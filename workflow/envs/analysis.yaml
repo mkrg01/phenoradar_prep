@@ -1,0 +1,9 @@
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.12
+  - pandas=2.2.3
+  - ete4=4.3.0
+  - matplotlib-base=3.10.6

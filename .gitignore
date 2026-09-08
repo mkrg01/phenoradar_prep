@@ -1,3 +1,16 @@
+/transcriptome_assembly/
+/metadata/
+/results/
+/work/
+/logs/
+/resources/
+/.snakemake/
+
+# User-specific execution settings and species selections.
+/config/mydata.yaml
+/config/*.local.yaml
+/config/pilot_species.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

@@ -1,0 +1,39 @@
+# Paths are relative to the project root (run Snakemake there).
+analysis: full
+inputs:
+  metadata: metadata/metadata.tsv
+  busco: transcriptome_assembly/multispecies_summary/busco_full_longest_cds.tsv
+  cds_dir: transcriptome_assembly/longest_cds
+  quant_dir: transcriptome_assembly/amalgkit_quant
+selection:
+  busco_threshold: 0.5
+  species_list: null
+  missing_taxonomy: error
+taxonomy:
+  database: resources/taxonomy/taxa.sqlite
+paths:
+  results: results
+  work: work
+  logs: logs
+tools:
+  python: python
+  seqkit: seqkit
+  odb_command: ODB-mapper
+  odb_prefix: ""
+translation:
+  table: 1
+odb:
+  version: v12
+  node: 3193
+  reference_dir: resources/orthodb/v12_3193
+  chunk_size: 250
+  threads: 32
+  batch_size: 128
+  mem_gb: 128
+  min_free_gb: 750
+  reference_min_free_gb: 200
+  allow_nonlocal: false
+  keep_work: false
+tpm:
+  # error: reject ambiguous genes; drop: omit them; split: divide TPM equally.
+  multimap: error

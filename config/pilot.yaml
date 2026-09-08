@@ -1,0 +1,11 @@
+# Generic pilot settings. Create your own species list after running prepare.
+analysis: pilot
+selection:
+  # This user-provided file is intentionally not distributed with the workflow.
+  species_list: config/pilot_species.txt
+odb:
+  chunk_size: 2
+  threads: 8
+  batch_size: 32
+  mem_gb: 64
+  keep_work: true
