@@ -117,10 +117,12 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.ticker import MaxNLocator
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.hist(joined["busco_percent"], bins=range(102), color="grey")
     ax.axvline(threshold * 100, color="red", linestyle="--", label=f"Threshold: {threshold * 100:g}%")
-    ax.set(xlabel="BUSCO completeness (%)", ylabel="Number of runs")
+    ax.set(xlabel="BUSCO completeness (%)", ylabel="Number of samples")
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     ax.legend()
     fig.tight_layout()
     fig.savefig(out / "busco_completeness.svg")
