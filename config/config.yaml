@@ -52,3 +52,57 @@ kegg:
   mem_gb: 8
   # Ambiguous multi-KO genes are retained in annotation/QC, but not duplicated in TPM.
   ambiguity: drop
+phylogeny:
+  # The explicit phylogeny/timetree targets also work without enabling rule all.
+  enabled: false
+  busco_full_dir: null
+  busco_full_suffix: .busco.full.tsv
+  lineage: embryophyta_odb12
+  # Original oriented, in-frame CDS, or original protein FASTA used by BUSCO.
+  sequence_mode: cds
+  sequence_dir: null  # null reuses selected samples' CDS paths (CDS mode only)
+  sequence_suffix: _longestCDS.fa.gz
+  outgroup: null  # required; exact selected species label
+  max_markers: 500  # highest overall BUSCO coverage first; ties by BUSCO ID ascending
+  min_protein_length: 100  # known amino acids, excluding X and gaps
+  max_unknown_fraction: 0.05
+  min_taxa: 4
+  famsa_command: famsa
+  trimal_command: resources/phylogeny_tools/bin/trimal
+  trimal_mode: gappyout  # gappyout | automated1 (the latter computes all sequence pairs)
+  veryfasttree_command: VeryFastTree
+  astral_command: resources/phylogeny_tools/bin/astral4_int128
+  align_threads: 4
+  tree_threads: 4
+  astral_threads: 32
+  preparation_mem_gb: 4
+  alignment_mem_gb: 8
+  trimming_mem_gb: 4
+  tree_mem_gb: 8
+  astral_mem_gb: 64
+  seed: 12345
+  dating:
+    enabled: false
+    calibration_source: file  # file | timetree
+    calibrations: null  # TSV: taxa, min_age_ma, max_age_ma, source
+    command: resources/phylogeny_tools/bin/treePL
+    threads: 1  # bounds CV memory and keeps stochastic execution serial
+    mem_gb: 32
+    treepl:
+      smoothing: null  # null selects by repeated random subsample cross-validation
+      cv_start: 1000.0
+      cv_stop: 0.001
+      cv_multiplier: 0.1
+      cv_replicates: 3
+      replicates: 3  # final optimizations with different random seeds
+      optimization_iterations: 2  # native LF/PL/CV rounds; increase if restarts disagree
+      numsites: null  # default: sum of retained, trimmed gene alignment lengths
+    timetree:
+      python: python  # interpreter in the separate timetree conda environment
+      representatives: null  # optional exact tree labels, one per line
+      max_representatives: 64
+      max_queries: 32
+      min_studies: 5
+      cache_dir: resources/timetree_cache
+      offline: false
+      request_delay_seconds: 1.0

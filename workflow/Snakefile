@@ -1,4 +1,4 @@
-"""Post-assembly metadata, ODB/KO annotation, and expression preparation."""
+"""Metadata, ODB/KO expression preparation, and optional BUSCO phylogeny."""
 import csv
 import json
 import re
@@ -34,11 +34,81 @@ for key in ["reference_dir", "command"]:
         raise WorkflowError(f"kegg.{key} must be a nonempty string")
 if config["kegg"]["ambiguity"] not in {"drop", "error"}:
     raise WorkflowError("kegg.ambiguity must be drop or error")
+PHY = dict(config["phylogeny"], translation_table=config["translation"]["table"])
+for key in ["enabled"]:
+    if type(PHY[key]) is not bool:
+        raise WorkflowError(f"phylogeny.{key} must be true or false")
+for key in ["min_sites", "min_informative_sites", "min_markers_per_species"]:
+    if key in PHY:
+        raise WorkflowError(f"phylogeny.{key} was removed; remove it from your configuration. These counts are now diagnostics")
+for key in ["max_markers", "min_protein_length",
+            "min_taxa", "align_threads", "tree_threads", "astral_threads",
+            "preparation_mem_gb", "alignment_mem_gb", "trimming_mem_gb", "tree_mem_gb", "astral_mem_gb", "seed"]:
+    if type(PHY[key]) is not int or PHY[key] <= 0:
+        raise WorkflowError(f"phylogeny.{key} must be a positive integer")
+if "min_occupancy" in PHY:
+    raise WorkflowError("phylogeny.min_occupancy was removed; remove it from your configuration. Coverage is used for ranking and diagnostics")
+for key in ["max_unknown_fraction"]:
+    if type(PHY[key]) not in {int, float} or not 0 <= PHY[key] <= 1:
+        raise WorkflowError(f"phylogeny.{key} must be between 0 and 1")
+if "max_gap_fraction" in PHY:
+    raise WorkflowError("phylogeny.max_gap_fraction was removed; column selection now uses trimAl")
+if PHY["trimal_mode"] not in {"gappyout", "automated1"}:
+    raise WorkflowError("phylogeny.trimal_mode must be gappyout or automated1")
+if PHY["min_taxa"] < 4:
+    raise WorkflowError("phylogeny requires min_taxa >= 4")
+if PHY["sequence_mode"] not in {"cds", "protein"} or (PHY["sequence_mode"] == "protein" and not PHY["sequence_dir"]):
+    raise WorkflowError("phylogeny.sequence_mode must be cds or protein; protein mode requires sequence_dir")
+for key in ["clade_rank", "clade_min_species", "min_clade_occupancy"]:
+    if key in PHY:
+        raise WorkflowError(f"phylogeny.{key} was removed; remove it from your configuration. Marker selection uses overall coverage")
+for key in ["busco_full_dir", "sequence_dir", "outgroup"]:
+    if PHY[key] is not None and (not isinstance(PHY[key], str) or not PHY[key].strip()):
+        raise WorkflowError(f"phylogeny.{key} must be null or a nonempty string")
+for key in ["busco_full_suffix", "sequence_suffix"]:
+    if not isinstance(PHY[key], str) or not PHY[key] or "/" in PHY[key] or "\\" in PHY[key]:
+        raise WorkflowError(f"phylogeny.{key} must be a nonempty filename suffix")
+for key in ["lineage", "famsa_command", "trimal_command", "veryfasttree_command", "astral_command"]:
+    if not isinstance(PHY[key], str) or not PHY[key].strip():
+        raise WorkflowError(f"phylogeny.{key} must be a nonempty string")
+if type(PHY["dating"]["enabled"]) is not bool:
+    raise WorkflowError("phylogeny.dating.enabled must be true or false")
+if type(PHY["dating"]["mem_gb"]) is not int or PHY["dating"]["mem_gb"] <= 0:
+    raise WorkflowError("phylogeny.dating.mem_gb must be a positive integer")
+for key in ["calibrations"]:
+    value = PHY["dating"][key]
+    if value is not None and (not isinstance(value, str) or not value.strip()):
+        raise WorkflowError(f"phylogeny.dating.{key} must be null or a nonempty path")
+if not isinstance(PHY["dating"]["command"], str) or not PHY["dating"]["command"].strip():
+    raise WorkflowError("phylogeny.dating.command must be a nonempty executable path")
+if type(PHY["dating"]["threads"]) is not int or PHY["dating"]["threads"] < 1:
+    raise WorkflowError("phylogeny.dating.threads must be a positive integer")
+if "rate_partitions" in PHY["dating"]:
+    raise WorkflowError("phylogeny.dating.rate_partitions was removed; dating now uses treePL")
+if PHY["dating"]["calibration_source"] not in {"file", "timetree"}:
+    raise WorkflowError("phylogeny.dating.calibration_source must be file or timetree")
+TT = PHY["dating"]["timetree"]
+if "min_clade_taxa" in TT:
+    raise WorkflowError("phylogeny.dating.timetree.min_clade_taxa was removed; remove it from your configuration. Query limits control workload")
+for key in ["max_representatives", "max_queries", "min_studies"]:
+    if type(TT[key]) is not int or TT[key] < 1:
+        raise WorkflowError(f"phylogeny.dating.timetree.{key} must be a positive integer")
+if TT["max_representatives"] < 2 or type(TT["offline"]) is not bool:
+    raise WorkflowError("TimeTree requires max_representatives >= 2 and boolean offline")
+for key in ["python", "cache_dir"]:
+    if not isinstance(TT[key], str) or not TT[key].strip():
+        raise WorkflowError(f"phylogeny.dating.timetree.{key} must be a nonempty string")
+if TT["representatives"] is not None and (not isinstance(TT["representatives"], str) or not TT["representatives"].strip()):
+    raise WorkflowError("TimeTree representatives must be null or a nonempty file path")
+if type(TT["request_delay_seconds"]) not in {int, float} or not 0 <= TT["request_delay_seconds"] < float("inf"):
+    raise WorkflowError("TimeTree request_delay_seconds must be finite and nonnegative")
 
 ROOT = str(Path(workflow.basedir).parent)
 SCRIPTS = str(Path(workflow.basedir) / "scripts")
 sys.path.insert(0, SCRIPTS)
 from make_manifests import chunk_plan
+from date_phylogeny import validate_settings as validate_treepl_settings
+validate_treepl_settings(PHY["dating"]["treepl"])
 OUT = f'{config["paths"]["results"]}/{config["analysis"]}'
 WORK = f'{config["paths"]["work"]}/{config["analysis"]}'
 LOG = f'{config["paths"]["logs"]}/{config["analysis"]}'
@@ -59,6 +129,12 @@ KEGG_FINAL = [f"{KEGG}/{name}" for name in [
     "ko_support.tsv", "mapping_qc.tsv", "ko_modules.tsv", "ko_pathways.tsv",
     "reference_qc.json",
 ]]
+PHYLO = f"{OUT}/phylogeny"
+PHYLO_PLAN = f"{PHYLO}/plan"
+PHYLO_FINAL = [f"{PHYLO}/species_tree.nwk", f"{PHYLO}/species_tree.json", f"{PHYLO}/species_coverage.tsv"]
+PHYLO_DATED = [f"{PHYLO}/dating/species_tree.dated.nwk", f"{PHYLO}/dating/provenance.json"]
+if PHY["dating"]["enabled"]:
+    PHYLO_FINAL += PHYLO_DATED
 
 # Refuse output roots inside either user-provided input tree.
 for destination in [OUT, WORK, LOG, REFERENCE, KEGG_REFERENCE]:
@@ -72,6 +148,11 @@ for destination in [OUT, WORK, LOG]:
     dest, ref = Path(destination).resolve(), Path(KEGG_REFERENCE).resolve()
     if dest == ref or ref in dest.parents or dest in ref.parents:
         raise WorkflowError("kegg.reference_dir must not overlap results, work, or log directories")
+    for source in [PHY["busco_full_dir"], PHY["sequence_dir"]]:
+        if source:
+            src = Path(source).resolve()
+            if dest == src or src in dest.parents or dest in src.parents:
+                raise WorkflowError("phylogeny input directories must not overlap output roots")
 
 
 def sample_rows(wildcards):
@@ -129,7 +210,8 @@ rule all:
         f"{TPM}/tpm_sum.tsv",
         f"{TPM}/tpm_sum_wide.tsv",
         f"{TPM}/mapping_qc.tsv",
-        KEGG_FINAL if config["kegg"]["enabled"] else []
+        KEGG_FINAL if config["kegg"]["enabled"] else [],
+        PHYLO_FINAL if PHY["enabled"] else []
 
 
 rule prepare:
@@ -165,7 +247,35 @@ rule kegg:
         KEGG_FINAL
 
 
+rule phylogeny:
+    input:
+        f"{OUT}/run.json",
+        PHYLO_FINAL
+
+
+rule phylogeny_prepare:
+    input:
+        f"{PHYLO_PLAN}/markers.tsv",
+        f"{PHYLO_PLAN}/species.tsv",
+        f"{PHYLO_PLAN}/marker_stats.tsv",
+        f"{PHYLO_PLAN}/provenance.json"
+
+
+rule phylogeny_calibrations:
+    input:
+        f"{PHYLO}/timetree/calibrations.tsv",
+        f"{PHYLO}/timetree/candidates.tsv",
+        f"{PHYLO}/timetree/provenance.json"
+
+
+rule timetree:
+    input:
+        f"{OUT}/run.json",
+        PHYLO_DATED
+
+
 include: "rules/metadata.smk"
 include: "rules/odb.smk"
 include: "rules/tpm.smk"
 include: "rules/kegg.smk"
+include: "rules/phylogeny.smk"

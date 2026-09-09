@@ -1,0 +1,121 @@
+--- a/src/utils.cpp
++++ b/src/utils.cpp
+@@ -458,7 +458,7 @@
+ 
+ //TODO: add timing to this, the faster one may be better too
+ void prime_optimization(pl_calc_parallel & plp, vector<double> & params){
+-    bool moredetail, moredetailad,moredetailcv;
++    bool moredetail = false, moredetailad = false, moredetailcv = false;
+     siman_calc_par smp3;
+     smp3.set_verbose(false);
+     smp3.set_pl(&plp,50,0.999,0.07,0.25,15000,0.001);
+@@ -568,7 +568,7 @@
+ }
+ 
+ bool check_possible_cv_nodes(const int cvnode, const vector<int> & samps, const vector<int> & parent_nds_ints){
+-    int cvpar = parent_nds_ints[cvpar];
++    int cvpar = parent_nds_ints[cvnode];
+     for(int i=0;i<samps.size();i++){
+ 		if(parent_nds_ints[samps[i]] == cvpar){
+ 			return false;
+@@ -724,7 +724,7 @@
+ 			    rc = optimize_best(optims->bestadopt,false,x2,&plp,optims->maxoptimiters,optims->moredetailad,optims->ftol,optims->xtol);
+ 		    }
+ 		}else{
+-			rc = optimize_best_parallel(optims->bestadopt,x2,&plp,10000,optims->moredetailad,optims->ftol,optims->xtol);
++			rc = optimize_best_parallel(optims->bestcvopt,x2,&plp,10000,optims->moredetailcvad,optims->ftol,optims->xtol);
+ 		}
+ 		for (unsigned int j = 0; j < params->size(); j++){(*params)[j] = x2[j];}
+ 		delete[] x2;
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -41,7 +41,7 @@
+ 
+ int main(int argc,char* argv[]) {
+     int seed = -1;
+-    cout.precision(8);
++    cout.precision(17);
+     int retval;
+     retval = -1;
+     retval = feraiseexcept( FE_ALL_EXCEPT );
+@@ -609,6 +609,7 @@
+                 }else if(cvtype == 1){//kfold cv, TODO fix this for new array types
+                     //srand(time(NULL)); // this was used twice! don't do that!
+                     int sampsize = (tree->getExternalNodeCount()*randomcvsamp)+0.5;//round up
++                    if (sampsize < 1) sampsize = 1;
+                     /* uncomment for sample without replacement
+                       vector<int> poss_nodes;
+                     for(int i=0;i<tree->getExternalNodeCount();i++){
+@@ -839,7 +840,8 @@
+                 exit(0);
+                 }
+                 cout << plp.calc_pl(params) << endl;
+-                optimize_full(plp,&params,&oopt,false);
++                bool converged = optimize_full(plp,&params,&oopt,false);
++                cout << "treepl_final_converged: " << converged << endl;
+                 cout << "after opt calc: " << plp.calc_pl(params) << endl;
+             }
+             /*
+--- a/src/node.cpp
++++ b/src/node.cpp
+@@ -159,7 +159,7 @@
+ 		ret = ret+this->getChild(i).getNewick(bl);
+ 		if(bl==true){
+ 			std::ostringstream o;
+-			setprecision(10);
++			o << setprecision(17);
+ 			o << std::fixed;
+ 			o << this->getChild(i).getBL();
+ 			ret = ret +":"+o.str();
+@@ -186,7 +186,7 @@
+ 		ret = ret+this->getChild(i).getNewick(bl,obj);
+ 		if(bl==true){
+ 			std::ostringstream o;
+-			setprecision(10);
++			o << setprecision(17);
+ 			o << std::fixed;
+ 			o << this->getChild(i).getBL();
+ 			ret = ret +":"+o.str();
+@@ -199,14 +199,14 @@
+ 	if(isInternal()==true){
+ 		if (obj == "number"){
+ 			std::ostringstream o;
+-			setprecision(10);
++			o << setprecision(17);
+ 			o << std::fixed;
+ 			o << number;
+ 			ret = ret +o.str();
+ 		}else{
+ 			if(this->getObject(obj)!=NULL){
+ 				std::ostringstream o;
+-				setprecision(10);
++				o << setprecision(17);
+ 				o << std::fixed;
+ 				o << (*((StringNodeObject*) (this->getObject(obj))));
+ 				ret = ret +o.str();
+--- a/src/myradops.cpp
++++ b/src/myradops.cpp
+@@ -114,6 +114,7 @@
+ ADvar::operator-=(const ADvar &R) {
+ 	ADvari *Lcv = cv, *Rcv = R.cv;
+ 	cv = new ADvar2(Lcv->Val - Rcv->Val, Lcv, &One, Rcv, &negOne);
++	return *this;
+ 	}
+ 
+  ADvar
+@@ -145,6 +146,7 @@
+ ADvar::operator*=(const ADvar &R) {
+ 	ADvari *Lcv = cv, *Rcv = R.cv;
+ 	cv = new ADvar2(Lcv->Val * Rcv->Val, Lcv, &Rcv->Val, Rcv, &Lcv->Val);
++	return *this;
+ 	}
+ 
+  ADvar
+@@ -178,6 +180,7 @@
+ 	ADvari *Lcv = cv, *Rcv = R.cv;
+ 	double Lv = Lcv->Val, Rv = Rcv->Val, pL = 1. / Rv, q = Lv/Rv;
+ 	cv = new ADvar2q(q, pL, -q*pL, Lcv, Rcv);
++	return *this;
+ 	}
+ 
+  ADvar

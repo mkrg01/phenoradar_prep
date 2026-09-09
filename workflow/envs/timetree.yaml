@@ -1,0 +1,10 @@
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.12
+  - biopython=1.85
+  - pip
+  - pip:
+      - "nwkit @ https://codeload.github.com/kfuku52/nwkit/tar.gz/db5b8a32c7608248db9f2b7b8aed16376779c5fb#sha256=cf3f09fd0eb0a00fa32ea83b3d7437bfa96024bcbbc9ca4808f25a04e6d49345"

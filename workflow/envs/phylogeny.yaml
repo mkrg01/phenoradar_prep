@@ -1,0 +1,14 @@
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.12
+  - biopython=1.85
+  - ete4=4.3.0
+  - numpy
+  - famsa=2.4.1
+  - veryfasttree=4.0.5
+  - pip
+  - pip:
+      - "cdskit @ https://codeload.github.com/kfuku52/cdskit/tar.gz/218f6ed61abcac7f11dd81b17c087cb16119c39e#sha256=88b3d1eff92df4bafb743c5a7fce194c51f5a6d49c64071a20a2d660e6abe54f"

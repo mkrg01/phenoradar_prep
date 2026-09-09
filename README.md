@@ -3,6 +3,9 @@
 A Snakemake workflow that turns transcriptome assemblies and abundance estimates
 into orthogroup-level TPM tables for comparative expression analysis, with an
 optional KEGG Orthology (KO) annotation and expression branch.
+An optional BUSCO protein phylogeny branch uses cdskit, FAMSA, trimAl, VeryFastTree, and
+ASTRAL-IV/CASTLES-II, with manual or nwkit/TimeTree secondary calibrations for
+optional treePL dating.
 
 ```text
 Metadata + BUSCO + taxonomy -> species selection -> CDS translation
@@ -69,5 +72,7 @@ Main tables are written to `results/<analysis>/tpm/`; logs and temporary work go
 | [Running and resuming](docs/running.md) | Installation, Slurm and direct execution, resource budgets, pilots, and recovery |
 | [Reference data](docs/references.md) | Taxonomy setup, OrthoDB downloads, storage, and reference updates |
 | [KEGG annotation and KO expression](docs/kegg.md) | Optional KofamScan branch, frozen reference setup, ambiguity, and PhenoRadar inputs |
+| [BUSCO phylogeny and dating](docs/phylogeny.md) | Existing BUSCO/CDS inputs, FAMSA, VeryFastTree, ASTRAL-IV, resources, and optional time trees |
+| [Phylogeny method review](docs/phylogeny_comparison.md) | Step-by-step comparison with GeneGalleon, scientific limitations, and improvement priorities |
 | [Outputs and TPM interpretation](docs/outputs.md) | Generated files, normalization, ambiguous mappings, and QC |
 | [Testing and validation](docs/development.md) | Test requirements, coverage, and validation limits |
