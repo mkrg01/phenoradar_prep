@@ -61,3 +61,12 @@ orthogroups, `tpm.multimap` controls its treatment:
 counts, the retained TPM fraction, and other mapping statistics. Aggregation
 rejects duplicate target IDs, negative or nonfinite TPM values, and runs with no
 positive TPM retained after mapping and ambiguity handling.
+
+## Optional KEGG outputs
+
+The [KEGG branch](kegg.md) writes `results/<analysis>/kegg/`, separately from the
+OG tables above. Its `ko_tpm_sum.tsv` contains sums of original input TPM and is
+**not renormalized** to the retained KO set. `ko_support.tsv` records annotated
+and quantified gene counts, including KOs with no quantified genes. Such KOs have
+blank values in support/wide tables and are omitted from the numeric long table;
+observed zero expression remains zero. Run identities are preserved.

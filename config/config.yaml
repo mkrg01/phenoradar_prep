@@ -37,3 +37,13 @@ odb:
 tpm:
   # error: reject ambiguous genes; drop: omit them; split: divide TPM equally.
   multimap: error
+kegg:
+  # Opt in for the full workflow; the explicit `kegg` target also runs this branch.
+  enabled: false
+  # Prepare this immutable snapshot with workflow/scripts/prepare_kegg_reference.py.
+  reference_dir: resources/kegg/snapshot_v1
+  command: exec_annotation
+  threads: 4
+  mem_gb: 8
+  # Ambiguous multi-KO genes are retained in annotation/QC, but not duplicated in TPM.
+  ambiguity: drop

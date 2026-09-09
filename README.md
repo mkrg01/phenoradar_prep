@@ -1,11 +1,13 @@
 # phenoradar_prep
 
 A Snakemake workflow that turns transcriptome assemblies and abundance estimates
-into orthogroup-level TPM tables for comparative expression analysis.
+into orthogroup-level TPM tables for comparative expression analysis, with an
+optional KEGG Orthology (KO) annotation and expression branch.
 
 ```text
 Metadata + BUSCO + taxonomy -> species selection -> CDS translation
   -> ODB-mapper -> orthogroup-level TPM tables, QC, and provenance
+  -> optional KofamScan -> KO-level TPM sums, membership tables, QC, and provenance
 ```
 
 Input files are read without modification. Datasets, reference databases, and
@@ -65,5 +67,6 @@ Main tables are written to `results/<analysis>/tpm/`; logs and temporary work go
 | [Inputs and configuration](docs/configuration.md) | File formats, species selection, configuration keys, and path handling |
 | [Running and resuming](docs/running.md) | Installation, Slurm and direct execution, resource budgets, pilots, and recovery |
 | [Reference data](docs/references.md) | Taxonomy setup, OrthoDB downloads, storage, and reference updates |
+| [KEGG annotation and KO expression](docs/kegg.md) | Optional KofamScan branch, frozen reference setup, ambiguity, and PhenoRadar inputs |
 | [Outputs and TPM interpretation](docs/outputs.md) | Generated files, normalization, ambiguous mappings, and QC |
 | [Testing and validation](docs/development.md) | Test requirements, coverage, and validation limits |

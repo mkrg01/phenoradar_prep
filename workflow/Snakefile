@@ -1,4 +1,4 @@
-"""Post-assembly metadata, ODB mapping, and OG-level TPM preparation."""
+"""Post-assembly metadata, ODB/KO annotation, and expression preparation."""
 import csv
 import json
 import re
@@ -21,6 +21,16 @@ if type(config["odb"]["mem_gb"]) is not int or config["odb"]["mem_gb"] <= 0:
     raise WorkflowError("odb.mem_gb must be a positive integer in GB (1 GB = 1000 MB)")
 if config["tpm"]["multimap"] not in {"error", "drop", "split"}:
     raise WorkflowError("tpm.multimap must be error, drop, or split")
+if type(config["kegg"]["enabled"]) is not bool:
+    raise WorkflowError("kegg.enabled must be true or false")
+for key in ["threads", "mem_gb"]:
+    if type(config["kegg"][key]) is not int or config["kegg"][key] <= 0:
+        raise WorkflowError(f"kegg.{key} must be a positive integer")
+for key in ["reference_dir", "command"]:
+    if not isinstance(config["kegg"][key], str) or not config["kegg"][key].strip():
+        raise WorkflowError(f"kegg.{key} must be a nonempty string")
+if config["kegg"]["ambiguity"] not in {"drop", "error"}:
+    raise WorkflowError("kegg.ambiguity must be drop or error")
 
 ROOT = str(Path(workflow.basedir).parent)
 SCRIPTS = str(Path(workflow.basedir) / "scripts")
@@ -37,14 +47,28 @@ MERGED = f"{OUT}/odb/merged"
 TPM = f"{OUT}/tpm"
 REFERENCE = config["odb"]["reference_dir"]
 PYTHON = config["tools"]["python"]
+KEGG = f"{OUT}/kegg"
+KEGG_SPECIES = f"{KEGG}/species"
+KEGG_RUNS = f"{KEGG}/runs"
+KEGG_REFERENCE = config["kegg"]["reference_dir"]
+KEGG_FINAL = [f"{KEGG}/{name}" for name in [
+    "gene_kos.tsv", "genes.tsv", "ko_tpm_sum.tsv", "ko_tpm_sum_wide.tsv",
+    "ko_support.tsv", "mapping_qc.tsv", "ko_modules.tsv", "ko_pathways.tsv",
+    "reference_qc.json",
+]]
 
 # Refuse output roots inside either user-provided input tree.
-for destination in [OUT, WORK, LOG, REFERENCE]:
+for destination in [OUT, WORK, LOG, REFERENCE, KEGG_REFERENCE]:
     dest = Path(destination).resolve()
     for source in [Path(config["inputs"]["metadata"]).resolve().parent,
                    Path(config["inputs"]["cds_dir"]).resolve().parent]:
         if dest == source or source in dest.parents:
             raise WorkflowError(f"output path overlaps input directory: {dest}")
+
+for destination in [OUT, WORK, LOG]:
+    dest, ref = Path(destination).resolve(), Path(KEGG_REFERENCE).resolve()
+    if dest == ref or ref in dest.parents or dest in ref.parents:
+        raise WorkflowError("kegg.reference_dir must not overlap results, work, or log directories")
 
 
 def sample_rows(wildcards):
@@ -86,6 +110,14 @@ def run_outputs(wildcards, suffix):
     return [f'{TPM}/runs/{r["run"]}.{suffix}' for r in sample_rows(wildcards)]
 
 
+def kegg_species_outputs(wildcards, name):
+    return sorted({f'{KEGG_SPECIES}/{r["odb_species"]}/{name}' for r in sample_rows(wildcards)})
+
+
+def kegg_run_outputs(wildcards, suffix):
+    return [f'{KEGG_RUNS}/{r["run"]}.{suffix}' for r in sample_rows(wildcards)]
+
+
 rule all:
     input:
         f"{OUT}/run.json",
@@ -93,7 +125,8 @@ rule all:
         f"{TPM}/tpm_wide.tsv",
         f"{TPM}/tpm_sum.tsv",
         f"{TPM}/tpm_sum_wide.tsv",
-        f"{TPM}/mapping_qc.tsv"
+        f"{TPM}/mapping_qc.tsv",
+        KEGG_FINAL if config["kegg"]["enabled"] else []
 
 
 rule prepare:
@@ -123,6 +156,13 @@ rule mapping:
         f"{MERGED}/merge_qc.json"
 
 
+rule kegg:
+    input:
+        f"{OUT}/run.json",
+        KEGG_FINAL
+
+
 include: "rules/metadata.smk"
 include: "rules/odb.smk"
 include: "rules/tpm.smk"
+include: "rules/kegg.smk"

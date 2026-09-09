@@ -27,6 +27,16 @@ forwarding, CPU and memory budgets, and exit-status propagation. A small real
 Snakemake workflow verifies both modes without sbatch or srun submissions.
 These tests do not require an actual Slurm allocation.
 
+KEGG tests additionally cover frozen reference snapshots and corruption checks,
+KofamScan detail-TSV interpretation, ambiguity, original-TPM accounting, missing
+observations, observed zeros, and runs with no retained KOs. A second workflow
+integration test uses a test-only KofamScan substitute with real Snakemake and
+seqkit. It checks the standalone `kegg` target, opt-in full workflow, annotation
+reuse across runs, abundance-only updates, and removal of stale species from
+merged outputs. No reference downloads are needed for these tests.
+
 The automated tests do not validate real ODB assignments, reference download
 availability, or Slurm execution. Run a real pilot with your input data to assess
 mapping quality, runtime, and peak memory before launching the full analysis.
+Likewise, synthetic KofamScan tests do not establish biological KO assignment
+accuracy or calibrate confidence for novel plant sequences.

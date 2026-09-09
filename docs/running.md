@@ -51,6 +51,7 @@ This also keeps `--configfile` from interpreting the target as another filename.
 | `references` | Prepared OrthoDB reference snapshot |
 | `proteins` | Translated CDS for the selected species |
 | `mapping` | ODB chunk results and the merged gene-to-orthogroup index |
+| `kegg` | KO annotations and original-TPM sums; independent of ODB mapping, after [KEGG reference setup](kegg.md) |
 
 Prerequisite steps are included automatically. See [reference setup](references.md)
 and [output formats](outputs.md) for details.

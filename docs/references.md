@@ -6,6 +6,10 @@
 Provide a taxonomy snapshot before running `prepare`; the workflow prepares OrthoDB automatically
 when it is needed. Neither database is distributed with the repository.
 
+The optional KEGG branch uses its own immutable KOfam/KEGG snapshot. Prepare it
+once using the [KEGG setup instructions](kegg.md); this snapshot is independent
+of the ODB reference and is not created by the `references` target.
+
 Run all commands from the repository root. For the batch command below, activate
 the workflow environment and create `logs/` before submission, as described in
 the [Slurm instructions](running.md#slurm-run-the-workflow-in-one-allocation).

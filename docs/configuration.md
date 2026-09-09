@@ -79,6 +79,11 @@ shared workflow. These files remain available locally.
 | `odb.allow_nonlocal` | Allow ODB work on filesystems outside the supported local types; default `false` |
 | `odb.keep_work` | Whether to retain successful ODB work directories |
 | `tpm.multimap` | Policy for genes assigned to multiple orthogroups; see [TPM interpretation](outputs.md#tpm-interpretation) |
+| `kegg.enabled` | Include KEGG outputs in the default full workflow; default `false` |
+| `kegg.reference_dir` | Prepared immutable KEGG/KOfam snapshot; see [KEGG setup](kegg.md) |
+| `kegg.command` | KofamScan executable, normally `exec_annotation`; a single executable name or path |
+| `kegg.threads`, `kegg.mem_gb` | CPU and decimal-GB memory budgets per species; defaults `4` and `8` |
+| `kegg.ambiguity` | `drop` (default) or `error` for quantified genes with multiple accepted KOs; annotations always retain candidates |
 
 Memory settings use positive integers in decimal GB (1 GB = 1000 MB). For example,
 `odb.mem_gb: 128` keeps the same memory estimate as the former `odb.mem_mb: 128000`.
