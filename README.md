@@ -31,8 +31,9 @@ cp config/config.yaml config/mydata.yaml
 Edit the metadata, BUSCO, CDS, and abundance paths, `taxonomy.database`, and
 `odb.node`. The default node `3193` is dataset-specific. See
 [inputs and configuration](docs/configuration.md) for the required formats.
-Provide a [taxonomy snapshot](docs/references.md#taxonomy-reference) before running;
-OrthoDB is downloaded and prepared automatically when needed.
+Missing [taxonomy snapshots](docs/references.md#taxonomy-reference) and OrthoDB
+references are downloaded and prepared automatically when needed. Existing
+taxonomy snapshots are reused without updates.
 
 Submit the full workflow as one Slurm job, replacing `YOUR_PARTITION`:
 

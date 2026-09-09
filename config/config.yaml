@@ -10,7 +10,10 @@ selection:
   species_list: null
   missing_taxonomy: error
 taxonomy:
+  # Created automatically when missing; existing snapshots are reused unchanged.
   database: resources/taxonomy/taxa.sqlite
+  # Optional local SQLite source. null downloads NCBI taxonomy and builds with ETE4.
+  source: null
 paths:
   results: results
   work: work

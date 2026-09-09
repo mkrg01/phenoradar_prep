@@ -65,7 +65,8 @@ shared workflow. These files remain available locally.
 | `paths.*` | Root directories for results, temporary work, and logs |
 | `tools.*` | Executable names or paths, plus an optional ODB environment prefix |
 | `translation.table` | Genetic code table used for CDS translation; default `1` |
-| `taxonomy.database` | Frozen ETE4 taxonomy SQLite database; see [reference setup](references.md#taxonomy-reference) |
+| `taxonomy.database` | ETE4 taxonomy SQLite snapshot; created automatically when missing and reused unchanged |
+| `taxonomy.source` | Optional existing SQLite database to copy when `taxonomy.database` is missing; default `null` downloads NCBI taxonomy |
 | `selection.busco_threshold` | Minimum complete BUSCO fraction; default `0.5` |
 | `selection.species_list` | Optional text file of species IDs, one per line |
 | `selection.missing_taxonomy` | `error` or `allow` for unresolved taxids |

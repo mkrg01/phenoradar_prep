@@ -21,6 +21,13 @@ and a test-only ODB substitute. It checks a complete workflow, separate preparat
 followed by execution, unchanged reruns, abundance updates, and reduced species
 selections. Without Snakemake or seqkit, that integration test is skipped.
 
+Taxonomy bootstrap tests build a real ETE4 database from a small synthetic
+taxdump, substituting only the network response. They check download/build
+failure recovery, local source copying, and reuse of existing snapshots. The
+workflow integration test starts with a missing taxonomy snapshot and verifies
+that later runs no longer require the bootstrap source. Tests do not download
+the full NCBI taxonomy.
+
 Launcher tests exercise direct execution from another directory and simulate
 Slurm's spooled script location and allocation settings. They check argument
 forwarding, CPU and memory budgets, and exit-status propagation. A small real

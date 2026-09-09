@@ -178,7 +178,7 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     import yaml
     config = {
         "analysis": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
-        "taxonomy": {"database": tiny_inputs["taxonomy_db"]},
+        "taxonomy": {"database": str(tmp_path / "taxonomy/taxa.sqlite"), "source": tiny_inputs["taxonomy_db"]},
         "paths": {"results": str(tmp_path / "results"), "work": str(tmp_path / "work"), "logs": str(tmp_path / "logs")},
         "tools": {"python": sys.executable, "seqkit": seqkit, "odb_command": str(fake_odb), "odb_prefix": ""},
         "odb": {"reference_dir": str(frozen_reference), "chunk_size": 1, "threads": 1, "batch_size": 1, "mem_gb": 3,
@@ -199,7 +199,13 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
             pytest.fail(result.stdout + "\n" + logs)
         return result.stdout
     execute(["--", "prepare"])
+    taxonomy = Path(config["taxonomy"]["database"])
+    taxonomy_before = file_record(taxonomy), taxonomy.stat().st_mtime_ns
+    assert json.loads(Path(str(taxonomy) + ".json").read_text())["method"] == "sqlite_backup"
+    # Once prepared, the snapshot no longer depends on the bootstrap source.
+    Path(tiny_inputs["taxonomy_db"]).unlink()
     plan = execute(["--dry-run"])
+    assert "rule prepare_taxonomy:" not in plan
     assert plan.count("rule odb_map:") == 2
     assert plan.count("mem_mb=3000") == 2
     assert not any("<TBD>" in line for line in plan.splitlines() if "input:" in line)
@@ -225,6 +231,7 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     configfile.write_text(yaml.safe_dump(config))
     execute()
     assert [r["run"] for r in read_tsv(out / "tpm/tpm_wide.tsv")] == ["B1"]
+    assert (file_record(taxonomy), taxonomy.stat().st_mtime_ns) == taxonomy_before
 
 
 @pytest.mark.parametrize("memory,message", [

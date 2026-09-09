@@ -3,8 +3,8 @@
 [Back to README](../README.md)
 
 `resources/` holds reusable reference snapshots, separate from the input assemblies and analysis outputs.
-Provide a taxonomy snapshot before running `prepare`; the workflow prepares OrthoDB automatically
-when it is needed. Neither database is distributed with the repository.
+The workflow prepares missing taxonomy and OrthoDB references automatically
+when they are needed. Neither database is distributed with the repository.
 
 The optional KEGG branch uses its own immutable KOfam/KEGG snapshot. Prepare it
 once using the [KEGG setup instructions](kegg.md); this snapshot is independent
@@ -16,11 +16,40 @@ the [Slurm instructions](running.md#slurm-run-the-workflow-in-one-allocation).
 
 ## Taxonomy reference
 
-Provide an existing ETE4-compatible `taxa.sqlite` database. If you do not have one,
-first create it with ETE4 in an environment containing that package; the initial
-taxonomy download is a separate setup step.
+When `taxonomy.database` is missing, the workflow downloads NCBI's
+`taxdump.tar.gz` and builds an ETE4-compatible SQLite snapshot before selecting
+metadata. This happens automatically for `prepare`, the full workflow, and the
+standalone `kegg` target. No extra setup command is required. The first build
+needs network access to `https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/`; its log is
+`logs/<analysis>/taxonomy_reference.log`.
 
-Create a local snapshot, replacing the source path with your database:
+An existing `taxonomy.database` is used unchanged, even if the bootstrap source
+or workflow code changes. It is not downloaded or updated on each run. A dry-run
+only schedules creation and does not download anything. The `references` target
+continues to prepare only OrthoDB.
+
+To use an existing local ETE4-compatible SQLite database as the source instead
+of downloading taxonomy, add this to your configuration:
+
+```yaml
+taxonomy:
+  database: resources/taxonomy/taxa.sqlite
+  source: /path/to/existing/taxa.sqlite
+```
+
+The source is copied with SQLite's backup API only when the destination is
+missing. `taxonomy.source: null` (the default) selects the NCBI download. An
+explicitly configured missing source is an error; it does not silently switch
+to a different taxonomy release.
+
+Downloads and ETE working files are isolated in a temporary directory beside
+the destination. The SQLite database is validated before publication, so a failed
+download or build leaves no partial database at the configured path. Resubmit
+the same workflow command to retry. Creation also writes `<database>.json` with
+the source, creation time, and database checksum; downloaded builds additionally
+record the taxdump checksum and ETE4 version.
+
+Manual offline snapshot creation remains available:
 
 ```bash
 python workflow/scripts/snapshot_taxonomy.py \
@@ -30,10 +59,11 @@ python workflow/scripts/snapshot_taxonomy.py \
 
 This command uses SQLite's backup API, records a checksum, and refuses to
 overwrite an existing snapshot. It does not require ETE4 in the environment
-running the snapshot command. Metadata processing uses the snapshot without
-downloading or updating taxonomy.
+running the snapshot command. Metadata processing itself always uses the
+prepared snapshot without downloading or updating taxonomy.
 
-To update taxonomy, create a new snapshot and change `taxonomy.database`.
+To update taxonomy, set `taxonomy.database` to a new path. The workflow creates
+that new snapshot on the next run, using `taxonomy.source` if configured.
 
 ## OrthoDB reference
 

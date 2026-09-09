@@ -1,3 +1,25 @@
+# Existing snapshots are external inputs, even if code or source settings change.
+# Only register a producer when the configured database is missing.
+if not Path(config["taxonomy"]["database"]).exists():
+    rule prepare_taxonomy:
+        input:
+            source=[config["taxonomy"]["source"]] if config["taxonomy"].get("source") else [],
+            code=f"{SCRIPTS}/prepare_taxonomy.py",
+            helpers=[f"{SCRIPTS}/snapshot_taxonomy.py", f"{SCRIPTS}/common.py"]
+        output:
+            database=config["taxonomy"]["database"],
+            provenance=f'{config["taxonomy"]["database"]}.json'
+        params:
+            source_flag="--source" if config["taxonomy"].get("source") else ""
+        log: f"{LOG}/taxonomy_reference.log"
+        conda: "../envs/analysis.yaml"
+        threads: 1
+        resources: mem_mb=8000
+        shell:
+            "{PYTHON:q} {input.code:q} --destination {output.database:q} "
+            "{params.source_flag} {input.source:q} > {log:q} 2>&1"
+
+
 checkpoint select_metadata:
     input:
         metadata=config["inputs"]["metadata"],

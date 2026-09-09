@@ -2,8 +2,8 @@
 
 [Back to README](../README.md)
 
-Run all commands from the repository root. First configure your [inputs](configuration.md)
-and provide the required [taxonomy snapshot](references.md#taxonomy-reference).
+Run all commands from the repository root. First configure your [inputs](configuration.md).
+A missing [taxonomy snapshot](references.md#taxonomy-reference) is prepared automatically.
 
 ## Installation
 
@@ -78,7 +78,7 @@ sbatch --partition=YOUR_PARTITION \
 To run only preparation, request a smaller allocation:
 
 ```bash
-sbatch --partition=YOUR_PARTITION --cpus-per-task=2 --mem=8G --time=01:00:00 \
+sbatch --partition=YOUR_PARTITION --cpus-per-task=2 --mem=16G --time=01:00:00 \
   run_pipeline.sh --configfile config/mydata.yaml -- prepare
 ```
 
@@ -87,6 +87,13 @@ both commands concurrently for the same outputs. Arguments before the script
 name configure the Slurm allocation; arguments after it specify workflow options
 and targets. The activated environment is exported to the job, and Conda manages
 the processing environments automatically.
+
+The preparation allocation includes an initial allowance for taxonomy generation
+when the database is missing. That first run needs NCBI network access unless
+`taxonomy.source` points to an existing SQLite database. Download and build time
+depend on the taxonomy release and host; increase the time or memory allocation
+if needed. With a prepared database, `--mem=8G` is sufficient for the declared
+preparation rule budgets.
 
 | Setting | Meaning in this mode |
 | --- | --- |

@@ -56,9 +56,9 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
                         on="scientific_name", how="left", validate="many_to_one")
     joined["busco_percent"] = (joined[COUNTS[0]] + joined[COUNTS[1]]) / joined[COUNTS[-1]] * 100
 
-    # Refuse missing databases BEFORE NCBITaxa can attempt a download or upgrade.
+    # The workflow prepares missing databases in its own rule. Keep this step offline.
     if not Path(taxonomy_db).is_file():
-        raise ValueError(f"taxonomy database missing: {taxonomy_db}; run snapshot_taxonomy.py first")
+        raise ValueError(f"taxonomy database missing: {taxonomy_db}; run the workflow or prepare_taxonomy.py first")
     from ete4 import NCBITaxa
     ncbi = NCBITaxa(dbfile=str(Path(taxonomy_db).resolve()), update=False)
     taxonomy, unknown = [], []
