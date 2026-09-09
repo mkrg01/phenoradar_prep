@@ -26,6 +26,8 @@ tools:
 translation:
   table: 1
 odb:
+  # Optional local snapshot of existing annotations and original protein checksums.
+  existing_results: null
   version: v12
   node: 3193
   reference_dir: resources/orthodb/v12_3193

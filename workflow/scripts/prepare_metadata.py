@@ -49,9 +49,7 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
             raise ValueError(f"BUSCO: invalid counts in {column}")
     if (bus["busco_cds_total"] <= 0).any() or not bus[COUNTS[:-1]].sum(axis=1).eq(bus[COUNTS[-1]]).all():
         raise ValueError("BUSCO: counts must sum to a positive total")
-    absent = set(meta["scientific_name"]) - set(bus["Species"])
-    if absent:
-        raise ValueError(f"metadata species missing from BUSCO: {sorted(absent)}")
+    missing_busco = sorted(set(meta["scientific_name"]) - set(bus["Species"]))
     joined = meta.merge(bus.rename(columns={"Species": "scientific_name"}),
                         on="scientific_name", how="left", validate="many_to_one")
     joined["busco_percent"] = (joined[COUNTS[0]] + joined[COUNTS[1]]) / joined[COUNTS[-1]] * 100
@@ -63,7 +61,8 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
     ncbi = NCBITaxa(dbfile=str(Path(taxonomy_db).resolve()), update=False)
     taxonomy, unknown = [], []
     try:
-        for taxid in sorted(set(joined["taxid"]), key=int):
+        # Species without BUSCO records are excluded; they need no taxonomy lookup.
+        for taxid in sorted(set(joined.loc[joined["busco_percent"].notna(), "taxid"]), key=int):
             try:
                 lineage = ncbi.get_lineage(int(taxid))
             except ValueError:
@@ -82,7 +81,9 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
         ncbi.db.close()
     if unknown and missing_taxonomy == "error":
         raise ValueError(f"taxids absent from frozen taxonomy: {unknown}")
-    joined = joined.merge(pd.DataFrame(taxonomy), on="taxid", validate="many_to_one")
+    joined = joined.merge(pd.DataFrame(taxonomy, columns=["taxid", *RANKS]),
+                          on="taxid", how="left", validate="many_to_one")
+    # Missing BUSCO counts stay NaN, so even a zero threshold cannot select them.
     joined["selected"] = (joined[COUNTS[0]] + joined[COUNTS[1]]) / joined[COUNTS[-1]] >= threshold
     requested = None
     if species_list:
@@ -119,7 +120,7 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
     import matplotlib.pyplot as plt
     from matplotlib.ticker import MaxNLocator
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.hist(joined["busco_percent"], bins=range(102), color="grey")
+    ax.hist(joined["busco_percent"].dropna(), bins=range(102), color="grey")
     ax.axvline(threshold * 100, color="red", linestyle="--", label=f"Threshold: {threshold * 100:g}%")
     ax.set(xlabel="BUSCO completeness (%)", ylabel="Number of samples")
     ax.yaxis.set_major_locator(MaxNLocator(integer=True))
@@ -129,11 +130,14 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
     plt.close(fig)
     report = {"created_at": now(), "input_runs": len(meta), "input_species": meta["species"].nunique(),
               "selected_runs": len(selected), "selected_species": selected["species"].nunique(),
+              "missing_busco_species": missing_busco,
+              "missing_busco_runs": int(meta["scientific_name"].isin(missing_busco).sum()),
               "busco_threshold": threshold, "requested_species": requested, "unknown_taxids": unknown,
               "metadata": file_record(metadata), "busco": file_record(busco),
               "taxonomy": file_record(taxonomy_db)}
     write_json(out / "selection.json", report)
-    print(json.dumps({k: report[k] for k in ["input_runs", "selected_runs", "selected_species"]}))
+    print(json.dumps({k: report[k] for k in
+                      ["input_runs", "selected_runs", "selected_species", "missing_busco_species", "missing_busco_runs"]}))
 
 
 if __name__ == "__main__":

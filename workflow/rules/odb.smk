@@ -105,10 +105,11 @@ rule merge_odb:
     input:
         samples=f"{META}/samples.tsv",
         manifests=MANIFESTS,
-        annotations=lambda wc: chunk_outputs(wc, "og.annotations"),
-        hits=lambda wc: chunk_outputs(wc, "og.hits"),
-        summaries=lambda wc: chunk_outputs(wc, "summary.txt"),
-        provenance=lambda wc: [f'{CHUNKS}/{r["chunk"]}/provenance.json' for r in chunk_rows(wc)],
+        annotations=lambda wc: [f"{EXISTING_ODB}/annotations.tsv"] if EXISTING_ODB else chunk_outputs(wc, "og.annotations"),
+        hits=lambda wc: [] if EXISTING_ODB else chunk_outputs(wc, "og.hits"),
+        summaries=lambda wc: [] if EXISTING_ODB else chunk_outputs(wc, "summary.txt"),
+        provenance=lambda wc: [f"{EXISTING_ODB}/snapshot.json"] if EXISTING_ODB else
+            [f'{CHUNKS}/{r["chunk"]}/provenance.json' for r in chunk_rows(wc)],
         proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa' for r in sample_rows(wc)}),
         code=f"{SCRIPTS}/merge_odb.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/translate_cds.py"]
@@ -116,11 +117,15 @@ rule merge_odb:
         database=f"{MERGED}/mappings.sqlite",
         mappings=f"{MERGED}/gene_orthogroups.tsv",
         qc=f"{MERGED}/merge_qc.json"
-    params: chunks=CHUNKS, proteins=PROTEINS, plan=f"{MANIFESTS}/chunks.json"
+    params:
+        chunks=CHUNKS, proteins=PROTEINS, plan=f"{MANIFESTS}/chunks.json",
+        existing=["--existing", EXISTING_ODB] if EXISTING_ODB else [],
+        version=config["odb"]["version"], node=config["odb"]["node"]
     log: f"{LOG}/merge_odb.log"
     conda: "../envs/analysis.yaml"
     resources: mem_mb=8000
     shell:
         "{PYTHON:q} {input.code:q} --samples {input.samples:q} --chunks {params.plan:q} "
         "--chunk-dir {params.chunks:q} --protein-dir {params.proteins:q} --database {output.database:q} "
-        "--mappings {output.mappings:q} --qc {output.qc:q} > {log:q} 2>&1"
+        "--mappings {output.mappings:q} --qc {output.qc:q} {params.existing:q} "
+        "--version {params.version:q} --node {params.node} > {log:q} 2>&1"

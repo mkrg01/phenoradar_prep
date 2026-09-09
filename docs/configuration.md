@@ -71,6 +71,7 @@ shared workflow. These files remain available locally.
 | `selection.species_list` | Optional text file of species IDs, one per line |
 | `selection.missing_taxonomy` | `error` or `allow` for unresolved taxids |
 | `odb.version` | OrthoDB version; this workflow supports `v12` |
+| `odb.existing_results` | Optional local import snapshot directory; `null` runs ODB normally |
 | `odb.node`, `odb.reference_dir` | OrthoDB node and reference snapshot directory |
 | `odb.chunk_size` | Maximum species per ODB chunk; default `250` |
 | `odb.threads`, `odb.batch_size` | Worker and batch counts; batch size must be at least the worker count |
@@ -85,6 +86,18 @@ shared workflow. These files remain available locally.
 | `kegg.command` | KofamScan executable, normally `exec_annotation`; a single executable name or path |
 | `kegg.threads`, `kegg.mem_gb` | CPU and decimal-GB memory budgets per species; defaults `4` and `8` |
 | `kegg.ambiguity` | `drop` (default) or `error` for quantified genes with multiple accepted KOs; annotations always retain candidates |
+
+For the one-time migration of completed ODB results, `odb.existing_results` points
+to a directory containing `annotations.tsv` and `snapshot.json` (schema version 1,
+OrthoDB version/node, original protein checksums keyed by species, and the annotation
+checksum). Preparing this snapshot is a local migration step, not a workflow target.
+With this setting, `mapping` and the full workflow skip ODB reference preparation
+and mapping. CDS translation still runs to verify exact agreement with the original
+protein inputs. Missing species, changed proteins, incompatible version/node, or
+modified annotations stop the import. Species subsets are supported; annotation
+rows outside the selected FASTA IDs are excluded and counted in `merge_qc.json`.
+The usual merged mappings and TPM outputs are produced. The explicit `references`
+target still prepares an ODB reference if requested.
 
 Memory settings use positive integers in decimal GB (1 GB = 1000 MB). For example,
 `odb.mem_gb: 128` keeps the same memory estimate as the former `odb.mem_mb: 128000`.
@@ -121,9 +134,16 @@ Complete BUSCO fraction is `(single + duplicated) / total`. Species meeting or
 exceeding the threshold are retained. An optional species list further restricts
 that set; every requested species must exist and pass the threshold.
 
-Missing BUSCO entries, invalid counts, duplicate runs, or missing input files for
-selected samples cause an error. Unresolved taxids cause an error by default;
-missing individual taxonomic ranks are allowed. Metadata columns such as
+Species absent from the BUSCO table are excluded automatically. They remain in
+`metadata_all.tsv` with `selected=False` and blank BUSCO values; `selection.json`
+records their scientific names in `missing_busco_species` and their run count in
+`missing_busco_runs`. They require no CDS, abundance, or taxonomy lookup and are
+omitted from the BUSCO histogram. Explicit species lists still require every
+requested species to have BUSCO data and pass the threshold.
+
+Invalid counts in existing BUSCO rows, duplicate runs, or missing input files for
+selected samples cause an error. Unresolved taxids for species with BUSCO data
+cause an error by default; missing individual taxonomic ranks are allowed. Metadata columns such as
 `exclusion` do not apply additional filters.
 
 `metadata_all.tsv` retains all metadata rows with a `selected` flag. `samples.tsv`

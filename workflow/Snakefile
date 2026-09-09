@@ -11,6 +11,9 @@ if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", str(config["analysis"])):
     raise WorkflowError("analysis must be a simple directory name")
 if config["odb"]["version"] != "v12":
     raise WorkflowError("only ODB v12 is supported by this workflow")
+EXISTING_ODB = config["odb"].get("existing_results")
+if EXISTING_ODB is not None and (not isinstance(EXISTING_ODB, str) or not EXISTING_ODB.strip()):
+    raise WorkflowError("odb.existing_results must be null or a snapshot directory")
 if config["odb"]["chunk_size"] < 1 or config["odb"]["threads"] < 1:
     raise WorkflowError("ODB chunk_size and threads must be positive")
 if config["odb"]["batch_size"] < config["odb"]["threads"]:
