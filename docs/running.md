@@ -22,11 +22,14 @@ the launcher enables this option automatically.
 The environment definitions pin the main package versions, including Snakemake
 9.8.0 and Orthologer 3.8.1. They are not complete dependency lockfiles.
 
-For direct execution with existing software environments, set `tools.python`,
-`tools.seqkit`, `tools.odb_command`, and, when applicable, `tools.odb_prefix` in
-your configuration. Use `run_pipeline.sh` without
-`--software-deployment-method conda`. Keep paths in your own configuration;
-no machine-specific configuration is distributed with the workflow.
+The workflow uses fixed command names supplied by these environments, including
+`python`, `seqkit`, `ODB-mapper`, `exec_annotation`, `famsa`, `trimal`,
+`VeryFastTree`, and `lsd2`. ASTRAL-IV uses its official local 128-bit build;
+see [phylogeny setup](phylogeny.md#setup-and-execution).
+For direct execution with existing software environments, put the commands on
+`PATH` and use `run_pipeline.sh` without `--software-deployment-method conda`.
+Executable and interpreter overrides are not configuration options. Remove old
+command settings using the [migration notes](configuration.md#configuration).
 The installed ODB-mapper command must support OrthoDB v12.
 
 ## Execution modes
@@ -70,7 +73,7 @@ From the repository root, activate the environment and create the log directory
 conda activate phenoradar-workflow
 mkdir -p logs
 
-# Run the full workflow: 32 CPUs, 256 GiB, up to 21 days by default.
+# Run the full workflow: 16 CPUs, 192 GiB, up to 21 days by default.
 sbatch --partition=YOUR_PARTITION \
   run_pipeline.sh --configfile config/mydata.yaml
 ```
@@ -97,12 +100,11 @@ preparation rule budgets.
 
 | Setting | Meaning in this mode |
 | --- | --- |
-| `#SBATCH --cpus-per-task=32` | CPU budget shared by all concurrently running steps; passed to Snakemake as `--cores` |
-| `#SBATCH --mem=256G` | Total allocation memory, including Snakemake and its processes |
+| `#SBATCH --cpus-per-task=16` | CPU budget shared by all concurrently running steps; passed to Snakemake as `--cores` |
+| `#SBATCH --mem=192G` | Total allocation memory, including Snakemake and its processes |
 | `#SBATCH --time=21-00:00:00` | Time limit for the entire workflow after the allocation starts |
 | Rule `threads`, including `odb.threads` | Threads used by a step, capped by the allocation's CPU budget |
 | `odb.mem_gb` | Memory estimate for one mapping step, in GB; converted to Snakemake's `mem_mb` scheduling resource |
-| Internal `odb_slots=1` | At most one ODB reference/mapping step at a time; set automatically by the launcher |
 
 The script derives the memory budget from Slurm's allocation and leaves 4 GB
 for Snakemake and environment management. It displays the budget in GB.
@@ -112,15 +114,21 @@ Both `--mem` and `--mem-per-cpu` are supported. Change the total budget with
 `sbatch` options, for example:
 
 ```bash
-sbatch --partition=YOUR_PARTITION --cpus-per-task=32 --mem=192G --time=21-00:00:00 \
+sbatch --partition=YOUR_PARTITION --cpus-per-task=32 --mem=384G --time=21-00:00:00 \
   run_pipeline.sh --configfile config/mydata.yaml
 ```
 
 These defaults are initial allowances, not measured requirements. The allocation
 must fit the largest processing step and last long enough for the whole workflow,
-including all sequential chunks. Reserving resources once avoids queue waits
+including every ODB chunk. Reserving resources once avoids queue waits
 between steps, but keeps those resources reserved during lighter steps as well.
 A larger or longer allocation may also wait longer before starting.
+
+ODB concurrency follows the available CPU and memory budgets. Each chunk defaults
+to 16 workers and a 192 GB memory estimate. Two chunks can run together with at
+least 32 CPUs and 384 GB of workflow memory available, plus the overhead reserved
+by the launcher when using Slurm. The default 16-CPU, 192-GiB allocation fits one
+ODB chunk at a time; increasing both budgets as needed permits more chunks.
 
 The entry point enforces local execution and the allocation budgets. Specify
 the partition and any required account with `sbatch --partition=...` and
@@ -147,18 +155,14 @@ Outside Slurm, specify an appropriate CPU and memory budget:
 
 ```bash
 ./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 24 \
-  --resources mem_gb=128
+  --configfile config/mydata.yaml --cores 16 \
+  --resources mem_gb=192
 ```
 
 This runs processing on the current host. The memory value is a scheduling budget,
 so leave additional physical memory for Snakemake and other processes. For shared
 clusters, submit the same script with `sbatch` to reserve resources and keep running
 after terminal disconnection.
-
-The launcher sets `odb_slots=1` automatically, including when you supply
-`--resources mem_gb=...`. You do not need to repeat it in commands. This limits
-ODB concurrency within Snakemake; it does not submit or reserve Slurm jobs.
 
 When `SLURM_JOB_ID` is present, including direct execution inside an existing
 Slurm allocation, the script uses that allocation's CPU and memory budgets and
@@ -169,14 +173,16 @@ total resources when requesting the allocation.
 
 Use positive whole numbers for `odb.mem_gb` in the configuration and
 `--resources mem_gb=...` when launching directly. Both use decimal GB:
-`128` means 128 GB, equivalent to 128000 MB. `odb.mem_gb` is the estimate for one
+`192` means 192 GB, equivalent to 192000 MB. `odb.mem_gb` is the estimate for one
 mapping step; the command-line resource is the total budget for concurrent steps.
 
 The launcher and workflow convert these values to Snakemake's standard `mem_mb`
 resource internally. Snakemake's own job listings can therefore still show MB.
-Slurm's `--mem=256G` uses GiB (1 GiB = 1024 cubed bytes). The launcher accounts for
+Slurm's `--mem=192G` uses GiB (1 GiB = 1024 cubed bytes). The launcher accounts for
 that difference when calculating the budget from the allocation; no manual
-conversion is needed when submitting with `sbatch`.
+conversion is needed when submitting with `sbatch`. The default 192 GiB leaves
+about 202.2 GB for workflow steps after reserving 4 GB for overhead, enough for
+the 192 GB ODB estimate.
 
 ## Prepare and inspect
 
@@ -187,7 +193,7 @@ downstream jobs. After `prepare` finishes, inspect the complete plan with:
 
 ```bash
 ./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 24 --dry-run
+  --configfile config/mydata.yaml --cores 16 --dry-run
 ```
 
 ## Pilot run
@@ -231,8 +237,9 @@ Incomplete ODB work is retained under
 `work/<analysis>/odb/<chunk>/<fingerprint>/`. The fingerprint includes input FASTA
 contents, the reference record, mapping settings, software records, and worker
 code. Matching incomplete work can be resumed; changed inputs or settings use a
-different work directory. A completed result is not skipped merely because a
-success marker exists.
+different work directory. Changing chunk membership, `odb.threads`, or
+`odb.batch_size` changes that identity; changing only `odb.mem_gb` does not.
+A completed result is not skipped merely because a success marker exists.
 
 After a successful job, native results and logs are copied out before that job's
 work directory is removed. Set `odb.keep_work: true` to retain it, as the pilot

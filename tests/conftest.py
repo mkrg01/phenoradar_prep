@@ -1,5 +1,6 @@
 import gzip
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -10,6 +11,19 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "workflow" / "scripts"))
 
 from common import file_record, write_json, write_tsv
+
+
+@pytest.fixture
+def command_environment(tmp_path):
+    """Expose real tools/test doubles under the workflow's fixed command names."""
+    def build(commands):
+        test_bin = tmp_path / "bin"
+        test_bin.mkdir()
+        for name, executable in commands.items():
+            (test_bin / name).symlink_to(Path(executable).resolve())
+        return {**os.environ, "PATH": str(test_bin) + os.pathsep + os.environ.get("PATH", ""),
+                "XDG_CACHE_HOME": str(tmp_path / "cache")}
+    return build
 
 
 @pytest.fixture
@@ -58,7 +72,7 @@ def fake_odb(tmp_path):
     """A protocol double, confined to tests; never used in production configs."""
     command = tmp_path / "fake_odb"
     command.write_text('''#!/usr/bin/env python3
-import json, os, sys
+import json, os, sys, time
 from pathlib import Path
 root = Path(os.environ['ODBMAPPER_WORK']) / 'v12'
 project = root / 'pipeline'
@@ -78,6 +92,13 @@ elif action == 'MAP':
     if os.environ.get('FAKE_ODB_LOG'):
         with open(os.environ['FAKE_ODB_LOG'], 'a') as log:
             log.write(str(root) + '\\n')
+    expected = int(os.environ.get('FAKE_ODB_BARRIER_COUNT', '0'))
+    if expected:
+        deadline = time.monotonic() + 30
+        while len(Path(os.environ['FAKE_ODB_LOG']).read_text().splitlines()) < expected:
+            if time.monotonic() >= deadline:
+                raise SystemExit('mapping jobs did not overlap')
+            time.sleep(0.05)
     flag = os.environ.get('FAKE_ODB_FAIL_ONCE')
     if flag and Path(flag).exists():
         Path(flag).unlink()

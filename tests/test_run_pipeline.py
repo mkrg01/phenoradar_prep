@@ -78,7 +78,7 @@ def test_launcher_arguments_and_exit_status(batch_workspace, tmp_path, mode, exi
         assert "mem_gb=7" not in argv
     else:
         assert "4.589 GB (4 GB reserved for overhead)" in result.stdout
-    assert "odb_slots=1" in argv
+    assert not any(arg.startswith("odb_slots=") for arg in argv)
     assert "--printshellcmds" in argv
     assert "--rerun-incomplete" in argv
     assert observed["cwd"] == str(checkout)
@@ -157,5 +157,4 @@ rule task:
     assert (checkout / "b.txt").read_text().strip() == expected_cores
     assert f"Provided cores: {expected_cores}" in result.stdout + result.stderr
     assert f"mem_mb={expected_memory}" in result.stdout + result.stderr
-    assert any(line.startswith("Provided resources:") and "odb_slots=1" in line
-               for line in (result.stdout + result.stderr).splitlines())
+    assert "odb_slots" not in result.stdout + result.stderr

@@ -5,7 +5,7 @@ into orthogroup-level TPM tables for comparative expression analysis, with an
 optional KEGG Orthology (KO) annotation and expression branch.
 An optional BUSCO protein phylogeny branch uses cdskit, FAMSA, trimAl, VeryFastTree, and
 ASTRAL-IV/CASTLES-II, with manual or nwkit/TimeTree secondary calibrations for
-optional treePL dating.
+optional LSD2 dating.
 
 ```text
 Metadata + BUSCO + taxonomy -> species selection -> CDS translation
@@ -47,13 +47,14 @@ sbatch --partition=YOUR_PARTITION \
 ```
 
 All steps run locally inside that allocation, and the terminal can be closed after
-submission. Set total resources with `sbatch` options or the script's `#SBATCH` lines.
+submission. The default allocation is 16 CPUs and 192 GiB, sized for one ODB chunk.
+Set total resources with `sbatch` options or the script's `#SBATCH` lines.
 For direct execution on the current host, use the same script with a CPU and memory budget:
 
 ```bash
 ./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 24 \
-  --resources mem_gb=128
+  --configfile config/mydata.yaml --cores 16 \
+  --resources mem_gb=192
 ```
 
 To run only species selection and manifest preparation, append `-- prepare`.

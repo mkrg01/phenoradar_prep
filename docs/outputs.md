@@ -70,3 +70,10 @@ OG tables above. Its `ko_tpm_sum.tsv` contains sums of original input TPM and is
 and quantified gene counts, including KOs with no quantified genes. Such KOs have
 blank values in support/wide tables and are omitted from the numeric long table;
 observed zero expression remains zero. Run identities are preserved.
+
+By default, `kegg.ambiguity: duplicate` adds a gene's full TPM to every distinct
+accepted KO. KO features can therefore overlap and their total can exceed the
+input TPM. In KEGG `mapping_qc.tsv`, `retained_targets`, `retained_tpm`, and
+`retained_tpm_fraction` count each contributing gene once; `quantified_assignments`
+and `ko_tpm_sum` count all gene/KO contributions. `ambiguous_tpm` is included in
+retained TPM under `duplicate`; it is excluded only when `drop` is selected.

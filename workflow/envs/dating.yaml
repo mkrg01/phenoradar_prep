@@ -6,8 +6,6 @@ dependencies:
   - python=3.12
   - biopython=1.85
   - ete4=4.3.0
-  - numpy
-  - famsa=2.4.1
-  - trimal=1.5.1
-  - veryfasttree=4.0.5
-  - cdskit=0.27.0
+  # The adjacent Snakemake post-deploy script builds unmodified upstream LSD2.
+  - gxx_linux-64=13
+  - make=4.4.1

@@ -87,7 +87,7 @@ def test_real_nwkit_client_with_recorded_http_response(tmp_path, monkeypatch):
     calls = []
     def get(url, **kwargs):
         calls.append(url)
-        assert kwargs == {"timeout": 30, "stream": True}
+        assert kwargs == ({"timeout": 30} if tool["version"] == "0.27.0" else {"timeout": 30, "stream": True})
         response = requests.Response()
         response.status_code = 200
         response._content = json.dumps(data).encode()
@@ -98,7 +98,7 @@ def test_real_nwkit_client_with_recorded_http_response(tmp_path, monkeypatch):
     assert result[0] == data
     cached_response([2, 1], tmp_path, offline=True)
     assert len(calls) == 1
-    assert result[1]["nwkit"]["version"] == "0.43.12"
+    assert result[1]["nwkit"]["version"] == tool["version"]
 
 
 def test_ambiguous_mrca_ids_and_conflicting_bounds_stop_automatic_dating(tmp_path):
@@ -181,7 +181,7 @@ def test_small_clades_are_eligible_and_query_budget_still_applies(tmp_path, maxi
     assert provenance["queries"] == len(expected_sizes)
 
 
-def test_preparation_and_real_treepl_keep_topology_and_substitution_tree(tmp_path):
+def test_preparation_and_real_lsd2_keep_topology_and_substitution_tree(tmp_path):
     tree, metadata, database, coverage = inputs(tmp_path)
     original = tree.read_bytes()
     settings = {"max_representatives": 4, "max_queries": 1,
@@ -192,11 +192,18 @@ def test_preparation_and_real_treepl_keep_topology_and_substitution_tree(tmp_pat
     prepare(tree, metadata, database, coverage, out, cache, settings)
     assert json.loads((out / "provenance.json").read_text())["status"] == "ready"
     assert len(read_tsv(out / "calibrations.tsv")) == 1
-    treepl = os.environ.get("TREEPL_BIN")
-    if treepl:
+    lsd2 = os.environ.get("LSD2_BIN")
+    if lsd2:
         provenance = tmp_path / "tree.json"
         provenance.write_text(json.dumps({"branch_length_unit": "substitutions_per_site", "outgroup": "A", "mean_gene_length": 250, "total_gene_sites": 750}))
-        date(tree, provenance, out / "calibrations.tsv", tmp_path / "dated", treepl, settings={"smoothing": 10, "replicates": 2})
+        date(tree, provenance, out / "calibrations.tsv", tmp_path / "dated", lsd2, settings={"variance": 1})
         dated = read_tree(tmp_path / "dated/species_tree.dated.nwk", "ABCD")
         assert 90 - 1e-3 <= dated.get_distance("A", "B") / 2 <= 110 + 1e-3
+        result = json.loads((tmp_path / "dated/provenance.json").read_text())
+        assert result["native_report"]["unique_scale"] is False
+        assert result["native_report"]["rate_substitutions_per_site_per_ma"] is None
+        assert result["native_report"]["root_date_interval"] == [-110, -90]
+        assert result["confidence_intervals"] is False
+        assert result["review_status"] == "needs_review"
+        assert "midpoint" in result["scale_selection"]
     assert tree.read_bytes() == original

@@ -19,7 +19,11 @@ ODB output formats, checksum verification, duplicate and ambiguous mappings, TPM
 normalization, and recovery after failure. The integration test uses real seqkit
 and a test-only ODB substitute. It checks a complete workflow, separate preparation
 followed by execution, unchanged reruns, abundance updates, and reduced species
-selections. Without Snakemake or seqkit, that integration test is skipped.
+selections. A barrier in the ODB substitute requires two chunks to start before
+either can finish, verifying concurrency when CPU and memory budgets allow it.
+The workflow is exercised without command configuration. Tests expose tools and
+test doubles under the workflow's fixed names on `PATH`.
+Without Snakemake or seqkit, that integration test is skipped.
 
 Taxonomy bootstrap tests build a real ETE4 database from a small synthetic
 taxdump, substituting only the network response. They check download/build
@@ -35,11 +39,14 @@ Snakemake workflow verifies both modes without sbatch or srun submissions.
 These tests do not require an actual Slurm allocation.
 
 KEGG tests additionally cover frozen reference snapshots and corruption checks,
-KofamScan detail-TSV interpretation, ambiguity, original-TPM accounting, missing
+KofamScan detail-TSV interpretation, full TPM contribution to every accepted KO
+by default, explicit drop/error policies, gene-level coverage versus repeated
+KO contributions, original-TPM accounting, missing
 observations, observed zeros, and runs with no retained KOs. A second workflow
 integration test uses a test-only KofamScan substitute with real Snakemake and
 seqkit. It checks the standalone `kegg` target, opt-in full workflow, annotation
-reuse across runs, abundance-only updates, and removal of stale species from
+reuse across runs, abundance-only and ambiguity-policy updates without
+reannotation, and removal of stale species from
 merged outputs. No reference downloads are needed for these tests.
 
 The automated tests do not validate real ODB assignments, reference download
@@ -58,16 +65,18 @@ rejection and count diagnostics, and calibration consistency. Install the pinned
 from `workflow/envs/phylogeny.yaml` in the test environment; tests compare its
 actual CLI with the workflow's Python API on stops, partial codons, frame changes,
 IUPAC/gap codons and alternate genetic codes. When tool paths are supplied, they
-run real FAMSA, trimAl (`TRIMAL_BIN`), VeryFastTree, ASTRAL-IV and treePL on
-synthetic inputs. They verify selected columns, original-X retention, unchanged
-reruns and FAMSA reuse after changing trimAl mode. They check that dating
+run real FAMSA, trimAl (`TRIMAL_BIN`), VeryFastTree, ASTRAL-IV and LSD2
+(`LSD2_BIN`) on synthetic inputs. They verify selected columns, original-X
+retention, unchanged reruns and FAMSA reuse after changing trimAl mode. Dating
 uses time units, honors calibrations, and reuses the existing species tree.
-The treePL tests also exercise repeated random CV on a 32-tip synthetic tree
-with heterogeneous lengths and a zero branch, reject incomplete/nonfinite
-outputs, and check rooted topology and ultrametricity. The project build includes
-the documented [upstream fixes](../workflow/patches/README.md); set `TREEPL_BIN`
-to that executable. A separate synthetic smoke run additionally exercised the
-default CV grid with three CV/final restarts and two native threads.
+The LSD2 tests exercise all three variance settings on a 32-tip synthetic tree
+with heterogeneous lengths and zero internal/terminal branches. They reject
+incomplete/nonfinite results, preserve failed-run logs, and check rooted topology,
+ultrametricity and calibration bounds after native rounding normalization.
+Deleting a dated output or changing dating settings reruns dating while retaining
+inference outputs. Set `PHYLOGENY_CONDA_PREFIX` to an environment cache directory
+to exercise `--use-conda` in the real workflow integration, including the automatic
+unmodified LSD2 build. `LSD2_SOURCE_ARCHIVE` can supply its verified archive offline.
 The TimeTree tests cover species-taxid resolution, missing child lineages,
 ambiguous MRCA IDs, conflicting bounds, cached/offline retrieval and transport
 failures. They also check that two-tip and other small clades remain eligible,

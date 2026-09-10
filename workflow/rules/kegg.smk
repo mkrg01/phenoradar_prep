@@ -38,7 +38,7 @@ rule annotate_kofam:
         species=lambda wc: species_row(wc)["species"],
         outdir=lambda wc: f"{KEGG_SPECIES}/{wc.species}",
         workdir=lambda wc: f"{WORK}/kegg/{wc.species}",
-        command=config["kegg"]["command"]
+        command="exec_annotation"
     threads: config["kegg"]["threads"]
     resources: mem_mb=config["kegg"]["mem_gb"] * 1000
     log: f"{LOG}/kegg/species/{{species}}.log"

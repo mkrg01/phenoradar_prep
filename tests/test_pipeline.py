@@ -257,7 +257,7 @@ def test_existing_odb_rejects_incompatible_inputs(existing_odb, tmp_path, proble
 
 
 @pytest.mark.parametrize("reuse", [False, True])
-def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, frozen_reference, existing_odb, tmp_path, reuse):
+def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, frozen_reference, existing_odb, tmp_path, reuse, command_environment):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     seqkit = os.environ.get("SEQKIT_BIN") or shutil.which("seqkit")
     if not snakemake or not seqkit:
@@ -267,7 +267,6 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
         "analysis": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
         "taxonomy": {"database": str(tmp_path / "taxonomy/taxa.sqlite"), "source": tiny_inputs["taxonomy_db"]},
         "paths": {"results": str(tmp_path / "results"), "work": str(tmp_path / "work"), "logs": str(tmp_path / "logs")},
-        "tools": {"python": sys.executable, "seqkit": seqkit, "odb_command": str(fake_odb), "odb_prefix": ""},
         "odb": {"reference_dir": str(frozen_reference), "chunk_size": 1, "threads": 1, "batch_size": 1, "mem_gb": 3,
                 "min_free_gb": 0, "allow_nonlocal": True, "keep_work": True},
     }
@@ -276,13 +275,13 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
         config["odb"]["existing_results"] = str(existing_odb[0])
         # Any accidental reference download or ODB execution must fail.
         config["odb"]["reference_dir"] = str(tmp_path / "absent_reference")
-        config["tools"]["odb_command"] = str(tmp_path / "absent_odb_command")
     configfile.write_text(yaml.safe_dump(config))
-    env = os.environ.copy()
-    env["XDG_CACHE_HOME"] = str(tmp_path / "cache")
+    # Supply standard command names as the rule environments do in production.
+    env = command_environment({"python": sys.executable, "seqkit": seqkit,
+                               "ODB-mapper": tmp_path / "absent_odb_command" if reuse else fake_odb})
     env["FAKE_ODB_LOG"] = str(tmp_path / "events.txt")
     base = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(configfile),
-            "--cores", "2", "--resources", "odb_slots=1"]
+            "--cores", "2", "--resources", "mem_mb=16000"]
     # Workflow configfile paths are relative to the repository root.
     def execute(extra=()):
         result = subprocess.run(base + list(extra), cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -302,7 +301,12 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     assert "rule prepare_odb_reference:" not in plan
     assert plan.count("mem_mb=3000") == (0 if reuse else 2)
     assert not any("<TBD>" in line for line in plan.splitlines() if "input:" in line)
+    if not reuse:
+        # Each MAP waits for both chunks to start: the CPU and memory budgets
+        # permit overlap, and no separate ODB limit may serialize them.
+        env["FAKE_ODB_BARRIER_COUNT"] = "2"
     execute()
+    env.pop("FAKE_ODB_BARRIER_COUNT", None)
     out = tmp_path / "results/test"
     assert len(read_tsv(out / "tpm/tpm_wide.tsv")) == 3
     events = tmp_path / "events.txt"

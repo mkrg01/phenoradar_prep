@@ -63,15 +63,15 @@ def ko_inputs(tmp_path):
     return dict(samples=samples, annotation_dir=annotation, run_dir=tmp_path / "runs", outdir=tmp_path / "merged")
 
 
-def aggregate_runs(inputs):
+def aggregate_runs(inputs, **options):
     for row in read_tsv(inputs["samples"]):
         run = row["run"]
         aggregate(inputs["samples"], run, inputs["annotation_dir"] / row["odb_species"],
-                  inputs["run_dir"] / f"{run}.tsv", inputs["run_dir"] / f"{run}.qc.json")
+                  inputs["run_dir"] / f"{run}.tsv", inputs["run_dir"] / f"{run}.qc.json", **options)
 
 
-def test_original_tpm_unique_assignment_no_multiplication_and_support(ko_inputs):
-    aggregate_runs(ko_inputs)
+def test_explicit_drop_preserves_unique_assignment_and_support(ko_inputs):
+    aggregate_runs(ko_inputs, ambiguity="drop")
     rows = {row["ko"]: row for row in read_tsv(ko_inputs["run_dir"] / "A1.tsv")}
     assert set(rows) == {"K00001", "K00006", "K00007"}
     assert float(rows["K00001"]["tpm_sum"]) == 50
@@ -89,6 +89,30 @@ def test_original_tpm_unique_assignment_no_multiplication_and_support(ko_inputs)
     assert qc["unannotated_tpm"] == qc["no_protein_tpm"] == 10
     assert qc["retained_targets"] == 3
     assert sum(float(row["tpm_sum"]) for row in rows.values() if row["tpm_sum"]) == 50
+    assert qc["ko_tpm_sum"] == 50
+    assert qc["quantified_assignments"] == 3
+    merge(**ko_inputs)
+
+
+def test_default_adds_full_tpm_to_each_accepted_ko_and_counts_coverage_once(ko_inputs):
+    aggregate_runs(ko_inputs)
+    rows = {row["ko"]: row for row in read_tsv(ko_inputs["run_dir"] / "A1.tsv")}
+    assert set(rows) == {"K00001", "K00002", "K00003", "K00006", "K00007"}
+    assert float(rows["K00001"]["tpm_sum"]) == 50
+    for ko in ("K00002", "K00003"):
+        assert float(rows[ko]["tpm_sum"]) == 10
+        assert rows[ko]["annotated_genes"] == rows[ko]["quantified_genes"] == "1"
+    assert rows["K00006"]["tpm_sum"] == ""  # no observation
+    assert rows["K00007"]["tpm_sum"] == "0.0"  # measured zero
+    qc = json.loads((ko_inputs["run_dir"] / "A1.qc.json").read_text())
+    assert qc["ambiguity"] == "duplicate"
+    assert qc["total_tpm"] == 100
+    assert qc["retained_tpm"] == 60
+    assert qc["retained_tpm_fraction"] == 0.6
+    assert qc["retained_targets"] == 4
+    assert qc["quantified_assignments"] == 5
+    assert qc["ko_tpm_sum"] == 70
+    assert qc["ambiguous_tpm"] == 10
 
 
 def test_merge_runs_missing_evidence_and_selection(ko_inputs):
@@ -98,12 +122,16 @@ def test_merge_runs_missing_evidence_and_selection(ko_inputs):
     assert [row["run"] for row in wide] == ["A1", "A2", "B1"]
     assert float(wide[0]["K00001"]) == 50
     assert float(wide[1]["K00001"]) == 20
-    assert wide[0]["K00002"] == wide[0]["K00006"] == wide[2]["K00001"] == ""
+    assert wide[0]["K00002"] == wide[0]["K00003"] == "10.0"
+    assert wide[0]["K00006"] == wide[2]["K00001"] == ""
     assert wide[0]["K00007"] == "0.0"
     numeric = read_tsv(ko_inputs["outdir"] / "ko_tpm_sum.tsv")
-    assert len(numeric) == 5
+    assert len(numeric) == 9
     assert all(row["tpm_sum"] != "" for row in numeric)
-    assert len(read_tsv(ko_inputs["outdir"] / "ko_support.tsv")) == 7
+    assert len(read_tsv(ko_inputs["outdir"] / "ko_support.tsv")) == 11
+    qc = read_tsv(ko_inputs["outdir"] / "mapping_qc.tsv")[0]
+    assert float(qc["retained_tpm"]) == 60
+    assert float(qc["ko_tpm_sum"]) == 70
     assert len(read_tsv(ko_inputs["outdir"] / "genes.tsv")) == 10  # species annotation not duplicated per run
     assert any(row["assignment_status"] == "accepted" and row["gene_id"] == "Alpha_plant_g3"
                for row in read_tsv(ko_inputs["outdir"] / "gene_kos.tsv"))
@@ -117,14 +145,13 @@ def test_merge_runs_missing_evidence_and_selection(ko_inputs):
     assert {row["species"] for row in read_tsv(ko_inputs["outdir"] / "genes.tsv")} == {"Beta_sp-X"}
 
 
+@pytest.mark.parametrize("ambiguity", ["duplicate", "drop", "error"])
 @pytest.mark.parametrize("kind", ["ambiguous", "unannotated", "zero"])
-def test_no_retained_or_all_zero_runs_are_valid(ko_inputs, kind):
+def test_multi_ko_only_no_retained_or_all_zero_runs(ko_inputs, kind, ambiguity):
     rows = read_tsv(ko_inputs["samples"])
     sample = rows[-1]
     write_tsv(ko_inputs["samples"], list(sample), [sample])
     hits = [] if kind == "unannotated" else [("K00001", "accepted"), ("K00002", "accepted")]
-    if kind == "zero":
-        hits = [("K00001", "accepted")]
     annotate(ko_inputs["annotation_dir"] / "Beta_sp_X", "Beta_sp-X",
              {"Beta_sp-X_g1": hits, "Beta_sp-X_g2": hits})
     if kind == "zero":
@@ -132,18 +159,42 @@ def test_no_retained_or_all_zero_runs_are_valid(ko_inputs, kind):
         for row in values:
             row["tpm"] = 0
         write_tsv(sample["abundance"], list(values[0]), values)
-    aggregate_runs(ko_inputs)
+    if kind != "unannotated" and ambiguity == "error":
+        with pytest.raises(ValueError, match="multiple accepted KOs"):
+            aggregate_runs(ko_inputs, ambiguity=ambiguity)
+        return
+    aggregate_runs(ko_inputs, ambiguity=ambiguity)
     merge(**ko_inputs)
     report = json.loads((ko_inputs["run_dir"] / "B1.qc.json").read_text())
-    assert report["retained_tpm"] == 0
-    if kind == "zero":
-        assert report["retained_tpm_fraction"] is None
+    if kind != "unannotated" and ambiguity == "duplicate":
+        total = 0 if kind == "zero" else 8
+        assert report["total_tpm"] == report["retained_tpm"] == total
+        assert report["ko_tpm_sum"] == 2 * total
+        assert report["retained_tpm_fraction"] == (None if kind == "zero" else 1)
+        assert report["retained_targets"] == 2
+        assert report["quantified_assignments"] == 4
         assert not report["no_retained_kos"]  # observed zero remains evidence
-        assert read_tsv(ko_inputs["outdir"] / "ko_tpm_sum.tsv")[0]["tpm_sum"] == "0.0"
+        numeric = read_tsv(ko_inputs["outdir"] / "ko_tpm_sum.tsv")
+        assert {r["ko"] for r in numeric} == {"K00001", "K00002"}
+        assert all(float(r["tpm_sum"]) == total for r in numeric)
     else:
+        assert report["retained_tpm"] == report["ko_tpm_sum"] == 0
         assert report["no_retained_kos"]
         assert read_tsv(ko_inputs["outdir"] / "ko_tpm_sum.tsv") == []
         assert read_tsv(ko_inputs["outdir"] / "ko_tpm_sum_wide.tsv") == [{"species": "Beta_sp-X", "run": "B1"}]
+
+
+def test_unobserved_multi_ko_has_missing_support_under_default_policy(ko_inputs):
+    sample = read_tsv(ko_inputs["samples"])[0]
+    values = read_tsv(sample["abundance"])
+    write_tsv(sample["abundance"], list(values[0]), [r for r in values if r["target_id"] != "Alpha_plant_g3"])
+    aggregate_runs(ko_inputs)
+    merge(**ko_inputs)
+    support = {r["ko"]: r for r in read_tsv(ko_inputs["run_dir"] / "A1.tsv")}
+    for ko in ("K00002", "K00003"):
+        assert support[ko]["annotated_genes"] == "1"
+        assert support[ko]["quantified_genes"] == "0"
+        assert support[ko]["tpm_sum"] == ""
 
 
 def test_ambiguity_error_does_not_split(ko_inputs):
@@ -207,6 +258,36 @@ def test_provenance_and_manifest_mismatches_rejected(ko_inputs, change):
         report["species"] = "Wrong"
         write_json(path, report)
     with pytest.raises(ValueError, match="changed|does not match"):
+        merge(**ko_inputs)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("retained_targets", 5), ("retained_tpm", 70), ("retained_tpm_fraction", 0.7),
+    ("quantified_assignments", 4), ("ko_tpm_sum", 60), ("ambiguity", "drop"),
+])
+def test_merge_rejects_confusing_gene_coverage_with_ko_totals(ko_inputs, field, value):
+    aggregate_runs(ko_inputs)
+    path = ko_inputs["run_dir"] / "A1.qc.json"
+    report = json.loads(path.read_text())
+    report[field] = value
+    write_json(path, report)
+    with pytest.raises(ValueError, match="disagrees"):
+        merge(**ko_inputs)
+
+
+def test_merge_rejects_dividing_multi_ko_tpm_even_with_matching_checksum(ko_inputs):
+    aggregate_runs(ko_inputs)
+    path = ko_inputs["run_dir"] / "A1.tsv"
+    rows = read_tsv(path)
+    for row in rows:
+        if row["ko"] in {"K00002", "K00003"}:
+            row["tpm_sum"] = 5
+    write_tsv(path, list(rows[0]), rows)
+    qc = path.with_suffix(".qc.json")
+    report = json.loads(qc.read_text())
+    report.update(result=file_record(path), ko_tpm_sum=60)
+    write_json(qc, report)
+    with pytest.raises(ValueError, match="TPM disagrees with input abundance"):
         merge(**ko_inputs)
 
 

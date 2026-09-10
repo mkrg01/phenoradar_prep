@@ -120,7 +120,8 @@ def test_extract_original_cds_audits_padding_masking_and_missing_ids(tmp_path):
     assert cds.read_bytes() == original
     report = json.loads(qc.read_text())
     assert report["rejected"] == {}
-    assert report["cdskit"]["version"] == "0.29.2"
+    import cdskit
+    assert report["cdskit"]["version"] == cdskit.__version__
     first, second = [r["preparation"] for r in report["records"]]
     assert first["head_padding_nt"] == first["tail_padding_nt"] == 1
     assert first["reading_frame_changed"] is True
@@ -174,8 +175,6 @@ def test_protein_input_requires_known_residues_and_does_not_reframe(tmp_path):
 
 def trimal_binary():
     command = os.environ.get("TRIMAL_BIN") or shutil.which("trimal")
-    if not command and (ROOT / "resources/phylogeny_tools/bin/trimal").is_file():
-        command = str(ROOT / "resources/phylogeny_tools/bin/trimal")
     if not command:
         pytest.skip("set TRIMAL_BIN for real trimming tests")
     return command
@@ -324,17 +323,17 @@ def test_renamed_binary_cannot_pass_int128_check(tmp_path):
         astral("unused", "unused", manifest, "unused", "unused", str(binary), "s0", 1, 1)
 
 
-def test_real_treepl_outputs_time_units_and_honors_calibration(tmp_path):
-    treepl = os.environ.get("TREEPL_BIN") or shutil.which("treePL")
-    if not treepl:
-        pytest.skip("set TREEPL_BIN for real dating integration")
+def test_real_lsd2_outputs_time_units_and_honors_calibration(tmp_path):
+    lsd2 = os.environ.get("LSD2_BIN") or shutil.which("lsd2")
+    if not lsd2:
+        pytest.skip("set LSD2_BIN for real dating integration")
     tree, provenance = tmp_path / "input.nwk", tmp_path / "input.json"
     tree.write_text("(A:0.1,(B:0.08,(C:0.04,D:0.04):0.04):0.02);\n")
     write_json(provenance, {"branch_length_unit": "substitutions_per_site", "outgroup": "A", "mean_gene_length": 250, "total_gene_sites": 750})
     calibrations = tmp_path / "calibrations.tsv"
     write_tsv(calibrations, ["taxa", "min_age_ma", "max_age_ma", "source"],
               [{"taxa": "A,B", "min_age_ma": 100, "max_age_ma": 100, "source": "synthetic test only"}])
-    date(tree, provenance, calibrations, tmp_path / "dated", treepl, settings={"smoothing": 10, "replicates": 2})
+    date(tree, provenance, calibrations, tmp_path / "dated", lsd2, settings={"variance": 1})
     dated = read_tree(tmp_path / "dated/species_tree.dated.nwk")
     assert dated.get_distance("A", "B") == pytest.approx(200)
     assert dated.get_distance("C", "D") == pytest.approx(80, rel=0.01)
@@ -382,30 +381,37 @@ def phylogeny_inputs(tmp_path):
     return source, species
 
 
-def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path):
+def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environment):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     famsa = os.environ.get("FAMSA_BIN") or shutil.which("famsa")
     vft = os.environ.get("VERYFASTTREE_BIN") or shutil.which("VeryFastTree")
-    astral4 = os.environ.get("ASTRAL_BIN") or shutil.which("astral4_int128")
-    if not all([snakemake, famsa, vft, astral4]):
-        pytest.skip("set phylogeny tool paths for real workflow integration")
+    astral4 = ROOT / "resources/phylogeny_tools/bin/astral4_int128"
+    if not all([snakemake, famsa, vft]) or not astral4.is_file():
+        pytest.skip("set phylogeny tool paths and run prepare_phylogeny_tools.py for workflow integration")
     trimal = trimal_binary()
+    lsd2 = os.environ.get("LSD2_BIN") or shutil.which("lsd2")
+    commands = {"python": sys.executable, "famsa": famsa, "trimal": trimal, "VeryFastTree": vft}
+    if lsd2:
+        commands["lsd2"] = lsd2
+    env = command_environment(commands)
     source, species = phylogeny_inputs(tmp_path)
     cfg = {"analysis": "test", "inputs": {"metadata": str(source / "metadata.tsv"), "busco": str(source / "busco.tsv"),
            "cds_dir": str(source / "cds"), "quant_dir": str(source / "quant")},
-           "taxonomy": {"database": str(source / "taxa.sqlite")}, "tools": {"python": sys.executable},
+           "taxonomy": {"database": str(source / "taxa.sqlite")},
            "paths": {key: str(tmp_path / key) for key in ["results", "work", "logs"]},
            "phylogeny": {"busco_full_dir": str(source / "busco"), "outgroup": species[0],
                "max_markers": 3,
-               "famsa_command": famsa, "trimal_command": trimal, "veryfasttree_command": vft, "astral_command": astral4,
                "align_threads": 1, "tree_threads": 1, "astral_threads": 2, "astral_mem_gb": 4}}
+    conda_prefix = os.environ.get("PHYLOGENY_CONDA_PREFIX")
     config = tmp_path / "config.yaml"
     config.write_text(yaml.safe_dump(cfg))
     argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(config),
             "--cores", "2", "--resources", "mem_mb=8000", "--", "phylogeny"]
+    if conda_prefix:
+        argv[1:1] = ["--use-conda", "--conda-prefix", conda_prefix]
     def run():
         result = subprocess.run(argv, cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                env={**os.environ, "XDG_CACHE_HOME": str(tmp_path / "cache")})
+                                env=env)
         assert result.returncode == 0, result.stdout + "\n" + "\n".join(
             p.read_text()[-4000:] for p in (tmp_path / "logs").rglob("*.log"))
         return result.stdout
@@ -431,18 +437,30 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path):
     timestamp = (out / "species_tree.nwk").stat().st_mtime_ns
     assert "Nothing to be done" in run()
     # The dating target reuses the inferred species tree and does not restart loci.
-    treepl = os.environ.get("TREEPL_BIN") or shutil.which("treePL")
-    if treepl:
+    if lsd2:
         calibrations = tmp_path / "calibrations.tsv"
         write_tsv(calibrations, ["taxa", "min_age_ma", "max_age_ma", "source"],
                   [{"taxa": ",".join(species[:2]), "min_age_ma": 100, "max_age_ma": 100,
                     "source": "synthetic workflow test only"}])
-        cfg["phylogeny"]["dating"] = {"calibrations": str(calibrations), "command": treepl, "mem_gb": 4,
-                                        "treepl": {"cv_start": 10.0, "cv_stop": 1.0, "cv_replicates": 2, "replicates": 2}}
+        cfg["phylogeny"]["dating"] = {"calibrations": str(calibrations), "mem_gb": 4,
+                                        "lsd2": {"variance": 1}}
         config.write_text(yaml.safe_dump(cfg))
         argv[-1] = "timetree"
         run()
         read_tree(out / "dating/species_tree.dated.nwk", species)
+        assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
+        dated_timestamp = (out / "dating/species_tree.dated.nwk").stat().st_mtime_ns
+        assert "Nothing to be done" in run()
+        assert (out / "dating/species_tree.dated.nwk").stat().st_mtime_ns == dated_timestamp
+        retained = {p: p.stat().st_mtime_ns for folder in [out / "gene_trees", out / "alignments/raw"]
+                    for p in folder.iterdir()}
+        (out / "dating/species_tree.dated.nwk").unlink()
+        run()
+        assert all(p.stat().st_mtime_ns == stamp for p, stamp in retained.items())
+        cfg["phylogeny"]["dating"]["lsd2"]["variance"] = 0
+        config.write_text(yaml.safe_dump(cfg))
+        run()
+        assert json.loads((out / "dating/provenance.json").read_text())["settings"]["variance"] == 0
         assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
         # Switch from manual bounds to the automatic TimeTree branch. Exercise
         # the full rule graph offline with a recorded synthetic API response.
@@ -452,7 +470,7 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path):
         cached_response(range(42, 48), cache, delay=0,
                         backend=(fake_fetch(payload(range(42, 48))), {"synthetic": True}))
         cfg["phylogeny"]["dating"].update(calibration_source="timetree", timetree={
-            "python": sys.executable, "max_representatives": 6, "max_queries": 1,
+            "max_representatives": 6, "max_queries": 1,
             "cache_dir": str(cache), "offline": True})
         config.write_text(yaml.safe_dump(cfg))
         run()

@@ -42,6 +42,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ["samples", "protein-dir", "outdir"]:
         parser.add_argument(f"--{flag}", required=True)
-    parser.add_argument("--chunk-size", type=int, default=250)
+    parser.add_argument("--chunk-size", type=int, default=50)
     args = vars(parser.parse_args())
     make(**args)

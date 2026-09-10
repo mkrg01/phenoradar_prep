@@ -7,7 +7,7 @@ rule translate_cds:
         protein=f"{PROTEINS}/{{species}}_protein.fa",
         provenance=f"{PROTEINS}/{{species}}_protein.json"
     params:
-        seqkit=config["tools"]["seqkit"],
+        seqkit="seqkit",
         table=config["translation"]["table"]
     threads: 1
     log: f"{LOG}/translate/{{species}}.log"
@@ -45,16 +45,16 @@ rule prepare_odb_reference:
         settings=f"{REFERENCE}/config.txt"
     params:
         root=REFERENCE,
-        command=config["tools"]["odb_command"],
-        prefix=config["tools"]["odb_prefix"],
-        version=config["odb"]["version"],
+        command="ODB-mapper",
+        prefix="",
+        version=ODB_VERSION,
         node=config["odb"]["node"],
         free=config["odb"]["reference_min_free_gb"],
         storage="--allow-nonlocal" if config["odb"]["allow_nonlocal"] else ""
     log: f"{LOG}/odb_reference.log"
     conda: "../envs/odb.yaml"
     threads: 1
-    resources: mem_mb=32000, odb_slots=1
+    resources: mem_mb=32000
     shell:
         "{PYTHON:q} {input.code:q} --reference-dir {params.root:q} --command {params.command:q} "
         "--prefix={params.prefix:q} --version {params.version:q} --node {params.node} "
@@ -78,18 +78,16 @@ rule odb_map:
         manifest=lambda wc: f"{MANIFESTS}/{wc.chunk}.fs",
         out=lambda wc: f"{CHUNKS}/{wc.chunk}",
         work=f"{WORK}/odb",
-        command=config["tools"]["odb_command"],
-        prefix=config["tools"]["odb_prefix"],
-        version=config["odb"]["version"],
+        command="ODB-mapper",
+        prefix="",
+        version=ODB_VERSION,
         node=config["odb"]["node"],
         batch=config["odb"]["batch_size"],
         free=config["odb"]["min_free_gb"],
         storage="--allow-nonlocal" if config["odb"]["allow_nonlocal"] else "",
         keep="--keep-work" if config["odb"]["keep_work"] else ""
     threads: config["odb"]["threads"]
-    resources:
-        mem_mb=config["odb"]["mem_gb"] * 1000,
-        odb_slots=1
+    resources: mem_mb=config["odb"]["mem_gb"] * 1000
     log: f"{LOG}/odb/{{chunk}}.log"
     benchmark: f"{LOG}/benchmarks/odb_{{chunk}}.tsv"
     conda: "../envs/odb.yaml"
@@ -120,7 +118,7 @@ rule merge_odb:
     params:
         chunks=CHUNKS, proteins=PROTEINS, plan=f"{MANIFESTS}/chunks.json",
         existing=["--existing", EXISTING_ODB] if EXISTING_ODB else [],
-        version=config["odb"]["version"], node=config["odb"]["node"]
+        version=ODB_VERSION, node=config["odb"]["node"]
     log: f"{LOG}/merge_odb.log"
     conda: "../envs/analysis.yaml"
     resources: mem_mb=8000

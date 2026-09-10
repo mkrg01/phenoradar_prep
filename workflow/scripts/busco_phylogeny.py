@@ -21,6 +21,7 @@ CDSKIT_MODULES = {
     "mask": "6af8ea346a96ebde8e47cb5d584a98f70aec0a2db022abd54217d6ca8c2908c6",
     "translate": "ea0164d9aa629a9afd0dfa36baffc4d6ce95df7a956b1fcd4ff702b327498e88",
 }
+CDSKIT_CONDA_MASK_SHA256 = "9f137703c4f2cefd0a7c49571a6cafb099c0dc5adc6238d4258cb0d529c31d3d"
 
 
 @lru_cache(maxsize=1)
@@ -30,9 +31,14 @@ def cdskit_backend():
     import cdskit
     modules = {name: importlib.import_module("cdskit." + name) for name in CDSKIT_MODULES}
     records = {name: file_record(module.__file__) for name, module in modules.items()}
-    if cdskit.__version__ != "0.29.2" or any(records[n]["sha256"] != digest for n, digest in CDSKIT_MODULES.items()):
+    expected = dict(CDSKIT_MODULES)
+    if cdskit.__version__ == "0.27.0":
+        expected["mask"] = CDSKIT_CONDA_MASK_SHA256
+    if cdskit.__version__ not in {"0.27.0", "0.29.2"} or any(records[n]["sha256"] != digest for n, digest in expected.items()):
         raise ValueError("cdskit API differs from the tested source; install workflow/envs/phylogeny.yaml")
-    return modules, {"version": cdskit.__version__, "commit": CDSKIT_COMMIT, "modules": records,
+    return modules, {"version": cdskit.__version__,
+                     "source": "bioconda::cdskit=0.27.0" if cdskit.__version__ == "0.27.0" else CDSKIT_COMMIT,
+                     "modules": records,
                      "interface": "Python functions used by cdskit pad, mask and translate"}
 
 

@@ -22,7 +22,7 @@ the dated trees should currently be treated as exploratory estimates.
 | Single-copy assignments | Requires one unambiguous `Complete` hit per species and BUSCO; excludes `Duplicated`, `Fragmented`, and original genes assigned to multiple BUSCOs | Defaults to `strictly_single_copy_only=0`; accepts nonmissing gene IDs without commas from a summary that does not retain the BUSCO Status column | Restricting to Complete hits is explicit and conservative. A single Fragmented hit can enter the reviewed GeneGalleon route. Neither rule guarantees orthology |
 | Marker selection | Selects **up to 500 loci in descending overall coverage**, among loci with admissible hits in at least four species; ties use lexicographic BUSCO ID order. No coverage floor or order-specific condition; mean BUSCO length is diagnostic | Does not require markers to be present in all species by default; removes species with missing or duplicate assignments from each locus. No 500-locus cap | The rule is reproducible and independent of taxonomic-rank thresholds. The cap is a resource setting, not a demonstrated optimum. Coverage ranking may favor conserved genes and reduce information for shallow divergences |
 | Sequence extraction | Maps BUSCO IDs to original CDS IDs and translates the full original CDS, without cropping by MetaEuk coordinates | Removes BUSCO coordinate suffixes and extracts original sequences in batches; uses `cdskit pad` for CDS | Neither route reconstructs the exact BUSCO-predicted peptide. Fusions, incorrect ORFs and extra domains can remain. Corresponding BUSCO peptide outputs or domain checks would improve validation |
-| CDS padding and masking | Uses cdskit 0.29.2 `pad` then `mask`; records head/tail N padding, frame changes, masked codon positions and sequence hashes | Uses `cdskit pad` then `cdskit mask`; the inspected commands do not explicitly pass a genetic code to these stages | Avoids terminal-base truncation and rejection of entire CDS sequences for internal stops. Padding can change the frame to reduce stops and does not establish the correct ORF. A mistranslated sequence can still contain few X residues and pass QC |
+| CDS padding and masking | Uses Bioconda cdskit 0.27.0 `pad` then `mask`; records head/tail N padding, frame changes, masked codon positions and sequence hashes | Uses `cdskit pad` then `cdskit mask`; the inspected commands do not explicitly pass a genetic code to these stages | Avoids terminal-base truncation and rejection of entire CDS sequences for internal stops. Padding can change the frame to reduce stops and does not establish the correct ORF. A mistranslated sequence can still contain few X residues and pass QC |
 | Translation and protein QC | Calls cdskit's `translate` implementation and passes `translation.table` to pad, mask and translate. Requires at least 100 known residues and at most 5% unknown residues; preserves masked stops and unresolved codons as X | Translation uses `seqkit translate --allow-unknown-codon --transl-table ...`; backalignment after protein alignment also preserves a DNA analysis route | The processing roles are similar, but the translation programs differ. Tests compare the cdskit API against its CLI. Resolvable ambiguous codons such as GCN are retained. A shared genetic code is used throughout; species- or organelle-specific codes are not supported |
 | Alignment | FAMSA 2.4.1, four threads per locus by default | MAFFT `--auto`, one thread per locus; aligns proteins and backaligns CDS inputs to codon sequences | FAMSA is a reasonable choice for large protein alignments. This does not establish that either aligner is uniformly more accurate, and accuracy on these BUSCO loci has not been benchmarked |
 | Column trimming | trimAl v1.5.1 `-gappyout` by default, with optional `automated1`; treats X as missing for selection and restores original residues using column maps. No custom 50% gap cutoff | trimAl `-automated1`; the CDS route uses protein-guided backtranslation and `-ignorestopcodon` | gappyout derives a threshold from the gap distribution and avoids automated1's all-pairs identity calculation. It loses the option to switch to strict mode using residue similarity. Treating X as missing is an additional difference, so retained columns need not match |
@@ -35,7 +35,7 @@ the dated trees should currently be treated as exploratory estimates.
 | Species-tree branch lengths | Integrated CASTLES-II estimates substitutions/site from gene trees, using mean retained alignment length | Fixes the ASTRAL topology and optimizes lengths on concatenated alignments with IQ-TREE `-te ... -n 0`; source also contains a fallback to the unoptimized tree | CASTLES provides substitution units without concatenated ML optimization. VFT length errors and locus/lineage rate heterogeneity can affect the estimates. Unoptimized ASTRAL lengths must not simply be interpreted as substitutions/site |
 | Concatenation | Not performed | Estimates concatenated protein/DNA trees and uses concatenation for length optimization after ASTRAL | Omitting concatenation is reasonable under the resource constraints. A concatenated tree can provide a diagnostic under different assumptions, but is not an obligatory reference truth |
 | Calibration retrieval | Uses nwkit's HTTP client and TimeTree JSON. Up to 64 representatives and 32 queries, prioritizing larger clades with representatives on every child lineage. No minimum clade size; saves MRCA IDs, studies, missing taxa and raw responses | `nwkit mcmctree --timetree ci --min-clade-prop 0.2`, or manual calibrations | phenoradar retains detailed retrieval and mapping records. Missing representatives in TimeTree can prevent calibration. Prioritizing large clades does not ensure calibration of small clades. nwkit's min-clade-prop filters after retrieval and does not itself reduce query count |
-| Dating | CASTLES lengths and calibration bounds feed treePL, with branch-specific rates and an additive smoothing penalty. Runs prime, three random-subsample CV replicates and three final optimizations; no final age CIs | The CDS route uses IQ2MC to construct a likelihood-approximation Hessian from concatenated CDS, then MCMCtree with default IND rate variation. This dating route is disabled for protein inputs | Allowing lineage-rate differences improves applicability to broad angiosperm sampling. Estimates still depend on smoothing, calibration placement and length errors; treePL does not estimate an MCMCtree posterior. Restart age ranges are not CIs. MCMCtree also requires prior and convergence assessment |
+| Dating | CASTLES lengths and calibration bounds feed unmodified LSD2, using weighted least squares and one estimated rate; no final age CIs | The CDS route uses IQ2MC to construct a likelihood-approximation Hessian from concatenated CDS, then MCMCtree with default IND rate variation. This dating route is disabled for protein inputs | LSD2 is fast on the tested synthetic trees, but a common rate can be inadequate for broad angiosperm sampling. Calibration placement and length errors affect estimates. Equally optimal scale ranges are not CIs or an MCMCtree posterior; MCMCtree also requires prior and convergence assessment |
 | Execution and resources | Snakemake resumes by locus and stage; records memory budgets, benchmarks, inputs and commands. Reuses FAMSA after trimAl setting changes; calls cdskit functions without per-sequence subprocesses | Containers, scheduler support, memory-aware concurrency, artifact provenance and stage-specific ZIP archives | The 8 GB alignment/gene-tree, 4 GB trimAl and 64 GB ASTRAL budgets are scheduling reservations, not measured upper bounds. Full-scale measurements remain necessary; many small files and repeated FASTA reads also have costs |
 
 Source evidence:
@@ -111,9 +111,9 @@ across internal stops, retaining unresolved codons as X. Known-residue counts
 and unknown fractions exclude sequences dominated by missing data. Terminal
 stops also become X and contribute to column selection. Protein inputs bypass
 CDS preparation and are rejected for internal stops.
-[cdskit pad](https://github.com/kfuku52/cdskit/blob/218f6ed61abcac7f11dd81b17c087cb16119c39e/cdskit/pad.py),
-[mask](https://github.com/kfuku52/cdskit/blob/218f6ed61abcac7f11dd81b17c087cb16119c39e/cdskit/mask.py),
-[translate](https://github.com/kfuku52/cdskit/blob/218f6ed61abcac7f11dd81b17c087cb16119c39e/cdskit/translate.py).
+[cdskit pad](https://github.com/kfuku52/cdskit/blob/0.27.0/cdskit/pad.py),
+[mask](https://github.com/kfuku52/cdskit/blob/0.27.0/cdskit/mask.py),
+[translate](https://github.com/kfuku52/cdskit/blob/0.27.0/cdskit/translate.py).
 
 Padding does more than make sequence lengths divisible by three. When internal
 stops occur, it can add N at the 5' end and choose a frame with fewer stops.
@@ -170,38 +170,36 @@ not resolve these issues.
 TimeTree ages are secondary calibrations derived from published estimates.
 Studies can share data and fossil calibrations, so a reported count of 35
 studies does not imply 35 independent pieces of evidence. Converting ranges
-of variation among studies into hard treePL bounds is not equivalent to using
+of variation among studies into hard LSD2 bounds is not equivalent to using
 soft priors in MCMCtree. Matching sampled MRCAs does not validate every source
 study's crown/stem interpretation.
 [TimeTree FAQ](https://timetree.org/faqs),
 [nwkit calibration functionality](https://github.com/kfuku52/nwkit/wiki/nwkit-mcmctree).
 
-treePL uses penalized likelihood with branch-specific rates, replacing a common
-rate across the tree. Smoothing is selected by mean scores across repeated
-random-subsample CV runs, followed by repeated final optimizations at that
-smoothing value. Native LF/PL/CV iteration limits bound work. The `thorough`
-option is not the default because small tests repeatedly returned to the same
-solution while continuing to the iteration limit. Objective/age reproducibility
-and native convergence flags are recorded separately; reproducibility does not
-prove global convergence.
-[treePL paper](https://doi.org/10.1093/bioinformatics/bts492),
-[treePL run options](https://github.com/blackrim/treePL/wiki/Run-Options).
+LSD2 now dates the existing rooted CASTLES substitution tree using least squares,
+with input-length variance weights and one estimated substitution rate by
+default. It requires no new alignment or concatenated optimization. This common
+rate differs from models that estimate branch-specific rates; speed does not
+establish equivalent dating accuracy under lineage-rate variation.
+[LSD method paper](https://doi.org/10.1093/sysbio/syv068),
+[LSD2 options](https://github.com/tothuhien/lsd2).
 
-A 2026 study reported CASTLES-Pro plus treePL length estimation and dating for
-10,000 species and 1,000 genes, averaging 1.6 hours and at most 26 GB for those
-stages. These figures exclude gene-tree and species-tree topology inference.
-The study's conditions differ from this CASTLES-II protein pipeline. Following
-that study, the default treePL `numsites` is the sum of retained, trimmed gene
-lengths; this does not establish the effective sample size of CASTLES lengths
-with missing data and variation in locus rates.
-[Tabatabaee et al. (2026)](https://doi.org/10.1093/sysbio/syag038).
+The default `numsites` is the sum of retained trimmed gene lengths. This affects
+LSD2's automatic variance offset, and does not establish the effective sample
+size of CASTLES lengths with missing data and variation in locus rates. Both
+variance settings and site count merit sensitivity assessment. No confidence
+simulations or rate partitions are enabled. Bounded calibrations can leave an
+equally optimal range of absolute scales; the native midpoint tree is retained
+with a review warning and the feasible intervals recorded. Those intervals are
+not statistical confidence intervals.
 
-The pinned treePL source contains defects including an uninitialized random-CV
-index, an uninitialized prime flag and inconsistent CV optimizer selection.
-The build applies documented corrections. Methodological justification and
-implementation correctness require separate checks.
-[Patch details and rationale](../workflow/patches/README.md).
-The workflow also records branches that treePL raises to `1/numsites`.
+The source is unmodified and built automatically inside a Snakemake Conda
+environment. The former treePL build and source patch have been removed.
+The adapter verifies native dates, rooted topology, time units, and calibration
+bounds, then exports parent-minus-child ages to avoid accumulated native output
+rounding. Native files and every age adjustment are retained. The
+[dating evaluation](dating_evaluation.md) records synthetic timing comparisons,
+the IQ-TREE tree-only interface check, and the limits of those observations.
 
 ## Example Methods text
 
@@ -244,11 +242,11 @@ the reported age, and be consistent with the other retained calibrations.
 
 ## Improvement priorities
 
-1. **Assess calibration and optimization sensitivity.** treePL supports rate
-   variation. Expand the CV grid when its optimum is at an endpoint, and examine
-   objective and age differences among restarts. Assess removal or replacement
-   of major calibrations, `numsites`, and short-branch adjustments. Propagating
-   calibration, gene-tree and branch-length uncertainty remains unimplemented.
+1. **Assess calibration and rate-model sensitivity.** Check whether one rate
+   adequately represents these data. Assess removal or replacement of major
+   calibrations, the variance weights and `numsites`, and inspect warnings or
+   nonunique absolute scales. Propagating calibration, gene-tree and branch-length
+   uncertainty remains unimplemented.
 2. **Improve sequence and locus diagnostics.** Report unusual lengths, unknown
    residues, anomalous alignment regions and terminal branches. Automatic
    long-branch removal can discard genuinely rapid evolution, so investigate
@@ -290,8 +288,10 @@ masking and translation behavior is preserved, including possible 5' padding;
 no additional reading-frame restriction is imposed.
 
 TimeTree retrieval through nwkit includes caching, taxon matching and age-bound
-validation and feeds treePL dating. treePL is the sole dating engine; the
-earlier engine and rate-partition configuration were removed. Minimum overall
+validation and feeds LSD2 dating. LSD2 is the sole dating engine; treePL and its
+source patch were removed. cdskit, trimAl and nwkit now use standard Conda
+packages; standalone LSD2 uses an automatic, verified upstream source build
+inside its Conda environment. Rate partitions remain unsupported. Minimum overall
 coverage and TimeTree clade-size cutoffs were removed while their diagnostic
 values remain recorded. ASTRAL's 128-bit build provenance and executable hash
 are checked, so renaming an ordinary binary `astral4_int128` cannot bypass the
@@ -300,9 +300,11 @@ requirement for more than 5,000 species.
 Tests cover sequence/tree processing contracts, incorrect calibration mappings,
 missing taxa, repeated MRCAs, ancestor-age conflicts, HTTP failures, offline
 reuse, cdskit CLI agreement, and a small workflow using actual FAMSA, trimAl,
-VeryFastTree, ASTRAL and treePL. They also check FAMSA reuse after trimAl setting
-changes, retention of low-coverage loci, and small-clade calibration eligibility
-under a bounded query budget.
+VeryFastTree, ASTRAL and LSD2 with actual Conda stage environments. They check
+FAMSA reuse after trimAl setting changes, retention of low-coverage loci, and
+small-clade calibration eligibility under a bounded query budget. Dating tests
+cover all three variance modes, zero branches, native rounding, hard bounds and
+dating-only recovery after a missing output, without repeating inference.
 
 A real-input check used 20 shared Complete BUSCOs from tlight for Amborella
 trichopoda, Oryza sativa, Abelia chinensis and Abeliophyllum distichum. All 80

@@ -105,7 +105,7 @@ rule align_busco_marker:
         qc=f"{PHYLO}/alignments/raw/{{marker}}.json"
     params:
         fasta=lambda wc: f"{PHYLO}/markers/{wc.marker}.faa",
-        command=PHY["famsa_command"],
+        command="famsa",
         settings=json.dumps({"min_taxa": PHY["min_taxa"]}, sort_keys=True)
     threads: PHY["align_threads"]
     resources: mem_mb=PHY["alignment_mem_gb"] * 1000
@@ -124,14 +124,13 @@ rule trim_busco_marker:
         alignment=f"{PHYLO}/alignments/raw/{{marker}}.faa",
         raw_qc=f"{PHYLO}/alignments/raw/{{marker}}.json",
         code=f"{SCRIPTS}/infer_phylogeny.py",
-        helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py"],
-        binary=[PHY["trimal_command"]] if "/" in PHY["trimal_command"] else []
+        helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py"]
     output:
         alignment=f"{PHYLO}/alignments/{{marker}}.faa",
         qc=f"{PHYLO}/alignments/{{marker}}.json",
         columns=f"{PHYLO}/alignments/{{marker}}.columns.tsv"
     params:
-        command=PHY["trimal_command"], mode=PHY["trimal_mode"],
+        command="trimal", mode=PHY["trimal_mode"],
         settings=json.dumps({k: PHY[k] for k in ["min_taxa", "min_protein_length"]}, sort_keys=True)
     threads: 1
     resources: mem_mb=PHY["trimming_mem_gb"] * 1000
@@ -153,7 +152,7 @@ rule infer_busco_gene_tree:
     output:
         tree=f"{PHYLO}/gene_trees/{{marker}}.nwk",
         qc=f"{PHYLO}/gene_trees/{{marker}}.json"
-    params: command=PHY["veryfasttree_command"], seed=PHY["seed"]
+    params: command="VeryFastTree", seed=PHY["seed"]
     threads: PHY["tree_threads"]
     resources: mem_mb=PHY["tree_mem_gb"] * 1000
     conda: "../envs/phylogeny.yaml"
@@ -195,10 +194,10 @@ rule infer_busco_species_tree:
         manifest=f"{PHYLO_PLAN}/species.tsv",
         code=f"{SCRIPTS}/infer_phylogeny.py",
         helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/prepare_phylogeny_tools.py"],
-        build_provenance=[str(Path(PHY["astral_command"]).parent.parent / "aster.json")] if "/" in PHY["astral_command"] and (Path(PHY["astral_command"]).parent.parent / "aster.json").is_file() else [],
-        binary=[PHY["astral_command"]] if "/" in PHY["astral_command"] else []
+        build_provenance=str(Path(ASTRAL).parent.parent / "aster.json"),
+        binary=ASTRAL
     output: tree=f"{PHYLO}/species_tree.nwk", qc=f"{PHYLO}/species_tree.json"
-    params: command=PHY["astral_command"], outgroup=PHY["outgroup"], seed=PHY["seed"]
+    params: command=ASTRAL, outgroup=PHY["outgroup"], seed=PHY["seed"]
     threads: PHY["astral_threads"]
     resources: mem_mb=PHY["astral_mem_gb"] * 1000
     conda: "../envs/phylogeny.yaml"
@@ -230,17 +229,16 @@ rule prepare_timetree_calibrations:
         taxa=f"{PHYLO}/timetree/taxa.tsv"
     params:
         outdir=f"{PHYLO}/timetree", cache=PHY["dating"]["timetree"]["cache_dir"],
-        python=PHY["dating"]["timetree"]["python"],
         representatives_flag="--representatives" if PHY["dating"]["timetree"]["representatives"] else "",
-        settings=json.dumps({k: PHY["dating"]["timetree"][k] for k in ["max_representatives", "max_queries",
-            "min_studies", "offline", "request_delay_seconds"]}, sort_keys=True)
+        settings=json.dumps(dict({k: PHY["dating"]["timetree"][k] for k in ["max_representatives", "max_queries",
+            "min_studies", "offline"]}, request_delay_seconds=1.0), sort_keys=True)
     threads: 1
     conda: "../envs/timetree.yaml"
     resources: mem_mb=PHY["dating"]["mem_gb"] * 1000
     log: f"{LOG}/phylogeny/timetree.log"
     benchmark: f"{PHYLO}/benchmarks/timetree.tsv"
     shell:
-        "{params.python:q} {input.code:q} --tree {input.tree:q} --metadata {input.metadata:q} "
+        "{PYTHON:q} {input.code:q} --tree {input.tree:q} --metadata {input.metadata:q} "
         "--taxonomy-db {input.taxonomy:q} --coverage {input.coverage:q} --outdir {params.outdir:q} "
         "--cache-dir {params.cache:q} --settings {params.settings:q} "
         "{params.representatives_flag} {input.representatives:q} > {log:q} 2>&1"
@@ -252,30 +250,29 @@ rule date_busco_species_tree:
         provenance=f"{PHYLO}/species_tree.json",
         calibrations=dating_calibrations,
         code=f"{SCRIPTS}/date_phylogeny.py",
-        helpers=[f"{SCRIPTS}/infer_phylogeny.py", f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py"],
-        binary=[PHY["dating"]["command"]] if "/" in PHY["dating"]["command"] else []
+        helpers=[f"{SCRIPTS}/infer_phylogeny.py", f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py"]
     output:
         tree=f"{PHYLO}/dating/species_tree.dated.nwk",
         provenance=f"{PHYLO}/dating/provenance.json",
         ages=f"{PHYLO}/dating/node_ages.tsv",
         calibrations=f"{PHYLO}/dating/calibrations.resolved.tsv",
-        raw=f"{PHYLO}/dating/treepl.dated.nwk",
-        config=f"{PHYLO}/dating/treepl.config.txt",
-        input_tree=f"{PHYLO}/dating/treepl.input.nwk",
-        cv=f"{PHYLO}/dating/cross_validation.tsv",
-        replicates=f"{PHYLO}/dating/optimization_replicates.tsv",
-        adjustments=f"{PHYLO}/dating/branch_length_adjustments.tsv"
-        # Keep treepl_runs as undeclared diagnostic artifacts: Snakemake must
-        # not delete native logs and configurations when dating fails.
+        raw=f"{PHYLO}/dating/lsd2.dated.date.nexus",
+        fitted=f"{PHYLO}/dating/lsd2.fitted.nwk",
+        report=f"{PHYLO}/dating/lsd2.report.txt",
+        dates=f"{PHYLO}/dating/lsd2.dates.txt",
+        command=f"{PHYLO}/dating/lsd2.command.json",
+        input_tree=f"{PHYLO}/dating/lsd2.input.nwk",
+        adjustments=f"{PHYLO}/dating/rounding_adjustments.tsv"
+        # Keep lsd2_runs undeclared so native diagnostics survive a failed job.
     params:
-        outdir=f"{PHYLO}/dating", command=PHY["dating"]["command"],
-        settings=json.dumps(PHY["dating"]["treepl"]), seed=PHY["seed"]
-    conda: "../envs/phylogeny.yaml"
-    threads: PHY["dating"]["threads"]
+        outdir=f"{PHYLO}/dating", command="lsd2",
+        settings=json.dumps(PHY["dating"]["lsd2"])
+    conda: "../envs/dating.yaml"
+    threads: 1
     resources: mem_mb=PHY["dating"]["mem_gb"] * 1000
     log: f"{LOG}/phylogeny/dating.log"
     benchmark: f"{PHYLO}/benchmarks/dating.tsv"
     shell:
         "{PYTHON:q} {input.code:q} --tree {input.tree:q} --provenance {input.provenance:q} "
         "--calibrations {input.calibrations:q} --outdir {params.outdir:q} --command {params.command:q} "
-        "--settings {params.settings:q} --threads {threads} --seed {params.seed} > {log:q} 2>&1"
+        "--settings {params.settings:q} --threads {threads} > {log:q} 2>&1"

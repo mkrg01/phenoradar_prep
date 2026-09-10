@@ -22,6 +22,7 @@ from infer_phylogeny import read_tree
 
 NWKIT_COMMIT = "db5b8a32c7608248db9f2b7b8aed16376779c5fb"
 NWKIT_MODULE_SHA256 = "56dd8efd5367ca50143ef9df783441d9693da4fa87a6639b5704eef575d05b79"
+NWKIT_CONDA_MODULE_SHA256 = "cbcd120846bdbac1c596056444c7c8622d5386ede7f63277f581bd634c5c9cf2"
 ENDPOINT = "https://timetree.org/api/mrca/id/"
 FIELDS = ["taxa", "min_age_ma", "max_age_ma", "source"]
 
@@ -32,9 +33,10 @@ def nwkit_backend():
     # This is deliberately a narrow, pinned private-API boundary. A changed
     # implementation must be reviewed/tested before it is used for retrieval.
     record = file_record(mcmctree.__file__)
-    if record["sha256"] != NWKIT_MODULE_SHA256:
+    if record["sha256"] not in {NWKIT_MODULE_SHA256, NWKIT_CONDA_MODULE_SHA256}:
         raise ValueError("unsupported nwkit TimeTree client; use workflow/envs/timetree.yaml")
-    return mcmctree._fetch_timetree_url, {"version": nwkit.__version__, "commit": NWKIT_COMMIT,
+    return mcmctree._fetch_timetree_url, {"version": nwkit.__version__,
+                                        "source": "bioconda::nwkit=0.27.0" if record["sha256"] == NWKIT_CONDA_MODULE_SHA256 else NWKIT_COMMIT,
                                         "module": record}
 
 
@@ -278,10 +280,10 @@ def prepare(tree, metadata, taxonomy_db, coverage, outdir, cache_dir, settings, 
     write_json(out / "provenance.json", {**status, "created_at": now(), "settings": settings,
         "tree": file_record(source), "metadata": file_record(metadata), "taxonomy": file_record(taxonomy_db),
         "coverage": file_record(coverage), "representatives_file": file_record(representatives) if representatives else None,
-        "nwkit_commit": NWKIT_COMMIT, "eligible_nodes": len(eligible), "queries": len(candidates),
+        "nwkit_environment": "workflow/envs/timetree.yaml", "eligible_nodes": len(eligible), "queries": len(candidates),
         "node_eligibility": "internal node with representatives on every child lineage",
         "query_ranking": ["clade_taxa descending", "representative species labels ascending (lexicographic)"],
-        "calibration_type": "TimeTree secondary bounds interpreted as hard treePL bounds",
+        "calibration_type": "TimeTree secondary bounds interpreted as hard LSD2 bounds",
         "topology_check": "sampled child-lineage coverage and distinct MRCA IDs; not proof of full topological concordance",
         "confidence_intervals_propagated": False, "cache_dir": str(Path(cache_dir).resolve())})
 

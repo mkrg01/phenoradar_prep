@@ -13,7 +13,7 @@ Selected species + existing BUSCO full tables + original in-frame CDS/proteins
   -> transpose to per-marker FASTA -> FAMSA -> trimAl gappyout -> alignment QC
   -> VeryFastTree -> ASTRAL-IV int128 + integrated CASTLES-II
   -> species_tree.nwk (substitutions/site)
-  -> optional manual or nwkit/TimeTree secondary calibrations + treePL
+  -> optional manual or nwkit/TimeTree secondary calibrations + LSD2
   -> species_tree.dated.nwk (million years)
 ```
 
@@ -49,8 +49,7 @@ Only unambiguous `Complete` (single-copy) hits are retained. Duplicated,
 fragmented, missing, multiply assigned original genes, and multiply reported
 complete hits are omitted. This reduces obvious ambiguity but does not prove
 orthology in the presence of ancient duplication and differential loss.
-CDS preparation uses cdskit 0.29.2, pinned to commit
-`218f6ed61abcac7f11dd81b17c087cb16119c39e`: `pad` -> `mask` -> `translate`.
+CDS preparation uses Bioconda cdskit 0.27.0: `pad` -> `mask` -> `translate`.
 The workflow calls the same Python functions as those commands to avoid starting
 three subprocesses for every CDS. The three module checksums are verified before
 use and recorded in each species' JSON. `translation.table` is passed explicitly
@@ -79,36 +78,44 @@ limits apply. Nonstandard amino-acid symbols are normalized to X.
 
 ## Setup and execution
 
-Run from the repository root. The workflow uses
-[`workflow/envs/phylogeny.yaml`](../workflow/envs/phylogeny.yaml) for pinned cdskit,
-FAMSA, VeryFastTree, and Python dependencies. The standard launcher creates this
-environment when using `--software-deployment-method conda`.
+Run from the repository root. The launcher with
+`--software-deployment-method conda` creates the required stage environments:
 
-Build the three additional tools once with Python 3.12+, GNU C/C++, make, and patch:
+- [`phylogeny.yaml`](../workflow/envs/phylogeny.yaml): cdskit 0.27.0, FAMSA
+  2.4.1, trimAl 1.5.1, VeryFastTree 4.0.5, and Python dependencies from Conda.
+- [`timetree.yaml`](../workflow/envs/timetree.yaml): nwkit 0.27.0 from Conda
+  for optional calibration retrieval.
+- [`dating.yaml`](../workflow/envs/dating.yaml): Conda Python and compiler
+  dependencies; its adjacent [post-deploy script](../workflow/envs/dating.post-deploy.sh)
+  automatically builds unmodified upstream LSD2 2.4.4 into the environment.
+
+LSD2 uses official commit `c61110f3a4fa05325b45c97b2134792ff9d55d4c`,
+a verified source archive, and the upstream makefile with Conda's GNU C++ 13
+compiler. It needs no manual installation or project source patch. The build
+record is saved as `share/lsd2/build.json` inside the environment. For an offline
+source build, set `LSD2_SOURCE_ARCHIVE=/path/to/lsd2.tar.gz` to the archive for
+that commit; the SHA-256 check still applies. Conda dependencies must also be
+available locally for an entirely offline installation.
+
+IQ-TREE contains LSD2, but its documented dating interface also takes an
+alignment. A tree-only test with Bioconda IQ-TREE 3.1.3 did not perform dating.
+The standalone executable accepts the existing CASTLES substitution tree
+directly. See the [evaluation](dating_evaluation.md) for the tested invocation
+and its limitations.
+
+Build ASTRAL-IV once with Python 3.12+ and GNU C++:
 
 ```bash
 python workflow/scripts/prepare_phylogeny_tools.py
 ```
 
-The helper downloads fixed official commits, checks SHA-256 checksums, and
-builds `resources/phylogeny_tools/bin/astral4_int128`, `treePL`, and `trimal`. Build provenance
-and executable checksums are recorded next to `bin/`. The ASTRAL build explicitly
-uses `LARGE_DATA` (128-bit integers) without machine-specific instruction flags.
-This matters above 5,000 species. It does not use the ordinary Conda ASTRAL binary.
-An offline build accepts `--archives /path/to/archives`, containing the three
-verified tarballs named `aster.tar.gz`, `treepl.tar.gz`, and `trimal.tar.gz`.
-trimAl is the unpatched v1.5.1 source at
-`d637091abe33595775f40480970d1a18d87a7bcb`, with build provenance in `trimal.json`.
-
-The treePL source is pinned to `f41af04ae7cc830deadbe83a1217ed9feca60c86`.
-The helper builds its bundled NLopt 2.4.2 and ADOL-C 2.6.3 (with OpenMP), linking
-those libraries statically. No system installation or separate library path is
-needed. Source archive, [local patch](../workflow/patches/treepl.patch), compiler,
-build commands and executable hashes are recorded in `treepl.json`.
-Use this project build: the wrapper requires its final-status output marker.
-[Patch rationale](../workflow/patches/README.md) describes the CV correctness,
-initialization and output-precision fixes. This is a patched upstream build,
-not an unmodified release.
+The helper downloads the fixed official ASTRAL source, checks its SHA-256,
+and builds `resources/phylogeny_tools/bin/astral4_int128`. Build provenance
+and executable checksums are recorded next to `bin/`. It follows the official
+`LARGE_DATA` (128-bit integers) instruction without machine-specific flags.
+This matters above 5,000 species. An existing verified build is reused.
+An offline build accepts `--archives /path/to/archives`, containing the verified
+`aster.tar.gz`. This helper no longer builds trimAl or treePL.
 
 Create an override, e.g. `config/phylogeny.local.yaml`:
 
@@ -285,86 +292,88 @@ phylogeny:
 Run the same launcher with target `timetree`; enabling dating also adds it to
 `phylogeny`. There is no default fossil age and no implicit conversion from
 root height 1 to millions of years. All selected species are treated as extant
-with age zero. Bounds remain positive Ma ages when passed to treePL.
+with age zero. The wrapper converts positive Ma ages to LSD2's dates increasing
+toward the present: a 90–110 Ma bound becomes `b(-110,-90)`, with every tip at 0.
+MRCA expressions identify calibrated nodes, including the root.
 
-Dating uses **treePL penalized likelihood with branch-specific rates and the
-additive rate-smoothing penalty**. No sequence alignment or concatenated ML
-optimization is needed at this stage. The procedure is:
-
-1. Run `prime` once and retain the recommended `opt`, `optad`, `optcvad` and
-   associated detail flags.
-2. Unless `smoothing` is fixed explicitly, run random-subsample cross-validation
-   with three different seeds. Each native run samples ten groups. The default
-   grid descends from 1000 to 0.001 by a factor of 0.1. Choose the smoothing value
-   with the lowest **mean CV score across runs**, rather than accepting the last
-   run's internal choice. All grid values must produce finite scores.
-3. Run three independent final optimizations at that smoothing value. Each
-   candidate must preserve the rooted topology and species set, have finite
-   nonnegative branches, be ultrametric, and satisfy the calibration bounds.
-   Publish the valid candidate with the smallest penalized objective.
-4. Report restart variation in both objective and node ages. Flag grid-boundary
-   optima, different CV winners, objective spread > 1e-4 relative to the best
-   objective (denominator at least 1), or node-age spread > 5% of root age as
-   `review_status: needs_review`. A diagnostic does not silently replace the
-   chosen smoothing or discard conflicting replicates. Inspect these reports
-   and adjust the grid/iteration settings before interpreting ages.
+Dating uses **LSD2 least squares with one estimated substitution rate**, weighted
+by input branch lengths by default. It fits node dates on the existing rooted
+CASTLES tree without a new alignment, concatenation, topology search, or root
+search. The default estimates a common rate; lineage-rate variation can affect
+its suitability and the resulting ages. It does not use treePL's penalized
+likelihood, rate smoothing, cross-validation or stochastic optimization restarts.
 
 ```yaml
 phylogeny:
   dating:
-    command: resources/phylogeny_tools/bin/treePL
-    threads: 1
-    mem_gb: 32
-    treepl:
-      smoothing: null
-      cv_start: 1000.0
-      cv_stop: 0.001
-      cv_multiplier: 0.1
-      cv_replicates: 3
-      replicates: 3
-      optimization_iterations: 2
+    mem_gb: 4
+    lsd2:
+      variance: 1
+      variance_parameter: null
       numsites: null
 ```
 
-`phylogeny.seed` determines the prime, CV and final restart seeds. Restarts run
-sequentially. One native thread is the default to bound CV memory and avoid
-parallel stochastic scheduling; the 32 GB reservation is a scheduling budget,
-not a measured upper bound for this dataset.
-
-We use bounded native LF/PL/CV optimization rounds (two each by default), rather
-than `thorough`: in the pinned source its stopping test compares optimization
-improvement after each fresh annealing perturbation. Our tiny exact-clock tests
-repeatedly reached its 1000-round cap despite returning the same objective.
-`optimization_iterations` can be increased. Native convergence flags and restart
-spread are reported separately; restart agreement does **not** establish a global
-optimum. A missing final objective/output, iteration-cap failure, invalid tree,
-or incomplete CV fails the stage. No fallback dating engine exists.
-Native run folders are diagnostic artifacts, deliberately excluded from
-Snakemake's output-cleanup list so logs and configurations survive a failed job.
-On success, provenance identifies the run folders used for the published tree.
+`variance: 0` selects unweighted least squares, `1` weights using input lengths,
+and `2` reweights after an initial fit. `variance_parameter` optionally sets
+LSD2's positive variance offset (`-b`); null leaves its native automatic choice.
+The standalone tool is serial; the rule fixes its thread count to 1 internally.
+The 4 GB memory value
+is a scheduling reservation, not a measured upper bound for the real dataset.
+The dating stage does not use `phylogeny.seed` and does not simulate confidence
+intervals. Rate partitions are not implemented by this wrapper.
 
 `numsites` defaults to `total_gene_sites` in species-tree provenance: the sum of
-trimmed alignment lengths for the genes actually retained for ASTRAL. This follows
-the practical convention used by [Tabatabaee et al. (2026)](https://doi.org/10.1093/sysbio/syag038)
-for coalescent branch lengths and treePL. It is **not** a claim that all sites are
-observed for every species or that this is the effective sample size of every
-CASTLES estimate. An explicit positive integer override supports sensitivity
-analysis; it is recorded and never inferred from mean gene length. No
-concatenated alignment is constructed. An older tree provenance file lacking
-`total_gene_sites` requires regenerating its provenance or a justified override.
+trimmed alignment lengths for the genes actually retained for ASTRAL. With the
+automatic variance offset, LSD2 uses the larger of the median branch length and
+`10 / numsites`. This site count does **not** establish the effective sample size
+of CASTLES lengths with missing species and variation in locus rates. An explicit
+positive integer supports sensitivity analysis; it is recorded and never inferred
+from the mean gene length. No concatenated alignment is constructed. An older
+tree provenance file lacking `total_gene_sites` requires regeneration or a
+justified explicit override.
 
-treePL raises input branches shorter than `1 / numsites` to that value, without
-collapsing them. `branch_length_adjustments.tsv` records every affected non-root
-branch. The original CASTLES file remains unchanged. Input and final Newick
-serialization preserve 17 significant digits; the native time tree is `dated.nwk`,
-whereas `dated.nwk.r8s` contains **rates**, not dates. The published tree has branch
-lengths in Ma. Internal node names are restored by rooted clade matching.
+The native invocation uses `-l -1 -u 0 -U 0` to retain zero-length internal
+branches and permit zero time branches. It leaves the input substitution tree
+unchanged. Each completed result must have a finite rate and objective, preserve
+the rooted topology and species, and satisfy positive calibration bounds with
+all tips at age zero. Missing, nonfinite, incomplete or inconsistent results fail
+the stage; no fallback dating engine is used.
 
-TimeTree bounds, branch-length errors and smoothing uncertainty are not propagated
-into confidence intervals. The min/max columns in `node_ages.tsv` describe only
-variation among optimization restarts, **not confidence intervals**. Review
-calibration placement and repeat with alternative defensible calibrations and
-site counts for scientific interpretation.
+LSD2 prints native dates and lengths with six significant digits. The wrapper
+reads node dates from the native time Nexus, verifies that its branches agree
+within that rounding precision, and intersects the date rounding intervals with
+hard calibrations and ancestor-age bounds. It fails if these cannot be satisfied.
+It then writes parent-minus-child ages as branches with 17 significant digits,
+so independent branch rounding does not accumulate into unequal root-to-tip
+lengths. Every adjusted node age is recorded. The final Newick is independently
+checked for ultrametricity, topology and calibration agreement.
+
+With bounded calibrations alone, LSD2 can return a range of equally optimal
+rates and dates instead of identifying a unique absolute scale. In that case,
+the wrapper retains the native midpoint date tree, records the feasible intervals
+and native warning, and marks `review_status: needs_review`. These feasible
+intervals, including native annotations named `CI_date`, are **not statistical
+confidence intervals**. This workflow does not request LSD2 confidence simulations.
+Any native warning or rate at the tool's lower bound also triggers review.
+
+The published `species_tree.dated.nwk` is in Ma. The retained
+`lsd2.dated.date.nexus` is native time output, whereas `lsd2.fitted.nwk` contains
+fitted **substitution lengths**. Stable internal node names are restored by
+rooted-clade matching. `lsd2_runs/` retains input files, native results, commands
+and logs even after a failed job. Published outputs are written only after
+validation, with `provenance.json` last as the completion record.
+
+Remove `dating.treepl`, `dating.command`, and `dating.threads` from old overrides.
+The dating executable and its thread count are fixed by the rule. Obsolete settings fail
+explicitly. Old CV/restart files from an earlier analysis are historical outputs;
+the current rule's outputs and provenance identify the LSD2 run. Successful
+inference stages remain reusable when only dating settings or outputs change.
+
+Review calibration placement and sensitivity to defensible alternative bounds,
+variance settings and site counts before scientific interpretation. Calibration,
+gene-tree and branch-length uncertainty is not propagated into confidence
+intervals. [The evaluation](dating_evaluation.md) records synthetic runtime
+measurements and their limits.
 
 ## Retrieving TimeTree secondary calibrations with nwkit
 
@@ -386,7 +395,7 @@ phylogeny:
   --configfile config/mydata.yaml config/phylogeny.local.yaml \
   --cores 32 --resources mem_gb=128 -- phylogeny_calibrations
 
-# Infer/reuse the tree, retrieve/reuse the calibrations, then run treePL.
+# Infer/reuse the tree, retrieve/reuse the calibrations, then run LSD2.
 ./run_pipeline.sh --software-deployment-method conda \
   --configfile config/mydata.yaml config/phylogeny.local.yaml \
   --cores 32 --resources mem_gb=128 -- timetree
@@ -399,10 +408,10 @@ The file route can use an edited copy of the candidate TSV after literature
 review; do not edit generated workflow outputs in place.
 
 Retrieval uses the separate [timetree environment](../workflow/envs/timetree.yaml),
-with nwkit 0.43.12, commit `db5b8a32c7608248db9f2b7b8aed16376779c5fb`, and a
-verified source-archive hash. It leaves the inference environment unchanged.
-`timetree.python` defaults to `python` in this environment; an explicit
-interpreter is available for an independently prepared installation.
+with Bioconda nwkit 0.27.0 and a verified client-module hash.
+It leaves the inference environment unchanged.
+The rule uses `python` from this environment; the interpreter is not a
+configuration option.
 
 The adapter calls `nwkit.mcmctree._fetch_timetree_url`, the same HTTP client used
 by `nwkit mcmctree --timetree ci`. It requests the documented **JSON endpoint**
@@ -452,7 +461,7 @@ The steps are:
 clade size, queried and used representatives, MRCA ID, study count, bounds and
 exclusion reason. Raw response records in `cache_dir` include `study_data`.
 `representatives.nwk` is a pruned diagnostic copy; the original CASTLES tree
-is the input to treePL and is never replaced by a calibration-only tree.
+is the input to LSD2 and is never replaced by a calibration-only tree.
 
 The cache has no automatic expiry: repeat runs use the frozen responses.
 `offline: true` prohibits requests and fails on a cache miss. Use a new cache
@@ -463,7 +472,7 @@ TimeTree datasets in this source repository.
 These are **secondary calibrations**, not fossil minima/maxima. TimeTree's
 reported intervals summarize variation across published estimates, and fewer
 studies can instead produce min–max ranges. They are not independent fossil
-priors. This pipeline explicitly interprets retained bounds as hard treePL
+priors. This pipeline explicitly interprets retained bounds as hard LSD2
 constraints; it does not transfer MCMCtree's soft tails or propagate a 95%
 credible interval to the dated tree. Five papers need not be five independent
 datasets. The sampled-MRCA checks do not prove that the full TimeTree topology
@@ -488,10 +497,11 @@ Outputs are under `results/<analysis>/phylogeny/`:
 | `species_coverage.tsv`, `gene_trees.json` | Retained loci per species, presence flags, count distribution, absent species and exclusions |
 | `species_tree.nwk`, `species_tree.json` | Rooted ASTRAL/CASTLES-II tree in substitutions/site |
 | `timetree/calibrations.tsv`, `timetree/candidates.tsv`, `timetree/provenance.json` | Optional retrieved secondary bounds and mapping/exclusion audit |
-| `dating/species_tree.dated.nwk`, `dating/node_ages.tsv` | Time tree, ages in Ma, and restart age ranges (not confidence intervals) |
-| `dating/cross_validation.tsv`, `dating/optimization_replicates.tsv` | CV scores, final objectives and native convergence flags |
-| `dating/branch_length_adjustments.tsv`, `dating/provenance.json` | Short-branch adjustments, settings, site count and review diagnostics |
-| `dating/treepl_runs/` | Configurations, input trees, native trees/rates and logs for prime, CV and final restarts |
+| `dating/species_tree.dated.nwk`, `dating/node_ages.tsv` | Ultrametric time tree and node ages in Ma, with native ages and rounding adjustments |
+| `dating/calibrations.resolved.tsv`, `dating/rounding_adjustments.tsv` | Resolved MRCA bounds and every age adjustment within native rounding precision |
+| `dating/lsd2.dated.date.nexus`, `dating/lsd2.fitted.nwk` | Native time Nexus and fitted substitution tree, respectively |
+| `dating/lsd2.report.txt`, `dating/lsd2.dates.txt`, `dating/lsd2.input.nwk`, `dating/lsd2.command.json` | Native fit report, date constraints, input tree and invocation |
+| `dating/provenance.json`, `dating/lsd2_runs/` | Settings, units, fit/rate diagnostics, executable/build hashes and retained native runs/logs |
 | `benchmarks/` | Runtime and maximum resident memory measurements |
 
 Unit tests cover coverage-based selection and deterministic ties independently
@@ -503,12 +513,18 @@ filtering, variable loci with low/zero informative-site counts, species with
 only one retained gene tree, missing-species rejection, and calibration consistency.
 cdskit API results are checked against
 its actual CLI. Real-tool tests exercise FAMSA, trimAl, VeryFastTree, ASTRAL-IV and
-treePL, including column correspondence, original-X retention, unit conversion,
-unchanged reruns and reuse of FAMSA after a trimAl mode change. Install the pinned
+LSD2, including column correspondence, original-X retention, unit conversion,
+hard calibrations, native rounding and zero branches under all three variance
+settings. They check unchanged reruns, dating-only recovery after a missing output,
+and reuse of FAMSA after a trimAl mode change. Install the pinned
 cdskit in the test Python environment. Enable the other tools with `SNAKEMAKE_BIN`,
-`FAMSA_BIN`, `TRIMAL_BIN`, `VERYFASTTREE_BIN`, `ASTRAL_BIN`, and `TREEPL_BIN` when they are
-not on `PATH`. Synthetic tests establish workflow behavior, not biological
-accuracy or 6,000-species performance.
+`FAMSA_BIN`, `TRIMAL_BIN`, `VERYFASTTREE_BIN`, `ASTRAL_BIN`, and `LSD2_BIN` when they are
+not on `PATH`. These variables are for tests, not production configuration.
+The workflow integration requires the official ASTRAL build at its fixed project
+location; the test exposes the other tools under their standard command names
+on `PATH`. Setting `PHYLOGENY_CONDA_PREFIX` also runs the workflow integration
+with actual stage-specific Conda environments. Synthetic tests establish workflow
+behavior, not biological accuracy or 6,000-species performance.
 
 TimeTree tests also retain valid calibrations from small clades (including
 two-tip clades) while checking that the query cap and size ranking still apply.
@@ -535,10 +551,11 @@ full-scale accuracy/performance.
 - [GeneGalleon species-tree workflow](https://github.com/kfuku52/genegalleon/blob/main/workflow/core/gg_genome_evolution_core.sh)
 - [BUSCO output formats](https://busco.ezlab.org/busco_userguide.html)
 - [FAMSA](https://github.com/refresh-bio/FAMSA)
-- [cdskit preparation source](https://github.com/kfuku52/cdskit/tree/218f6ed61abcac7f11dd81b17c087cb16119c39e/cdskit)
+- [cdskit preparation source](https://github.com/kfuku52/cdskit/tree/0.27.0/cdskit)
 - [trimAl v1.5.1 source](https://github.com/inab/trimal/tree/d637091abe33595775f40480970d1a18d87a7bcb/source)
 - [VeryFastTree](https://github.com/citiususc/veryfasttree)
 - [FastTree models, support and Gamma20 scaling](https://morgannprice.github.io/fasttree/)
 - [ASTRAL-IV and CASTLES-II, including the >5,000-species build requirement](https://github.com/chaoszhang/ASTER/blob/master/tutorial/astral4.md)
-- [treePL inputs, outputs and cross-validation](https://github.com/blackrim/treePL/wiki/Quick-run)
+- [LSD2 source and dating options](https://github.com/tothuhien/lsd2)
+- [LSD method paper](https://doi.org/10.1093/sysbio/syv068)
 - [Coalescent branch lengths and scalable dating](https://doi.org/10.1093/sysbio/syag038)

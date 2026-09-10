@@ -35,7 +35,7 @@ def publish_tree(source, destination):
 
 
 def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper_v12", prefix="",
-        version="v12", node=3193, jobs=32, batch_size=128, min_free_gb=750,
+        version="v12", node=3193, jobs=16, batch_size=64, min_free_gb=750,
         allow_nonlocal=False, keep_work=False):
     if not re.fullmatch(r"chunk_[0-9]+", label) or jobs < 1 or batch_size < jobs:
         raise ValueError("invalid chunk label or concurrency settings")
@@ -124,8 +124,8 @@ if __name__ == "__main__":
     parser.add_argument("--prefix", default="")
     parser.add_argument("--version", default="v12")
     parser.add_argument("--node", type=int, default=3193)
-    parser.add_argument("--jobs", type=int, default=32)
-    parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--jobs", type=int, default=16)
+    parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--min-free-gb", type=float, default=750)
     parser.add_argument("--allow-nonlocal", action="store_true")
     parser.add_argument("--keep-work", action="store_true")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aggregate original transcript TPM for unique accepted KO assignments."""
+"""Aggregate original transcript TPM for accepted KO assignments."""
 import argparse
 import csv
 import json
@@ -15,9 +15,11 @@ HIT_FIELDS = ["species", "gene_id", "ko", "score", "threshold", "evalue", "assig
 GENE_FIELDS = ["species", "gene_id", "assignment_status", "accepted_ko_count", "selected_ko", "terminal_stop_stripped"]
 KO_FIELDS = ["species", "run", "ko", "tpm_sum", "annotated_genes", "quantified_genes"]
 STATUSES = ("unique", "ambiguous", "below_threshold", "threshold_missing", "unannotated")
+AMBIGUITY_POLICIES = ("duplicate", "drop", "error")
 QC_FIELDS = ["species", "run", "ambiguity", "targets", "protein_genes", "quantified_proteins",
              "retained_targets", "annotated_kos", "quantified_kos", "total_tpm", "retained_tpm",
-             "retained_tpm_fraction", "no_protein_targets", "no_protein_tpm", "no_retained_kos"]
+             "retained_tpm_fraction", "quantified_assignments", "ko_tpm_sum",
+             "no_protein_targets", "no_protein_tpm", "no_retained_kos"]
 QC_FIELDS += [f"{status}_{suffix}" for status in STATUSES
               for suffix in ("genes", "targets", "tpm")]
 
@@ -163,29 +165,33 @@ def abundance_values(path, run):
     return values
 
 
-def aggregate(samples, run, annotation_dir, output, qc, ambiguity="drop"):
-    if ambiguity not in {"drop", "error"}:
-        raise ValueError("KO ambiguity must be drop or error; splitting is unsupported")
+def aggregate(samples, run, annotation_dir, output, qc, ambiguity="duplicate"):
+    if ambiguity not in AMBIGUITY_POLICIES:
+        raise ValueError("KO ambiguity must be duplicate, drop, or error; splitting is unsupported")
     manifest = selected_samples(samples)
     matches = [row for row in manifest if row["run"] == run]
     if len(matches) != 1:
         raise ValueError(f"expected exactly one manifest row for run {run}")
     sample = matches[0]
-    genes, _, source = load_annotation(annotation_dir, sample["species"])
+    genes, hits, source = load_annotation(annotation_dir, sample["species"])
     values = abundance_values(sample["abundance"], run)
     groups, contributions = defaultdict(list), defaultdict(list)
     status_counts = Counter(row["assignment_status"] for row in genes.values())
     target_counts, partitions = Counter(), defaultdict(list)
-    for gene, row in genes.items():
-        if row["assignment_status"] == "unique":
-            groups[row["selected_ko"]].append(gene)
+    retained_genes = set()
+    # load_annotation verifies unique gene/KO pairs and the upstream acceptance marker.
+    for hit in hits:
+        gene, ko = hit["gene_id"], hit["ko"]
+        if hit["accepted"] == "1" and (ambiguity == "duplicate" or genes[gene]["assignment_status"] == "unique"):
+            groups[ko].append(gene)
+            if gene in values:
+                contributions[ko].append(values[gene])
+                retained_genes.add(gene)
     for gene, value in values.items():
         row = genes.get(gene)
         status = row["assignment_status"] if row else "no_protein"
         target_counts[status] += 1
         partitions[status].append(value)
-        if status == "unique":
-            contributions[row["selected_ko"]].append(value)
     if target_counts["ambiguous"] and ambiguity == "error":
         raise ValueError(f"{run}: {target_counts['ambiguous']} quantified genes have multiple accepted KOs")
     result = [{"species": sample["species"], "run": run, "ko": ko,
@@ -193,14 +199,17 @@ def aggregate(samples, run, annotation_dir, output, qc, ambiguity="drop"):
                "annotated_genes": len(members), "quantified_genes": len(contributions[ko])}
               for ko, members in sorted(groups.items())]
     total = summed(values.values())
-    retained = summed(partitions["unique"])
+    # Coverage counts each input gene once, even when its TPM supports several KOs.
+    retained = summed(values[gene] for gene in retained_genes)
     report = {"created_at": now(), "species": sample["species"], "run": run, "ambiguity": ambiguity,
               "targets": len(values), "protein_genes": len(genes),
               "quantified_proteins": len(values) - target_counts["no_protein"],
-              "retained_targets": target_counts["unique"], "annotated_kos": len(result),
+              "retained_targets": len(retained_genes), "annotated_kos": len(result),
               "quantified_kos": sum(bool(contributions[ko]) for ko in groups),
               "total_tpm": total, "retained_tpm": retained,
               "retained_tpm_fraction": retained / total if total else None,
+              "quantified_assignments": sum(len(items) for items in contributions.values()),
+              "ko_tpm_sum": summed(row["tpm_sum"] for row in result if row["quantified_genes"]),
               "no_protein_targets": target_counts["no_protein"],
               "no_protein_tpm": summed(partitions["no_protein"]),
               "no_retained_kos": not any(contributions.values()),
@@ -217,5 +226,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ["samples", "run", "annotation-dir", "output", "qc"]:
         parser.add_argument(f"--{flag}", required=True)
-    parser.add_argument("--ambiguity", choices=["drop", "error"], default="drop")
+    parser.add_argument("--ambiguity", choices=AMBIGUITY_POLICIES, default="duplicate")
     aggregate(**vars(parser.parse_args()))

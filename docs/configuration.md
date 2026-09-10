@@ -63,19 +63,17 @@ shared workflow. These files remain available locally.
 | `analysis` | Output directory name under `results/`, `work/`, and `logs/` |
 | `inputs.*` | Metadata, BUSCO, CDS, and abundance paths |
 | `paths.*` | Root directories for results, temporary work, and logs |
-| `tools.*` | Executable names or paths, plus an optional ODB environment prefix |
 | `translation.table` | Genetic code table used for CDS translation; default `1` |
 | `taxonomy.database` | ETE4 taxonomy SQLite snapshot; created automatically when missing and reused unchanged |
 | `taxonomy.source` | Optional existing SQLite database to copy when `taxonomy.database` is missing; default `null` downloads NCBI taxonomy |
 | `selection.busco_threshold` | Minimum complete BUSCO fraction; default `0.5` |
 | `selection.species_list` | Optional text file of species IDs, one per line |
 | `selection.missing_taxonomy` | `error` or `allow` for unresolved taxids |
-| `odb.version` | OrthoDB version; this workflow supports `v12` |
 | `odb.existing_results` | Optional local import snapshot directory; `null` runs ODB normally |
 | `odb.node`, `odb.reference_dir` | OrthoDB node and reference snapshot directory |
-| `odb.chunk_size` | Maximum species per ODB chunk; default `250` |
-| `odb.threads`, `odb.batch_size` | Worker and batch counts; batch size must be at least the worker count |
-| `odb.mem_gb` | Memory estimate in whole GB used to schedule ODB alongside other steps; default `128` |
+| `odb.chunk_size` | Maximum species per ODB chunk; default `50` |
+| `odb.threads`, `odb.batch_size` | Worker and batch counts per chunk; defaults `16` and `64`; batch size must be at least the worker count |
+| `odb.mem_gb` | Memory estimate per chunk in whole GB used to schedule ODB alongside other steps; default `192` |
 | `odb.min_free_gb` | Minimum free disk space before mapping, in GiB; default `750` |
 | `odb.reference_min_free_gb` | Minimum free disk space before reference preparation, in GiB; default `200` |
 | `odb.allow_nonlocal` | Allow ODB work on filesystems outside the supported local types; default `false` |
@@ -83,9 +81,33 @@ shared workflow. These files remain available locally.
 | `tpm.multimap` | Policy for genes assigned to multiple orthogroups; see [TPM interpretation](outputs.md#tpm-interpretation) |
 | `kegg.enabled` | Include KEGG outputs in the default full workflow; default `false` |
 | `kegg.reference_dir` | Prepared immutable KEGG/KOfam snapshot; see [KEGG setup](kegg.md) |
-| `kegg.command` | KofamScan executable, normally `exec_annotation`; a single executable name or path |
 | `kegg.threads`, `kegg.mem_gb` | CPU and decimal-GB memory budgets per species; defaults `4` and `8` |
-| `kegg.ambiguity` | `drop` (default) or `error` for quantified genes with multiple accepted KOs; annotations always retain candidates |
+| `kegg.ambiguity` | `duplicate` (default) adds full TPM to each accepted KO; `drop` excludes multi-KO genes; `error` rejects quantified multi-KO genes. Annotations always retain candidates |
+
+ODB chunks can run concurrently when their combined CPU and memory estimates fit
+the workflow budget. The defaults use 16 workers and 192 GB for up to 50 species
+per chunk. These are initial allowances to check against measured peak memory;
+`config/pilot.yaml` retains smaller settings for its two-species chunks.
+
+Configuration contains dataset paths, analysis choices, resource budgets and
+storage/cache controls. Executable names and interpreters are fixed in the
+workflow and supplied by each rule's Conda environment. ASTRAL-IV uses the
+official build at `resources/phylogeny_tools/bin/astral4_int128`.
+
+The workflow fixes OrthoDB to its supported version `v12`, standalone LSD2 to
+one thread, and the TimeTree delay to one second between uncached requests.
+These are not user configuration options. For phylogeny settings such as marker
+selection, trimming, rooting and calibrations, see [the phylogeny guide](phylogeny.md).
+
+Remove the following keys from older overrides: `tools`, `odb.version`,
+`kegg.command`, `phylogeny.famsa_command`, `phylogeny.trimal_command`,
+`phylogeny.veryfasttree_command`, `phylogeny.astral_command`,
+`phylogeny.dating.command`, `phylogeny.dating.threads`,
+`phylogeny.dating.timetree.python`, and
+`phylogeny.dating.timetree.request_delay_seconds`. They are rejected with a
+migration message. Execution records still retain the commands, tool hashes and
+reference versions actually used; `run.json` records configuration and workflow
+source checksums.
 
 For the one-time migration of completed ODB results, `odb.existing_results` points
 to a directory containing `annotations.tsv` and `snapshot.json` (schema version 1,

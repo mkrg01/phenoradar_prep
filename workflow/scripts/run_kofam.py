@@ -300,7 +300,7 @@ def run(protein, species, reference, output_dir, work_dir, command="exec_annotat
                       "normalized_protein_sha256": sha256(normalized),
                       "terminal_stop_stripped_count": sum(p["terminal_stop_stripped"] for p in proteins),
                       "gene_status_counts": dict(Counter(g["assignment_status"] for g in genes)),
-                      "quantitative_policy": "unique accepted KO only; ambiguous assignments excluded",
+                      "quantitative_policy": "determined during TPM aggregation; see per-run QC ambiguity",
                       "acceptance_policy": "upstream pre-rounding marker, verified against KO threshold",
                       "results": [{**file_record(result / name), "path": str(out / name)}
                                   for name in RESULT_NAMES]}

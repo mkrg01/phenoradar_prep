@@ -1,3 +1,4 @@
+# Dataset, analysis, and resource settings. Commands are fixed in the workflow.
 # Paths are relative to the project root (run Snakemake there).
 analysis: full
 inputs:
@@ -18,23 +19,18 @@ paths:
   results: results
   work: work
   logs: logs
-tools:
-  python: python
-  seqkit: seqkit
-  odb_command: ODB-mapper
-  odb_prefix: ""
 translation:
   table: 1
 odb:
   # Optional local snapshot of existing annotations and original protein checksums.
   existing_results: null
-  version: v12
   node: 3193
   reference_dir: resources/orthodb/v12_3193
-  chunk_size: 250
-  threads: 32
-  batch_size: 128
-  mem_gb: 128
+  # Per chunk; concurrency follows the workflow's total CPU and memory budgets.
+  chunk_size: 50
+  threads: 16
+  batch_size: 64
+  mem_gb: 192
   min_free_gb: 750
   reference_min_free_gb: 200
   allow_nonlocal: false
@@ -47,11 +43,10 @@ kegg:
   enabled: false
   # Prepare this immutable snapshot with workflow/scripts/prepare_kegg_reference.py.
   reference_dir: resources/kegg/snapshot_v1
-  command: exec_annotation
   threads: 4
   mem_gb: 8
-  # Ambiguous multi-KO genes are retained in annotation/QC, but not duplicated in TPM.
-  ambiguity: drop
+  # duplicate: add full TPM to every accepted KO; drop: omit multi-KO genes; error: reject them.
+  ambiguity: duplicate
 phylogeny:
   # The explicit phylogeny/timetree targets also work without enabling rule all.
   enabled: false
@@ -67,11 +62,7 @@ phylogeny:
   min_protein_length: 100  # known amino acids, excluding X and gaps
   max_unknown_fraction: 0.05
   min_taxa: 4
-  famsa_command: famsa
-  trimal_command: resources/phylogeny_tools/bin/trimal
   trimal_mode: gappyout  # gappyout | automated1 (the latter computes all sequence pairs)
-  veryfasttree_command: VeryFastTree
-  astral_command: resources/phylogeny_tools/bin/astral4_int128
   align_threads: 4
   tree_threads: 4
   astral_threads: 32
@@ -85,24 +76,15 @@ phylogeny:
     enabled: false
     calibration_source: file  # file | timetree
     calibrations: null  # TSV: taxa, min_age_ma, max_age_ma, source
-    command: resources/phylogeny_tools/bin/treePL
-    threads: 1  # bounds CV memory and keeps stochastic execution serial
-    mem_gb: 32
-    treepl:
-      smoothing: null  # null selects by repeated random subsample cross-validation
-      cv_start: 1000.0
-      cv_stop: 0.001
-      cv_multiplier: 0.1
-      cv_replicates: 3
-      replicates: 3  # final optimizations with different random seeds
-      optimization_iterations: 2  # native LF/PL/CV rounds; increase if restarts disagree
-      numsites: null  # default: sum of retained, trimmed gene alignment lengths
+    mem_gb: 4
+    lsd2:
+      variance: 1  # 0: unweighted; 1: input lengths; 2: reweight after initial fit
+      variance_parameter: null  # null uses LSD2's automatic variance offset
+      numsites: null  # default: sum of retained trimmed gene lengths; affects variance offset
     timetree:
-      python: python  # interpreter in the separate timetree conda environment
       representatives: null  # optional exact tree labels, one per line
       max_representatives: 64
       max_queries: 32
       min_studies: 5
       cache_dir: resources/timetree_cache
       offline: false
-      request_delay_seconds: 1.0

@@ -79,7 +79,7 @@ def test_publish_preserves_frozen_reference(tmp_path):
     assert verify(reference / "reference.json")["reference_id"] == original
 
 
-def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, frozen_reference, tmp_path):
+def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, frozen_reference, tmp_path, command_environment):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     seqkit = os.environ.get("SEQKIT_BIN") or shutil.which("seqkit")
     if not snakemake or not seqkit:
@@ -90,20 +90,20 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
         "analysis": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
         "taxonomy": {"database": tiny_inputs["taxonomy_db"]},
         "paths": {"results": str(tmp_path / "results"), "work": str(tmp_path / "work"), "logs": str(tmp_path / "logs")},
-        "tools": {"python": sys.executable, "seqkit": seqkit, "odb_command": str(fake_odb), "odb_prefix": ""},
         "odb": {"reference_dir": str(frozen_reference), "chunk_size": 1, "threads": 1, "batch_size": 1,
                 "mem_gb": 3, "min_free_gb": 0, "allow_nonlocal": True},
-        "kegg": {"enabled": False, "reference_dir": str(reference), "command": str(command),
+        "kegg": {"enabled": False, "reference_dir": str(reference),
                  "threads": 1, "mem_gb": 2},
     }
     configfile = tmp_path / "config.yaml"
     configfile.write_text(yaml.safe_dump(config))
     events = tmp_path / "kofam_events.txt"
     odb_events = tmp_path / "odb_events.txt"
-    env = {**os.environ, "XDG_CACHE_HOME": str(tmp_path / "cache"),
+    env = {**command_environment({"python": sys.executable, "seqkit": seqkit,
+                                 "ODB-mapper": fake_odb, "exec_annotation": command}),
            "FAKE_KOFAM_LOG": str(events), "FAKE_ODB_LOG": str(odb_events)}
     base = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(configfile),
-            "--cores", "2", "--resources", "odb_slots=1"]
+            "--cores", "2", "--resources", "mem_mb=16000"]
 
     def execute(options=(), targets=("kegg",)):
         result = subprocess.run(base + list(options) + ["--"] + list(targets), cwd=ROOT, env=env,
@@ -121,13 +121,17 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     assert len(benchmarks) == 2
     assert all(float(read_tsv(path)[0]["s"]) >= 0 for path in benchmarks)
     rows = read_tsv(out / "ko_tpm_sum.tsv")
-    assert {r["run"]: float(r["tpm_sum"]) for r in rows} == {"A1": 20, "A2": 80, "B1": 20}
-    assert {r["ko"] for r in rows} == {"K00001"}
+    assert {(r["run"], r["ko"]): float(r["tpm_sum"]) for r in rows} == {
+        (run, ko): value for run, unique, multi in [("A1", 20, 30), ("A2", 80, 10), ("B1", 20, 30)]
+        for ko, value in [("K00001", unique), ("K00002", multi), ("K00003", multi)]}
     assert len(read_tsv(out / "genes.tsv")) == 6
     assert {r["assignment_status"] for r in read_tsv(out / "genes.tsv")} == {"unique", "ambiguous", "below_threshold"}
     qc = {r["run"]: r for r in read_tsv(out / "mapping_qc.tsv")}
-    assert float(qc["A1"]["retained_tpm_fraction"]) == 0.2
-    assert len(read_tsv(out / "ko_support.tsv")) == 3
+    assert qc["A1"]["ambiguity"] == "duplicate"
+    assert float(qc["A1"]["retained_tpm_fraction"]) == 0.5
+    assert float(qc["A1"]["retained_tpm"]) == 50
+    assert float(qc["A1"]["ko_tpm_sum"]) == 80
+    assert len(read_tsv(out / "ko_support.tsv")) == 9
     assert read_tsv(out / "ko_modules.tsv")[0] == {"ko": "K00001", "module": "M00001"}
     assert "Nothing to be done" in execute(["--dry-run"])
 
@@ -140,14 +144,28 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     assert "rule annotate_kofam:" not in dry
     execute()
     assert len(events.read_text().splitlines()) == 2
-    assert float(next(r for r in read_tsv(out / "ko_tpm_sum.tsv") if r["run"] == "A1")["tpm_sum"]) == 40
+    assert float(next(r for r in read_tsv(out / "ko_tpm_sum.tsv")
+                      if r["run"] == "A1" and r["ko"] == "K00001")["tpm_sum"]) == 40
+
+    # Aggregation policy changes reuse the species annotations.
+    annotation_times = {p: p.stat().st_mtime_ns for p in (out / "species").glob("*/provenance.json")}
+    for ambiguity, expected_kos in [("drop", {"K00001"}), ("duplicate", {"K00001", "K00002", "K00003"})]:
+        config["kegg"]["ambiguity"] = ambiguity
+        configfile.write_text(yaml.safe_dump(config))
+        dry = execute(["--dry-run"])
+        assert "rule aggregate_ko_tpm:" in dry
+        assert "rule annotate_kofam:" not in dry
+        execute()
+        assert {r["ko"] for r in read_tsv(out / "ko_tpm_sum.tsv")} == expected_kos
+        assert len(events.read_text().splitlines()) == 2
+        assert all(p.stat().st_mtime_ns == timestamp for p, timestamp in annotation_times.items())
 
     subset = tmp_path / "subset.txt"
     subset.write_text("Beta_sp-X\n")
     config["selection"] = {"species_list": str(subset)}
     configfile.write_text(yaml.safe_dump(config))
     execute()
-    assert [r["run"] for r in read_tsv(out / "ko_tpm_sum.tsv")] == ["B1"]
+    assert [r["run"] for r in read_tsv(out / "ko_tpm_sum.tsv")] == ["B1"] * 3
     assert {r["species"] for r in read_tsv(out / "genes.tsv")} == {"Beta_sp-X"}
     assert len(events.read_text().splitlines()) == 2
 
@@ -163,8 +181,8 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     ({"enabled": "yes"}, "kegg.enabled must be true or false"),
     ({"threads": 0}, "kegg.threads must be a positive integer"),
     ({"mem_gb": True}, "kegg.mem_gb must be a positive integer"),
-    ({"ambiguity": "split"}, "kegg.ambiguity must be drop or error"),
-    ({"command": ""}, "kegg.command must be a nonempty string"),
+    ({"ambiguity": "split"}, "kegg.ambiguity must be duplicate, drop, or error"),
+    ({"command": ""}, "fixed by the workflow"),
 ])
 def test_invalid_kegg_config_is_rejected(tmp_path, settings, message):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
