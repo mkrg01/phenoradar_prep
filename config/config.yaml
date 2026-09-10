@@ -3,6 +3,7 @@
 analysis: full
 inputs:
   metadata: metadata/metadata.tsv
+  species_trait: species_trait/species_trait.tsv
   busco: transcriptome_assembly/multispecies_summary/busco_full_longest_cds.tsv
   cds_dir: transcriptome_assembly/longest_cds
   quant_dir: transcriptome_assembly/amalgkit_quant
@@ -56,7 +57,7 @@ phylogeny:
   sequence_mode: cds
   sequence_dir: null  # null reuses selected samples' CDS paths (CDS mode only)
   sequence_suffix: _longestCDS.fa.gz
-  outgroup: null  # required; exact selected species label
+  outgroup: auto  # choose within each inference species set using NCBI/APG IV; or specify a species label
   max_markers: 500  # highest overall BUSCO coverage first; ties by BUSCO ID ascending
   min_protein_length: 100  # known amino acids, excluding X and gaps
   max_unknown_fraction: 0.05
@@ -86,3 +87,7 @@ phylogeny:
       max_queries: 32
       min_studies: 5
       offline: false
+contrast:
+  # The explicit contrast_pairs target also works while disabled here.
+  enabled: false
+  trait: C4  # column in inputs.species_trait; metadata is never a trait source

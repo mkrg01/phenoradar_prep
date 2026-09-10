@@ -84,7 +84,7 @@ Run from the repository root. The launcher with
 - [`phylogeny.yaml`](../workflow/envs/phylogeny.yaml): cdskit 0.27.0, FAMSA
   2.4.1, trimAl 1.5.1, VeryFastTree 4.0.5, and Python dependencies from Conda.
 - [`timetree.yaml`](../workflow/envs/timetree.yaml): nwkit 0.27.0 from Conda
-  for optional calibration retrieval.
+  for automatic outgroup selection, contrast skims/figures, and optional calibration retrieval.
 - [`dating.yaml`](../workflow/envs/dating.yaml): Conda Python and compiler
   dependencies; its adjacent [post-deploy script](../workflow/envs/dating.post-deploy.sh)
   automatically builds unmodified upstream LSD2 2.4.4 into the environment.
@@ -123,12 +123,37 @@ Create an override, e.g. `config/phylogeny.local.yaml`:
 phylogeny:
   busco_full_dir: /path/to/tlight/tree_all/gfe_data/busco_full_longest_cds
   sequence_dir: /path/to/tlight/tree_all/gfe_data/longest_cds
-  outgroup: Amborella_trichopoda
+  outgroup: auto  # automatic; or an exact selected species label
 ```
 
-The outgroup must be one of the selected species. The example is appropriate
-only for an angiosperm dataset containing Amborella; it is not a universal root.
-Rooting is supplied to ASTRAL before CASTLES-II branch-length estimation.
+The default `auto` selects an outgroup **within the species set
+actually used by each inference run**. The full branch uses its selected input
+manifest; the contrast branch first selects representatives with nwkit skim,
+then chooses among those representatives. No species is added for rooting, and
+the branches can select different outgroups.
+Use `auto` for automatic selection; `null` is rejected with a configuration error.
+`nwkit constrain` builds an NCBI guide with the existing frozen SQLite snapshot;
+contrast rooting uses the compressed guide containing exactly its representatives.
+If its root is binary with a singleton side, that species is used. For an
+unresolved root, the workflow takes the highest-BUSCO species from each basal
+lineage (ties by species ID) and consults nwkit's bundled **APG IV order tree**.
+Exact taxids from the snapshot map these representatives to APG IV orders.
+The reference must resolve every basal lineage and identify a singleton side
+that was also a singleton lineage in that run's NCBI guide. This avoids
+mistaking one representative of a multi-species outgroup for an outgroup to
+all other species. APG IV is an angiosperm reference, not a universal guide.
+Unresolved roots or two multi-species root sides require an explicit outgroup.
+No OpenTree/TimeTree request is made for rooting. The root position is a
+reference-based choice, not an ancestral-root estimate from BUSCO sequences.
+
+`results/<analysis>/rooting/` contains the dataset-wide `ncbi_tree.nwk` and
+`taxids.tsv`. Each inference branch writes its own `rooting/outgroup.txt` and
+`rooting/outgroup.json` under `phylogeny/` or `contrast/phylogeny/` (candidate
+manifest/count, source, reference checksum and root split). An explicit outgroup
+bypasses automatic selection and must already belong to that run's inference
+manifest; a name absent from the skim representatives fails rather than adding
+a species. Both runs resolve their own outgroup **before CASTLES-II length estimation**.
+The molecular topology is not constrained to the NCBI/APG IV topology.
 
 ```bash
 # Check the graph and inputs.

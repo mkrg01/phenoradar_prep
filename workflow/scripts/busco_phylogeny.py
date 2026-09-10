@@ -163,7 +163,9 @@ def unique_species(samples):
     return dict(sorted(result.items()))
 
 
-def plan(samples, outdir, settings):
+def plan(samples, outdir, settings, outgroup_file=None):
+    if outgroup_file:
+        settings = dict(settings, outgroup=Path(outgroup_file).read_text().strip())
     species = unique_species(samples)
     if settings["outgroup"] not in species:
         raise ValueError("phylogeny.outgroup must name a selected species; it is required for CASTLES-II branch lengths")
@@ -299,6 +301,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
     p = sub.add_parser("plan")
+    p.add_argument("--outgroup-file")
     for name in ["samples", "outdir", "settings"]:
         p.add_argument("--" + name, required=True)
     p = sub.add_parser("extract")

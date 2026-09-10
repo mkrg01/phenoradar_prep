@@ -1,13 +1,30 @@
+def phylogeny_samples(wc):
+    if wc.phylo_branch == "contrast/phylogeny":
+        return checkpoints.select_contrast_representatives.get().output.samples
+    return checkpoints.select_metadata.get().output.samples
+
+
+def phylogeny_root_guide(wc):
+    if PHY["outgroup"] != "auto":
+        return []
+    if wc.phylo_branch == "contrast/phylogeny":
+        return [checkpoints.select_contrast_representatives.get().output.tree]
+    return [f"{ROOTING}/ncbi_tree.nwk"]
+
+
+def phylogeny_input_rows(wc):
+    with open(phylogeny_samples(wc)) as handle:
+        return list(csv.DictReader(handle, delimiter="\t"))
+
+
 def phylogeny_tables(wc):
     if not PHY["busco_full_dir"]:
         raise WorkflowError("set phylogeny.busco_full_dir to per-species BUSCO full tables; see docs/phylogeny.md")
-    if not PHY["outgroup"]:
-        raise WorkflowError("set phylogeny.outgroup to an exact selected species label")
-    return sorted({str(Path(PHY["busco_full_dir"]) / (r["species"] + PHY["busco_full_suffix"])) for r in sample_rows(wc)})
+    return sorted({str(Path(PHY["busco_full_dir"]) / (r["species"] + PHY["busco_full_suffix"])) for r in phylogeny_input_rows(wc)})
 
 
 def phylogeny_plan_rows(wc, table):
-    output = checkpoints.plan_phylogeny.get().output
+    output = checkpoints.plan_phylogeny.get(phylo_branch=wc.phylo_branch).output
     with open(getattr(output, table)) as handle:
         return list(csv.DictReader(handle, delimiter="\t"))
 
@@ -20,7 +37,7 @@ def phylogeny_species_row(wc):
 
 
 def phylogeny_marker_files(wc, suffix):
-    return [f'{PHYLO}/gene_trees/{r["marker"]}.{suffix}' for r in phylogeny_plan_rows(wc, "markers")]
+    return [f'{OUT}/{wc.phylo_branch}/gene_trees/{r["marker"]}.{suffix}' for r in phylogeny_plan_rows(wc, "markers")]
 
 
 def dating_calibrations(wc):
@@ -33,43 +50,44 @@ def dating_calibrations(wc):
 
 checkpoint plan_phylogeny:
     input:
-        samples=f"{META}/samples.tsv",
+        samples=phylogeny_samples,
+        outgroup=f"{PHYLO_RUN}/rooting/outgroup.txt",
         tables=phylogeny_tables,
         code=f"{SCRIPTS}/busco_phylogeny.py",
         common=f"{SCRIPTS}/common.py"
     output:
-        species=f"{PHYLO_PLAN}/species.tsv",
-        markers=f"{PHYLO_PLAN}/markers.tsv",
-        stats=f"{PHYLO_PLAN}/marker_stats.tsv",
-        provenance=f"{PHYLO_PLAN}/provenance.json"
+        species=f"{PHYLO_RUN}/plan/species.tsv",
+        markers=f"{PHYLO_RUN}/plan/markers.tsv",
+        stats=f"{PHYLO_RUN}/plan/marker_stats.tsv",
+        provenance=f"{PHYLO_RUN}/plan/provenance.json"
     params:
-        outdir=PHYLO_PLAN,
+        outdir=f"{PHYLO_RUN}/plan",
         settings=json.dumps({k: PHY[k] for k in ["outgroup", "busco_full_dir", "busco_full_suffix", "lineage",
             "sequence_dir", "sequence_suffix", "min_taxa", "max_markers"]}, sort_keys=True)
-    log: f"{LOG}/phylogeny/plan.log"
+    log: f"{LOG}/{{phylo_branch}}/plan.log"
     conda: "../envs/phylogeny.yaml"
     resources: mem_mb=PHY["preparation_mem_gb"] * 1000
     shell:
         "{PYTHON:q} {input.code:q} plan --samples {input.samples:q} "
-        "--outdir {params.outdir:q} --settings {params.settings:q} > {log:q} 2>&1"
+        "--outgroup-file {input.outgroup:q} --outdir {params.outdir:q} --settings {params.settings:q} > {log:q} 2>&1"
 
 
 rule extract_busco_proteins:
     input:
-        markers=f"{PHYLO_PLAN}/markers.tsv",
+        markers=f"{PHYLO_RUN}/plan/markers.tsv",
         table=lambda wc: phylogeny_species_row(wc)["busco_table"],
         sequences=lambda wc: phylogeny_species_row(wc)["sequences"],
         code=f"{SCRIPTS}/busco_phylogeny.py",
         common=f"{SCRIPTS}/common.py"
     output:
-        proteins=f"{PHYLO}/species/{{species}}.faa",
-        qc=f"{PHYLO}/species/{{species}}.json"
+        proteins=f"{PHYLO_RUN}/species/{{species}}.faa",
+        qc=f"{PHYLO_RUN}/species/{{species}}.json"
     params:
         settings=json.dumps({k: PHY[k] for k in ["lineage", "sequence_mode", "translation_table",
             "min_protein_length", "max_unknown_fraction"]}, sort_keys=True)
     conda: "../envs/phylogeny.yaml"
     resources: mem_mb=PHY["preparation_mem_gb"] * 1000
-    log: f"{LOG}/phylogeny/extract/{{species}}.log"
+    log: f"{LOG}/{{phylo_branch}}/extract/{{species}}.log"
     shell:
         "{PYTHON:q} {input.code:q} extract --species {wildcards.species:q} --table {input.table:q} "
         "--sequences {input.sequences:q} --markers {input.markers:q} --output {output.proteins:q} "
@@ -78,17 +96,17 @@ rule extract_busco_proteins:
 
 rule collect_busco_markers:
     input:
-        manifest=f"{PHYLO_PLAN}/species.tsv",
-        markers=f"{PHYLO_PLAN}/markers.tsv",
-        proteins=lambda wc: [f'{PHYLO}/species/{r["species"]}.faa' for r in phylogeny_plan_rows(wc, "species")],
-        reports=lambda wc: [f'{PHYLO}/species/{r["species"]}.json' for r in phylogeny_plan_rows(wc, "species")],
+        manifest=f"{PHYLO_RUN}/plan/species.tsv",
+        markers=f"{PHYLO_RUN}/plan/markers.tsv",
+        proteins=lambda wc: [f'{OUT}/{wc.phylo_branch}/species/{r["species"]}.faa' for r in phylogeny_plan_rows(wc, "species")],
+        reports=lambda wc: [f'{OUT}/{wc.phylo_branch}/species/{r["species"]}.json' for r in phylogeny_plan_rows(wc, "species")],
         code=f"{SCRIPTS}/busco_phylogeny.py",
         common=f"{SCRIPTS}/common.py"
-    output: fasta=directory(f"{PHYLO}/markers")
-    params: species_dir=f"{PHYLO}/species"
+    output: fasta=directory(f"{PHYLO_RUN}/markers")
+    params: species_dir=f"{PHYLO_RUN}/species"
     conda: "../envs/phylogeny.yaml"
     resources: mem_mb=PHY["preparation_mem_gb"] * 1000
-    log: f"{LOG}/phylogeny/collect.log"
+    log: f"{LOG}/{{phylo_branch}}/collect.log"
     shell:
         "{PYTHON:q} {input.code:q} collect --manifest {input.manifest:q} --markers {input.markers:q} "
         "--species-dir {params.species_dir:q} --outdir {output.fasta:q} > {log:q} 2>&1"
@@ -101,17 +119,17 @@ rule align_busco_marker:
         code=f"{SCRIPTS}/infer_phylogeny.py",
         helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py"]
     output:
-        alignment=f"{PHYLO}/alignments/raw/{{marker}}.faa",
-        qc=f"{PHYLO}/alignments/raw/{{marker}}.json"
+        alignment=f"{PHYLO_RUN}/alignments/raw/{{marker}}.faa",
+        qc=f"{PHYLO_RUN}/alignments/raw/{{marker}}.json"
     params:
-        fasta=lambda wc: f"{PHYLO}/markers/{wc.marker}.faa",
+        fasta=lambda wc: f"{OUT}/{wc.phylo_branch}/markers/{wc.marker}.faa",
         command="famsa",
         settings=json.dumps({"min_taxa": PHY["min_taxa"]}, sort_keys=True)
     threads: PHY["align_threads"]
     resources: mem_mb=PHY["alignment_mem_gb"] * 1000
     conda: "../envs/phylogeny.yaml"
-    log: f"{LOG}/phylogeny/align/{{marker}}.log"
-    benchmark: f"{PHYLO}/benchmarks/align.{{marker}}.tsv"
+    log: f"{LOG}/{{phylo_branch}}/align/{{marker}}.log"
+    benchmark: f"{PHYLO_RUN}/benchmarks/align.{{marker}}.tsv"
     shell:
         "{PYTHON:q} {input.code:q} align --fasta {params.fasta:q} --output {output.alignment:q} "
         "--qc {output.qc:q} --command {params.command:q} --threads {threads} "
@@ -121,22 +139,22 @@ rule align_busco_marker:
 rule trim_busco_marker:
     wildcard_constraints: marker="[A-Za-z0-9][A-Za-z0-9_.-]*"
     input:
-        alignment=f"{PHYLO}/alignments/raw/{{marker}}.faa",
-        raw_qc=f"{PHYLO}/alignments/raw/{{marker}}.json",
+        alignment=f"{PHYLO_RUN}/alignments/raw/{{marker}}.faa",
+        raw_qc=f"{PHYLO_RUN}/alignments/raw/{{marker}}.json",
         code=f"{SCRIPTS}/infer_phylogeny.py",
         helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py"]
     output:
-        alignment=f"{PHYLO}/alignments/{{marker}}.faa",
-        qc=f"{PHYLO}/alignments/{{marker}}.json",
-        columns=f"{PHYLO}/alignments/{{marker}}.columns.tsv"
+        alignment=f"{PHYLO_RUN}/alignments/{{marker}}.faa",
+        qc=f"{PHYLO_RUN}/alignments/{{marker}}.json",
+        columns=f"{PHYLO_RUN}/alignments/{{marker}}.columns.tsv"
     params:
         command="trimal", mode=PHY["trimal_mode"],
         settings=json.dumps({k: PHY[k] for k in ["min_taxa", "min_protein_length"]}, sort_keys=True)
     threads: 1
     resources: mem_mb=PHY["trimming_mem_gb"] * 1000
     conda: "../envs/phylogeny.yaml"
-    log: f"{LOG}/phylogeny/trim/{{marker}}.log"
-    benchmark: f"{PHYLO}/benchmarks/trim.{{marker}}.tsv"
+    log: f"{LOG}/{{phylo_branch}}/trim/{{marker}}.log"
+    benchmark: f"{PHYLO_RUN}/benchmarks/trim.{{marker}}.tsv"
     shell:
         "{PYTHON:q} {input.code:q} trim --alignment {input.alignment:q} --raw-qc {input.raw_qc:q} "
         "--output {output.alignment:q} --qc {output.qc:q} --columns {output.columns:q} "
@@ -145,19 +163,19 @@ rule trim_busco_marker:
 
 rule infer_busco_gene_tree:
     input:
-        alignment=f"{PHYLO}/alignments/{{marker}}.faa",
-        alignment_qc=f"{PHYLO}/alignments/{{marker}}.json",
+        alignment=f"{PHYLO_RUN}/alignments/{{marker}}.faa",
+        alignment_qc=f"{PHYLO_RUN}/alignments/{{marker}}.json",
         code=f"{SCRIPTS}/infer_phylogeny.py",
         helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py"]
     output:
-        tree=f"{PHYLO}/gene_trees/{{marker}}.nwk",
-        qc=f"{PHYLO}/gene_trees/{{marker}}.json"
+        tree=f"{PHYLO_RUN}/gene_trees/{{marker}}.nwk",
+        qc=f"{PHYLO_RUN}/gene_trees/{{marker}}.json"
     params: command="VeryFastTree", seed=PHY["seed"]
     threads: PHY["tree_threads"]
     resources: mem_mb=PHY["tree_mem_gb"] * 1000
     conda: "../envs/phylogeny.yaml"
-    log: f"{LOG}/phylogeny/tree/{{marker}}.log"
-    benchmark: f"{PHYLO}/benchmarks/tree.{{marker}}.tsv"
+    log: f"{LOG}/{{phylo_branch}}/tree/{{marker}}.log"
+    benchmark: f"{PHYLO_RUN}/benchmarks/tree.{{marker}}.tsv"
     shell:
         "{PYTHON:q} {input.code:q} gene_tree --alignment {input.alignment:q} --alignment-qc {input.alignment_qc:q} "
         "--output {output.tree:q} --qc {output.qc:q} --command {params.command:q} --threads {threads} "
@@ -166,21 +184,21 @@ rule infer_busco_gene_tree:
 
 rule merge_busco_gene_trees:
     input:
-        manifest=f"{PHYLO_PLAN}/species.tsv",
-        markers=f"{PHYLO_PLAN}/markers.tsv",
+        manifest=f"{PHYLO_RUN}/plan/species.tsv",
+        markers=f"{PHYLO_RUN}/plan/markers.tsv",
         trees=lambda wc: phylogeny_marker_files(wc, "nwk"),
         reports=lambda wc: phylogeny_marker_files(wc, "json"),
         code=f"{SCRIPTS}/infer_phylogeny.py",
         helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py"]
     output:
-        trees=f"{PHYLO}/gene_trees.nwk",
-        coverage=f"{PHYLO}/species_coverage.tsv",
-        qc=f"{PHYLO}/gene_trees.json"
+        trees=f"{PHYLO_RUN}/gene_trees.nwk",
+        coverage=f"{PHYLO_RUN}/species_coverage.tsv",
+        qc=f"{PHYLO_RUN}/gene_trees.json"
     params:
-        tree_dir=f"{PHYLO}/gene_trees"
+        tree_dir=f"{PHYLO_RUN}/gene_trees"
     conda: "../envs/phylogeny.yaml"
     resources: mem_mb=PHY["preparation_mem_gb"] * 1000
-    log: f"{LOG}/phylogeny/merge.log"
+    log: f"{LOG}/{{phylo_branch}}/merge.log"
     shell:
         "{PYTHON:q} {input.code:q} merge --manifest {input.manifest:q} --markers {input.markers:q} "
         "--tree-dir {params.tree_dir:q} --output {output.trees:q} --coverage {output.coverage:q} "
@@ -189,24 +207,25 @@ rule merge_busco_gene_trees:
 
 rule infer_busco_species_tree:
     input:
-        trees=f"{PHYLO}/gene_trees.nwk",
-        merge_qc=f"{PHYLO}/gene_trees.json",
-        manifest=f"{PHYLO_PLAN}/species.tsv",
+        trees=f"{PHYLO_RUN}/gene_trees.nwk",
+        merge_qc=f"{PHYLO_RUN}/gene_trees.json",
+        manifest=f"{PHYLO_RUN}/plan/species.tsv",
         code=f"{SCRIPTS}/infer_phylogeny.py",
         helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/prepare_phylogeny_tools.py"],
         build_provenance=str(Path(ASTRAL).parent.parent / "aster.json"),
-        binary=ASTRAL
-    output: tree=f"{PHYLO}/species_tree.nwk", qc=f"{PHYLO}/species_tree.json"
-    params: command=ASTRAL, outgroup=PHY["outgroup"], seed=PHY["seed"]
+        binary=ASTRAL,
+        outgroup=f"{PHYLO_RUN}/rooting/outgroup.txt"
+    output: tree=f"{PHYLO_RUN}/species_tree.nwk", qc=f"{PHYLO_RUN}/species_tree.json"
+    params: command=ASTRAL, seed=PHY["seed"]
     threads: PHY["astral_threads"]
     resources: mem_mb=PHY["astral_mem_gb"] * 1000
     conda: "../envs/phylogeny.yaml"
-    log: f"{LOG}/phylogeny/astral.log"
-    benchmark: f"{PHYLO}/benchmarks/astral.tsv"
+    log: f"{LOG}/{{phylo_branch}}/astral.log"
+    benchmark: f"{PHYLO_RUN}/benchmarks/astral.tsv"
     shell:
         "{PYTHON:q} {input.code:q} astral --trees {input.trees:q} --merge-qc {input.merge_qc:q} "
         "--manifest {input.manifest:q} --output {output.tree:q} --qc {output.qc:q} "
-        "--command {params.command:q} --outgroup {params.outgroup:q} --threads {threads} "
+        "--command {params.command:q} --outgroup-file {input.outgroup:q} --threads {threads} "
         "--seed {params.seed} > {log:q} 2>&1"
 
 

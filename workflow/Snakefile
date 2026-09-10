@@ -63,6 +63,12 @@ for key in ["threads", "mem_gb"]:
 if config["kegg"]["ambiguity"] not in {"duplicate", "drop", "error"}:
     raise WorkflowError("kegg.ambiguity must be duplicate, drop, or error")
 PHY = dict(config["phylogeny"], translation_table=config["translation"]["table"])
+if type(config["contrast"]["enabled"]) is not bool:
+    raise WorkflowError("contrast.enabled must be true or false")
+if not isinstance(config["contrast"]["trait"], str) or not config["contrast"]["trait"].strip():
+    raise WorkflowError("contrast.trait must name a column in inputs.species_trait")
+if config["contrast"]["trait"] in {"species", "role", "group", "representative", "is_representative", "n_species_in_group", "contrast_pair_id"}:
+    raise WorkflowError("contrast.trait conflicts with a reserved output column")
 for key in ["enabled"]:
     if type(PHY[key]) is not bool:
         raise WorkflowError(f"phylogeny.{key} must be true or false")
@@ -90,9 +96,11 @@ if PHY["sequence_mode"] not in {"cds", "protein"} or (PHY["sequence_mode"] == "p
 for key in ["clade_rank", "clade_min_species", "min_clade_occupancy"]:
     if key in PHY:
         raise WorkflowError(f"phylogeny.{key} was removed; remove it from your configuration. Marker selection uses overall coverage")
-for key in ["busco_full_dir", "sequence_dir", "outgroup"]:
+for key in ["busco_full_dir", "sequence_dir"]:
     if PHY[key] is not None and (not isinstance(PHY[key], str) or not PHY[key].strip()):
         raise WorkflowError(f"phylogeny.{key} must be null or a nonempty string")
+if not isinstance(PHY["outgroup"], str) or not PHY["outgroup"].strip():
+    raise WorkflowError("phylogeny.outgroup must be auto or an exact inference species label; use auto instead of null")
 for key in ["busco_full_suffix", "sequence_suffix"]:
     if not isinstance(PHY[key], str) or not PHY[key] or "/" in PHY[key] or "\\" in PHY[key]:
         raise WorkflowError(f"phylogeny.{key} must be a nonempty filename suffix")
@@ -154,6 +162,15 @@ KEGG_FINAL = [f"{KEGG}/{name}" for name in [
     "reference_qc.json",
 ]]
 PHYLO = f"{OUT}/phylogeny"
+# Both inference runs use the same rules, environments and settings.
+PHYLO_RUN = f"{OUT}/{{phylo_branch}}"
+wildcard_constraints:
+    phylo_branch="phylogeny|contrast/phylogeny"
+CONTRAST = f"{OUT}/contrast"
+ROOTING = f"{OUT}/rooting"
+CONTRAST_FINAL = [f"{CONTRAST}/{name}" for name in [
+    "contrast_pairs.tsv", "species_metadata.tsv", "summary.json", "summary_tree.nwk",
+    "summary_tree.pdf", "summary_tree.svg", "contrastive.nwk"]]
 PHYLO_PLAN = f"{PHYLO}/plan"
 PHYLO_FINAL = [f"{PHYLO}/species_tree.nwk", f"{PHYLO}/species_tree.json", f"{PHYLO}/species_coverage.tsv"]
 PHYLO_DATED = [f"{PHYLO}/dating/species_tree.dated.nwk", f"{PHYLO}/dating/provenance.json"]
@@ -236,7 +253,8 @@ rule all:
         f"{TPM}/mapping_qc.tsv",
         lambda wc: alignment_targets(wc) if config["alignment"]["enabled"] else [],
         KEGG_FINAL if config["kegg"]["enabled"] else [],
-        PHYLO_FINAL if PHY["enabled"] else []
+        PHYLO_FINAL if PHY["enabled"] else [],
+        CONTRAST_FINAL if config["contrast"]["enabled"] else []
 
 
 rule prepare:
@@ -300,6 +318,12 @@ rule phylogeny_prepare:
         f"{PHYLO_PLAN}/provenance.json"
 
 
+rule contrast_pairs:
+    input:
+        f"{OUT}/run.json",
+        CONTRAST_FINAL
+
+
 rule phylogeny_calibrations:
     input:
         f"{PHYLO}/timetree/calibrations.tsv",
@@ -319,3 +343,4 @@ include: "rules/tpm.smk"
 include: "rules/alignments.smk"
 include: "rules/kegg.smk"
 include: "rules/phylogeny.smk"
+include: "rules/contrast.smk"

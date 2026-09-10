@@ -232,7 +232,9 @@ def merge(manifest, markers, tree_dir, output, coverage, qc):
     # failed coverage check, so Snakemake does not delete the diagnostic tables.
 
 
-def astral(trees, merge_qc, manifest, output, qc, command, outgroup, threads, seed):
+def astral(trees, merge_qc, manifest, output, qc, command, outgroup, threads, seed, outgroup_file=None):
+    if outgroup_file:
+        outgroup = Path(outgroup_file).read_text().strip()
     command = executable(command)
     # A filename alone cannot demonstrate a LARGE_DATA build.
     expected = {r["species"] for r in read_tsv(manifest)}
@@ -281,7 +283,7 @@ if __name__ == "__main__":
         "trim": ["alignment", "raw-qc", "output", "qc", "columns", "command", "mode", "settings"],
         "gene_tree": ["alignment", "alignment-qc", "output", "qc", "command"],
         "merge": ["manifest", "markers", "tree-dir", "output", "coverage", "qc"],
-        "astral": ["trees", "merge-qc", "manifest", "output", "qc", "command", "outgroup"],
+        "astral": ["trees", "merge-qc", "manifest", "output", "qc", "command"],
     }
     for action, names in fields.items():
         p = sub.add_parser(action)
@@ -291,6 +293,9 @@ if __name__ == "__main__":
             p.add_argument("--threads", type=int, required=True)
         if action in {"gene_tree", "astral"}:
             p.add_argument("--seed", type=int, default=12345)
+        if action == "astral":
+            p.add_argument("--outgroup")
+            p.add_argument("--outgroup-file")
     args = vars(parser.parse_args())
     action = args.pop("action")
     if "settings" in args:
