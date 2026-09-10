@@ -1,8 +1,10 @@
 import io
+import gzip
 import json
 import shutil
 import subprocess
 import sys
+import tarfile
 import urllib.error
 from pathlib import Path
 
@@ -11,6 +13,7 @@ import pytest
 from common import read_tsv, sha256
 from prepare_kegg_reference import download_links, normalize_links, prepare
 from verify_kegg_reference import verify
+import bootstrap_kegg_reference as bootstrap_module
 
 
 @pytest.fixture
@@ -216,3 +219,115 @@ def test_download_does_not_retry_permanent_errors(monkeypatch, tmp_path):
     with pytest.raises(urllib.error.HTTPError):
         download_links("https://rest.kegg.jp/link/module/ko", tmp_path / "module.tsv")
     assert len(calls) == 1
+
+
+@pytest.fixture
+def reference_downloads(kegg_inputs, monkeypatch):
+    """Serve real compressed fixture files through the bootstrap HTTP boundary."""
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w:gz") as handle:
+        handle.add(kegg_inputs["profiles_dir"], arcname="profiles")
+    payloads = {"profiles": archive.getvalue(),
+                "ko_list": gzip.compress(kegg_inputs["ko_list"].read_bytes()),
+                "module_links": kegg_inputs["module_links"].read_bytes(),
+                "pathway_links": kegg_inputs["pathway_links"].read_bytes()}
+    urls = {key: url for key, (url, _) in bootstrap_module.DOWNLOADS.items()}
+    calls = []
+
+    class Response(io.BytesIO):
+        status = 200
+
+        def __init__(self, payload):
+            super().__init__(payload)
+            self.headers = {"Content-Length": str(len(payload)), "ETag": "fixture"}
+
+    def fetch(request, timeout):
+        calls.append(request.full_url)
+        key = next(key for key, url in urls.items() if url == request.full_url)
+        return Response(payloads[key])
+
+    monkeypatch.setattr(bootstrap_module, "urlopen", fetch)
+    monkeypatch.setattr(bootstrap_module.time, "sleep", lambda _: None)
+    return payloads, urls, calls, fetch
+
+
+def test_bootstrap_downloads_once_and_reuses_portable_snapshot(tmp_path, reference_downloads):
+    _, urls, calls, _ = reference_downloads
+    root = tmp_path / "resources/kegg/snapshot_v1"
+    reference = bootstrap_module.bootstrap(root)
+    assert calls == list(urls.values())
+    assert verify(reference)["counts"]["profiles"] == 2
+    metadata = json.loads(reference.read_text())
+    for key, (_, filename) in bootstrap_module.DOWNLOADS.items():
+        source = metadata["sources"]["downloads"][key]
+        assert source["sha256"] == sha256(root.parent / "downloads" / filename)
+        assert source["url"] == urls[key]
+    before = {p: (sha256(p), p.stat().st_mtime_ns) for p in root.rglob("*") if p.is_file()}
+    shutil.rmtree(root.parent / "downloads")
+    shutil.rmtree(tmp_path / "source")
+    assert bootstrap_module.bootstrap(root) == reference
+    assert calls == list(urls.values())
+    assert all((sha256(p), p.stat().st_mtime_ns) == record for p, record in before.items())
+    moved = tmp_path / "relocated"
+    root.rename(moved)
+    verify(moved / "reference.json")
+
+
+def test_bootstrap_resumes_completed_downloads_after_interruption(tmp_path, reference_downloads, monkeypatch):
+    _, urls, calls, fetch = reference_downloads
+    root = tmp_path / "kegg/snapshot_v1"
+
+    def interrupted_fetch(request, timeout):
+        response = fetch(request, timeout)
+        if request.full_url == urls["ko_list"]:
+            response.headers["Content-Length"] = str(int(response.headers["Content-Length"]) + 1)
+        return response
+
+    monkeypatch.setattr(bootstrap_module, "urlopen", interrupted_fetch)
+    with pytest.raises(ValueError, match="incomplete download"):
+        bootstrap_module.bootstrap(root)
+    assert not root.exists()
+    cache = root.parent / "downloads"
+    assert (cache / "profiles.tar.gz").is_file()
+    assert (cache / "profiles.tar.gz.json").is_file()
+    assert not (cache / "ko_list.gz").exists()
+    before = (cache / "profiles.tar.gz").stat().st_mtime_ns
+    monkeypatch.setattr(bootstrap_module, "urlopen", fetch)
+    verify(bootstrap_module.bootstrap(root))
+    assert calls.count(urls["profiles"]) == 1
+    assert calls.count(urls["ko_list"]) == 2
+    assert (cache / "profiles.tar.gz").stat().st_mtime_ns == before
+
+
+def test_bootstrap_rejects_corrupt_snapshot_without_replacing_it(tmp_path, reference_downloads):
+    _, _, calls, _ = reference_downloads
+    root = tmp_path / "kegg/snapshot_v1"
+    bootstrap_module.bootstrap(root)
+    count = len(calls)
+    profile = root / "profiles/K00001.hmm"
+    profile.write_text("damaged")
+    with pytest.raises(ValueError, match="mismatch"):
+        bootstrap_module.bootstrap(root)
+    assert len(calls) == count
+    assert profile.read_text() == "damaged"
+
+
+@pytest.mark.parametrize("corruption", ["gzip", "traversal", "symlink"])
+def test_bootstrap_rejects_invalid_archive_without_publishing(tmp_path, reference_downloads, corruption):
+    payloads, _, _, _ = reference_downloads
+    if corruption == "gzip":
+        payloads["profiles"] = payloads["profiles"][:-8]  # missing gzip footer
+    else:
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w:gz") as handle:
+            member = tarfile.TarInfo("../escaped.hmm" if corruption == "traversal" else "profiles/link")
+            if corruption == "symlink":
+                member.type, member.linkname = tarfile.SYMTYPE, "/tmp/outside"
+            handle.addfile(member)
+        payloads["profiles"] = archive.getvalue()
+    root = tmp_path / "kegg/snapshot_v1"
+    with pytest.raises((EOFError, tarfile.TarError, ValueError)):
+        bootstrap_module.bootstrap(root)
+    assert not root.exists()
+    assert not list(root.parent.glob(".snapshot_v1.extracting-*"))
+    assert not list(tmp_path.rglob("escaped.hmm"))

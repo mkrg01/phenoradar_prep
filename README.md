@@ -31,11 +31,12 @@ For a new dataset, create a configuration; skip the copy if you already have one
 cp config/config.yaml config/mydata.yaml
 ```
 
-Edit the metadata, BUSCO, CDS, and abundance paths, `taxonomy.database`, and
+Edit the metadata, BUSCO, CDS, and abundance paths, optional `taxonomy.source`, and
 `odb.node`. The default node `3193` is dataset-specific. See
 [inputs and configuration](docs/configuration.md) for the required formats.
-Missing [taxonomy snapshots](docs/references.md#taxonomy-reference) and OrthoDB
-references are downloaded and prepared automatically when needed. Existing
+Missing [taxonomy snapshots](docs/references.md#taxonomy-reference), OrthoDB
+references, and optional [KOfam/KEGG references](docs/kegg.md) are downloaded
+and prepared automatically when needed. Existing
 taxonomy snapshots are reused without updates.
 
 Submit the full workflow as one Slurm job, replacing `YOUR_PARTITION`:
@@ -71,7 +72,7 @@ Main tables are written to `results/<analysis>/tpm/`; logs and temporary work go
 | --- | --- |
 | [Inputs and configuration](docs/configuration.md) | File formats, species selection, configuration keys, and path handling |
 | [Running and resuming](docs/running.md) | Installation, Slurm and direct execution, resource budgets, pilots, and recovery |
-| [Reference data](docs/references.md) | Taxonomy setup, OrthoDB downloads, storage, and reference updates |
+| [Reference data](docs/references.md) | Taxonomy, OrthoDB and KEGG downloads, fixed storage, and reference updates |
 | [KEGG annotation and KO expression](docs/kegg.md) | Optional KofamScan branch, frozen reference setup, ambiguity, and PhenoRadar inputs |
 | [BUSCO phylogeny and dating](docs/phylogeny.md) | Existing BUSCO/CDS inputs, FAMSA, VeryFastTree, ASTRAL-IV, resources, and optional time trees |
 | [Phylogeny method review](docs/phylogeny_comparison.md) | Step-by-step comparison with GeneGalleon, scientific limitations, and improvement priorities |

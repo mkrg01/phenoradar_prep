@@ -79,21 +79,25 @@ def test_publish_preserves_frozen_reference(tmp_path):
     assert verify(reference / "reference.json")["reference_id"] == original
 
 
-def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, frozen_reference, tmp_path, command_environment):
+def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, frozen_reference, tmp_path, command_environment, workflow_project):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     seqkit = os.environ.get("SEQKIT_BIN") or shutil.which("seqkit")
     if not snakemake or not seqkit:
         pytest.skip("set SNAKEMAKE_BIN and SEQKIT_BIN for workflow integration")
     reference = small_reference(tmp_path)
+    kegg_reference = workflow_project / "resources/kegg/snapshot_v1"
+    kegg_reference.parent.mkdir(parents=True)
+    reference.rename(kegg_reference)
+    odb_reference = workflow_project / "resources/orthodb/v12_3193"
+    odb_reference.parent.mkdir(parents=True)
+    odb_reference.symlink_to(frozen_reference, target_is_directory=True)
     command = fake_kofam_command(tmp_path)
     config = {
         "analysis": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
-        "taxonomy": {"database": tiny_inputs["taxonomy_db"]},
-        "paths": {"results": str(tmp_path / "results"), "work": str(tmp_path / "work"), "logs": str(tmp_path / "logs")},
-        "odb": {"reference_dir": str(frozen_reference), "chunk_size": 1, "threads": 1, "batch_size": 1,
+        "taxonomy": {"source": tiny_inputs["taxonomy_db"]},
+        "odb": {"chunk_size": 1, "threads": 1, "batch_size": 1,
                 "mem_gb": 3, "min_free_gb": 0, "allow_nonlocal": True},
-        "kegg": {"enabled": False, "reference_dir": str(reference),
-                 "threads": 1, "mem_gb": 2},
+        "kegg": {"enabled": False, "threads": 1, "mem_gb": 2},
     }
     configfile = tmp_path / "config.yaml"
     configfile.write_text(yaml.safe_dump(config))
@@ -106,7 +110,7 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
             "--cores", "2", "--resources", "mem_mb=16000"]
 
     def execute(options=(), targets=("kegg",)):
-        result = subprocess.run(base + list(options) + ["--"] + list(targets), cwd=ROOT, env=env,
+        result = subprocess.run(base + list(options) + ["--"] + list(targets), cwd=workflow_project, env=env,
                                 text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         if result.returncode:
             logs = "\n".join(f"{p}:\n{p.read_text()}" for p in (tmp_path / "logs").rglob("*.log"))
@@ -196,3 +200,23 @@ def test_invalid_kegg_config_is_rejected(tmp_path, settings, message):
                             env={**os.environ, "XDG_CACHE_HOME": str(tmp_path / "cache")})
     assert result.returncode != 0
     assert message in result.stdout
+
+
+@pytest.mark.parametrize("target,overrides,rule,reference", [
+    ("kegg_references", {}, "prepare_kegg_reference", "resources/kegg/snapshot_v1/reference.json"),
+    ("references", {"odb": {"node": 33090}}, "prepare_odb_reference", "resources/orthodb/v12_33090/reference.json"),
+])
+def test_missing_references_are_scheduled_without_assemblies(workflow_project, target, overrides, rule, reference):
+    snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
+    if not snakemake:
+        pytest.skip("Snakemake is unavailable")
+    configfile = workflow_project / "override.yaml"
+    configfile.write_text(yaml.safe_dump(overrides))
+    result = subprocess.run([snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"),
+                             "--configfile", str(configfile), "--cores", "1", "--dry-run", "--", target],
+                            cwd=workflow_project, text=True, capture_output=True, timeout=60,
+                            env={**os.environ, "XDG_CACHE_HOME": str(workflow_project / ".cache")})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"rule {rule}:" in result.stdout
+    assert reference in result.stdout
+    assert not (workflow_project / "resources").exists()

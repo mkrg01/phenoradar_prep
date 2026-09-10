@@ -9,7 +9,6 @@ import tarfile
 from pathlib import Path
 
 import pytest
-import yaml
 
 import prepare_taxonomy
 from common import file_record
@@ -113,17 +112,15 @@ def test_failed_bootstrap_leaves_no_database_and_can_be_retried(tiny_inputs, tmp
     assert destination.is_file()
 
 
-def test_missing_database_is_scheduled_without_downloading(tmp_path):
+def test_missing_database_is_scheduled_without_downloading(tmp_path, workflow_project):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     if not snakemake:
         pytest.skip("Snakemake is not available")
-    destination = tmp_path / "taxonomy" / "taxa.sqlite"
-    configfile = tmp_path / "config.yaml"
-    configfile.write_text(yaml.safe_dump({"taxonomy": {"database": str(destination)}}))
+    destination = workflow_project / "resources/taxonomy/taxa.sqlite"
     result = subprocess.run([
         snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"),
-        "--configfile", str(configfile), "--cores", "1", "--dry-run", "--", str(destination),
-    ], cwd=ROOT, env={**os.environ, "XDG_CACHE_HOME": str(tmp_path / "cache")},
+        "--cores", "1", "--dry-run", "--", "resources/taxonomy/taxa.sqlite",
+    ], cwd=workflow_project, env={**os.environ, "XDG_CACHE_HOME": str(tmp_path / "cache")},
         capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "rule prepare_taxonomy:" in result.stdout

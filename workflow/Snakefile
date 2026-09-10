@@ -10,12 +10,13 @@ configfile: "config/config.yaml"
 # These are implementation choices, supplied by rule environments or the
 # official ASTRAL build. Refuse stale overrides rather than silently ignore them.
 fixed_keys = {
-    "": ["tools"],
-    "odb": ["version"],
-    "kegg": ["command"],
+    "": ["tools", "paths"],
+    "taxonomy": ["database"],
+    "odb": ["version", "reference_dir"],
+    "kegg": ["command", "reference_dir"],
     "phylogeny": ["famsa_command", "trimal_command", "veryfasttree_command", "astral_command"],
     "phylogeny.dating": ["command", "threads"],
-    "phylogeny.dating.timetree": ["python", "request_delay_seconds"],
+    "phylogeny.dating.timetree": ["python", "request_delay_seconds", "cache_dir"],
 }
 obsolete = []
 for section, keys in fixed_keys.items():
@@ -28,6 +29,8 @@ if obsolete:
 
 ODB_VERSION = "v12"
 PYTHON = "python"
+TAXONOMY_DB = "resources/taxonomy/taxa.sqlite"
+TIMETREE_CACHE = "resources/timetree_cache"
 
 if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", str(config["analysis"])):
     raise WorkflowError("analysis must be a simple directory name")
@@ -36,6 +39,8 @@ if EXISTING_ODB is not None and (not isinstance(EXISTING_ODB, str) or not EXISTI
     raise WorkflowError("odb.existing_results must be null or a snapshot directory")
 if config["odb"]["chunk_size"] < 1 or config["odb"]["threads"] < 1:
     raise WorkflowError("ODB chunk_size and threads must be positive")
+if type(config["odb"]["node"]) is not int or config["odb"]["node"] < 1:
+    raise WorkflowError("odb.node must be a positive integer")
 if config["odb"]["batch_size"] < config["odb"]["threads"]:
     raise WorkflowError("ODB batch_size must be >= threads")
 if "mem_mb" in config["odb"]:
@@ -49,9 +54,6 @@ if type(config["kegg"]["enabled"]) is not bool:
 for key in ["threads", "mem_gb"]:
     if type(config["kegg"][key]) is not int or config["kegg"][key] <= 0:
         raise WorkflowError(f"kegg.{key} must be a positive integer")
-for key in ["reference_dir"]:
-    if not isinstance(config["kegg"][key], str) or not config["kegg"][key].strip():
-        raise WorkflowError(f"kegg.{key} must be a nonempty string")
 if config["kegg"]["ambiguity"] not in {"duplicate", "drop", "error"}:
     raise WorkflowError("kegg.ambiguity must be duplicate, drop, or error")
 PHY = dict(config["phylogeny"], translation_table=config["translation"]["table"])
@@ -113,9 +115,6 @@ for key in ["max_representatives", "max_queries", "min_studies"]:
         raise WorkflowError(f"phylogeny.dating.timetree.{key} must be a positive integer")
 if TT["max_representatives"] < 2 or type(TT["offline"]) is not bool:
     raise WorkflowError("TimeTree requires max_representatives >= 2 and boolean offline")
-for key in ["cache_dir"]:
-    if not isinstance(TT[key], str) or not TT[key].strip():
-        raise WorkflowError(f"phylogeny.dating.timetree.{key} must be a nonempty string")
 if TT["representatives"] is not None and (not isinstance(TT["representatives"], str) or not TT["representatives"].strip()):
     raise WorkflowError("TimeTree representatives must be null or a nonempty file path")
 
@@ -126,20 +125,20 @@ sys.path.insert(0, SCRIPTS)
 from make_manifests import chunk_plan
 from date_phylogeny import validate_settings as validate_lsd2_settings
 validate_lsd2_settings(PHY["dating"]["lsd2"])
-OUT = f'{config["paths"]["results"]}/{config["analysis"]}'
-WORK = f'{config["paths"]["work"]}/{config["analysis"]}'
-LOG = f'{config["paths"]["logs"]}/{config["analysis"]}'
+OUT = f'results/{config["analysis"]}'
+WORK = f'work/{config["analysis"]}'
+LOG = f'logs/{config["analysis"]}'
 PROTEINS = str(Path(f"{OUT}/proteins").resolve())
 META = f"{OUT}/metadata"
 MANIFESTS = f"{OUT}/odb/manifests"
 CHUNKS = f"{OUT}/odb/chunks"
 MERGED = f"{OUT}/odb/merged"
 TPM = f"{OUT}/tpm"
-REFERENCE = config["odb"]["reference_dir"]
+REFERENCE = f'resources/orthodb/{ODB_VERSION}_{config["odb"]["node"]}'
 KEGG = f"{OUT}/kegg"
 KEGG_SPECIES = f"{KEGG}/species"
 KEGG_RUNS = f"{KEGG}/runs"
-KEGG_REFERENCE = config["kegg"]["reference_dir"]
+KEGG_REFERENCE = "resources/kegg/snapshot_v1"
 KEGG_FINAL = [f"{KEGG}/{name}" for name in [
     "gene_kos.tsv", "genes.tsv", "ko_tpm_sum.tsv", "ko_tpm_sum_wide.tsv",
     "ko_support.tsv", "mapping_qc.tsv", "ko_modules.tsv", "ko_pathways.tsv",
@@ -153,7 +152,7 @@ if PHY["dating"]["enabled"]:
     PHYLO_FINAL += PHYLO_DATED
 
 # Refuse output roots inside either user-provided input tree.
-for destination in [OUT, WORK, LOG, REFERENCE, KEGG_REFERENCE]:
+for destination in [OUT, WORK, LOG, REFERENCE, KEGG_REFERENCE, TAXONOMY_DB, TIMETREE_CACHE]:
     dest = Path(destination).resolve()
     for source in [Path(config["inputs"]["metadata"]).resolve().parent,
                    Path(config["inputs"]["cds_dir"]).resolve().parent]:
@@ -163,7 +162,7 @@ for destination in [OUT, WORK, LOG, REFERENCE, KEGG_REFERENCE]:
 for destination in [OUT, WORK, LOG]:
     dest, ref = Path(destination).resolve(), Path(KEGG_REFERENCE).resolve()
     if dest == ref or ref in dest.parents or dest in ref.parents:
-        raise WorkflowError("kegg.reference_dir must not overlap results, work, or log directories")
+        raise WorkflowError("KEGG reference storage must not overlap results, work, or log directories")
     for source in [PHY["busco_full_dir"], PHY["sequence_dir"]]:
         if source:
             src = Path(source).resolve()
@@ -243,6 +242,14 @@ rule references:
     input:
         f"{REFERENCE}/reference.json",
         f"{REFERENCE}/files.json"
+
+
+rule kegg_references:
+    input:
+        f"{KEGG_REFERENCE}/reference.json",
+        f"{KEGG_REFERENCE}/files.json",
+        f"{KEGG_REFERENCE}/ko_modules.tsv",
+        f"{KEGG_REFERENCE}/ko_pathways.tsv"
 
 
 rule proteins:

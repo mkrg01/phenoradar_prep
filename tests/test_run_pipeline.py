@@ -25,7 +25,7 @@ def batch_workspace(tmp_path):
            if not k.startswith(("SLURM_", "SBATCH_", "SRUN_"))}
     env.update({"SLURM_JOB_ID": "123", "SLURM_CPUS_PER_TASK": "2",
                 "SLURM_MEM_PER_NODE": "8192", "SLURM_NTASKS": "1",
-                "PHENORADAR_CACHE_DIR": str(tmp_path / "cache")})
+                "XDG_CACHE_HOME": str(tmp_path / "inherited_cache")})
     return checkout, script, env
 
 
@@ -40,7 +40,7 @@ def test_launcher_arguments_and_exit_status(batch_workspace, tmp_path, mode, exi
         "import json, os, sys\n"
         "from pathlib import Path\n"
         "Path(os.environ['PHENORADAR_TEST_CAPTURE']).write_text(json.dumps({\n"
-        "    'argv': sys.argv[1:], 'cwd': os.getcwd(),\n"
+        "    'argv': sys.argv[1:], 'cwd': os.getcwd(), 'cache': os.environ['XDG_CACHE_HOME'],\n"
         "    'job': os.environ.get('SLURM_JOB_ID')}))\n"
         f"sys.exit({exit_code})\n"
     )
@@ -82,6 +82,7 @@ def test_launcher_arguments_and_exit_status(batch_workspace, tmp_path, mode, exi
     assert "--printshellcmds" in argv
     assert "--rerun-incomplete" in argv
     assert observed["cwd"] == str(checkout)
+    assert observed["cache"] == str(checkout / ".cache")
     assert observed["job"] == (None if mode == "direct" else "123")
 
 

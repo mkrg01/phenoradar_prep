@@ -1,3 +1,25 @@
+# A completed snapshot is an immutable input, independent of code changes.
+# Failed downloads remain outside the snapshot and can be reused on retry.
+if not Path(KEGG_REFERENCE).exists():
+    rule prepare_kegg_reference:
+        input:
+            code=f"{SCRIPTS}/bootstrap_kegg_reference.py",
+            helpers=[f"{SCRIPTS}/prepare_kegg_reference.py", f"{SCRIPTS}/verify_kegg_reference.py",
+                     f"{SCRIPTS}/common.py"]
+        output:
+            reference=f"{KEGG_REFERENCE}/reference.json",
+            inventory=f"{KEGG_REFERENCE}/files.json",
+            modules=f"{KEGG_REFERENCE}/ko_modules.tsv",
+            pathways=f"{KEGG_REFERENCE}/ko_pathways.tsv"
+        params: root=KEGG_REFERENCE
+        threads: 1
+        resources: mem_mb=4000
+        conda: "../envs/analysis.yaml"
+        log: f"{LOG}/kegg/reference_prepare.log"
+        shell:
+            "{PYTHON:q} {input.code:q} --reference-dir {params.root:q} > {log:q} 2>&1"
+
+
 rule kegg_verify_reference:
     input:
         reference=f"{KEGG_REFERENCE}/reference.json",

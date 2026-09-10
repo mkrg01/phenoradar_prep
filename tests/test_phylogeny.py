@@ -381,7 +381,7 @@ def phylogeny_inputs(tmp_path):
     return source, species
 
 
-def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environment):
+def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environment, workflow_project):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     famsa = os.environ.get("FAMSA_BIN") or shutil.which("famsa")
     vft = os.environ.get("VERYFASTTREE_BIN") or shutil.which("VeryFastTree")
@@ -397,8 +397,7 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
     source, species = phylogeny_inputs(tmp_path)
     cfg = {"analysis": "test", "inputs": {"metadata": str(source / "metadata.tsv"), "busco": str(source / "busco.tsv"),
            "cds_dir": str(source / "cds"), "quant_dir": str(source / "quant")},
-           "taxonomy": {"database": str(source / "taxa.sqlite")},
-           "paths": {key: str(tmp_path / key) for key in ["results", "work", "logs"]},
+           "taxonomy": {"source": str(source / "taxa.sqlite")},
            "phylogeny": {"busco_full_dir": str(source / "busco"), "outgroup": species[0],
                "max_markers": 3,
                "align_threads": 1, "tree_threads": 1, "astral_threads": 2, "astral_mem_gb": 4}}
@@ -410,7 +409,7 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
     if conda_prefix:
         argv[1:1] = ["--use-conda", "--conda-prefix", conda_prefix]
     def run():
-        result = subprocess.run(argv, cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        result = subprocess.run(argv, cwd=workflow_project, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 env=env)
         assert result.returncode == 0, result.stdout + "\n" + "\n".join(
             p.read_text()[-4000:] for p in (tmp_path / "logs").rglob("*.log"))
@@ -466,12 +465,12 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
         # the full rule graph offline with a recorded synthetic API response.
         from timetree_calibrations import cached_response
         from test_timetree_calibrations import fake_fetch, payload
-        cache = tmp_path / "timetree_cache"
+        cache = workflow_project / "resources/timetree_cache"
         cached_response(range(42, 48), cache, delay=0,
                         backend=(fake_fetch(payload(range(42, 48))), {"synthetic": True}))
         cfg["phylogeny"]["dating"].update(calibration_source="timetree", timetree={
             "max_representatives": 6, "max_queries": 1,
-            "cache_dir": str(cache), "offline": True})
+            "offline": True})
         config.write_text(yaml.safe_dump(cfg))
         run()
         assert json.loads((out / "timetree/provenance.json").read_text())["status"] == "ready"

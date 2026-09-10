@@ -70,7 +70,7 @@ if ! command -v "${SNAKEMAKE_BIN:-snakemake}" >/dev/null 2>&1; then
     printf '%s\n' 'Snakemake is unavailable. Activate the workflow Conda environment first.' >&2
     exit 2
 fi
-export XDG_CACHE_HOME="${PHENORADAR_CACHE_DIR:-$root/.cache}"
+export XDG_CACHE_HOME="$root/.cache"
 mkdir -p "$XDG_CACHE_HOME"
 
 # Translate the user-facing GB budget to Snakemake's standard memory resource.

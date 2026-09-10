@@ -385,7 +385,6 @@ phylogeny:
       max_representatives: 64
       max_queries: 32
       min_studies: 5
-      cache_dir: resources/timetree_cache
       offline: false
 ```
 
@@ -459,15 +458,18 @@ The steps are:
 
 `candidates.tsv` and `candidates.json` describe each attempted node, its original
 clade size, queried and used representatives, MRCA ID, study count, bounds and
-exclusion reason. Raw response records in `cache_dir` include `study_data`.
+exclusion reason. Raw response records in `resources/timetree_cache/` include `study_data`.
 `representatives.nwk` is a pruned diagnostic copy; the original CASTLES tree
 is the input to LSD2 and is never replaced by a calibration-only tree.
 
 The cache has no automatic expiry: repeat runs use the frozen responses.
-`offline: true` prohibits requests and fails on a cache miss. Use a new cache
-directory for an intentional database refresh; changing `cache_dir` retriggers
-the rule. Keep the cache with the analysis record; do not publish retrieved
-TimeTree datasets in this source repository.
+`offline: true` prohibits requests and fails on a cache miss. For an intentional
+refresh, archive `resources/timetree_cache/` with the previous analysis record,
+then rerun online with a new `analysis` name or explicitly force
+`prepare_timetree_calibrations` using `--forcerun`. Removing the cache alone does
+not invalidate completed calibration outputs. The fixed cache directory is
+created as needed. Do not publish retrieved TimeTree datasets in this source
+repository.
 
 These are **secondary calibrations**, not fossil minima/maxima. TimeTree's
 reported intervals summarize variation across published estimates, and fewer

@@ -1,14 +1,14 @@
 # Existing snapshots are external inputs, even if code or source settings change.
-# Only register a producer when the configured database is missing.
-if not Path(config["taxonomy"]["database"]).exists():
+# Only register a producer when the fixed snapshot is missing.
+if not Path(TAXONOMY_DB).exists():
     rule prepare_taxonomy:
         input:
             source=[config["taxonomy"]["source"]] if config["taxonomy"].get("source") else [],
             code=f"{SCRIPTS}/prepare_taxonomy.py",
             helpers=[f"{SCRIPTS}/snapshot_taxonomy.py", f"{SCRIPTS}/common.py"]
         output:
-            database=config["taxonomy"]["database"],
-            provenance=f'{config["taxonomy"]["database"]}.json'
+            database=TAXONOMY_DB,
+            provenance=f"{TAXONOMY_DB}.json"
         params:
             source_flag="--source" if config["taxonomy"].get("source") else ""
         log: f"{LOG}/taxonomy_reference.log"
@@ -24,7 +24,7 @@ checkpoint select_metadata:
     input:
         metadata=config["inputs"]["metadata"],
         busco=config["inputs"]["busco"],
-        taxonomy=config["taxonomy"]["database"],
+        taxonomy=TAXONOMY_DB,
         subset=[config["selection"]["species_list"]] if config["selection"]["species_list"] else [],
         code=f"{SCRIPTS}/prepare_metadata.py",
         common=f"{SCRIPTS}/common.py"

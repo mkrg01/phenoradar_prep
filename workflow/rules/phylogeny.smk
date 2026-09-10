@@ -214,7 +214,7 @@ rule prepare_timetree_calibrations:
     input:
         tree=f"{PHYLO}/species_tree.nwk",
         metadata=f"{META}/metadata_high_busco.tsv",
-        taxonomy=config["taxonomy"]["database"],
+        taxonomy=TAXONOMY_DB,
         coverage=f"{PHYLO}/species_coverage.tsv",
         representatives=[PHY["dating"]["timetree"]["representatives"]] if PHY["dating"]["timetree"]["representatives"] else [],
         code=f"{SCRIPTS}/timetree_calibrations.py",
@@ -228,7 +228,7 @@ rule prepare_timetree_calibrations:
         skeleton=f"{PHYLO}/timetree/representatives.nwk",
         taxa=f"{PHYLO}/timetree/taxa.tsv"
     params:
-        outdir=f"{PHYLO}/timetree", cache=PHY["dating"]["timetree"]["cache_dir"],
+        outdir=f"{PHYLO}/timetree", cache=TIMETREE_CACHE,
         representatives_flag="--representatives" if PHY["dating"]["timetree"]["representatives"] else "",
         settings=json.dumps(dict({k: PHY["dating"]["timetree"][k] for k in ["max_representatives", "max_queries",
             "min_studies", "offline"]}, request_delay_seconds=1.0), sort_keys=True)

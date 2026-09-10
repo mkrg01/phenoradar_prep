@@ -153,7 +153,7 @@ def _copied_source_record(source, frozen):
 
 
 def prepare(profiles_dir, ko_list, reference_dir, module_links=None, pathway_links=None,
-            release="unspecified"):
+            release="unspecified", source_downloads=None):
     """Build a relocatable snapshot and publish only after successful validation."""
     root = Path(reference_dir).absolute()
     if root.exists() or root.is_symlink():
@@ -199,6 +199,8 @@ def prepare(profiles_dir, ko_list, reference_dir, module_links=None, pathway_lin
 
             sources = {"profiles_dir": str(source_dir),
                        "ko_list": _copied_source_record(source_ko_list, staging / "ko_list")}
+            if source_downloads is not None:
+                sources["downloads"] = source_downloads
             counts = {"profiles": len(profiles), "ko_list_entries": len(frozen_entries)}
             for kind, local in [("module", module_links), ("pathway", pathway_links)]:
                 raw = staging / "raw" / f"ko_{kind}_links.tsv"

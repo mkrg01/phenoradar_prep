@@ -21,8 +21,9 @@ and a test-only ODB substitute. It checks a complete workflow, separate preparat
 followed by execution, unchanged reruns, abundance updates, and reduced species
 selections. A barrier in the ODB substitute requires two chunks to start before
 either can finish, verifying concurrency when CPU and memory budgets allow it.
-The workflow is exercised without command configuration. Tests expose tools and
-test doubles under the workflow's fixed names on `PATH`.
+The workflow is exercised in isolated project directories with fixed storage
+paths and without command configuration. Tests expose tools and test doubles
+under the workflow's fixed names on `PATH`.
 Without Snakemake or seqkit, that integration test is skipped.
 
 Taxonomy bootstrap tests build a real ETE4 database from a small synthetic
@@ -47,7 +48,11 @@ integration test uses a test-only KofamScan substitute with real Snakemake and
 seqkit. It checks the standalone `kegg` target, opt-in full workflow, annotation
 reuse across runs, abundance-only and ambiguity-policy updates without
 reannotation, and removal of stale species from
-merged outputs. No reference downloads are needed for these tests.
+merged outputs. Bootstrap tests serve small real gzip/tar fixtures through a
+substituted HTTP boundary, checking automatic preparation, interrupted-download
+recovery, archive safety, portability, and reuse without network access. Dry-runs
+check missing-reference scheduling and node-derived ODB paths without assemblies.
+No full reference downloads are needed for these tests.
 
 The automated tests do not validate real ODB assignments, reference download
 availability, or Slurm execution. Run a real pilot with your input data to assess

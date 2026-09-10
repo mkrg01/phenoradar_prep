@@ -1,4 +1,4 @@
-# Dataset, analysis, and resource settings. Commands are fixed in the workflow.
+# Dataset, analysis, and resource settings. Commands and storage layout are fixed.
 # Paths are relative to the project root (run Snakemake there).
 analysis: full
 inputs:
@@ -11,21 +11,15 @@ selection:
   species_list: null
   missing_taxonomy: error
 taxonomy:
-  # Created automatically when missing; existing snapshots are reused unchanged.
-  database: resources/taxonomy/taxa.sqlite
-  # Optional local SQLite source. null downloads NCBI taxonomy and builds with ETE4.
+  # Optional local SQLite source for resources/taxonomy/taxa.sqlite.
+  # null downloads NCBI taxonomy and builds with ETE4 when the snapshot is missing.
   source: null
-paths:
-  results: results
-  work: work
-  logs: logs
 translation:
   table: 1
 odb:
   # Optional local snapshot of existing annotations and original protein checksums.
   existing_results: null
   node: 3193
-  reference_dir: resources/orthodb/v12_3193
   # Per chunk; concurrency follows the workflow's total CPU and memory budgets.
   chunk_size: 50
   threads: 16
@@ -41,8 +35,7 @@ tpm:
 kegg:
   # Opt in for the full workflow; the explicit `kegg` target also runs this branch.
   enabled: false
-  # Prepare this immutable snapshot with workflow/scripts/prepare_kegg_reference.py.
-  reference_dir: resources/kegg/snapshot_v1
+  # Missing references are downloaded automatically on first use.
   threads: 4
   mem_gb: 8
   # duplicate: add full TPM to every accepted KO; drop: omit multi-KO genes; error: reject them.
@@ -86,5 +79,4 @@ phylogeny:
       max_representatives: 64
       max_queries: 32
       min_studies: 5
-      cache_dir: resources/timetree_cache
       offline: false

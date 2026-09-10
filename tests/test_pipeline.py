@@ -257,7 +257,7 @@ def test_existing_odb_rejects_incompatible_inputs(existing_odb, tmp_path, proble
 
 
 @pytest.mark.parametrize("reuse", [False, True])
-def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, frozen_reference, existing_odb, tmp_path, reuse, command_environment):
+def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, frozen_reference, existing_odb, tmp_path, reuse, command_environment, workflow_project):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     seqkit = os.environ.get("SEQKIT_BIN") or shutil.which("seqkit")
     if not snakemake or not seqkit:
@@ -265,16 +265,18 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     import yaml
     config = {
         "analysis": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
-        "taxonomy": {"database": str(tmp_path / "taxonomy/taxa.sqlite"), "source": tiny_inputs["taxonomy_db"]},
-        "paths": {"results": str(tmp_path / "results"), "work": str(tmp_path / "work"), "logs": str(tmp_path / "logs")},
-        "odb": {"reference_dir": str(frozen_reference), "chunk_size": 1, "threads": 1, "batch_size": 1, "mem_gb": 3,
+        "taxonomy": {"source": tiny_inputs["taxonomy_db"]},
+        "odb": {"chunk_size": 1, "threads": 1, "batch_size": 1, "mem_gb": 3,
                 "min_free_gb": 0, "allow_nonlocal": True, "keep_work": True},
     }
     configfile = tmp_path / "config.yaml"
     if reuse:
         config["odb"]["existing_results"] = str(existing_odb[0])
-        # Any accidental reference download or ODB execution must fail.
-        config["odb"]["reference_dir"] = str(tmp_path / "absent_reference")
+        # Leave the fixed reference absent; ODB must never execute in import mode.
+    else:
+        reference = workflow_project / "resources/orthodb/v12_3193"
+        reference.parent.mkdir(parents=True)
+        reference.symlink_to(frozen_reference, target_is_directory=True)
     configfile.write_text(yaml.safe_dump(config))
     # Supply standard command names as the rule environments do in production.
     env = command_environment({"python": sys.executable, "seqkit": seqkit,
@@ -282,15 +284,14 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     env["FAKE_ODB_LOG"] = str(tmp_path / "events.txt")
     base = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(configfile),
             "--cores", "2", "--resources", "mem_mb=16000"]
-    # Workflow configfile paths are relative to the repository root.
     def execute(extra=()):
-        result = subprocess.run(base + list(extra), cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        result = subprocess.run(base + list(extra), cwd=workflow_project, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         if result.returncode:
             logs = "\n".join(f"{p}:\n{p.read_text()}" for p in (tmp_path / "logs").rglob("*.log"))
             pytest.fail(result.stdout + "\n" + logs)
         return result.stdout
     execute(["--", "prepare"])
-    taxonomy = Path(config["taxonomy"]["database"])
+    taxonomy = workflow_project / "resources/taxonomy/taxa.sqlite"
     taxonomy_before = file_record(taxonomy), taxonomy.stat().st_mtime_ns
     assert json.loads(Path(str(taxonomy) + ".json").read_text())["method"] == "sqlite_backup"
     # Once prepared, the snapshot no longer depends on the bootstrap source.

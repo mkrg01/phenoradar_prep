@@ -50,7 +50,7 @@ it. If you already have a configuration, keep using it rather than overwriting i
 cp config/config.yaml config/mydata.yaml
 ```
 
-Set the input paths, taxonomy database, analysis name, and appropriate OrthoDB
+Set the input paths, optional taxonomy source, analysis name, and appropriate OrthoDB
 taxonomic node. **The default node `3193` is dataset-specific**; review it before
 processing another dataset or downloading reference data.
 
@@ -62,15 +62,13 @@ shared workflow. These files remain available locally.
 | --- | --- |
 | `analysis` | Output directory name under `results/`, `work/`, and `logs/` |
 | `inputs.*` | Metadata, BUSCO, CDS, and abundance paths |
-| `paths.*` | Root directories for results, temporary work, and logs |
 | `translation.table` | Genetic code table used for CDS translation; default `1` |
-| `taxonomy.database` | ETE4 taxonomy SQLite snapshot; created automatically when missing and reused unchanged |
-| `taxonomy.source` | Optional existing SQLite database to copy when `taxonomy.database` is missing; default `null` downloads NCBI taxonomy |
+| `taxonomy.source` | Optional existing SQLite database to copy when `resources/taxonomy/taxa.sqlite` is missing; default `null` downloads NCBI taxonomy |
 | `selection.busco_threshold` | Minimum complete BUSCO fraction; default `0.5` |
 | `selection.species_list` | Optional text file of species IDs, one per line |
 | `selection.missing_taxonomy` | `error` or `allow` for unresolved taxids |
 | `odb.existing_results` | Optional local import snapshot directory; `null` runs ODB normally |
-| `odb.node`, `odb.reference_dir` | OrthoDB node and reference snapshot directory |
+| `odb.node` | Positive integer OrthoDB node; determines the reference path `resources/orthodb/v12_<node>` |
 | `odb.chunk_size` | Maximum species per ODB chunk; default `50` |
 | `odb.threads`, `odb.batch_size` | Worker and batch counts per chunk; defaults `16` and `64`; batch size must be at least the worker count |
 | `odb.mem_gb` | Memory estimate per chunk in whole GB used to schedule ODB alongside other steps; default `192` |
@@ -80,7 +78,6 @@ shared workflow. These files remain available locally.
 | `odb.keep_work` | Whether to retain successful ODB work directories |
 | `tpm.multimap` | Policy for genes assigned to multiple orthogroups; see [TPM interpretation](outputs.md#tpm-interpretation) |
 | `kegg.enabled` | Include KEGG outputs in the default full workflow; default `false` |
-| `kegg.reference_dir` | Prepared immutable KEGG/KOfam snapshot; see [KEGG setup](kegg.md) |
 | `kegg.threads`, `kegg.mem_gb` | CPU and decimal-GB memory budgets per species; defaults `4` and `8` |
 | `kegg.ambiguity` | `duplicate` (default) adds full TPM to each accepted KO; `drop` excludes multi-KO genes; `error` rejects quantified multi-KO genes. Annotations always retain candidates |
 
@@ -89,8 +86,25 @@ the workflow budget. The defaults use 16 workers and 192 GB for up to 50 species
 per chunk. These are initial allowances to check against measured peak memory;
 `config/pilot.yaml` retains smaller settings for its two-species chunks.
 
-Configuration contains dataset paths, analysis choices, resource budgets and
-storage/cache controls. Executable names and interpreters are fixed in the
+Configuration contains dataset paths, analysis choices, and resource budgets.
+Generated storage locations are fixed:
+
+| Contents | Location |
+| --- | --- |
+| Analysis results, temporary work, logs | `results/<analysis>/`, `work/<analysis>/`, `logs/<analysis>/` |
+| Taxonomy snapshot | `resources/taxonomy/taxa.sqlite` |
+| OrthoDB reference | `resources/orthodb/v12_<node>/` |
+| KOfam/KEGG reference | `resources/kegg/snapshot_v1/` |
+| Completed KOfam/KEGG downloads | `resources/kegg/downloads/` |
+| TimeTree response cache | `resources/timetree_cache/` |
+| Launcher-managed Snakemake cache | `.cache/` |
+
+Missing reference data are prepared automatically when a requested branch needs
+them. Existing snapshots and cached responses are reused without automatic
+updates. The KEGG reference is only required for KEGG targets or `kegg.enabled: true`.
+See [reference management](references.md) for preparation and intentional refreshes.
+
+Executable names and interpreters are fixed in the
 workflow and supplied by each rule's Conda environment. ASTRAL-IV uses the
 official build at `resources/phylogeny_tools/bin/astral4_int128`.
 
@@ -99,12 +113,14 @@ one thread, and the TimeTree delay to one second between uncached requests.
 These are not user configuration options. For phylogeny settings such as marker
 selection, trimming, rooting and calibrations, see [the phylogeny guide](phylogeny.md).
 
-Remove the following keys from older overrides: `tools`, `odb.version`,
+Remove the following keys from older overrides: `tools`, `paths`,
+`taxonomy.database`, `odb.reference_dir`, `kegg.reference_dir`, `odb.version`,
 `kegg.command`, `phylogeny.famsa_command`, `phylogeny.trimal_command`,
 `phylogeny.veryfasttree_command`, `phylogeny.astral_command`,
 `phylogeny.dating.command`, `phylogeny.dating.threads`,
 `phylogeny.dating.timetree.python`, and
-`phylogeny.dating.timetree.request_delay_seconds`. They are rejected with a
+`phylogeny.dating.timetree.request_delay_seconds`, and
+`phylogeny.dating.timetree.cache_dir`. They are rejected with a
 migration message. Execution records still retain the commands, tool hashes and
 reference versions actually used; `run.json` records configuration and workflow
 source checksums.
@@ -131,8 +147,9 @@ Paths are relative to the repository root unless absolute. When run directly,
 `run_pipeline.sh` changes to its own directory. With `sbatch`, submit from the
 repository root or use `sbatch --chdir=/path/to/phenoradar_prep`; the script uses
 the job's working directory because Slurm executes a temporary copy of it.
-The launcher keeps Snakemake's cache in `.cache/`. Override the cache location
-with `PHENORADAR_CACHE_DIR`, or the Snakemake executable with `SNAKEMAKE_BIN`.
+The launcher keeps Snakemake's cache in `.cache/` and sets `XDG_CACHE_HOME`
+accordingly; `PHENORADAR_CACHE_DIR` is no longer used. The Snakemake executable
+can be supplied with `SNAKEMAKE_BIN`.
 Both execution modes print shell commands and rerun incomplete outputs automatically.
 
 The workflow loads `config/config.yaml` and overlays files supplied with

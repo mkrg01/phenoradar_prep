@@ -9,13 +9,29 @@ OG TPM is never used to reconstruct KO expression.
 
 ## Prepare a reference snapshot
 
-Obtain and extract matching `profiles` and `ko_list` files from the
-[official KOfam distribution](https://www.genome.jp/tools/kofamkoala/).
-The workflow does not bundle or automatically download the large KOfam database.
-Setup copies local profiles, so allow space for a complete snapshot.
+The workflow automatically creates `resources/kegg/snapshot_v1/` when a KEGG
+target first needs it. It downloads `profiles.tar.gz` and `ko_list.gz` from the
+[official KOfam distribution](https://www.genome.jp/ftp/db/kofam/) and KO-to-MODULE
+and KO-to-PATHWAY tables from KEGG REST. Initial setup needs network access and
+space for the archives, extracted profiles, and final snapshot.
 
-From the repository root, use a new destination and record the KOfam release or
-download date:
+To prepare the reference separately, without assemblies or annotation:
+
+```bash
+./run_pipeline.sh --software-deployment-method conda \
+  --cores 1 --resources mem_gb=4 -- kegg_references
+```
+
+Completed downloads and their URL, retrieval time, byte count, and SHA-256
+records stay in `resources/kegg/downloads/`. Retrying after a failed download
+reuses verified completed files and restarts the interrupted file. Extraction
+and validation must all succeed before the snapshot is published. Existing
+snapshots are reused without network access or automatic updates; corrupt
+snapshots or cached downloads cause an error rather than being silently replaced.
+Preparation logs are in `logs/<analysis>/kegg/reference_prepare.log`.
+
+For manual setup using locally extracted profiles and a matching `ko_list`, the
+offline helper remains available. The fixed destination must be absent:
 
 ```bash
 python workflow/scripts/prepare_kegg_reference.py \
@@ -25,7 +41,7 @@ python workflow/scripts/prepare_kegg_reference.py \
   --release YOUR_KOFAM_RELEASE_OR_DOWNLOAD_DATE
 ```
 
-This fetches the small KO-to-MODULE and KO-to-PATHWAY link tables from KEGG REST.
+This manual command fetches the small KO-to-MODULE and KO-to-PATHWAY link tables from KEGG REST.
 For offline setup, also pass `--module-links /path/to/ko_module_links.tsv` and
 `--pathway-links /path/to/ko_pathway_links.tsv`. These are headerless two-column
 responses from `https://rest.kegg.jp/link/module/ko` and
@@ -39,8 +55,10 @@ without a searched profile.
 The snapshot contains `profiles/`, `ko_list`, raw mappings, normalized
 `ko_modules.tsv` and `ko_pathways.tsv`, `files.json`, and `reference.json`.
 Checksums, source/retrieval information, profile counts, and the release label
-are recorded. Existing snapshot directories are never overwritten. Updates
-require a new directory and an updated `kegg.reference_dir`.
+are recorded. Existing snapshot directories are never overwritten. To refresh
+deliberately, archive the whole `resources/kegg/` directory, including its download
+cache, and run again with a new `analysis` name to preserve previous results.
+Keeping the old download cache would reuse the old downloaded data.
 
 Snapshots must remain immutable. The workflow verifies all file checksums once
 before annotation. Species jobs also check the inventory hash, file set, and
@@ -52,7 +70,7 @@ python workflow/scripts/verify_kegg_reference.py \
 ```
 
 Changing files inside an existing snapshot is unsupported, including changes
-that preserve timestamps. Prepare a new snapshot to trigger reproducible reruns.
+that preserve timestamps. Keep each completed snapshot with its analysis records.
 
 ## Run the branch
 
@@ -61,7 +79,6 @@ Add these settings to your dataset configuration:
 ```yaml
 kegg:
   enabled: true
-  reference_dir: resources/kegg/snapshot_v1
   threads: 4
   mem_gb: 8
   ambiguity: duplicate
