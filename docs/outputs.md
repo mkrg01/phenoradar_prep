@@ -77,3 +77,16 @@ input TPM. In KEGG `mapping_qc.tsv`, `retained_targets`, `retained_tpm`, and
 `retained_tpm_fraction` count each contributing gene once; `quantified_assignments`
 and `ko_tpm_sum` count all gene/KO contributions. `ambiguous_tpm` is included in
 retained TPM under `duplicate`; it is excluded only when `drop` is selected.
+
+## Optional OG alignments
+
+The [alignment branch](alignments.md) writes `results/<analysis>/alignments/`:
+
+- `{og}.faa`: untrimmed protein MSA, one row per original gene ID, with all copies.
+- `members.tsv`: `orthogroup`, `gene_id`, and `species`; one row per gene/OG pair.
+- `provenance.json`: membership and alignment hashes and links to execution records.
+
+Every OG observed in the selected species' ODB mappings is included, even with
+one sequence or no variation. Genes assigned to several OGs occur in each, regardless
+of `tpm.multimap`. Species, gene, OG and site selection for modelling belongs in
+PhenoRadar. No trimming or site-coordinate tables are produced.

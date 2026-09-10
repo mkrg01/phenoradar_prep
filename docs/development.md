@@ -26,6 +26,17 @@ paths and without command configuration. Tests expose tools and test doubles
 under the workflow's fixed names on `PATH`.
 Without Snakemake or seqkit, that integration test is skipped.
 
+OG alignment tests cover all copies and repeated assignments, singletons,
+identical sequences, repeated runs, bounded open-file collection, stale OG removal,
+invalid inputs and aligner residue/ID corruption. Set `FAMSA_BIN` to run real
+FAMSA tests (including stops, ambiguous residues and unequal input lengths).
+With `SNAKEMAKE_BIN` and `SEQKIT_BIN` also supplied, the alignment workflow test
+uses real FAMSA/seqkit and a test-only ODB substitute. It checks standalone and
+opt-in full targets, unchanged reruns, a deleted alignment, an interrupted OG job,
+abundance-only updates, independence from TPM ambiguity policy, and species
+selection changes. These tests do not benchmark full-scale OG alignments or
+validate biological homology.
+
 Taxonomy bootstrap tests build a real ETE4 database from a small synthetic
 taxdump, substituting only the network response. They check download/build
 failure recovery, local source copying, and reuse of existing snapshots. The

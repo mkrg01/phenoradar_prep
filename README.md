@@ -6,10 +6,13 @@ optional KEGG Orthology (KO) annotation and expression branch.
 An optional BUSCO protein phylogeny branch uses cdskit, FAMSA, trimAl, VeryFastTree, and
 ASTRAL-IV/CASTLES-II, with manual or nwkit/TimeTree secondary calibrations for
 optional LSD2 dating.
+An optional OG alignment branch saves untrimmed protein alignments for every
+observed orthogroup, retaining all gene copies for downstream site analysis.
 
 ```text
 Metadata + BUSCO + taxonomy -> species selection -> CDS translation
   -> ODB-mapper -> orthogroup-level TPM tables, QC, and provenance
+                -> optional FAMSA -> all-copy, untrimmed OG protein alignments
   -> optional KofamScan -> KO-level TPM sums, membership tables, QC, and provenance
 ```
 
@@ -74,6 +77,7 @@ Main tables are written to `results/<analysis>/tpm/`; logs and temporary work go
 | [Running and resuming](docs/running.md) | Installation, Slurm and direct execution, resource budgets, pilots, and recovery |
 | [Reference data](docs/references.md) | Taxonomy, OrthoDB and KEGG downloads, fixed storage, and reference updates |
 | [KEGG annotation and KO expression](docs/kegg.md) | Optional KofamScan branch, frozen reference setup, ambiguity, and PhenoRadar inputs |
+| [OG protein alignments](docs/alignments.md) | All OGs and copies, untrimmed FASTA, membership, and resuming per OG |
 | [BUSCO phylogeny and dating](docs/phylogeny.md) | Existing BUSCO/CDS inputs, FAMSA, VeryFastTree, ASTRAL-IV, resources, and optional time trees |
 | [Phylogeny method review](docs/phylogeny_comparison.md) | Step-by-step comparison with GeneGalleon, scientific limitations, and improvement priorities |
 | [Outputs and TPM interpretation](docs/outputs.md) | Generated files, normalization, ambiguous mappings, and QC |

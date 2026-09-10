@@ -49,12 +49,13 @@ This also keeps `--configfile` from interpreting the target as another filename.
 
 | Target | Result |
 | --- | --- |
-| `all` (default) | Complete workflow through the combined TPM and QC tables |
+| `all` (default) | Combined TPM and QC tables, plus enabled optional branches |
 | `prepare` | Selected metadata, provenance, and sample/chunk manifests |
 | `references` | Prepared OrthoDB reference snapshot |
 | `kegg_references` | Prepared KOfam/KEGG reference snapshot; no assemblies required |
 | `proteins` | Translated CDS for the selected species |
 | `mapping` | ODB chunk results and the merged gene-to-orthogroup index |
+| `alignments` | Untrimmed protein MSA for every mapped OG, all copies retained; includes ODB mapping but no TPM aggregation or tree inference |
 | `kegg` | KO annotations and original-TPM sums; independent of ODB mapping, with automatic [KEGG reference setup](kegg.md) |
 
 Prerequisite steps are included automatically. See [reference setup](references.md)

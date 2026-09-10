@@ -77,6 +77,8 @@ shared workflow. These files remain available locally.
 | `odb.allow_nonlocal` | Allow ODB work on filesystems outside the supported local types; default `false` |
 | `odb.keep_work` | Whether to retain successful ODB work directories |
 | `tpm.multimap` | Policy for genes assigned to multiple orthogroups; see [TPM interpretation](outputs.md#tpm-interpretation) |
+| `alignment.enabled` | Include untrimmed, all-copy alignments of every mapped OG in the full workflow; default `false` |
+| `alignment.threads`, `alignment.mem_gb` | Threads per OG alignment and decimal-GB memory budget per alignment-branch job; defaults `4` and `8` |
 | `kegg.enabled` | Include KEGG outputs in the default full workflow; default `false` |
 | `kegg.threads`, `kegg.mem_gb` | CPU and decimal-GB memory budgets per species; defaults `4` and `8` |
 | `kegg.ambiguity` | `duplicate` (default) adds full TPM to each accepted KO; `drop` excludes multi-KO genes; `error` rejects quantified multi-KO genes. Annotations always retain candidates |
@@ -103,6 +105,8 @@ Missing reference data are prepared automatically when a requested branch needs
 them. Existing snapshots and cached responses are reused without automatic
 updates. The KEGG reference is only required for KEGG targets or `kegg.enabled: true`.
 See [reference management](references.md) for preparation and intentional refreshes.
+The [OG alignment branch](alignments.md) reuses ODB mappings and translated
+proteins; it requires no additional reference database.
 
 Executable names and interpreters are fixed in the
 workflow and supplied by each rule's Conda environment. ASTRAL-IV uses the

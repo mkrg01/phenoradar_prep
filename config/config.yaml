@@ -32,6 +32,12 @@ odb:
 tpm:
   # error: reject ambiguous genes; drop: omit them; split: divide TPM equally.
   multimap: error
+alignment:
+  # All mapped OGs and all copies, without trimming or selection.
+  # The explicit `alignments` target also runs this branch when disabled here.
+  enabled: false
+  threads: 4
+  mem_gb: 8
 kegg:
   # Opt in for the full workflow; the explicit `kegg` target also runs this branch.
   enabled: false
