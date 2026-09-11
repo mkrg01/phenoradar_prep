@@ -19,6 +19,18 @@ def plot(tree, metadata, summary, outdir):
     from ete4 import Tree
     info = json.loads(Path(summary).read_text())
     rows = {r["species"]: r for r in read_tsv(metadata) if r["is_representative"] == "1"}
+    if not Path(tree).read_text().strip():
+        if rows or info["summary_species"]:
+            raise ValueError("empty summary tree has nonempty representatives")
+        fig, ax = plt.subplots(figsize=(7.2, 2))
+        ax.set_axis_off()
+        ax.text(0.5, 0.5, f"No species with observed {info['trait']}\n0 contrast pairs",
+                ha="center", va="center", transform=ax.transAxes)
+        Path(outdir).mkdir(parents=True, exist_ok=True)
+        for extension in ["pdf", "svg"]:
+            fig.savefig(Path(outdir) / f"summary_tree.{extension}")
+        plt.close(fig)
+        return
     phy = Tree(Path(tree).read_text(), parser=0)
     # Ladderization only orders siblings for drawing; topology and lengths stay intact.
     counts = {}
@@ -29,7 +41,7 @@ def plot(tree, metadata, summary, outdir):
     if set(phy.leaf_names()) != set(rows):
         raise ValueError("plot labels differ from summary tree")
     states = sorted({r[info["trait"]] for r in rows.values()})
-    colors = dict(zip(states, ["#595959", "#009E73"]))
+    colors = {"0": "#595959", "1": "#009E73"} if info["trait"] == "C4" else dict(zip(states, ["#595959", "#009E73"]))
     distance = {phy: 0.0}
     for node in phy.traverse("preorder"):
         for child in node.children:
@@ -43,8 +55,8 @@ def plot(tree, metadata, summary, outdir):
     names = {node: node.name.replace("_", " ") for node in tips}
     name_width = max(text_width(name, italic) for name in names.values())
     columns = [("n", "n_species_in_group"), ("Group", "group"), ("Pair", "contrast_pair_id")]
-    widths = [max(text_width(title, upright), *(text_width(r[field], upright)
-                  for r in rows.values() if r[field] != "")) for title, field in columns]
+    widths = [max([text_width(title, upright), *(text_width(r[field], upright)
+                   for r in rows.values() if r[field] != "")]) for title, field in columns]
     margin, gap, row_height = 12, 12, 13
     annotation_width = name_width + sum(widths) + gap * 4
     width = max(7.2 * 72, margin * 2 + annotation_width + 144)

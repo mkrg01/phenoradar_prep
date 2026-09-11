@@ -1,4 +1,4 @@
-# Contrast pairs from a representative species tree
+# Contrast pairs from species trees
 
 [Back to README](../README.md)
 
@@ -9,7 +9,89 @@ QC as `phylogeny`, with a separate representative manifest and output directory.
 It does not run dating. Full and subset alignments/gene trees are separate
 because marker coverage and alignments depend on the selected species set.
 
-## Inputs and execution
+The separate `phylogeny_contrast_pairs` target assigns pairs directly from the
+all-species or phenotyped molecular tree. Both routes share the molecular skim,
+pair assignment, TSV export and plotting implementation.
+
+## Pairs after full or phenotyped inference
+
+Select `phylogeny.species_sets: [all]`, `[phenotyped]`, or `[all, phenotyped]`,
+then run:
+
+```bash
+./run_pipeline.sh --software-deployment-method conda \
+  --configfile config/mydata.yaml config/phylogeny.local.yaml \
+  --cores 1 --resources mem_gb=8 -- phylogeny_contrast_pairs
+```
+
+This is an explicit target; `contrast.enabled` continues to control only the
+representative analysis in `all`. With `exclude_species: []`, the target follows
+the ordinary inference dependencies. Completed, unchanged trees are reused;
+missing trees or changed upstream inputs can schedule inference. Use the normal
+inference resource budget if trees still need to be built. It does not request
+dating or the NCBI representative-selection analysis.
+
+| Input tree under `results/<analysis>/` | Pair output directory |
+| --- | --- |
+| `phylogeny/species_tree.nwk` | `phylogeny/contrast/` |
+| `phylogeny_phenotyped/species_tree.nwk` | `phylogeny_phenotyped/contrast/` |
+
+Inputs are the rooted molecular tree and its QC record, that run's sample
+manifest, `metadata/metadata_high_busco.tsv` for representative scores, and
+`inputs.species_trait`. The pair trait is `contrast.trait`; it may differ from
+the `phylogeny.trait` used to choose the phenotyped inference species.
+
+The source tree must match the run's species manifest and recorded outgroup.
+After validating its root, the analysis prunes missing-trait tips, preserving
+surviving path lengths and the direction inherited from that root. An unknown
+outgroup can therefore be absent from the observed subtree. No new outgroup is
+selected and no tree, branch length, support or date is reestimated.
+
+`observed_tree.nwk` records the subtree before the molecular skim. Subsequent
+outputs have the same names and columns as the representative route below.
+`species_metadata.tsv` contains each retained species in the input run once,
+including unknown-trait species with empty group/pair IDs. Group membership is
+determined directly on the molecular tree; no NCBI membership is inherited.
+Replicated RNA-seq runs do not increase species counts.
+
+Zero or one observed state succeeds with zero pairs. No minimum of four skim
+representatives applies to this postprocessing step. With no observed species,
+the Newick files are empty, the TSVs retain headers, and the figures explain that
+there are no observed species. More than two observed states is unsupported.
+Multiway contrastive clades remain unresolved under the shared pair criteria.
+
+### Recompute after manual species exclusion
+
+With a nonempty top-level `exclude_species`, `phylogeny_contrast_pairs` uses the
+same completed-snapshot export as `filter_species`. Neither target requests
+upstream inference in this mode. The explicit pair target requires completed
+inputs for the requested `phylogeny.species_sets`; `filter_species` instead
+reports unavailable branches in `filtered/manifest.json` and exports what is ready.
+
+`filter_species` automatically recomputes pairs for **both completed molecular
+trees**, independent of `phylogeny.species_sets`, even when they had no previous
+pair output. It requires the tree/QC, sample manifest, BUSCO score table and
+trait table; gene trees and raw sequence inputs are unnecessary for pairs.
+Results go to `filtered/phylogeny/contrast/` and, when available,
+`filtered/phylogeny_phenotyped/contrast/`. Excluded species are removed before
+grouping and pair detection, so surviving species can form different pairs.
+Every export starts from the original trees, allowing exclusions to be reversed.
+An empty exclusion list with `filter_species` restores the unexcluded export.
+
+The original `contrast/` representative analysis is neither read nor recomputed.
+Original full/phenotyped trees and pair outputs also remain unchanged. Pair IDs
+are local to each result and can change after exclusion; join by species and
+the result directory, not by an ID shared between analyses. `summary.json`
+records source checksums, the effective exclusions, missing-trait species,
+trait, seed and inherited-root status. If the source outgroup is excluded,
+the subtree still inherits the original orientation; it has not been rerooted.
+
+The filter export replaces its owned directory as a bundle. To recover a
+manually deleted file inside that bundle, rerun `filter_species` with
+`--forcerun filter_species`. Ordinary unfiltered figures are tracked separately
+and can be regenerated without repeating pair assignment or inference.
+
+## Representative analysis: inputs and execution
 
 Use the ordinary metadata/BUSCO/CDS inputs and `phylogeny.busco_full_dir`.
 Species selection currently also validates the usual abundance input files,
@@ -143,6 +225,13 @@ automatically selected roots. It checks that the full-tree outgroup is not
 added to the contrast representatives, unchanged reruns, recovery of a deleted
 figure, and isolation of the full tree from a trait-only change. It uses
 synthetic sequences and a local taxonomy fixture, not external services.
+It also checks full/phenotyped post-inference targets, switching species sets,
+and figure recovery with unchanged trees. `tests/test_phylogeny_contrast.py`
+checks direct molecular membership, unknown or excluded outgroups, replicated
+runs, empty/one-state subsets, invalid source inputs, and exclusion-driven
+pair reformation. Its full-Snakefile snapshot test has no raw sequence or
+gene-tree inputs and verifies that exclusion leaves source trees and NCBI
+representative results unchanged.
 
 On the current dataset, the first skim selects 199 representatives from 2,047
 known-trait species. Root selection chooses `Nymphaea_colorata` within those

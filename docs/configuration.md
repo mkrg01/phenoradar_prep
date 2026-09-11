@@ -103,6 +103,9 @@ BUSCO-selected species with a nonmissing `phylogeny.trait`, or `[all, phenotyped
 for both inference runs. They retain separate results in `phylogeny/` and
 `phylogeny_phenotyped/`; changing only this list reuses completed outputs.
 The phylogeny, preparation, calibration and dating targets all follow this list.
+The explicit `phylogeny_contrast_pairs` target also follows this list and uses
+`contrast.trait` for pair assignment. `contrast.enabled` controls only the
+existing NCBI representative analysis; no new enable setting is required.
 See [species sets](phylogeny.md#species-sets-and-reusable-outputs) for details.
 
 `taxonomy_audit.enabled` defaults to `false`. Its explicit `taxonomy_audit`
@@ -119,7 +122,10 @@ and interpretation.
 For manual exclusions after reviewing candidates, set top-level
 `exclude_species: [Species_one, Species_two]` and run `filter_species`.
 It exports completed outputs to `results/<analysis>/filtered/`, preserving the
-original analysis and the provisional phenotyped/contrast branches. See
+original analysis. It also recomputes pairs from both completed molecular trees
+after exclusions, without inference or rerunning the NCBI representative
+analysis. With a nonempty exclusion list, `phylogeny_contrast_pairs` requests
+this same export and requires completed inputs for the selected species sets. See
 [manual exclusion](species_filter.md) for scope, storage and tree interpretation.
 
 Generated storage locations are fixed:

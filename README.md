@@ -14,6 +14,9 @@ The `filter_species` target exports a subset of completed outputs using the
 top-level `exclude_species` list, preserving the original analysis.
 The `contrast_pairs` target selects trait-guided representatives with nwkit,
 reuses the BUSCO inference rules, and exports contrast pairs and a summary tree.
+`phylogeny_contrast_pairs` assigns pairs directly from full/phenotyped molecular
+trees. Species exclusion recomputes those pairs inside `filtered/`, using the
+completed trees without rerunning inference or the NCBI representative analysis.
 Each inference run can select an outgroup automatically within its own input species set.
 An optional OG alignment branch saves untrimmed protein alignments for every
 observed orthogroup, retaining all gene copies for downstream site analysis.
@@ -90,7 +93,7 @@ Main tables are written to `results/<analysis>/tpm/`; logs and temporary work go
 | [BUSCO phylogeny and dating](docs/phylogeny.md) | Existing BUSCO/CDS inputs, FAMSA, VeryFastTree, ASTRAL-IV, resources, and optional time trees |
 | [Taxonomic review](docs/taxonomy_audit.md) | MonoPhy species-tree taxonomy review, intruder/outlier flags, run IDs and rank figures |
 | [Manual species exclusion](docs/species_filter.md) | Top-level exclusion list, reusable filtered outputs, unchanged expression values/sites, and pruned trees |
-| [Contrast pairs](docs/contrast_pairs.md) | Species trait TSV, representative selection, independent subset inference, pair membership and figures |
+| [Contrast pairs](docs/contrast_pairs.md) | Representative analysis, pairs from full/phenotyped trees, recomputation after exclusion, membership and figures |
 | [Phylogeny method review](docs/phylogeny_comparison.md) | Step-by-step comparison with GeneGalleon, scientific limitations, and improvement priorities |
 | [Outputs and TPM interpretation](docs/outputs.md) | Generated files, normalization, ambiguous mappings, and QC |
 | [Testing and validation](docs/development.md) | Test requirements, coverage, and validation limits |

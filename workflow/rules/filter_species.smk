@@ -10,16 +10,20 @@ rule filter_species:
         snapshot=lambda wc: filter_snapshot()["files"],
         code=f"{SCRIPTS}/filter_species.py",
         phylogeny_code=f"{SCRIPTS}/filter_species_phylogeny.py",
+        contrast_code=[f"{SCRIPTS}/{name}.py" for name in
+                       ["contrast_pairs", "plot_contrast_tree", "species_traits", "phylogeny_root"]],
         common=f"{SCRIPTS}/common.py"
     output: bundle=directory(f"{OUT}/filtered")
     params:
         source=str(Path(OUT).resolve()),
         excluded=json.dumps(EXCLUDE_SPECIES),
         traits=config["inputs"].get("species_trait") or "",
+        trait=config["contrast"]["trait"], seed=PHY["seed"],
         inventory=lambda wc: json.dumps(filter_snapshot()["sections"], sort_keys=True)
-    conda: "../envs/analysis.yaml"
+    conda: "../envs/timetree.yaml"
     resources: mem_mb=8000
     log: f"{LOG}/filter_species.log"
     shell:
         "{PYTHON:q} {input.code:q} --source {params.source:q} --outdir {output.bundle:q} "
-        "--exclude-species {params.excluded:q} --traits {params.traits:q} > {log:q} 2>&1"
+        "--exclude-species {params.excluded:q} --traits {params.traits:q} "
+        "--contrast-trait {params.trait:q} --seed {params.seed} > {log:q} 2>&1"

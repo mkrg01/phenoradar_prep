@@ -2,6 +2,7 @@
 """Trait-guided nwkit skims, representative manifests, pair tables and figures."""
 import argparse
 import json
+import math
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
@@ -81,8 +82,27 @@ def prepare(samples, metadata, traits, tree, outdir, trait="C4", seed=12345):
                "nwkit": "0.27.0", "ncbi_tree": file_record(tree)})
 
 
-def summarize(tree, selection_dir, outgroup_file, outdir, seed=12345):
+def rooted_tree(path, names, outgroup):
+    """Validate the original rooted tree before any traits or exclusions prune it."""
     from ete4 import Tree
+    text = Path(path).read_text()
+    if text.count(";") != 1:
+        raise ValueError("expected one inferred species tree")
+    tree = Tree(text, parser=0)
+    tips = list(tree.leaf_names())
+    if len(tips) != len(set(tips)) or set(tips) != set(names):
+        raise ValueError("inferred tree tips differ from species manifest")
+    if outgroup not in names:
+        raise ValueError("outgroup is absent from the species manifest")
+    if len(tree.children) != 2 or not any(c.is_leaf and c.name == outgroup for c in tree.children):
+        raise ValueError("inferred tree is not rooted with the selected outgroup")
+    if any(n.dist is None or not math.isfinite(n.dist) or n.dist < 0
+           for n in tree.traverse() if not n.is_root):
+        raise ValueError("inferred tree requires finite nonnegative branch lengths")
+    return tree
+
+
+def summarize(tree, selection_dir, outgroup_file, outdir, seed=12345):
     selection, out = Path(selection_dir), Path(outdir)
     plan = json.loads((selection / "selection.json").read_text())
     all_traits = read_tsv(selection / "traits.tsv")
@@ -92,24 +112,42 @@ def summarize(tree, selection_dir, outgroup_file, outdir, seed=12345):
     outgroup = Path(outgroup_file).read_text().strip()
     if outgroup not in names:
         raise ValueError("outgroup is absent from the selected representatives")
-    inferred = Tree(Path(tree).read_text(), parser=0)
-    if set(inferred.leaf_names()) != names:
-        raise ValueError("inferred tree tips differ from representative manifest")
-    if len(inferred.children) != 2 or not any(c.is_leaf and c.name == outgroup for c in inferred.children):
-        raise ValueError("inferred tree is not rooted with the selected outgroup")
+    inferred = rooted_tree(tree, names, outgroup)
     rows = [{"leaf_name": r["leaf_name"], "trait": r["trait"], "busco_percent": float(r["busco_percent"])}
             for r in first_reps]
-    second_all, second_reps = skim(inferred, rows, out / "summary_tree", seed)
-    summary_tree = Tree((out / "summary_tree.nwk").read_text(), parser=0)
-    contrast_all, contrast_reps = skim(summary_tree, [
-        {k: r[k] for k in ["leaf_name", "trait", "busco_percent"]} for r in second_reps
-    ], out / "contrastive", seed, contrastive=True)
-    # Compose two many-to-one maps; do not rely on IDs from different skims
-    # having the same meaning or on an unchecked dict overwriting duplicates.
+    first_representatives = {r["group"]: r["leaf_name"] for r in first_reps}
+    tip_for_species = {r["leaf_name"]: first_representatives[r["group"]] for r in first_all}
+    return summarize_tree(inferred, rows, all_traits, tip_for_species, out, plan["trait"], seed, outgroup,
+                          {"outgroup_file": file_record(outgroup_file), "inferred_tree": file_record(tree),
+                           "selection": file_record(selection / "selection.json"),
+                           "assignment": "non-representative species inherit their NCBI skim group membership"})
+
+
+def summarize_tree(inferred, rows, all_traits, tip_for_species, outdir, trait, seed, outgroup, provenance):
+    """Shared molecular skim, pair assignment and export for both input routes."""
+    from ete4 import Tree
+    out = Path(outdir)
+    out.mkdir(parents=True, exist_ok=True)
+    if rows:
+        second_all, second_reps = skim(inferred, rows, out / "summary_tree", seed)
+        summary_tree = Tree((out / "summary_tree.nwk").read_text(), parser=0)
+        _, contrast_reps = skim(summary_tree, [
+            {k: r[k] for k in ["leaf_name", "trait", "busco_percent"]} for r in second_reps
+        ], out / "contrastive", seed, contrastive=True)
+    else:
+        second_all, second_reps, contrast_reps = [], [], []
+        for prefix in ["summary_tree", "contrastive"]:
+            fields = ["leaf_name", "trait", "busco_percent", "group"]
+            if prefix == "contrastive":
+                fields += ["contrastive_clade"]
+            for suffix in ["all", "sampled"]:
+                write_tsv(out / f"{prefix}.{suffix}.tsv", fields, [])
+            with atomic_writer(out / f"{prefix}.nwk") as handle:
+                handle.write("")
+    # Map original species through their input-tree tips to molecular groups.
     second_group = {r["leaf_name"]: r["group"] for r in second_all}
-    first_to_second = {r["group"]: second_group[r["leaf_name"]] for r in first_reps}
     final_reps = {r["group"]: r["leaf_name"] for r in second_reps}
-    members = {r["leaf_name"]: first_to_second[r["group"]] for r in first_all}
+    members = {name: second_group[tip] for name, tip in tip_for_species.items()}
     counts = Counter(members.values())
     candidates = {}
     for row in contrast_reps:
@@ -135,7 +173,7 @@ def summarize(tree, selection_dir, outgroup_file, outdir, seed=12345):
     for row in all_traits:
         name = row["species"]
         group = members.get(name, "")
-        metadata.append({"species": name, plan["trait"]: row["trait"],
+        metadata.append({"species": name, trait: row["trait"],
                          "role": "outgroup" if name == outgroup else row["role"],
                          "group": group, "representative": final_reps.get(group, ""),
                          "is_representative": int(final_reps.get(group) == name),
@@ -144,13 +182,71 @@ def summarize(tree, selection_dir, outgroup_file, outdir, seed=12345):
     fields = ["contrast_pair_id", "state_a", "state_b", "representative_a", "representative_b",
               "group_a", "group_b", "n_species_a", "n_species_b"]
     write_tsv(out / "contrast_pairs.tsv", fields, pairs)
-    write_tsv(out / "species_metadata.tsv", list(metadata[0]), metadata)
-    write_json(out / "summary.json", {"created_at": now(), "trait": plan["trait"], "nwkit": "0.27.0",
-               "outgroup": outgroup, "outgroup_file": file_record(outgroup_file),
-               "inferred_tree": file_record(tree), "selection": file_record(selection / "selection.json"),
+    write_tsv(out / "species_metadata.tsv", ["species", trait, "role", "group", "representative",
+              "is_representative", "n_species_in_group", "contrast_pair_id"], metadata)
+    report = {"created_at": now(), "trait": trait, "nwkit": "0.27.0", "outgroup": outgroup,
                "summary_species": len(second_reps), "contrast_pairs": len(pairs), "seed": seed,
-               "unresolved_contrastive_clades": unresolved,
-               "assignment": "non-representative species inherit their NCBI skim group membership"})
+               "unresolved_contrastive_clades": unresolved, **provenance}
+    write_json(out / "summary.json", report)
+    return report
+
+
+def from_tree(tree, tree_qc, samples, metadata, traits, outdir, trait="C4", seed=12345, exclude_species=()):
+    """Assign pairs directly on a completed species tree, optionally pruning species."""
+    if not isinstance(exclude_species, (list, tuple)) or any(not isinstance(n, str) for n in exclude_species):
+        raise ValueError("exclude_species must be a list of species IDs")
+    if len(set(exclude_species)) != len(exclude_species):
+        raise ValueError("duplicate excluded species IDs")
+    if not isinstance(trait, str) or not trait.strip() or trait in {
+            "species", "role", "group", "representative", "is_representative", "n_species_in_group", "contrast_pair_id"}:
+        raise ValueError("contrast.trait must name a non-reserved phenotype column")
+    if type(seed) is not int or seed <= 0:
+        raise ValueError("seed must be a positive integer")
+    names = {r["species"] for r in read_tsv(samples)}
+    qc = json.loads(Path(tree_qc).read_text())
+    if qc.get("species") != len(names):
+        raise ValueError("species-tree QC differs from species manifest")
+    outgroup = qc.get("outgroup")
+    inferred = rooted_tree(tree, names, outgroup)
+    annotation = read_species_traits(traits, trait)
+    retained = names - set(exclude_species)
+    eligible = {n for n in retained if annotation.get(n, "") != ""}
+    states = sorted({annotation[n] for n in eligible})
+    if len(states) > 2:
+        raise ValueError(f"contrast analysis supports at most two observed trait states; found {states}")
+    scores = {}
+    for row in read_tsv(metadata):
+        name = row["species"]
+        if name not in eligible:
+            continue
+        score = float(row["busco_percent"])
+        if not math.isfinite(score) or not 0 <= score <= 100:
+            raise ValueError(f"invalid BUSCO completeness: {name}")
+        if name in scores and scores[name] != score:
+            raise ValueError(f"conflicting BUSCO completeness: {name}")
+        scores[name] = score
+    if eligible - scores.keys():
+        raise ValueError("missing BUSCO completeness: " + ", ".join(sorted(eligible - scores.keys())))
+    out = Path(outdir)
+    out.mkdir(parents=True, exist_ok=True)
+    with atomic_writer(out / "observed_tree.nwk") as handle:
+        if eligible:
+            inferred.prune(sorted(eligible), preserve_branch_length=True)
+            handle.write(inferred.write(parser=0) + "\n")
+    rows = [{"leaf_name": n, "trait": annotation[n], "busco_percent": scores[n]} for n in sorted(eligible)]
+    all_traits = [{"species": n, "trait": annotation.get(n, ""),
+                   "role": "observed" if n in eligible else "missing_trait"} for n in sorted(retained)]
+    return summarize_tree(inferred, rows, all_traits, {n: n for n in eligible}, out, trait, seed, outgroup,
+                          {"mode": "inferred_tree", "inferred_tree": file_record(tree),
+                           "tree_qc": file_record(tree_qc), "samples": file_record(samples),
+                           "metadata": file_record(metadata), "species_trait": file_record(traits),
+                           "source_species": len(names), "retained_species": len(retained),
+                           "observed_species": len(eligible), "states": states,
+                           "excluded_species": sorted(names - retained),
+                           "missing_trait_species": sorted(retained - eligible),
+                           "rooting": "source_root_inherited", "outgroup_in_observed_tree": outgroup in eligible,
+                           "reestimated": False,
+                           "assignment": "membership on the observed-species subtree of the input molecular tree"})
 
 
 
@@ -166,5 +262,11 @@ if __name__ == "__main__":
     for name in ["tree", "selection-dir", "outgroup-file", "outdir"]:
         p.add_argument("--" + name, required=True)
     p.add_argument("--seed", type=int, default=12345)
+    p = sub.add_parser("from_tree")
+    for name in ["tree", "tree-qc", "samples", "metadata", "traits", "outdir"]:
+        p.add_argument("--" + name, required=True)
+    p.add_argument("--trait", default="C4")
+    p.add_argument("--seed", type=int, default=12345)
+    p.add_argument("--exclude-species", type=json.loads, default=[], help="JSON list of species IDs to prune")
     args = vars(parser.parse_args())
     globals()[args.pop("action")](**args)

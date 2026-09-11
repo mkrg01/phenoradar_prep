@@ -23,6 +23,8 @@ BUNDLES = {
     "phylogeny": ["phylogeny/species_tree.nwk", "phylogeny/species_tree.json", "phylogeny/gene_trees.nwk",
                   "phylogeny/gene_trees.json", "phylogeny/species_coverage.tsv"],
 }
+CONTRAST_BRANCHES = {"phylogeny": "metadata/samples.tsv",
+                     "phylogeny_phenotyped": "phylogeny_phenotyped/selection/samples.tsv"}
 
 
 def safe_name(value):
@@ -122,6 +124,22 @@ def discover(source, traits=None):
         sections["traits"] = {"status": "ready", "path": str(Path(traits).resolve())}
     else:
         sections["traits"] = {"status": "absent"}
+    # Pair postprocessing needs only a completed rooted species tree, not gene
+    # trees, prior pairs, or the inference programs. Discover both saved runs.
+    metadata = source / "metadata/metadata_high_busco.tsv"
+    score_columns = set(next(table(metadata))) if metadata.is_file() else set()
+    for branch, samples in CONTRAST_BRANCHES.items():
+        required = [f"{branch}/species_tree.nwk", f"{branch}/species_tree.json", samples,
+                    "metadata/metadata_high_busco.tsv"]
+        missing = [p for p in required if not (source / p).is_file()]
+        if sections["traits"]["status"] != "ready":
+            missing.append("species trait table")
+        if not {"species", "busco_percent"} <= score_columns:
+            missing.append("metadata columns species/busco_percent")
+        present = any((source / p).is_file() for p in required[:2])
+        sections[f"{branch}_contrast"] = {"status": "ready" if not missing else "incomplete" if present else "absent",
+                                           "missing": missing}
+        files.update(source / p for p in required if (source / p).is_file())
     return {"sections": sections, "files": sorted(str(p.resolve()) for p in files)}
 
 
@@ -165,7 +183,8 @@ class Export:
         self.keep_runs = {r for r, s in self.runs.items() if s in self.keep}
         self.inventory, self.records, self.stats, self.counts = inventory, {}, {}, {}
         self.allowed_inputs = set(inventory["files"])
-        self.ignored = ["phylogeny_phenotyped", "contrast", "taxonomy_audit", "phylogeny/taxonomy_audit",
+        self.ignored = ["phylogeny_phenotyped inference outputs (contrast pairs are recomputed)",
+                        "contrast", "taxonomy_audit", "phylogeny/taxonomy_audit",
                         "raw logs, chunk results, and per-run computation caches"]
 
     def input(self, path, expected_hash=None):
@@ -398,7 +417,24 @@ class Export:
         (self.stage / ".ko_genes.sqlite").unlink()
 
 
-def export(source, exclusions, outdir=None, traits=None):
+def export_contrast(job, branch, trait, seed):
+    from contrast_pairs import from_tree
+    from plot_contrast_tree import plot
+    samples = job.input(job.source / CONTRAST_BRANCHES[branch])
+    if {r["species"] for r in list(table(samples))[1:]} - job.species:
+        raise ValueError("contrast species manifest contains species outside the source dataset")
+    out = job.stage / branch / "contrast"
+    report = from_tree(job.input(job.source / branch / "species_tree.nwk"),
+                       job.input(job.source / branch / "species_tree.json"), samples,
+                       job.input(job.source / "metadata/metadata_high_busco.tsv"),
+                       job.input(job.inventory["sections"]["traits"]["path"]),
+                       out, trait=trait, seed=seed, exclude_species=sorted(job.excluded))
+    plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out)
+    job.counts[f"{branch}_contrast"] = {k: report[k] for k in
+                                       ["source_species", "retained_species", "observed_species", "contrast_pairs"]}
+
+
+def export(source, exclusions, outdir=None, traits=None, contrast_trait="C4", seed=12345):
     exclusions = validate_exclusions(exclusions)
     source = Path(source).resolve()
     requested_out = Path(outdir) if outdir else source / "filtered"
@@ -424,7 +460,9 @@ def export(source, exclusions, outdir=None, traits=None):
                 continue
             print(f"{name}: {section['status']}", flush=True)
             if section["status"] == "ready":
-                if name == "phylogeny":
+                if name.endswith("_contrast"):
+                    export_contrast(job, name.removesuffix("_contrast"), contrast_trait, seed)
+                elif name == "phylogeny":
                     from filter_species_phylogeny import export_phylogeny
                     export_phylogeny(job)
                 else:
@@ -445,13 +483,17 @@ def export(source, exclusions, outdir=None, traits=None):
                 else:
                     record = dict(file_record(path), storage="file")
                 outputs.append({**record, "path": str(path.relative_to(stage))})
-        summary = {"report_type": "species_filter", "schema_version": 1, "created_at": now(),
+        summary = {"report_type": "species_filter", "schema_version": 2, "created_at": now(),
                    "source": str(source), "exclude_species": exclusions, "retained_species": sorted(job.keep),
                    "retained_runs": sorted(job.keep_runs), "counts": job.counts, "sections": inventory["sections"],
                    "inputs": list(job.records.values()), "outputs": outputs, "not_exported": job.ignored,
+                   "contrast": {"trait": contrast_trait, "seed": seed},
                    "code": [file_record(Path(__file__).with_name(name)) for name in
-                            ["filter_species.py", "filter_species_phylogeny.py", "common.py"]],
-                   "policies": {"recomputed": False, "expression_values": "original strings preserved",
+                            ["filter_species.py", "filter_species_phylogeny.py", "contrast_pairs.py",
+                             "plot_contrast_tree.py", "species_traits.py", "phylogeny_root.py", "common.py"]],
+                   "policies": {"sequence_inference_recomputed": False,
+                                "contrast_pairs": "recomputed from completed molecular trees after exclusions; NCBI representative analysis untouched",
+                                "expression_values": "original strings preserved",
                                 "feature_columns": "source OG/KO axes retained, including all-zero and unavailable columns",
                                 "alignment_columns": "unchanged, including columns left all-gap",
                                 "protein_files": "symlinks to retained species files; keep original results available",
@@ -476,6 +518,8 @@ def main():
     parser.add_argument("--source", required=True)
     parser.add_argument("--outdir")
     parser.add_argument("--traits")
+    parser.add_argument("--contrast-trait", default="C4")
+    parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument("--exclude-species", default="[]", help="JSON list of exact species IDs")
     args = vars(parser.parse_args())
     args["exclusions"] = json.loads(args.pop("exclude_species"))

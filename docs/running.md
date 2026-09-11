@@ -57,6 +57,8 @@ This also keeps `--configfile` from interpreting the target as another filename.
 | `mapping` | ODB chunk results and the merged gene-to-orthogroup index |
 | `alignments` | Untrimmed protein MSA for every mapped OG, all copies retained; includes ODB mapping but no TPM aggregation or tree inference |
 | `kegg` | KO annotations and original-TPM sums; independent of ODB mapping, with automatic [KEGG reference setup](kegg.md) |
+| `phylogeny_contrast_pairs` | [Pairs from full/phenotyped molecular trees](contrast_pairs.md#pairs-after-full-or-phenotyped-inference); with exclusions, uses completed snapshots and recomputes filtered pairs without inference |
+| `filter_species` | [Export completed results after manual exclusions](species_filter.md), including recomputed molecular-tree pairs; preserves the original NCBI representative analysis |
 
 Prerequisite steps are included automatically. See [reference setup](references.md)
 and [output formats](outputs.md) for details.

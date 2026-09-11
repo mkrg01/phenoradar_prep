@@ -41,6 +41,14 @@ each selected species-tree branch. It includes taxonomic group results,
 intruder/outlier events, associated run IDs and one review PDF per rank.
 It reads the species tree and taxonomy only; gene trees are not audit inputs.
 
+[`phylogeny_contrast_pairs`](contrast_pairs.md#pairs-after-full-or-phenotyped-inference)
+writes `contrast/` under each selected molecular-tree branch, including pair
+and species tables, source/assignment records, the observed subtree and summary
+figures. Manual exclusion recomputes these results under
+`filtered/phylogeny/contrast/` and `filtered/phylogeny_phenotyped/contrast/` when
+inputs are complete. Original trees and the representative analysis at
+`results/<analysis>/contrast/` remain unchanged.
+
 ## TPM interpretation
 
 The optional [`filter_species` export](species_filter.md) writes a curated subset

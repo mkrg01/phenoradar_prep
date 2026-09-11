@@ -58,6 +58,12 @@ The observed-species run does not depend on a completed all-species tree or
 alignment. Marker coverage is ranked separately within each species set, and
 alignments and trees are inferred independently using the same rules and settings.
 `contrast_pairs` remains a separate representative-selection analysis.
+Use [`phylogeny_contrast_pairs`](contrast_pairs.md#pairs-after-full-or-phenotyped-inference)
+to assign pairs directly from these molecular trees. It reuses completed
+inference, follows `species_sets`, and writes each run's `contrast/` directory.
+With `exclude_species` set, it uses completed snapshots to produce filtered
+pairs without scheduling inference. The `filter_species` export also recomputes
+pairs from both completed trees automatically.
 
 Manual calibration taxa and an optional TimeTree representative list must be
 valid for every requested tree. Automatic TimeTree representatives and

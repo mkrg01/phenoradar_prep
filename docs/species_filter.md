@@ -43,8 +43,9 @@ completed inputs, fail rather than produce a partial success.
 The rule uses absolute paths to completed snapshot files as external inputs.
 The original relative-path producer rules are not dependencies of this target:
 raw RNA-seq, CDS, BUSCO tables, external reference preparation, mapping and
-phylogeny tools do not need to be available. The analysis Conda environment
-supplies the Python/ETE4 code used to prune trees.
+phylogeny tools do not need to be available. The existing `timetree` Conda
+environment supplies ETE4 and the pinned nwkit for tree pruning, contrast-pair
+assignment and figures; the export makes no TimeTree query.
 
 Changing the list regenerates only the export. Changed source files or a newly
 completed optional branch invalidate it on the next invocation. Unchanged
@@ -91,6 +92,7 @@ the guise of new calculations.
 | `phylogeny/alignments/`, including `raw/` when present | Available retained-marker alignments with excluded species rows removed; saved column maps unchanged |
 | `phylogeny/species_coverage.tsv`, `pruning.json` | Recounted retained-tree coverage, root status and explicit pruning limitations |
 | `phylogeny/dating/species_tree.dated.pruned.nwk` when available | Pruned source time tree, without refitting ages or calibration constraints |
+| `phylogeny/contrast/`, `phylogeny_phenotyped/contrast/` when ready | Fresh pair IDs, species membership, observed/summary trees and PDF/SVG figures computed from the corresponding original molecular tree after exclusions |
 | `manifest.json` | Exclusion list, retained identities, before/after counts, exported/skipped branches and input/output/code checksums |
 
 Gene ownership comes from database or membership rows, never gene-name prefix
@@ -99,11 +101,23 @@ with that database. Original per-run outputs, chunk results, logs and external
 CDS/abundance inputs remain source caches; they are not duplicated. Paths in
 the selected-sample manifest still point to the original inputs.
 
-The full source phenotype table is unchanged. `phylogeny_phenotyped/` and
-`contrast/` remain provisional original results and are not copied into the
-curated bundle. Taxonomy-audit reports stay with the source analysis as the
-record of why a species was considered for exclusion. Future contrast-pair
-selection should explicitly consume the curated full-species dataset.
+The full source phenotype table and all original trees/pairs are unchanged.
+The NCBI representative analysis under `contrast/` is neither copied nor
+recomputed. Phenotyped inference outputs are not copied, but completed full
+and phenotyped species trees are both used to recompute contrast pairs inside
+the curated bundle, regardless of `phylogeny.species_sets`. Previous pair
+outputs need not exist. Missing tree/QC, manifest, trait or BUSCO-score inputs
+are recorded as unavailable pair sections in `manifest.json`; they never
+trigger inference. Taxonomy-audit reports stay with the source analysis.
+
+Pair assignment uses `contrast.trait` and `phylogeny.seed`. The standalone
+export accepts `--contrast-trait` and `--seed` for the same settings. Removing
+a species can change surviving clades and create different pairs, so old pair
+IDs are not preserved. Zero/one-state subsets produce zero pairs, including
+when no species remain in the phenotyped branch. See
+[post-inference pairs](contrast_pairs.md#pairs-after-full-or-phenotyped-inference)
+for outputs, root interpretation and the `phylogeny_contrast_pairs` target,
+which uses this export when `exclude_species` is nonempty.
 
 ## Numerical and phylogenetic meaning
 
@@ -133,7 +147,8 @@ and inference-QC files are not relabeled as filtered calculations.
 
 The saved BUSCO alignments permit later tree inference without redoing RNA-seq
 assembly, translation or ODB mapping. This export does not automatically run
-that inference or finalize new contrast pairs.
+that inference. It does recompute contrast pairs from the completed molecular
+trees with excluded tips removed, inheriting the source root orientation.
 
 ## Storage and verification
 
@@ -150,3 +165,6 @@ empty OGs, path-length preservation, missing outgroups, small trees, exclusion
 reversal, incomplete branches and invalid/stale input rejection. A full-Snakefile
 test runs the export without raw inputs or inference/reference tools and verifies
 that changing the list/source regenerates only the export.
+The contrast tests additionally verify pair reformation after exclusions,
+unchanged original molecular/NCBI results, both inference species sets, and
+successful pair-only processing without gene-tree inputs.

@@ -91,6 +91,8 @@ phylogeny:
       offline: false
 contrast:
   # The explicit contrast_pairs target also works while disabled here.
+  # phylogeny_contrast_pairs uses full/phenotyped trees independently of this flag.
+  # filter_species recomputes molecular-tree pairs after exclusions, without inference.
   enabled: false
   trait: C4  # column in inputs.species_trait; metadata is never a trait source
 taxonomy_audit:

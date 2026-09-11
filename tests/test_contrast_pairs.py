@@ -223,6 +223,31 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     full_mtime = full_tree.stat().st_mtime_ns
     contrast_tree = result / "contrast/phylogeny/species_tree.nwk"
     contrast_mtime = contrast_tree.stat().st_mtime_ns
+    # The post-inference target uses the completed full tree, with no NCBI
+    # representative selection. Selecting additional runs retains old outputs.
+    run(["phylogeny_contrast_pairs"])
+    full_pairs = result / "phylogeny/contrast/contrast_pairs.tsv"
+    full_pair_mtime = full_pairs.stat().st_mtime_ns
+    assert {r["species"] for r in read_tsv(full_pairs.parent / "species_metadata.tsv")} == set(species)
+    assert "Nothing to be done" in run(["phylogeny_contrast_pairs"])
+    cfg["phylogeny"]["species_sets"] = ["phenotyped"]
+    config.write_text(yaml.safe_dump(cfg))
+    run(["phylogeny_contrast_pairs"])
+    observed = result / "phylogeny_phenotyped"
+    assert {r["species"] for r in read_tsv(observed / "contrast/species_metadata.tsv")} == set(species[1:])
+    observed_mtime = (observed / "species_tree.nwk").stat().st_mtime_ns
+    cfg["phylogeny"]["species_sets"] = ["all", "phenotyped"]
+    config.write_text(yaml.safe_dump(cfg))
+    assert "Nothing to be done" in run(["phylogeny_contrast_pairs"])
+    assert full_pairs.stat().st_mtime_ns == full_pair_mtime
+    (full_pairs.parent / "summary_tree.pdf").unlink()
+    run(["phylogeny_contrast_pairs"])
+    assert full_pairs.stat().st_mtime_ns == full_pair_mtime
+    assert full_tree.stat().st_mtime_ns == full_mtime
+    assert contrast_tree.stat().st_mtime_ns == contrast_mtime
+    assert (observed / "species_tree.nwk").stat().st_mtime_ns == observed_mtime
+    cfg["phylogeny"]["species_sets"] = ["all"]
+    config.write_text(yaml.safe_dump(cfg))
     (result / "contrast/summary_tree.pdf").unlink()
     run(["contrast_pairs"])
     assert contrast_tree.stat().st_mtime_ns == contrast_mtime
