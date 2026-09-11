@@ -100,8 +100,11 @@ retained TPM under `duplicate`; it is excluded only when `drop` is selected.
 The [alignment branch](alignments.md) writes `results/<analysis>/alignments/`:
 
 - `{og}.faa`: untrimmed protein MSA, one row per original gene ID, with all copies.
-- `members.tsv`: `orthogroup`, `gene_id`, and `species`; one row per gene/OG pair.
-- `provenance.json`: membership and alignment hashes and links to execution records.
+- `provenance.json`: alignment hashes and links to collection/execution records.
+
+OG membership comes from the filename. Gene IDs use `{species}_g{number}`, so
+removing the final `_g{number}` recovers the exact metadata species ID. There is
+no separate `members.tsv` or added `species=` header attribute.
 
 Every OG observed in the selected species' ODB mappings is included, even with
 one sequence or no variation. Genes assigned to several OGs occur in each, regardless

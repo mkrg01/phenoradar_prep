@@ -33,9 +33,9 @@ def snapshot(tmp_path):
     traits = tmp_path / "traits.tsv"
     write_tsv(traits, ["species", "C4", "other"], [{"species": s.replace("_", " "), "C4": str(i % 2), "other": ""}
                                                   for i, s in enumerate(SPECIES)])
-    genes = [("unrelated99", SPECIES[0]), ("copy2", SPECIES[1]), ("copy3", SPECIES[1]),
-             ("q4", SPECIES[2]), ("d5", SPECIES[3]), ("e6", SPECIES[4])]
-    pairs = [(g, "OGshared") for g, s in genes] + [("unrelated99", "OGempty"), ("copy2", "OGamb")]
+    genes = [("Plant_A_g99", SPECIES[0]), ("Plant_B-x_g2", SPECIES[1]), ("Plant_B-x_g3", SPECIES[1]),
+             ("Plant_C_g4", SPECIES[2]), ("Plant_D_g5", SPECIES[3]), ("Plant_E_g6", SPECIES[4])]
+    pairs = [(g, "OGshared") for g, s in genes] + [("Plant_A_g99", "OGempty"), ("Plant_B-x_g2", "OGamb")]
     folder = source / "odb/merged"
     folder.mkdir(parents=True)
     with sqlite3.connect(folder / "mappings.sqlite") as db:
@@ -55,16 +55,14 @@ def snapshot(tmp_path):
                   [{"species": r["species"], "run": r["run"], "OGshared": value, "OGzero": "0"} for r in rows])
     write_tsv(source / "tpm/mapping_qc.tsv", ["species", "run", "fraction"],
               [{"species": r["species"], "run": r["run"], "fraction": ".000001"} for r in rows])
-    members, alignments = [], []
+    alignments = []
     for og in sorted({og for g, og in pairs}):
         path = source / "alignments" / f"{og}.faa"
         path.parent.mkdir(exist_ok=True)
         records = [(g, "aA----" if s == SPECIES[0] else "--C--D") for g, s in genes if (g, og) in pairs]
         path.write_text("".join(f">{g} full header\n{seq}\n" for g, seq in records))
-        members += [dict(orthogroup=og, gene_id=g, species=dict(genes)[g]) for g, seq in records]
         alignments.append(dict(orthogroup=og, alignment=file_record(path)))
-    write_tsv(source / "alignments/members.tsv", ["orthogroup", "gene_id", "species"], members)
-    write_json(source / "alignments/provenance.json", {"members": file_record(source / "alignments/members.tsv"), "alignments": alignments})
+    write_json(source / "alignments/provenance.json", {"alignments": alignments})
     write_tsv(source / "kegg/genes.tsv", ["species", "gene_id", "assignment_status"],
               [dict(species=s, gene_id=g, assignment_status="unique") for g, s in genes])
     write_tsv(source / "kegg/gene_kos.tsv", ["species", "gene_id", "ko", "accepted"],
@@ -126,10 +124,11 @@ def test_export_all_outputs_preserves_values_and_sources(snapshot, tmp_path):
     assert all(row["K00001"] == "0" and row["K00002"] == "" for row in wide)
     with sqlite3.connect(out / "odb/merged/mappings.sqlite") as db:
         assert db.execute("SELECT query FROM genes WHERE species='Plant_A'").fetchall() == []
-        assert db.execute("SELECT og FROM mappings WHERE query='copy2' ORDER BY og").fetchall() == [("OGamb",), ("OGshared",)]
+        assert db.execute("SELECT og FROM mappings WHERE query='Plant_B-x_g2' ORDER BY og").fetchall() == [("OGamb",), ("OGshared",)]
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
     assert not (out / "alignments/OGempty.faa").exists()
-    assert list(fasta_records(out / "alignments/OGshared.faa")) == [r for r in fasta_records(source / "alignments/OGshared.faa") if not r[0].startswith("unrelated99 ")]
+    assert not (out / "alignments/members.tsv").exists()
+    assert list(fasta_records(out / "alignments/OGshared.faa")) == [r for r in fasta_records(source / "alignments/OGshared.faa") if not r[0].startswith("Plant_A_g99 ")]
     assert all(len(seq) == 6 for header, seq in fasta_records(out / "alignments/OGshared.faa"))
     assert (out / "proteins/Plant_B_x_protein.fa").is_symlink()
     assert not (out / "proteins/Plant_A_protein.fa").exists()
@@ -186,6 +185,61 @@ def test_incomplete_branch_is_reported_and_never_built(snapshot, tmp_path):
     assert (out / "tpm/tpm.tsv").is_file()
 
 
+def test_alignments_without_odb_or_membership_table_use_gene_ids(snapshot, tmp_path):
+    source, traits = snapshot
+    shutil.rmtree(source / "odb")
+    out = tmp_path / "filtered"
+    result = export(source, ["Plant_B-x"], out)
+    assert result["sections"]["alignments"]["status"] == "ready"
+    assert not (out / "alignments/members.tsv").exists()
+    assert not (out / "alignments/OGamb.faa").exists()
+    assert list(fasta_records(out / "alignments/OGshared.faa")) == [
+        r for r in fasta_records(source / "alignments/OGshared.faa") if not r[0].startswith("Plant_B-x_g")]
+
+
+def test_alignment_without_completion_record_is_incomplete(snapshot, tmp_path):
+    source, traits = snapshot
+    (source / "alignments/provenance.json").unlink()
+    result = export(source, [], tmp_path / "filtered")
+    assert result["sections"]["alignments"]["status"] == "incomplete"
+    assert not (tmp_path / "filtered/alignments").exists()
+
+
+@pytest.mark.parametrize("damage", ["format", "unknown_species", "duplicate", "empty", "unequal_lengths", "missing_gene", "missing_og", "duplicate_og"])
+def test_alignment_id_and_membership_checks_use_fasta(snapshot, tmp_path, damage):
+    source, traits = snapshot
+    path = source / "alignments/OGshared.faa"
+    records = list(fasta_records(path))
+    if damage == "format":
+        records[0] = ("arbitrary_id", records[0][1])
+    elif damage == "unknown_species":
+        records[0] = ("Unknown_g1", records[0][1])
+    elif damage == "duplicate":
+        records.append(records[0])
+    elif damage == "empty":
+        records = []
+    elif damage == "unequal_lengths":
+        records[0] = (records[0][0], "AA")
+    elif damage == "missing_gene":
+        records.pop()
+    path.write_text("".join(f">{header}\n{seq}\n" for header, seq in records))
+    report_path = source / "alignments/provenance.json"
+    report = json.loads(report_path.read_text())
+    for record in report["alignments"]:
+        if record["orthogroup"] == "OGshared":
+            record["alignment"] = file_record(path)
+    if damage == "missing_og":
+        report["alignments"] = [r for r in report["alignments"] if r["orthogroup"] != "OGamb"]
+    elif damage == "duplicate_og":
+        report["alignments"].append(report["alignments"][0])
+    write_json(report_path, report)
+    # The recorded hash is consistent: validation must inspect IDs/content.
+    out = tmp_path / "filtered"
+    with pytest.raises(ValueError):
+        export(source, ["Plant_A"], out)
+    assert not out.exists()
+
+
 @pytest.mark.parametrize("damage", ["run_identity", "missing_run", "alignment_hash", "ko_owner", "odb_owner", "odb_pair", "gene_tree_hash"])
 def test_inconsistent_inputs_fail_without_changing_originals(snapshot, tmp_path, damage):
     source, traits = snapshot
@@ -207,10 +261,10 @@ def test_inconsistent_inputs_fail_without_changing_originals(snapshot, tmp_path,
         write_tsv(path, list(rows[0]), rows)
     elif damage == "odb_owner":
         with sqlite3.connect(source / "odb/merged/mappings.sqlite") as db:
-            db.execute("UPDATE genes SET species='Plant_A' WHERE query='copy2'")
+            db.execute("UPDATE genes SET species='Plant_A' WHERE query='Plant_B-x_g2'")
     elif damage == "odb_pair":
         with sqlite3.connect(source / "odb/merged/mappings.sqlite") as db:
-            db.execute("UPDATE mappings SET og='changed_OG' WHERE query='copy2' AND og='OGamb'")
+            db.execute("UPDATE mappings SET og='changed_OG' WHERE query='Plant_B-x_g2' AND og='OGamb'")
     else:
         path = source / "phylogeny/gene_trees.nwk"
         path.write_text(path.read_text().replace("Plant_A:1", "Plant_A:2"))

@@ -28,7 +28,10 @@ Without Snakemake or seqkit, that integration test is skipped.
 
 OG alignment tests cover all copies and repeated assignments, singletons,
 identical sequences, repeated runs, bounded open-file collection, stale OG removal,
-invalid inputs and aligner residue/ID corruption. Set `FAMSA_BIN` to run real
+invalid inputs and aligner residue/ID corruption. They also check species recovery
+from `{species}_g{number}` IDs, exact metadata ownership, export without a
+membership table or ODB database, and rejection of inconsistent FASTA membership.
+Set `FAMSA_BIN` to run real
 FAMSA tests (including stops, ambiguous residues and unequal input lengths).
 With `SNAKEMAKE_BIN` and `SEQKIT_BIN` also supplied, the alignment workflow test
 uses real FAMSA/seqkit and a test-only ODB substitute. It checks standalone and

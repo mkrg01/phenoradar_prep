@@ -52,7 +52,9 @@ finalization. Concurrency follows the workflow's overall resource budget.
   is performed here.
 
 Inputs must contain nonempty, ungapped protein sequences (letters A–Z and `*`).
-Malformed inputs, missing mapped genes, and duplicate gene IDs fail the job
+Mapped gene IDs must use `{species}_g{number}`, with an ASCII nonnegative integer
+suffix and the exact metadata species ID. Malformed inputs, missing mapped genes,
+gene IDs encoding a different species, and duplicate gene IDs fail the job
 instead of silently dropping records. Multi-sequence outputs are checked for
 unchanged gene IDs, equal aligned lengths and exact ungapped residue preservation.
 These checks validate processing integrity, not orthology or alignment accuracy.
@@ -62,14 +64,18 @@ These checks validate processing integrity, not orthology or alignment accuracy.
 ```text
 results/<analysis>/alignments/
   {og}.faa
-  members.tsv
   provenance.json
 ```
 
 FASTA headers retain the original gene IDs; output rows follow collected input
-order. `members.tsv` has `orthogroup`, `gene_id`, and `species` columns. Species
-labels match metadata and TPM outputs, including hyphens that are normalized only
-in ODB protein filenames. Unmapped genes do not appear in these outputs.
+order. PhenoRadar's sequence inputs are just the `{og}.faa` files: the filename
+gives the orthogroup, the first header token gives the gene ID, and removing the
+final `_g{number}` gives the species. For example, `100007at3193.faa` containing
+`>Abelia_chinensis_g0` identifies OG `100007at3193`, gene `Abelia_chinensis_g0`,
+and species `Abelia_chinensis`. No `species=` attribute or `members.tsv` is added.
+Species IDs match metadata and TPM outputs exactly, including underscores and
+hyphens; only ODB protein filenames normalize hyphens. Splitting on the first
+underscore is incorrect. Unmapped genes do not appear in these outputs.
 
 PhenoRadar can use MSA column numbers directly. If needed, original protein
 positions can be reconstructed by counting non-gap symbols along each row. No
@@ -95,7 +101,8 @@ by Snakemake). Completed OG jobs are reused. Changing abundance values or the TP
 ambiguity policy does not recompute alignments. Changes to selected species,
 proteins or mappings rebuild collection and its dependent alignments.
 
-Finalization verifies alignment hashes and publishes the membership table and
-provenance only after all current OG jobs have succeeded. On selection/mapping
+Finalization verifies alignment hashes and publishes provenance only after all
+current OG jobs have succeeded. It also removes a legacy `members.tsv` from its
+output directory. On selection/mapping
 updates it also removes obsolete `*.faa` files from the workflow-owned results
 alignment directory, so the directory reflects the current OG set.

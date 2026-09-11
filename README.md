@@ -89,7 +89,7 @@ Main tables are written to `results/<analysis>/tpm/`; logs and temporary work go
 | [Running and resuming](docs/running.md) | Installation, Slurm and direct execution, resource budgets, pilots, and recovery |
 | [Reference data](docs/references.md) | Taxonomy, OrthoDB and KEGG downloads, fixed storage, and reference updates |
 | [KEGG annotation and KO expression](docs/kegg.md) | Optional KofamScan branch, frozen reference setup, ambiguity, and PhenoRadar inputs |
-| [OG protein alignments](docs/alignments.md) | All OGs and copies, untrimmed FASTA, membership, and resuming per OG |
+| [OG protein alignments](docs/alignments.md) | All OGs and copies, untrimmed FASTA with species-encoded gene IDs, and resuming per OG |
 | [BUSCO phylogeny and dating](docs/phylogeny.md) | Existing BUSCO/CDS inputs, FAMSA, VeryFastTree, ASTRAL-IV, resources, and optional time trees |
 | [Taxonomic review](docs/taxonomy_audit.md) | MonoPhy species-tree taxonomy review, intruder/outlier flags, run IDs and rank figures |
 | [Manual species exclusion](docs/species_filter.md) | Top-level exclusion list, reusable filtered outputs, unchanged expression values/sites, and pruned trees |

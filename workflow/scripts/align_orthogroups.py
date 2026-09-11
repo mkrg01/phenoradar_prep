@@ -12,12 +12,11 @@ import subprocess
 import tempfile
 
 from busco_phylogeny import fasta_records
-from common import atomic_writer, file_record, now, read_tsv, write_json, write_tsv
+from common import atomic_writer, file_record, now, read_tsv, species_from_gene_id, write_json
 
 
 SAFE_OG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 PROTEIN_ALPHABET = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ*")
-MEMBER_FIELDS = ["orthogroup", "gene_id", "species"]
 
 
 def validate_protein(gene, sequence):
@@ -60,6 +59,8 @@ def collect(samples, database, protein_dir, outdir):
                         assignments = mapping.pop(gene, [])
                         if not assignments:
                             continue
+                        if species_from_gene_id(gene) != name:
+                            raise ValueError(f"gene ID species differs from mapping/protein species: {gene}: {name}")
                         validate_protein(gene, sequence)
                         for og in assignments:
                             handle = handles.pop(og, None)
@@ -75,9 +76,6 @@ def collect(samples, database, protein_dir, outdir):
             finally:
                 for handle in handles.values():
                     handle.close()
-            write_tsv(staging / "members.tsv", MEMBER_FIELDS,
-                      (dict(zip(MEMBER_FIELDS, row)) for row in db.execute(
-                          "SELECT og, query, species FROM mappings JOIN genes USING(query) ORDER BY og, query")))
             write_json(staging / "provenance.json", {
                 "created_at": now(), "orthogroups": groups,
                 "samples": file_record(samples), "database": file_record(database), "proteins": sources,
@@ -95,6 +93,7 @@ def align(fasta, output, provenance, threads=1, command="famsa"):
     if not inputs or len(original) != len(inputs):
         raise ValueError("OG FASTA must contain unique, nonempty gene IDs")
     for gene, sequence in inputs:
+        species_from_gene_id(gene)
         validate_protein(gene, sequence)
     if type(threads) is not int or threads < 1:
         raise ValueError("alignment threads must be positive")
@@ -132,7 +131,7 @@ def align(fasta, output, provenance, threads=1, command="famsa"):
 
 
 def finish(inputs, outdir, reports):
-    """Publish membership/provenance after all current OG jobs have succeeded."""
+    """Publish provenance after all current OG jobs have succeeded."""
     inputs, outdir, reports = Path(inputs), Path(outdir), Path(reports)
     plan = json.loads((inputs / "provenance.json").read_text())
     groups = plan["orthogroups"]
@@ -154,11 +153,11 @@ def finish(inputs, outdir, reports):
     for path in outdir.glob("*.faa"):
         if path.name not in expected_names:
             path.unlink()
-    with atomic_writer(outdir / "members.tsv") as handle, open(inputs / "members.tsv") as source:
-        shutil.copyfileobj(source, handle)
+    # Retire this workflow-owned output when updating a pre-header-contract run.
+    (outdir / "members.tsv").unlink(missing_ok=True)
     write_json(outdir / "provenance.json", {
         "created_at": now(), "collection": file_record(inputs / "provenance.json"),
-        "members": file_record(outdir / "members.tsv"), "alignments": alignments,
+        "alignments": alignments,
     })
 
 

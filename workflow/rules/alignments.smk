@@ -7,7 +7,7 @@ def alignment_files(wc, suffix, root):
 
 def alignment_targets(wc):
     # Request each OG directly: Snakemake otherwise considers a deleted MSA an
-    # unnecessary intermediate when the final membership/provenance still exist.
+    # unnecessary intermediate when the final provenance still exists.
     return (ALIGNMENT_FINAL + alignment_files(wc, "faa", ALIGNMENTS)
             + alignment_files(wc, "json", f"{LOG}/alignments"))
 
@@ -57,7 +57,6 @@ rule finish_alignments:
         code=f"{SCRIPTS}/align_orthogroups.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/busco_phylogeny.py"]
     output:
-        members=f"{ALIGNMENTS}/members.tsv",
         provenance=f"{ALIGNMENTS}/provenance.json"
     params: outdir=ALIGNMENTS, reports=f"{LOG}/alignments"
     resources: mem_mb=config["alignment"]["mem_gb"] * 1000

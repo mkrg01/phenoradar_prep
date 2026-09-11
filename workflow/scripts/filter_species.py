@@ -11,14 +11,14 @@ import shutil
 import sqlite3
 import tempfile
 
-from common import file_record, now, write_json, write_tsv
+from common import file_record, now, species_from_gene_id, write_json, write_tsv
 
 
 SAFE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 BUNDLES = {
     "odb": ["odb/merged/mappings.sqlite", "odb/merged/gene_orthogroups.tsv", "odb/merged/merge_qc.json"],
     "tpm": [f"tpm/{n}.tsv" for n in ["tpm", "tpm_wide", "tpm_sum", "tpm_sum_wide", "mapping_qc"]],
-    "alignments": ["alignments/members.tsv", "alignments/provenance.json"],
+    "alignments": ["alignments/provenance.json"],
     "kegg": [f"kegg/{n}.tsv" for n in ["genes", "gene_kos", "ko_tpm_sum", "ko_tpm_sum_wide", "ko_support", "mapping_qc"]],
     "phylogeny": ["phylogeny/species_tree.nwk", "phylogeny/species_tree.json", "phylogeny/gene_trees.nwk",
                   "phylogeny/gene_trees.json", "phylogeny/species_coverage.tsv"],
@@ -94,6 +94,11 @@ def discover(source, traits=None):
         sections[name] = {"status": "ready" if not missing else "absent" if len(missing) == len(names) else "incomplete",
                           "missing": missing}
         files.update(source / n for n in names if (source / n).is_file())
+    if sections["alignments"]["status"] == "absent":
+        unfinished = list((source / "alignments").glob("*.faa"))
+        if unfinished:
+            sections["alignments"]["status"] = "incomplete"
+            files.update(unfinished)
     for relative in ["run.json", "metadata/metadata_all.tsv", "metadata/metadata_high_busco.tsv", "metadata/selection.json",
                      "kegg/ko_modules.tsv", "kegg/ko_pathways.tsv", "kegg/reference_qc.json"]:
         if (source / relative).is_file():
@@ -324,20 +329,44 @@ class Export:
         destination = self.stage / "alignments"
         destination.mkdir()
         report = json.loads(self.input(self.source / "alignments/provenance.json").read_text())
-        member_path = self.input(self.source / "alignments/members.tsv", report.get("members", {}).get("sha256"))
+        declared = [safe_name(r["orthogroup"]) for r in report["alignments"]]
+        if len(set(declared)) != len(declared):
+            raise ValueError("duplicate OG in completed alignment inventory")
+        records, empty = [], []
         with sqlite3.connect(self.stage / ".alignment_members.sqlite", uri=True) as db:
             db.execute("CREATE TABLE members(og TEXT, gene TEXT, species TEXT, PRIMARY KEY(og,gene)) WITHOUT ROWID")
-            reader = table(member_path, ["orthogroup", "gene_id", "species"])
-            next(reader)
-            batch = []
-            for row in reader:
-                if row["species"] not in self.species:
-                    raise ValueError("unknown species in alignment membership")
-                batch.append((safe_name(row["orthogroup"]), row["gene_id"], row["species"]))
-                if len(batch) == 10000:
-                    db.executemany("INSERT INTO members VALUES (?,?,?)", batch)
-                    batch.clear()
-            db.executemany("INSERT INTO members VALUES (?,?,?)", batch)
+            for record in report["alignments"]:
+                og = record["orthogroup"]
+                path = self.input(self.source / "alignments" / f"{og}.faa", record["alignment"]["sha256"])
+                seen, width, after, batch = set(), None, 0, []
+                output = destination / f"{og}.faa"
+                with output.open("w") as fasta:
+                    for header, sequence in fasta_records(path):
+                        gene = header.split()[0]
+                        species = species_from_gene_id(gene)
+                        if species not in self.species:
+                            raise ValueError(f"unknown species in alignment gene ID: {gene}: {species}")
+                        if gene in seen:
+                            raise ValueError(f"duplicate alignment gene: {og}: {gene}")
+                        seen.add(gene)
+                        if width is None:
+                            width = len(sequence)
+                        if len(sequence) != width:
+                            raise ValueError(f"unequal alignment lengths: {og}")
+                        batch.append((og, gene, species))
+                        if len(batch) == 10000:
+                            db.executemany("INSERT INTO members VALUES (?,?,?)", batch)
+                            batch.clear()
+                        if species in self.keep:
+                            fasta.write(f">{header}\n{sequence}\n")
+                            after += 1
+                if not seen:
+                    raise ValueError(f"empty source alignment: {og}")
+                db.executemany("INSERT INTO members VALUES (?,?,?)", batch)
+                if not after:
+                    output.unlink()
+                    empty.append(og)
+                records.append(dict(orthogroup=og, before=len(seen), after=after, columns=width))
             self.verify_gene_owners(db, "members", "gene")
             if self.inventory["sections"]["odb"]["status"] == "ready":
                 missing = db.execute("SELECT m.gene FROM members m LEFT JOIN original_odb.mappings p "
@@ -346,39 +375,6 @@ class Export:
                                    "ON m.gene=p.query AND m.og=p.og WHERE m.gene IS NULL LIMIT 1").fetchone()
                 if missing or extra:
                     raise ValueError("alignment gene/OG membership differs from completed ODB mappings")
-            declared = [safe_name(r["orthogroup"]) for r in report["alignments"]]
-            if len(set(declared)) != len(declared) or set(declared) != {og for og, in db.execute("SELECT DISTINCT og FROM members")}:
-                raise ValueError("alignment membership differs from completed alignment inventory")
-            records, empty = [], []
-            with (destination / "members.tsv").open("w", newline="") as handle:
-                writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
-                writer.writerow(["orthogroup", "gene_id", "species"])
-                for record in report["alignments"]:
-                    og = record["orthogroup"]
-                    members = dict(db.execute("SELECT gene,species FROM members WHERE og=?", (og,)))
-                    path = self.input(self.source / "alignments" / f"{og}.faa", record["alignment"]["sha256"])
-                    seen, width, retained = set(), None, []
-                    for header, sequence in fasta_records(path):
-                        gene = header.split()[0]
-                        if gene not in members or gene in seen:
-                            raise ValueError(f"alignment gene differs from membership: {og}: {gene}")
-                        seen.add(gene)
-                        if width is None:
-                            width = len(sequence)
-                        if len(sequence) != width:
-                            raise ValueError(f"unequal alignment lengths: {og}")
-                        if members[gene] in self.keep:
-                            retained.append((header, sequence))
-                            writer.writerow([og, gene, members[gene]])
-                    if seen != set(members):
-                        raise ValueError("missing genes in alignment: " + og)
-                    if retained:
-                        with (destination / f"{og}.faa").open("w") as fasta:
-                            for header, sequence in retained:
-                                fasta.write(f">{header}\n{sequence}\n")
-                    else:
-                        empty.append(og)
-                    records.append(dict(orthogroup=og, before=len(members), after=len(retained), columns=width))
             write_json(destination / "filter_qc.json", {"realigned": False, "columns_changed": False,
                        "empty_orthogroups": empty, "alignments": records})
             self.counts["alignment_sequences"] = dict(before=sum(r["before"] for r in records), after=sum(r["after"] for r in records))

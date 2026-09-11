@@ -86,7 +86,7 @@ the guise of new calculations.
 | `odb/merged/mappings.sqlite`, `gene_orthogroups.tsv`, `filter_qc.json` | Subset of the original gene ownership/mapping database, including all retained copies and ambiguous gene/OG assignments |
 | `tpm/*.tsv` | Original long/wide tables and run QC with excluded runs removed |
 | `kegg/*.tsv` | Filtered gene/KO membership, expression, support and run QC; feature descriptions retained |
-| `alignments/*.faa`, `members.tsv`, `filter_qc.json` | Retained gene rows with original full headers, residues and site coordinates; empty OGs omitted and listed |
+| `alignments/*.faa`, `filter_qc.json` | Retained gene rows with original full headers, residues and site coordinates; empty OGs omitted and listed |
 | `phylogeny/species_tree.pruned.nwk` | All-species tree with excluded tips removed, when at least two tips remain |
 | `phylogeny/gene_trees.pruned.nwk`, `gene_trees/*.pruned.nwk`, `gene_trees.tsv` | Per-marker derivatives and a marker/retention index; trees with fewer than two tips omitted |
 | `phylogeny/alignments/`, including `raw/` when present | Available retained-marker alignments with excluded species rows removed; saved column maps unchanged |
@@ -95,9 +95,15 @@ the guise of new calculations.
 | `phylogeny/contrast/`, `phylogeny_phenotyped/contrast/` when ready | Fresh pair IDs, species membership, observed/summary trees and PDF/SVG figures computed from the corresponding original molecular tree after exclusions |
 | `manifest.json` | Exclusion list, retained identities, before/after counts, exported/skipped branches and input/output/code checksums |
 
-Gene ownership comes from database or membership rows, never gene-name prefix
-parsing. Where ODB mappings exist, alignment and KO gene ownership must agree
-with that database. Original per-run outputs, chunk results, logs and external
+For OG alignments, filenames identify OGs and gene IDs use `{species}_g{number}`.
+Removing the final `_g{number}` recovers the exact source metadata species ID,
+preserving underscores and hyphens. Nonconforming IDs and unknown species fail.
+No `members.tsv` is required or exported. A completed alignment inventory and
+its FASTA checksums are still required; FASTAs without a completion record are
+reported as an incomplete branch. Where ODB mappings exist, every alignment
+gene/species/OG assignment must agree with that database. KO ownership continues
+to come from its gene tables and is checked against ODB when available.
+Original per-run outputs, chunk results, logs and external
 CDS/abundance inputs remain source caches; they are not duplicated. Paths in
 the selected-sample manifest still point to the original inputs.
 
@@ -159,7 +165,7 @@ FASTA collection. Keep original results available and treat linked protein
 files as shared input data; editing through a link would edit the original.
 Input/output checksum verification still reads those files.
 
-Tests cover replicated runs, unrelated gene IDs, multiple copies and ambiguous
+Tests cover replicated runs, species-encoded alignment IDs, multiple copies and ambiguous
 assignments, numeric-string/zero/missing-value preservation, alignment coordinates,
 empty OGs, path-length preservation, missing outgroups, small trees, exclusion
 reversal, incomplete branches and invalid/stale input rejection. A full-Snakefile

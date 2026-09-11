@@ -3,10 +3,19 @@ import csv
 import hashlib
 import json
 import os
+import re
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+def species_from_gene_id(gene_id):
+    """Recover the exact metadata species ID from a {species}_g{number} ID."""
+    match = re.fullmatch(r"([A-Za-z0-9][A-Za-z0-9_.-]*)_g[0-9]+", gene_id)
+    if match is None:
+        raise ValueError(f"gene ID must use {{species}}_g{{number}}: {gene_id!r}")
+    return match.group(1)
 
 
 def sha256(path):

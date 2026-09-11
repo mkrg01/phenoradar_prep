@@ -11,10 +11,30 @@ import pytest
 import yaml
 
 from align_orthogroups import align, collect, fasta_records, finish
-from common import read_tsv, write_tsv
+from common import read_tsv, species_from_gene_id, write_tsv
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def alignment_members(folder):
+    return [dict(orthogroup=path.stem, gene_id=gene, species=species_from_gene_id(gene))
+            for path in sorted(folder.glob("*.faa")) for gene, _ in fasta_records(path)]
+
+
+@pytest.mark.parametrize("gene,species", [
+    ("Abelia_chinensis_g0", "Abelia_chinensis"),
+    ("Beta_sp-X_g12", "Beta_sp-X"),
+    ("Plant_g42_var-X_g123", "Plant_g42_var-X"),
+])
+def test_gene_id_recovers_exact_species(gene, species):
+    assert species_from_gene_id(gene) == species
+
+
+@pytest.mark.parametrize("gene", ["a1", "Plant_g", "Plant_g-1", "Plant_g1_extra", "_g1", "Plant g1", "Plant_g1\n"])
+def test_gene_id_rejects_noncanonical_identifiers(gene):
+    with pytest.raises(ValueError, match="gene ID must use"):
+        species_from_gene_id(gene)
 
 
 @pytest.fixture
@@ -28,18 +48,18 @@ def collected_inputs(tmp_path):
     proteins = tmp_path / "proteins"
     proteins.mkdir()
     (proteins / "Alpha_protein.fa").write_text(
-        ">a1\nMACDEFGHIKLMNPQRSTVWY*\n>a2\nMACDEFGHIKLMNPQRSTVWY*\n>unused\nMXXX*\n")
+        ">Alpha_g1\nMACDEFGHIKLMNPQRSTVWY*\n>Alpha_g2\nMACDEFGHIKLMNPQRSTVWY*\n>unused\nMXXX*\n")
     (proteins / "Beta_X_protein.fa").write_text(
-        ">b1\nMACDXXGHIKLMNPQRSTVWY*\n>b2\nMAUBZOJ*ACD\n")
+        ">Beta-X_g1\nMACDXXGHIKLMNPQRSTVWY*\n>Beta-X_g2\nMAUBZOJ*ACD\n")
     database = tmp_path / "mappings.sqlite"
     with sqlite3.connect(database) as db:
         db.executescript("""
             CREATE TABLE genes (query TEXT PRIMARY KEY, species TEXT NOT NULL);
             CREATE TABLE mappings (query TEXT, og TEXT, PRIMARY KEY (query, og));
-            INSERT INTO genes VALUES ('a1','Alpha'), ('a2','Alpha'), ('unused','Alpha'),
-                                     ('b1','Beta-X'), ('b2','Beta-X');
-            INSERT INTO mappings VALUES ('a1','OG1'), ('a2','OG1'), ('b1','OG1'),
-                                        ('b2','OG2'), ('a2','OG3');
+            INSERT INTO genes VALUES ('Alpha_g1','Alpha'), ('Alpha_g2','Alpha'), ('unused','Alpha'),
+                                     ('Beta-X_g1','Beta-X'), ('Beta-X_g2','Beta-X');
+            INSERT INTO mappings VALUES ('Alpha_g1','OG1'), ('Alpha_g2','OG1'), ('Beta-X_g1','OG1'),
+                                        ('Beta-X_g2','OG2'), ('Alpha_g2','OG3');
         """)
     inputs = tmp_path / "inputs"
     collect(samples, database, proteins, inputs)
@@ -50,13 +70,14 @@ def test_collect_preserves_all_copies_assignments_and_species(collected_inputs):
     _, _, _, inputs = collected_inputs
     assert set(p.name for p in inputs.glob("*.faa")) == {"OG1.faa", "OG2.faa", "OG3.faa"}
     og1 = dict(fasta_records(inputs / "OG1.faa"))
-    assert set(og1) == {"a1", "a2", "b1"}
-    assert og1["a1"] == og1["a2"]
-    assert dict(fasta_records(inputs / "OG3.faa")) == {"a2": og1["a2"]}
-    members = read_tsv(inputs / "members.tsv")
+    assert set(og1) == {"Alpha_g1", "Alpha_g2", "Beta-X_g1"}
+    assert og1["Alpha_g1"] == og1["Alpha_g2"]
+    assert dict(fasta_records(inputs / "OG3.faa")) == {"Alpha_g2": og1["Alpha_g2"]}
+    assert not (inputs / "members.tsv").exists()
+    members = alignment_members(inputs)
     assert len(members) == 5  # repeated runs do not duplicate sequences
-    assert next(r for r in members if r["gene_id"] == "b2")["species"] == "Beta-X"
-    assert {r["orthogroup"] for r in members if r["gene_id"] == "a2"} == {"OG1", "OG3"}
+    assert next(r for r in members if r["gene_id"] == "Beta-X_g2")["species"] == "Beta-X"
+    assert {r["orthogroup"] for r in members if r["gene_id"] == "Alpha_g2"} == {"OG1", "OG3"}
     assert "unused" not in {r["gene_id"] for r in members}
 
 
@@ -70,30 +91,37 @@ def test_collection_replaces_removed_ogs_and_handles_no_mappings(collected_input
         db.execute("DELETE FROM mappings")
     collect(samples, database, proteins, inputs)
     assert not list(inputs.glob("*.faa"))
-    assert read_tsv(inputs / "members.tsv") == []
+    assert not (inputs / "members.tsv").exists()
     out = inputs.parent / "alignments"
     finish(inputs, out, inputs.parent / "reports")
     assert json.loads((out / "provenance.json").read_text())["alignments"] == []
 
 
-@pytest.mark.parametrize("kind", ["missing", "duplicate", "invalid", "unsafe_og", "wrong_species"])
+@pytest.mark.parametrize("kind", ["missing", "duplicate", "invalid", "unsafe_og", "wrong_species", "gene_format", "gene_species"])
 def test_collection_rejects_inconsistent_inputs_without_replacing_checkpoint(collected_inputs, kind):
     samples, database, proteins, inputs = collected_inputs
-    previous = (inputs / "members.tsv").read_bytes()
+    previous = {p.name: p.read_bytes() for p in inputs.iterdir()}
     if kind == "missing":
-        (proteins / "Beta_X_protein.fa").write_text(">b1\nMXX*\n")
+        (proteins / "Beta_X_protein.fa").write_text(">Beta-X_g1\nMXX*\n")
     elif kind == "duplicate":
         with open(proteins / "Beta_X_protein.fa", "a") as handle:
-            handle.write(">b2\nMAA*\n")
+            handle.write(">Beta-X_g2\nMAA*\n")
     elif kind == "invalid":
-        (proteins / "Beta_X_protein.fa").write_text(">b1\nM-AA\n>b2\nMAA*\n")
+        (proteins / "Beta_X_protein.fa").write_text(">Beta-X_g1\nM-AA\n>Beta-X_g2\nMAA*\n")
+    elif kind in {"gene_format", "gene_species"}:
+        gene = "arbitrary_id" if kind == "gene_format" else "Beta_X_g2"
+        path = proteins / "Beta_X_protein.fa"
+        path.write_text(path.read_text().replace("Beta-X_g2", gene))
+        with sqlite3.connect(database) as db:
+            db.execute("UPDATE genes SET query=? WHERE query='Beta-X_g2'", (gene,))
+            db.execute("UPDATE mappings SET query=? WHERE query='Beta-X_g2'", (gene,))
     else:
         with sqlite3.connect(database) as db:
             db.execute("UPDATE mappings SET og = '../escape' WHERE og = 'OG3'" if kind == "unsafe_og"
-                       else "UPDATE genes SET species = 'Other' WHERE query = 'b2'")
+                       else "UPDATE genes SET species = 'Other' WHERE query = 'Beta-X_g2'")
     with pytest.raises(ValueError):
         collect(samples, database, proteins, inputs)
-    assert (inputs / "members.tsv").read_bytes() == previous
+    assert {p.name: p.read_bytes() for p in inputs.iterdir()} == previous
 
 
 def test_singleton_is_saved_without_running_famsa(collected_inputs, tmp_path):
@@ -104,25 +132,33 @@ def test_singleton_is_saved_without_running_famsa(collected_inputs, tmp_path):
     assert json.loads(report.read_text())["method"] == "singleton"
 
 
+def test_alignment_rejects_noncanonical_gene_id_before_running_famsa(tmp_path):
+    fasta = tmp_path / "in.faa"
+    fasta.write_text(">arbitrary_id\nMAA\n")
+    with pytest.raises(ValueError, match="gene ID must use"):
+        align(fasta, tmp_path / "out.faa", tmp_path / "out.json", command="nonexistent-famsa")
+    assert not (tmp_path / "out.faa").exists()
+
+
 def test_collection_reopens_many_og_files_without_losing_copies(collected_inputs):
     samples, database, proteins, inputs = collected_inputs
     groups = [f"many{i:03d}" for i in range(70)]
     with sqlite3.connect(database) as db:
         db.executemany("INSERT INTO mappings VALUES (?, ?)",
-                       [(gene, og) for gene in ["a1", "a2"] for og in groups])
+                       [(gene, og) for gene in ["Alpha_g1", "Alpha_g2"] for og in groups])
     collect(samples, database, proteins, inputs)
     for og in groups:
-        assert [name for name, _ in fasta_records(inputs / f"{og}.faa")] == ["a1", "a2"]
+        assert [name for name, _ in fasta_records(inputs / f"{og}.faa")] == ["Alpha_g1", "Alpha_g2"]
 
 
 @pytest.mark.parametrize("replacement, message", [
-    (">a1\nMAA\n", "gene ID set"),
-    (">a1\nMAA\n>a2\nMAAA\n", "unequal sequence lengths"),
-    (">a1\nM-A\n>a2\nMAA\n", "changed input residues"),
+    (">Alpha_g1\nMAA\n", "gene ID set"),
+    (">Alpha_g1\nMAA\n>Alpha_g2\nMAAA\n", "unequal sequence lengths"),
+    (">Alpha_g1\nM-A\n>Alpha_g2\nMAA\n", "changed input residues"),
 ])
 def test_bad_aligner_output_is_not_published(tmp_path, replacement, message):
     fasta = tmp_path / "in.faa"
-    fasta.write_text(">a1\nMAA\n>a2\nMAA\n")
+    fasta.write_text(">Alpha_g1\nMAA\n>Alpha_g2\nMAA\n")
     command = tmp_path / "fake_famsa"
     command.write_text(f"#!{sys.executable}\nfrom pathlib import Path\nimport sys\n"
                        f"Path(sys.argv[-1]).write_text({replacement!r})\n")
@@ -148,10 +184,10 @@ def test_real_famsa_preserves_residues_and_finish_prunes_removed_ogs(collected_i
     binary = famsa_binary()
     # Different lengths, stop/ambiguity symbols, identical copies and singletons.
     with open(proteins / "Alpha_protein.fa", "a") as handle:
-        handle.write(">special\nMAUBZOJ*ACD\n>unknown\nXXXXX\n")
+        handle.write(">Alpha_g3\nMAUBZOJ*ACD\n>Alpha_g4\nXXXXX\n")
     with sqlite3.connect(database) as db:
-        db.executemany("INSERT INTO genes VALUES (?, 'Alpha')", [("special",), ("unknown",)])
-        db.executemany("INSERT INTO mappings VALUES (?, 'OG1')", [("special",), ("unknown",)])
+        db.executemany("INSERT INTO genes VALUES (?, 'Alpha')", [("Alpha_g3",), ("Alpha_g4",)])
+        db.executemany("INSERT INTO mappings VALUES (?, 'OG1')", [("Alpha_g3",), ("Alpha_g4",)])
     collect(samples, database, proteins, inputs)
     for fasta in sorted(inputs.glob("*.faa")):
         align(fasta, output / fasta.name, reports / f"{fasta.stem}.json", command=binary)
@@ -159,12 +195,15 @@ def test_real_famsa_preserves_residues_and_finish_prunes_removed_ogs(collected_i
         assert len({len(seq) for seq in result.values()}) == 1
         assert {g: s.replace("-", "") for g, s in result.items()} == dict(fasta_records(fasta))
     (output / "obsolete.faa").write_text(">old\nMAA\n")
+    (output / "members.tsv").write_text("obsolete membership table\n")
     (output / "notes.txt").write_text("keep\n")
     finish(inputs, output, reports)
     assert not (output / "obsolete.faa").exists()
     assert (output / "notes.txt").read_text() == "keep\n"
-    assert (output / "members.tsv").read_bytes() == (inputs / "members.tsv").read_bytes()
+    assert not (output / "members.tsv").exists()
+    assert alignment_members(output) == alignment_members(inputs)
     report = json.loads((output / "provenance.json").read_text())
+    assert "members" not in report
     assert {r["orthogroup"] for r in report["alignments"]} == {"OG1", "OG2", "OG3"}
     with open(output / "OG1.faa", "a") as handle:
         handle.write(">unexpected\nMAA\n")
@@ -233,7 +272,8 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     assert len(list(fasta_records(out / "OG1.faa"))) == 4
     assert len(list(fasta_records(out / "OG2.faa"))) == 2
     assert len(list(fasta_records(out / "OG3.faa"))) == 1
-    assert len(read_tsv(out / "members.tsv")) == 7
+    assert len(alignment_members(out)) == 7
+    assert not (out / "members.tsv").exists()
     assert sorted(events.read_text().splitlines()) == ["OG1", "OG2"]
     assert len(odb_events.read_text().splitlines()) == 2
     assert not (out.parent / "tpm").exists()
@@ -265,17 +305,17 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     assert (out.parent / "tpm/tpm.tsv").exists()
     assert (out / "OG2.faa").exists()
     assert all((out / name).stat().st_mtime_ns == t for name, t in times.items() if name != "OG2.faa")
-    assert len(read_tsv(out / "members.tsv")) == 7  # multi-OG copies still present
+    assert len(alignment_members(out)) == 7  # multi-OG copies still present
     assert "Nothing to be done" in execute(targets=())
 
-    # Species changes rebuild membership and remove no-longer-observed OGs.
+    # Species changes remove no-longer-observed OGs and preserve parseable IDs.
     subset = tmp_path / "subset.txt"
     subset.write_text("Alpha_plant\n")
     config["selection"] = {"species_list": str(subset)}
     configfile.write_text(yaml.safe_dump(config))
     execute()
     assert {p.name for p in out.glob("*.faa")} == {"OG1.faa", "OG2.faa"}
-    assert {r["species"] for r in read_tsv(out / "members.tsv")} == {"Alpha_plant"}
+    assert {r["species"] for r in alignment_members(out)} == {"Alpha_plant"}
     assert len(list(fasta_records(out / "OG1.faa"))) == 2
     assert len(list(fasta_records(out / "OG2.faa"))) == 1
     assert "Nothing to be done" in execute()
