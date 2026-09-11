@@ -229,6 +229,11 @@ the current inference; the current manifests define membership.
 A step-by-step scientific review against a fixed GeneGalleon revision, including
 limitations and priorities, is in [the method comparison](phylogeny_comparison.md).
 
+The optional [`taxonomy_audit` target](taxonomy_audit.md) uses MonoPhy on the existing
+species tree and NCBI taxonomy to report non-monophyletic groups, native
+intruder/outlier flags, associated run IDs and figures at each rank. It follows `species_sets` and changes no
+inference outputs or contrast pairs. Species removal is not part of this stage.
+
 ## Selection and inference defaults
 
 The default selects the **500 eligible BUSCO markers with the highest overall
@@ -575,6 +580,7 @@ Outputs are under `results/<analysis>/phylogeny/` for `all`, and
 | `gene_trees/` | Per-marker trees and QC |
 | `species_coverage.tsv`, `gene_trees.json` | Retained loci per species, presence flags, count distribution, absent species and exclusions |
 | `species_tree.nwk`, `species_tree.json` | Rooted ASTRAL/CASTLES-II tree in substitutions/site |
+| `taxonomy_audit/` | Optional MonoPhy species-tree review: groups, intruder/outlier flags, run linkage, rank figures and provenance |
 | `timetree/calibrations.tsv`, `timetree/candidates.tsv`, `timetree/provenance.json` | Optional retrieved secondary bounds and mapping/exclusion audit |
 | `dating/species_tree.dated.nwk`, `dating/node_ages.tsv` | Ultrametric time tree and node ages in Ma, with native ages and rounding adjustments |
 | `dating/calibrations.resolved.tsv`, `dating/rounding_adjustments.tsv` | Resolved MRCA bounds and every age adjustment within native rounding precision |

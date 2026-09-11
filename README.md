@@ -8,6 +8,10 @@ ASTRAL-IV/CASTLES-II, with manual or nwkit/TimeTree secondary calibrations for
 optional LSD2 dating.
 `phylogeny.species_sets` selects all BUSCO-filtered species, all species with an
 observed phenotype, or both, retaining independent outputs for later reuse.
+The optional `taxonomy_audit` target uses MonoPhy to report unexpected species-tree
+placements for manual review, with group membership, run IDs and figures at each rank.
+The `filter_species` target exports a subset of completed outputs using the
+top-level `exclude_species` list, preserving the original analysis.
 The `contrast_pairs` target selects trait-guided representatives with nwkit,
 reuses the BUSCO inference rules, and exports contrast pairs and a summary tree.
 Each inference run can select an outgroup automatically within its own input species set.
@@ -84,6 +88,8 @@ Main tables are written to `results/<analysis>/tpm/`; logs and temporary work go
 | [KEGG annotation and KO expression](docs/kegg.md) | Optional KofamScan branch, frozen reference setup, ambiguity, and PhenoRadar inputs |
 | [OG protein alignments](docs/alignments.md) | All OGs and copies, untrimmed FASTA, membership, and resuming per OG |
 | [BUSCO phylogeny and dating](docs/phylogeny.md) | Existing BUSCO/CDS inputs, FAMSA, VeryFastTree, ASTRAL-IV, resources, and optional time trees |
+| [Taxonomic review](docs/taxonomy_audit.md) | MonoPhy species-tree taxonomy review, intruder/outlier flags, run IDs and rank figures |
+| [Manual species exclusion](docs/species_filter.md) | Top-level exclusion list, reusable filtered outputs, unchanged expression values/sites, and pruned trees |
 | [Contrast pairs](docs/contrast_pairs.md) | Species trait TSV, representative selection, independent subset inference, pair membership and figures |
 | [Phylogeny method review](docs/phylogeny_comparison.md) | Step-by-step comparison with GeneGalleon, scientific limitations, and improvement priorities |
 | [Outputs and TPM interpretation](docs/outputs.md) | Generated files, normalization, ambiguous mappings, and QC |

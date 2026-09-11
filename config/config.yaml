@@ -93,3 +93,14 @@ contrast:
   # The explicit contrast_pairs target also works while disabled here.
   enabled: false
   trait: C4  # column in inputs.species_trait; metadata is never a trait source
+taxonomy_audit:
+  # Report only; explicit taxonomy_audit target follows phylogeny.species_sets.
+  # When enabled, reports accompany requested full/phenotyped phylogenies, never contrast.
+  enabled: false
+  ranks: [family, subfamily, tribe, subtribe, genus]
+  outlierlevel: 0.5  # MonoPhy core-clade threshold: fraction of tips, not confidence
+  collapse_monophyletic: true  # display only; retain all flagged tips
+  mem_gb: 8
+# Manual postprocessing only; exact species IDs from metadata/samples.tsv.
+# Run the explicit filter_species target to export results/<analysis>/filtered/.
+exclude_species: []

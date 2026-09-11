@@ -36,7 +36,16 @@ results/<analysis>/
 Logs and ODB resource benchmarks are saved under `logs/<analysis>/`. Temporary
 ODB work is stored under `work/<analysis>/odb/`.
 
+The optional [MonoPhy review](taxonomy_audit.md) writes `taxonomy_audit/` under
+each selected species-tree branch. It includes taxonomic group results,
+intruder/outlier events, associated run IDs and one review PDF per rank.
+It reads the species tree and taxonomy only; gene trees are not audit inputs.
+
 ## TPM interpretation
+
+The optional [`filter_species` export](species_filter.md) writes a curated subset
+under `results/<analysis>/filtered/`. Its `manifest.json` records the top-level
+`exclude_species` list and source/output hashes. Original outputs remain available.
 
 Long tables contain `species`, `run`, `orthogroup`, and either `tpm_sum` or `tpm`.
 Wide tables contain one row per run, identified by `species` and `run`, with one

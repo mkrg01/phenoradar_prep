@@ -61,6 +61,7 @@ shared workflow. These files remain available locally.
 | Setting | Purpose |
 | --- | --- |
 | `analysis` | Output directory name under `results/`, `work/`, and `logs/` |
+| `exclude_species` | Top-level list of exact species IDs for the explicit `filter_species` export; default `[]`. Does not change upstream selection |
 | `inputs.*` | Metadata, BUSCO, CDS, and abundance paths |
 | `translation.table` | Genetic code table used for CDS translation; default `1` |
 | `taxonomy.source` | Optional existing SQLite database to copy when `resources/taxonomy/taxa.sqlite` is missing; default `null` downloads NCBI taxonomy |
@@ -103,6 +104,23 @@ for both inference runs. They retain separate results in `phylogeny/` and
 `phylogeny_phenotyped/`; changing only this list reuses completed outputs.
 The phylogeny, preparation, calibration and dating targets all follow this list.
 See [species sets](phylogeny.md#species-sets-and-reusable-outputs) for details.
+
+`taxonomy_audit.enabled` defaults to `false`. Its explicit `taxonomy_audit`
+target follows the same species sets and uses MonoPhy 1.3.2 on the existing
+rooted species tree and frozen NCBI taxonomy; gene trees are not audit inputs.
+Set it to `true` to include reports in `phylogeny` as well. `ranks` defaults to
+family, subfamily, tribe, subtribe and genus. `outlierlevel: 0.5` is MonoPhy's
+core-clade tip-fraction threshold, not confidence. `collapse_monophyletic: true`
+folds unflagged monophyletic groups in the figures only. The former
+`min_reference_species` and `max_plot_species` settings have been removed.
+No species are removed. See [taxonomic review](taxonomy_audit.md) for outputs
+and interpretation.
+
+For manual exclusions after reviewing candidates, set top-level
+`exclude_species: [Species_one, Species_two]` and run `filter_species`.
+It exports completed outputs to `results/<analysis>/filtered/`, preserving the
+original analysis and the provisional phenotyped/contrast branches. See
+[manual exclusion](species_filter.md) for scope, storage and tree interpretation.
 
 Generated storage locations are fixed:
 
