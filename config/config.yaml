@@ -50,6 +50,8 @@ kegg:
 phylogeny:
   # The explicit phylogeny/timetree targets also work without enabling rule all.
   enabled: false
+  species_sets: [all]  # all | phenotyped; both: [all, phenotyped], with separate outputs
+  trait: C4  # nonmissing column in inputs.species_trait for the phenotyped set
   busco_full_dir: null
   busco_full_suffix: .busco.full.tsv
   lineage: embryophyta_odb12

@@ -72,6 +72,12 @@ if config["contrast"]["trait"] in {"species", "role", "group", "representative",
 for key in ["enabled"]:
     if type(PHY[key]) is not bool:
         raise WorkflowError(f"phylogeny.{key} must be true or false")
+if (not isinstance(PHY["species_sets"], list) or not PHY["species_sets"]
+        or any(not isinstance(s, str) or s not in {"all", "phenotyped"} for s in PHY["species_sets"])
+        or len(set(PHY["species_sets"])) != len(PHY["species_sets"])):
+    raise WorkflowError("phylogeny.species_sets must be a nonempty list of all and/or phenotyped, without duplicates")
+if not isinstance(PHY["trait"], str) or not PHY["trait"].strip() or PHY["trait"] == "species":
+    raise WorkflowError("phylogeny.trait must name a phenotype column in inputs.species_trait")
 for key in ["min_sites", "min_informative_sites", "min_markers_per_species"]:
     if key in PHY:
         raise WorkflowError(f"phylogeny.{key} was removed; remove it from your configuration. These counts are now diagnostics")
@@ -161,19 +167,25 @@ KEGG_FINAL = [f"{KEGG}/{name}" for name in [
     "ko_support.tsv", "mapping_qc.tsv", "ko_modules.tsv", "ko_pathways.tsv",
     "reference_qc.json",
 ]]
-PHYLO = f"{OUT}/phylogeny"
-# Both inference runs use the same rules, environments and settings.
+PHYLO_BRANCHES = {"all": "phylogeny", "phenotyped": "phylogeny_phenotyped"}
+PHENOTYPED = f"{OUT}/phylogeny_phenotyped"
+# All inference runs use the same rules, environments and settings.
 PHYLO_RUN = f"{OUT}/{{phylo_branch}}"
 wildcard_constraints:
-    phylo_branch="phylogeny|contrast/phylogeny"
+    phylo_branch="phylogeny|phylogeny_phenotyped|contrast/phylogeny"
 CONTRAST = f"{OUT}/contrast"
 ROOTING = f"{OUT}/rooting"
 CONTRAST_FINAL = [f"{CONTRAST}/{name}" for name in [
     "contrast_pairs.tsv", "species_metadata.tsv", "summary.json", "summary_tree.nwk",
     "summary_tree.pdf", "summary_tree.svg", "contrastive.nwk"]]
-PHYLO_PLAN = f"{PHYLO}/plan"
-PHYLO_FINAL = [f"{PHYLO}/species_tree.nwk", f"{PHYLO}/species_tree.json", f"{PHYLO}/species_coverage.tsv"]
-PHYLO_DATED = [f"{PHYLO}/dating/species_tree.dated.nwk", f"{PHYLO}/dating/provenance.json"]
+
+def phylogeny_targets(names):
+    # Selecting targets must not change any inference job's parameters.
+    return [f"{OUT}/{PHYLO_BRANCHES[s]}/{name}" for s in PHY["species_sets"] for name in names]
+
+
+PHYLO_FINAL = phylogeny_targets(["species_tree.nwk", "species_tree.json", "species_coverage.tsv"])
+PHYLO_DATED = phylogeny_targets(["dating/species_tree.dated.nwk", "dating/provenance.json"])
 if PHY["dating"]["enabled"]:
     PHYLO_FINAL += PHYLO_DATED
 
@@ -312,10 +324,7 @@ rule phylogeny:
 
 rule phylogeny_prepare:
     input:
-        f"{PHYLO_PLAN}/markers.tsv",
-        f"{PHYLO_PLAN}/species.tsv",
-        f"{PHYLO_PLAN}/marker_stats.tsv",
-        f"{PHYLO_PLAN}/provenance.json"
+        phylogeny_targets(["plan/markers.tsv", "plan/species.tsv", "plan/marker_stats.tsv", "plan/provenance.json"])
 
 
 rule contrast_pairs:
@@ -326,9 +335,7 @@ rule contrast_pairs:
 
 rule phylogeny_calibrations:
     input:
-        f"{PHYLO}/timetree/calibrations.tsv",
-        f"{PHYLO}/timetree/candidates.tsv",
-        f"{PHYLO}/timetree/provenance.json"
+        phylogeny_targets(["timetree/calibrations.tsv", "timetree/candidates.tsv", "timetree/provenance.json"])
 
 
 rule timetree:

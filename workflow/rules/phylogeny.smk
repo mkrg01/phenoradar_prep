@@ -1,6 +1,8 @@
 def phylogeny_samples(wc):
     if wc.phylo_branch == "contrast/phylogeny":
         return checkpoints.select_contrast_representatives.get().output.samples
+    if wc.phylo_branch == "phylogeny_phenotyped":
+        return checkpoints.select_phenotyped_species.get().output.samples
     return checkpoints.select_metadata.get().output.samples
 
 
@@ -9,6 +11,8 @@ def phylogeny_root_guide(wc):
         return []
     if wc.phylo_branch == "contrast/phylogeny":
         return [checkpoints.select_contrast_representatives.get().output.tree]
+    if wc.phylo_branch == "phylogeny_phenotyped":
+        return [f"{PHENOTYPED}/rooting/ncbi_tree.nwk"]
     return [f"{ROOTING}/ncbi_tree.nwk"]
 
 
@@ -42,10 +46,29 @@ def phylogeny_marker_files(wc, suffix):
 
 def dating_calibrations(wc):
     if PHY["dating"]["calibration_source"] == "timetree":
-        return f"{PHYLO}/timetree/calibrations.tsv"
+        return f"{OUT}/{wc.phylo_branch}/timetree/calibrations.tsv"
     if not PHY["dating"]["calibrations"]:
         raise WorkflowError("absolute dating requires phylogeny.dating.calibrations; no arbitrary root age is used")
     return PHY["dating"]["calibrations"]
+
+
+checkpoint select_phenotyped_species:
+    input:
+        samples=f"{META}/samples.tsv",
+        traits=config["inputs"]["species_trait"],
+        code=f"{SCRIPTS}/species_traits.py",
+        common=f"{SCRIPTS}/common.py"
+    output:
+        samples=f"{PHENOTYPED}/selection/samples.tsv",
+        qc=f"{PHENOTYPED}/selection/selection.json"
+    params:
+        outdir=f"{PHENOTYPED}/selection", trait=PHY["trait"], min_taxa=PHY["min_taxa"]
+    conda: "../envs/analysis.yaml"
+    resources: mem_mb=4000
+    log: f"{LOG}/phylogeny_phenotyped/selection.log"
+    shell:
+        "{PYTHON:q} {input.code:q} --samples {input.samples:q} --traits {input.traits:q} "
+        "--trait {params.trait:q} --min-taxa {params.min_taxa} --outdir {params.outdir:q} > {log:q} 2>&1"
 
 
 checkpoint plan_phylogeny:
@@ -230,32 +253,33 @@ rule infer_busco_species_tree:
 
 
 rule prepare_timetree_calibrations:
+    wildcard_constraints: phylo_branch="phylogeny|phylogeny_phenotyped"
     input:
-        tree=f"{PHYLO}/species_tree.nwk",
+        tree=f"{PHYLO_RUN}/species_tree.nwk",
         metadata=f"{META}/metadata_high_busco.tsv",
         taxonomy=TAXONOMY_DB,
-        coverage=f"{PHYLO}/species_coverage.tsv",
+        coverage=f"{PHYLO_RUN}/species_coverage.tsv",
         representatives=[PHY["dating"]["timetree"]["representatives"]] if PHY["dating"]["timetree"]["representatives"] else [],
         code=f"{SCRIPTS}/timetree_calibrations.py",
         helpers=[f"{SCRIPTS}/date_phylogeny.py", f"{SCRIPTS}/infer_phylogeny.py", f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py"]
     output:
-        calibrations=f"{PHYLO}/timetree/calibrations.tsv",
-        candidates=f"{PHYLO}/timetree/candidates.tsv",
-        details=f"{PHYLO}/timetree/candidates.json",
-        provenance=f"{PHYLO}/timetree/provenance.json",
-        representatives=f"{PHYLO}/timetree/representatives.txt",
-        skeleton=f"{PHYLO}/timetree/representatives.nwk",
-        taxa=f"{PHYLO}/timetree/taxa.tsv"
+        calibrations=f"{PHYLO_RUN}/timetree/calibrations.tsv",
+        candidates=f"{PHYLO_RUN}/timetree/candidates.tsv",
+        details=f"{PHYLO_RUN}/timetree/candidates.json",
+        provenance=f"{PHYLO_RUN}/timetree/provenance.json",
+        representatives=f"{PHYLO_RUN}/timetree/representatives.txt",
+        skeleton=f"{PHYLO_RUN}/timetree/representatives.nwk",
+        taxa=f"{PHYLO_RUN}/timetree/taxa.tsv"
     params:
-        outdir=f"{PHYLO}/timetree", cache=TIMETREE_CACHE,
+        outdir=f"{PHYLO_RUN}/timetree", cache=TIMETREE_CACHE,
         representatives_flag="--representatives" if PHY["dating"]["timetree"]["representatives"] else "",
         settings=json.dumps(dict({k: PHY["dating"]["timetree"][k] for k in ["max_representatives", "max_queries",
             "min_studies", "offline"]}, request_delay_seconds=1.0), sort_keys=True)
     threads: 1
     conda: "../envs/timetree.yaml"
     resources: mem_mb=PHY["dating"]["mem_gb"] * 1000
-    log: f"{LOG}/phylogeny/timetree.log"
-    benchmark: f"{PHYLO}/benchmarks/timetree.tsv"
+    log: f"{LOG}/{{phylo_branch}}/timetree.log"
+    benchmark: f"{PHYLO_RUN}/benchmarks/timetree.tsv"
     shell:
         "{PYTHON:q} {input.code:q} --tree {input.tree:q} --metadata {input.metadata:q} "
         "--taxonomy-db {input.taxonomy:q} --coverage {input.coverage:q} --outdir {params.outdir:q} "
@@ -264,33 +288,34 @@ rule prepare_timetree_calibrations:
 
 
 rule date_busco_species_tree:
+    wildcard_constraints: phylo_branch="phylogeny|phylogeny_phenotyped"
     input:
-        tree=f"{PHYLO}/species_tree.nwk",
-        provenance=f"{PHYLO}/species_tree.json",
+        tree=f"{PHYLO_RUN}/species_tree.nwk",
+        provenance=f"{PHYLO_RUN}/species_tree.json",
         calibrations=dating_calibrations,
         code=f"{SCRIPTS}/date_phylogeny.py",
         helpers=[f"{SCRIPTS}/infer_phylogeny.py", f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py"]
     output:
-        tree=f"{PHYLO}/dating/species_tree.dated.nwk",
-        provenance=f"{PHYLO}/dating/provenance.json",
-        ages=f"{PHYLO}/dating/node_ages.tsv",
-        calibrations=f"{PHYLO}/dating/calibrations.resolved.tsv",
-        raw=f"{PHYLO}/dating/lsd2.dated.date.nexus",
-        fitted=f"{PHYLO}/dating/lsd2.fitted.nwk",
-        report=f"{PHYLO}/dating/lsd2.report.txt",
-        dates=f"{PHYLO}/dating/lsd2.dates.txt",
-        command=f"{PHYLO}/dating/lsd2.command.json",
-        input_tree=f"{PHYLO}/dating/lsd2.input.nwk",
-        adjustments=f"{PHYLO}/dating/rounding_adjustments.tsv"
+        tree=f"{PHYLO_RUN}/dating/species_tree.dated.nwk",
+        provenance=f"{PHYLO_RUN}/dating/provenance.json",
+        ages=f"{PHYLO_RUN}/dating/node_ages.tsv",
+        calibrations=f"{PHYLO_RUN}/dating/calibrations.resolved.tsv",
+        raw=f"{PHYLO_RUN}/dating/lsd2.dated.date.nexus",
+        fitted=f"{PHYLO_RUN}/dating/lsd2.fitted.nwk",
+        report=f"{PHYLO_RUN}/dating/lsd2.report.txt",
+        dates=f"{PHYLO_RUN}/dating/lsd2.dates.txt",
+        command=f"{PHYLO_RUN}/dating/lsd2.command.json",
+        input_tree=f"{PHYLO_RUN}/dating/lsd2.input.nwk",
+        adjustments=f"{PHYLO_RUN}/dating/rounding_adjustments.tsv"
         # Keep lsd2_runs undeclared so native diagnostics survive a failed job.
     params:
-        outdir=f"{PHYLO}/dating", command="lsd2",
+        outdir=f"{PHYLO_RUN}/dating", command="lsd2",
         settings=json.dumps(PHY["dating"]["lsd2"])
     conda: "../envs/dating.yaml"
     threads: 1
     resources: mem_mb=PHY["dating"]["mem_gb"] * 1000
-    log: f"{LOG}/phylogeny/dating.log"
-    benchmark: f"{PHYLO}/benchmarks/dating.tsv"
+    log: f"{LOG}/{{phylo_branch}}/dating.log"
+    benchmark: f"{PHYLO_RUN}/benchmarks/dating.tsv"
     shell:
         "{PYTHON:q} {input.code:q} --tree {input.tree:q} --provenance {input.provenance:q} "
         "--calibrations {input.calibrations:q} --outdir {params.outdir:q} --command {params.command:q} "

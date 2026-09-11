@@ -1,15 +1,18 @@
 rule prepare_ncbi_guide:
+    wildcard_constraints: guide_branch="rooting|phylogeny_phenotyped/rooting"
     input:
-        samples=f"{META}/samples.tsv",
+        samples=lambda wc: (checkpoints.select_phenotyped_species.get().output.samples
+                            if wc.guide_branch == "phylogeny_phenotyped/rooting"
+                            else checkpoints.select_metadata.get().output.samples),
         taxonomy=TAXONOMY_DB,
         code=f"{SCRIPTS}/phylogeny_root.py",
         helpers=f"{SCRIPTS}/common.py"
     output:
-        tree=f"{ROOTING}/ncbi_tree.nwk",
-        taxids=f"{ROOTING}/taxids.tsv"
+        tree=f"{OUT}/{{guide_branch}}/ncbi_tree.nwk",
+        taxids=f"{OUT}/{{guide_branch}}/taxids.tsv"
     conda: "../envs/timetree.yaml"
     resources: mem_mb=4000
-    log: f"{LOG}/rooting/ncbi.log"
+    log: f"{LOG}/{{guide_branch}}/ncbi.log"
     shell:
         "{PYTHON:q} {input.code:q} ncbi_tree --samples {input.samples:q} --taxonomy-db {input.taxonomy:q} "
         "--output {output.tree:q} --taxids {output.taxids:q} > {log:q} 2>&1"

@@ -6,6 +6,8 @@ optional KEGG Orthology (KO) annotation and expression branch.
 An optional BUSCO protein phylogeny branch uses cdskit, FAMSA, trimAl, VeryFastTree, and
 ASTRAL-IV/CASTLES-II, with manual or nwkit/TimeTree secondary calibrations for
 optional LSD2 dating.
+`phylogeny.species_sets` selects all BUSCO-filtered species, all species with an
+observed phenotype, or both, retaining independent outputs for later reuse.
 The `contrast_pairs` target selects trait-guided representatives with nwkit,
 reuses the BUSCO inference rules, and exports contrast pairs and a summary tree.
 Each inference run can select an outgroup automatically within its own input species set.

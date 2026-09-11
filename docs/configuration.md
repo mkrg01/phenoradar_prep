@@ -91,11 +91,18 @@ per chunk. These are initial allowances to check against measured peak memory;
 Configuration contains dataset paths, analysis choices, and resource budgets.
 `inputs.species_trait` defaults to `species_trait/species_trait.tsv` and is the
 sole source of phenotype annotations. It requires `species` and the column
-selected by `contrast.trait` (default `C4`). Spaces in species names become
-underscores, matching the pipeline's species IDs; duplicate normalized names
+selected by `phylogeny.trait` or `contrast.trait` (both default to `C4`). Spaces
+in species names become underscores, matching the pipeline's species IDs; duplicate normalized names
 are rejected. `C4` accepts `0`, `1`, or missing values. Metadata phenotype
 columns are ignored. The file is required only by branches that use traits.
 See [contrast pairs](contrast_pairs.md) for execution and outputs.
+
+`phylogeny.species_sets` defaults to `[all]`. Use `[phenotyped]` for all
+BUSCO-selected species with a nonmissing `phylogeny.trait`, or `[all, phenotyped]`
+for both inference runs. They retain separate results in `phylogeny/` and
+`phylogeny_phenotyped/`; changing only this list reuses completed outputs.
+The phylogeny, preparation, calibration and dating targets all follow this list.
+See [species sets](phylogeny.md#species-sets-and-reusable-outputs) for details.
 
 Generated storage locations are fixed:
 

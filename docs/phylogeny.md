@@ -17,6 +17,53 @@ Selected species + existing BUSCO full tables + original in-frame CDS/proteins
   -> species_tree.dated.nwk (million years)
 ```
 
+## Species sets and reusable outputs
+
+`phylogeny.species_sets` selects one or both independent inference runs:
+
+```yaml
+phylogeny:
+  species_sets: [phenotyped]  # default: [all]; both: [all, phenotyped]
+  trait: C4
+```
+
+| Set | Inference species | Directory under `results/<analysis>/` |
+| --- | --- | --- |
+| `all` | All species passing the ordinary BUSCO/species-list selection | `phylogeny/` (unchanged) |
+| `phenotyped` | Those selected species with a nonmissing value in `phylogeny.trait` | `phylogeny_phenotyped/` |
+
+Traits come only from `inputs.species_trait`; metadata trait columns are ignored.
+The existing name normalization and missing-value rules apply: blanks, `NA`,
+`NaN`, `nan`, and absent species rows are unknown. Both `C4=0` and `C4=1` are
+observed. All observed species are retained, with no representative skim and
+no requirement for two states. The selected set must contain at least
+`phylogeny.min_taxa` distinct species (default four). `phylogeny.trait` is
+independent of `contrast.trait`. The `all` run needs no trait file.
+
+The `phylogeny`, `phylogeny_prepare`, `phylogeny_calibrations`, and `timetree`
+targets all follow `species_sets`. `phylogeny.enabled: true` also includes the
+requested sets in `all`; it is unnecessary for the explicit targets.
+To try observed species first, run `phylogeny` with `[phenotyped]`. Later change
+the list to `[all]` or `[all, phenotyped]` and run the same target. Switching this
+list alone does not delete or recompute completed inference or dating outputs.
+Each directory retains its own marker plan, alignments, gene trees, rooting,
+calibrations, dating, and benchmarks; logs use matching branch directories.
+Changing source inputs or inference settings still triggers the affected jobs.
+The shared `run.json` records the latest configuration; branch provenance and
+`phylogeny_phenotyped/selection/selection.json` retain the relevant input records.
+Use different `analysis` names to retain multiple trait definitions or inference
+settings simultaneously.
+
+The observed-species run does not depend on a completed all-species tree or
+alignment. Marker coverage is ranked separately within each species set, and
+alignments and trees are inferred independently using the same rules and settings.
+`contrast_pairs` remains a separate representative-selection analysis.
+
+Manual calibration taxa and an optional TimeTree representative list must be
+valid for every requested tree. Automatic TimeTree representatives and
+calibrations are selected separately for each tree; raw API responses share
+the existing cache.
+
 ## Input requirements
 
 Set `phylogeny.busco_full_dir` to a directory of per-species BUSCO full tables.
@@ -127,9 +174,10 @@ phylogeny:
 ```
 
 The default `auto` selects an outgroup **within the species set
-actually used by each inference run**. The full branch uses its selected input
-manifest; the contrast branch first selects representatives with nwkit skim,
-then chooses among those representatives. No species is added for rooting, and
+actually used by each inference run**. The full and phenotyped branches use
+their respective input manifests; the contrast branch first selects
+representatives with nwkit skim, then chooses among those representatives.
+No species is added for rooting, and
 the branches can select different outgroups.
 Use `auto` for automatic selection; `null` is rejected with a configuration error.
 `nwkit constrain` builds an NCBI guide with the existing frozen SQLite snapshot;
@@ -147,12 +195,14 @@ No OpenTree/TimeTree request is made for rooting. The root position is a
 reference-based choice, not an ancestral-root estimate from BUSCO sequences.
 
 `results/<analysis>/rooting/` contains the dataset-wide `ncbi_tree.nwk` and
-`taxids.tsv`. Each inference branch writes its own `rooting/outgroup.txt` and
-`rooting/outgroup.json` under `phylogeny/` or `contrast/phylogeny/` (candidate
+`taxids.tsv`. The phenotyped branch builds its own guide from its selected
+species under `phylogeny_phenotyped/rooting/`. Each inference branch writes its
+own `rooting/outgroup.txt` and `rooting/outgroup.json` under `phylogeny/`,
+`phylogeny_phenotyped/`, or `contrast/phylogeny/` (candidate
 manifest/count, source, reference checksum and root split). An explicit outgroup
 bypasses automatic selection and must already belong to that run's inference
 manifest; a name absent from the skim representatives fails rather than adding
-a species. Both runs resolve their own outgroup **before CASTLES-II length estimation**.
+a species. All runs resolve their own outgroup **before CASTLES-II length estimation**.
 The molecular topology is not constrained to the NCBI/APG IV topology.
 
 ```bash
@@ -511,10 +561,12 @@ See the [TimeTree FAQ](https://timetree.org/faqs),
 
 ## Outputs and validation
 
-Outputs are under `results/<analysis>/phylogeny/`:
+Outputs are under `results/<analysis>/phylogeny/` for `all`, and
+`results/<analysis>/phylogeny_phenotyped/` for `phenotyped`:
 
 | Output | Meaning |
 | --- | --- |
+| `selection/samples.tsv`, `selection/selection.json` (phenotyped only) | Observed-species input rows, trait column/source checksum, species counts and missing-trait exclusions |
 | `plan/marker_stats.tsv`, `plan/markers.tsv` | All BUSCO marker statistics/ranks and the selected set in coverage-descending, ID-ascending order |
 | `plan/species.tsv`, `plan/provenance.json` | Source paths, table checksums, lineage and selection settings |
 | `species/*.faa`, `species/*.json` | Proteins; cdskit source hashes, padding/frame changes, masked codon positions and sequence QC |
@@ -552,6 +604,14 @@ location; the test exposes the other tools under their standard command names
 on `PATH`. Setting `PHYLOGENY_CONDA_PREFIX` also runs the workflow integration
 with actual stage-specific Conda environments. Synthetic tests establish workflow
 behavior, not biological accuracy or 6,000-species performance.
+
+`tests/test_phenotyped_phylogeny.py` checks observed zeros, missing annotations,
+single-state and continuous traits, species counts across replicate rows, and
+invalid set choices. Its real-tool workflow test runs phenotyped species first,
+then all species, then both; verifies unchanged inference files across switches;
+checks independent roots, calibrations and dating; and verifies that phenotype
+membership changes leave the all-species outputs untouched. TimeTree responses
+are recorded synthetic fixtures; these tests make no external API requests.
 
 TimeTree tests also retain valid calibrations from small clades (including
 two-tip clades) while checking that the query cap and size ranking still apply.
