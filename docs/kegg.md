@@ -177,7 +177,6 @@ results/<analysis>/kegg/
     gene_kos.tsv                   # Candidate hits, thresholds, acceptance
     genes.tsv                      # Every protein, including unannotated genes
     provenance.json
-    benchmark.tsv                  # Snakemake elapsed seconds and sampled resource use
     execution_config.json
     stdout.log
     stderr.log
@@ -190,6 +189,9 @@ results/<analysis>/kegg/
   ko_support.tsv                   # All annotated KO/run support records
   mapping_qc.tsv                   # One row per selected run
 ```
+
+Snakemake elapsed time and sampled resource use are saved separately at
+`logs/<analysis>/kegg/benchmarks/<odb_species>.tsv`.
 
 Per-run and support columns are `species`, `run`, `ko`, `tpm_sum`,
 `annotated_genes`, and `quantified_genes`; the merged numeric long table contains
@@ -208,12 +210,18 @@ completeness.
 
 ## Passing KO features to PhenoRadar
 
-After selecting compatible tissue/condition runs and explicitly constructing a
-species-level table, KO identifiers can be used as feature IDs:
+The explicit [`phenoradar_inputs` target](phenoradar_inputs.md) can collect
+`ko_tpm_sum.tsv` and the requested KO–module/pathway maps directly, without ODB
+mapping or an OG–KEGG join. It validates one run per species and expression
+coverage before publishing links. Grouping or module scoring is not performed
+by this preparation workflow.
+
+After selecting compatible tissue/condition runs, use one run per species.
+The collected long table can be passed directly, with KO identifiers as feature IDs:
 
 ```yaml
 data:
-  tpm_path: ko_expression_species.tsv
+  tpm_path: results/full/phenoradar_inputs/kegg/ko_tpm_sum.tsv
   feature_col: ko
   value_col: tpm_sum
   orthogroup_annotation_path: null

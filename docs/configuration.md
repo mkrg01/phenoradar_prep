@@ -9,23 +9,32 @@ Use this guide to adapt the workflow to a dataset. Run all commands from the rep
 The default input layout is:
 
 ```text
-metadata/
+input/
   metadata.tsv
-transcriptome_assembly/
-  multispecies_summary/
-    busco_full_longest_cds.tsv
-  longest_cds/
+  species_trait.tsv
+  busco/
+    summary.tsv
+    full/                         # Optional per-species phylogeny tables
+  cds/
     {species}_longestCDS.fa.gz
-  amalgkit_quant/
+  quant/
     {species}/{run}/{run}_abundance.tsv
+  calibrations.tsv                # Optional dating input
+  pilot_species.txt               # Optional species selection
 ```
 
 | Input | Required columns or format |
 | --- | --- |
 | Sample metadata | Tab-separated; `scientific_name`, `run`, `taxid` |
+| Species traits | Tab-separated; `species` and the configured trait column; required for trait-based analyses |
 | BUSCO summary | Tab-separated; `Species`, `busco_cds_single`, `busco_cds_duplicated`, `busco_cds_fragmented`, `busco_cds_missing`, `busco_cds_total` |
 | Coding sequences | Gzip-compressed FASTA, one file per species |
 | Abundance estimates | Tab-separated; `target_id`, `tpm`, one file per run |
+
+This layout groups dataset inputs separately from `config/` settings and reusable
+`resources/` references. Optional directories need only exist when used. Configured
+external files or symbolic links avoid copying large source datasets. See the
+[directory guide](directory_layout.md) for output organization and migration.
 
 Run IDs must be unique in the metadata, and species names must be unique in the
 BUSCO summary. Multiple runs per species are supported. All runs for the same
@@ -54,7 +63,7 @@ Set the input paths, optional taxonomy source, analysis name, and appropriate Or
 taxonomic node. **The default node `3193` is dataset-specific**; review it before
 processing another dataset or downloading reference data.
 
-`config/mydata.yaml`, `config/*.local.yaml`, and `config/pilot_species.txt` are
+`config/mydata.yaml`, `config/*.local.yaml`, and `input/pilot_species.txt` are
 ignored by Git so that personal settings and species selections stay out of the
 shared workflow. These files remain available locally.
 
@@ -83,6 +92,7 @@ shared workflow. These files remain available locally.
 | `kegg.enabled` | Include KEGG outputs in the default full workflow; default `false` |
 | `kegg.threads`, `kegg.mem_gb` | CPU and decimal-GB memory budgets per species; defaults `4` and `8` |
 | `kegg.ambiguity` | `duplicate` (default) adds full TPM to each accepted KO; `drop` excludes multi-KO genes; `error` rejects quantified multi-KO genes. Annotations always retain candidates |
+| `phenoradar.*` | Select completed inputs for the explicit `phenoradar_inputs` target; see [input collection](phenoradar_inputs.md) |
 
 ODB chunks can run concurrently when their combined CPU and memory estimates fit
 the workflow budget. The defaults use 16 workers and 192 GB for up to 50 species
@@ -90,18 +100,19 @@ per chunk. These are initial allowances to check against measured peak memory;
 `config/pilot.yaml` retains smaller settings for its two-species chunks.
 
 Configuration contains dataset paths, analysis choices, and resource budgets.
-`inputs.species_trait` defaults to `species_trait/species_trait.tsv` and is the
+`inputs.species_trait` defaults to `input/species_trait.tsv` and is the
 sole source of phenotype annotations. It requires `species` and the column
 selected by `phylogeny.trait` or `contrast.trait` (both default to `C4`). Spaces
 in species names become underscores, matching the pipeline's species IDs; duplicate normalized names
 are rejected. `C4` accepts `0`, `1`, or missing values. Metadata phenotype
-columns are ignored. The file is required only by branches that use traits.
+columns are ignored. The file is required by trait-based inference branches;
+base PhenoRadar metadata uses blank traits when the file has not been supplied.
 See [contrast pairs](contrast_pairs.md) for execution and outputs.
 
 `phylogeny.species_sets` defaults to `[all]`. Use `[phenotyped]` for all
 BUSCO-selected species with a nonmissing `phylogeny.trait`, or `[all, phenotyped]`
-for both inference runs. They retain separate results in `phylogeny/` and
-`phylogeny_phenotyped/`; changing only this list reuses completed outputs.
+for both inference runs. They retain separate results in `phylogeny/all/` and
+`phylogeny/phenotyped/`; changing only this list reuses completed outputs.
 The phylogeny, preparation, calibration and dating targets all follow this list.
 The explicit `phylogeny_contrast_pairs` target also follows this list and uses
 `contrast.trait` for pair assignment. `contrast.enabled` controls only the

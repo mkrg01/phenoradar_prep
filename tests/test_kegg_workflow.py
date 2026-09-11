@@ -121,7 +121,7 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     out = tmp_path / "results/test/kegg"
     assert not odb_events.exists()  # A standalone KEGG target never maps to ODB.
     assert len(events.read_text().splitlines()) == 2  # two species, three runs
-    benchmarks = list((out / "species").glob("*/benchmark.tsv"))
+    benchmarks = list((workflow_project / "logs/test/kegg/benchmarks").glob("*.tsv"))
     assert len(benchmarks) == 2
     assert all(float(read_tsv(path)[0]["s"]) >= 0 for path in benchmarks)
     rows = read_tsv(out / "ko_tpm_sum.tsv")
@@ -176,7 +176,7 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     config["kegg"]["enabled"] = True
     configfile.write_text(yaml.safe_dump(config))
     execute(targets=())
-    assert [r["run"] for r in read_tsv(out.parent / "tpm/tpm.tsv")] == ["B1", "B1"]
+    assert [r["run"] for r in read_tsv(out.parent / "orthogroups/expression/tpm.tsv")] == ["B1", "B1"]
     assert len(odb_events.read_text().splitlines()) == 1
     assert "Nothing to be done" in execute(["--dry-run"], targets=())
 

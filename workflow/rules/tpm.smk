@@ -2,14 +2,14 @@ rule aggregate_tpm:
     input:
         samples=f"{META}/samples.tsv",
         abundance=lambda wc: run_row(wc)["abundance"],
-        database=f"{MERGED}/mappings.sqlite",
+        database=f"{MAPPING}/mappings.sqlite",
         code=f"{SCRIPTS}/aggregate_tpm.py",
         common=f"{SCRIPTS}/common.py"
     output:
         tpm=f"{TPM}/runs/{{run}}.tsv",
         qc=f"{TPM}/runs/{{run}}.qc.json"
     params: multimap=config["tpm"]["multimap"]
-    log: f"{LOG}/tpm/{{run}}.log"
+    log: f"{LOG}/{ORTHOGROUP_EXPRESSION}/{{run}}.log"
     conda: "../envs/analysis.yaml"
     resources: mem_mb=2000
     shell:
@@ -32,7 +32,7 @@ rule merge_tpm:
         summed_wide=f"{TPM}/tpm_sum_wide.tsv",
         qc=f"{TPM}/mapping_qc.tsv"
     params: runs=f"{TPM}/runs", out=TPM
-    log: f"{LOG}/merge_tpm.log"
+    log: f"{LOG}/{ORTHOGROUP_EXPRESSION}/merge.log"
     conda: "../envs/analysis.yaml"
     resources: mem_mb=8000
     shell:

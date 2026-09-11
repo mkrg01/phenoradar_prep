@@ -4,7 +4,7 @@
 
 This optional branch saves untrimmed amino-acid alignments for **every OG observed
 in the selected species' ODB mappings**, retaining all mapped gene copies. It
-reuses the translated protein FASTA and `odb/merged/mappings.sqlite`:
+reuses the translated protein FASTA and `orthogroups/mapping/mappings.sqlite`:
 
 ```text
 Protein FASTA + ODB mappings -> collect by OG -> FAMSA -> untrimmed FASTA
@@ -62,7 +62,7 @@ These checks validate processing integrity, not orthology or alignment accuracy.
 ## Outputs and PhenoRadar
 
 ```text
-results/<analysis>/alignments/
+results/<analysis>/orthogroups/alignments/
   {og}.faa
   provenance.json
 ```
@@ -90,9 +90,10 @@ evidence of a biological gene deletion.
 
 Collection reads each selected species' protein file once for sequence extraction,
 keeps mappings for one species in memory, and caps simultaneously open OG files.
-Collected FASTA and input records live in `work/<analysis>/alignments/inputs/`.
-Each OG is a separate Snakemake job with a log, execution JSON and benchmark under
-`logs/<analysis>/`. The execution JSON records the input/output hashes, actual
+Collected FASTA and input records live in `work/<analysis>/orthogroups/alignments/inputs/`.
+Each OG is a separate Snakemake job with a log and execution JSON under
+`logs/<analysis>/orthogroups/alignments/` and a resource TSV in its `benchmarks/`
+subdirectory. The execution JSON records the input/output hashes, actual
 command, thread count and FAMSA executable hash; singletons record a direct copy.
 The normal `run.json` records workflow code and resolved configuration.
 

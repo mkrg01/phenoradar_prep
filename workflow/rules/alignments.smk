@@ -9,13 +9,13 @@ def alignment_targets(wc):
     # Request each OG directly: Snakemake otherwise considers a deleted MSA an
     # unnecessary intermediate when the final provenance still exists.
     return (ALIGNMENT_FINAL + alignment_files(wc, "faa", ALIGNMENTS)
-            + alignment_files(wc, "json", f"{LOG}/alignments"))
+            + alignment_files(wc, "json", f"{LOG}/{ORTHOGROUP_ALIGNMENTS}"))
 
 
 checkpoint collect_orthogroup_proteins:
     input:
         samples=f"{META}/samples.tsv",
-        database=f"{MERGED}/mappings.sqlite",
+        database=f"{MAPPING}/mappings.sqlite",
         proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa' for r in sample_rows(wc)}),
         code=f"{SCRIPTS}/align_orthogroups.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/busco_phylogeny.py"]
@@ -23,7 +23,7 @@ checkpoint collect_orthogroup_proteins:
     params: proteins=PROTEINS
     resources: mem_mb=config["alignment"]["mem_gb"] * 1000
     conda: "../envs/alignment.yaml"
-    log: f"{LOG}/alignments/collect.log"
+    log: f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/collect.log"
     shell:
         "{PYTHON:q} {input.code:q} collect --samples {input.samples:q} --database {input.database:q} "
         "--protein-dir {params.proteins:q} --outdir {output.fasta:q} > {log:q} 2>&1"
@@ -37,13 +37,13 @@ rule align_orthogroup:
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/busco_phylogeny.py"]
     output:
         alignment=f"{ALIGNMENTS}/{{og}}.faa",
-        provenance=f"{LOG}/alignments/{{og}}.json"
+        provenance=f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/{{og}}.json"
     params: fasta=lambda wc: f"{ALIGNMENT_INPUTS}/{wc.og}.faa"
     threads: config["alignment"]["threads"]
     resources: mem_mb=config["alignment"]["mem_gb"] * 1000
     conda: "../envs/alignment.yaml"
-    log: f"{LOG}/alignments/{{og}}.log"
-    benchmark: f"{LOG}/benchmarks/alignment_{{og}}.tsv"
+    log: f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/{{og}}.log"
+    benchmark: f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/benchmarks/{{og}}.tsv"
     shell:
         "{PYTHON:q} {input.code:q} align --fasta {params.fasta:q} --output {output.alignment:q} "
         "--provenance {output.provenance:q} --threads {threads} > {log:q} 2>&1"
@@ -53,15 +53,15 @@ rule finish_alignments:
     input:
         proteins=lambda wc: checkpoints.collect_orthogroup_proteins.get().output.fasta,
         alignments=lambda wc: alignment_files(wc, "faa", ALIGNMENTS),
-        reports=lambda wc: alignment_files(wc, "json", f"{LOG}/alignments"),
+        reports=lambda wc: alignment_files(wc, "json", f"{LOG}/{ORTHOGROUP_ALIGNMENTS}"),
         code=f"{SCRIPTS}/align_orthogroups.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/busco_phylogeny.py"]
     output:
         provenance=f"{ALIGNMENTS}/provenance.json"
-    params: outdir=ALIGNMENTS, reports=f"{LOG}/alignments"
+    params: outdir=ALIGNMENTS, reports=f"{LOG}/{ORTHOGROUP_ALIGNMENTS}"
     resources: mem_mb=config["alignment"]["mem_gb"] * 1000
     conda: "../envs/alignment.yaml"
-    log: f"{LOG}/alignments/finish.log"
+    log: f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/finish.log"
     shell:
         "{PYTHON:q} {input.code:q} finish --inputs {input.proteins:q} --outdir {params.outdir:q} "
         "--reports {params.reports:q} > {log:q} 2>&1"

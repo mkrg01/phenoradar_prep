@@ -64,7 +64,7 @@ rule annotate_kofam:
     threads: config["kegg"]["threads"]
     resources: mem_mb=config["kegg"]["mem_gb"] * 1000
     log: f"{LOG}/kegg/species/{{species}}.log"
-    benchmark: f"{KEGG_SPECIES}/{{species}}/benchmark.tsv"
+    benchmark: f"{LOG}/kegg/benchmarks/{{species}}.tsv"
     conda: "../envs/kofam.yaml"
     shell:
         "{PYTHON:q} {input.code:q} --protein {input.protein:q} --species {params.species:q} "

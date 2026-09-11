@@ -415,7 +415,7 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
             p.read_text()[-4000:] for p in (tmp_path / "logs").rglob("*.log"))
         return result.stdout
     run()
-    out = tmp_path / "results/test/phylogeny"
+    out = tmp_path / "results/test/phylogeny/all"
     read_tree(out / "species_tree.nwk", species)
     assert all(int(r["gene_trees"]) >= 1 for r in read_tsv(out / "species_coverage.tsv"))
     report = json.loads((out / "species_tree.json").read_text())
@@ -424,8 +424,8 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
     timestamp = (out / "species_tree.nwk").stat().st_mtime_ns
     assert "Nothing to be done" in run()
     assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
-    assert not (tmp_path / "results/test/odb/merged").exists()
-    assert not (tmp_path / "results/test/tpm").exists()
+    assert not (tmp_path / "results/test/orthogroups/mapping").exists()
+    assert not (tmp_path / "results/test/orthogroups/expression").exists()
     upstream = {p: p.stat().st_mtime_ns for folder in [out / "species", out / "alignments/raw"]
                 for p in folder.iterdir()}
     cfg["phylogeny"]["trimal_mode"] = "automated1"

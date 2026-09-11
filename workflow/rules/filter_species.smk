@@ -11,8 +11,8 @@ rule filter_species:
         code=f"{SCRIPTS}/filter_species.py",
         phylogeny_code=f"{SCRIPTS}/filter_species_phylogeny.py",
         contrast_code=[f"{SCRIPTS}/{name}.py" for name in
-                       ["contrast_pairs", "plot_contrast_tree", "species_traits", "phylogeny_root"]],
-        common=f"{SCRIPTS}/common.py"
+                       ["contrast_pairs", "plot_contrast_tree", "species_traits", "phylogeny_root", "phenoradar_metadata"]],
+        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/layout.py"]
     output: bundle=directory(f"{OUT}/filtered")
     params:
         source=str(Path(OUT).resolve()),

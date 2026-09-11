@@ -20,6 +20,9 @@ completed trees without rerunning inference or the NCBI representative analysis.
 Each inference run can select an outgroup automatically within its own input species set.
 An optional OG alignment branch saves untrimmed protein alignments for every
 observed orthogroup, retaining all gene copies for downstream site analysis.
+The explicit `phenoradar_inputs` target validates completed outputs and collects
+only selected PhenoRadar inputs as links, including independent KO expression
+and KO-to-module/pathway maps.
 
 ```text
 Metadata + BUSCO + taxonomy -> species selection -> CDS translation
@@ -28,8 +31,9 @@ Metadata + BUSCO + taxonomy -> species selection -> CDS translation
   -> optional KofamScan -> KO-level TPM sums, membership tables, QC, and provenance
 ```
 
-Input files are read without modification. Datasets, reference databases, and
-analysis outputs are not distributed with the repository.
+Dataset inputs are grouped under `input/`; external paths or links can also be
+configured. Workflow jobs read input files without modification. Datasets,
+reference databases, and analysis outputs are not distributed with the repository.
 
 ## Quick start
 
@@ -79,8 +83,8 @@ dry-runs, pilots, monitoring, and resuming an interrupted run.
 
 ## Results and documentation
 
-Main tables are written to `results/<analysis>/tpm/`; logs and temporary work go to
-`logs/<analysis>/` and `work/<analysis>/`. The default analysis name is `full`;
+Main tables are written to `results/<analysis>/orthogroups/expression/`; logs and
+temporary work go to `logs/<analysis>/` and `work/<analysis>/`. The default analysis name is `full`;
 `pilot` is a separate analysis using a selected subset of species.
 
 | Guide | Contents |
@@ -93,6 +97,8 @@ Main tables are written to `results/<analysis>/tpm/`; logs and temporary work go
 | [BUSCO phylogeny and dating](docs/phylogeny.md) | Existing BUSCO/CDS inputs, FAMSA, VeryFastTree, ASTRAL-IV, resources, and optional time trees |
 | [Taxonomic review](docs/taxonomy_audit.md) | MonoPhy species-tree taxonomy review, intruder/outlier flags, run IDs and rank figures |
 | [Manual species exclusion](docs/species_filter.md) | Top-level exclusion list, reusable filtered outputs, unchanged expression values/sites, and pruned trees |
+| [PhenoRadar inputs](docs/phenoradar_inputs.md) | Minimal metadata, completed expression/sequence/tree inputs, optional KO groups, and validation |
+| [Directory layout](docs/directory_layout.md) | Input organization, shared output paths, and migration records |
 | [Contrast pairs](docs/contrast_pairs.md) | Representative analysis, pairs from full/phenotyped trees, recomputation after exclusion, membership and figures |
 | [Phylogeny method review](docs/phylogeny_comparison.md) | Step-by-step comparison with GeneGalleon, scientific limitations, and improvement priorities |
 | [Outputs and TPM interpretation](docs/outputs.md) | Generated files, normalization, ambiguous mappings, and QC |

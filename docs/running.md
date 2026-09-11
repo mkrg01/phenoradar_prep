@@ -202,13 +202,13 @@ downstream jobs. After `prepare` finishes, inspect the complete plan with:
 
 ## Pilot run
 
-After preparation, create `config/pilot_species.txt` with a small set of eligible
+After preparation, create `input/pilot_species.txt` with a small set of eligible
 species from `results/<analysis>/metadata/species_high_busco.txt`. For example,
 with the default analysis name `full`, select the first three species and review
 or edit the list:
 
 ```bash
-head -n 3 results/full/metadata/species_high_busco.txt > config/pilot_species.txt
+head -n 3 results/full/metadata/species_high_busco.txt > input/pilot_species.txt
 ```
 
 The generic `config/pilot.yaml` reads that list, uses two species per ODB chunk,
@@ -238,7 +238,7 @@ sbatch --partition=YOUR_PARTITION \
 ```
 
 Incomplete ODB work is retained under
-`work/<analysis>/odb/<chunk>/<fingerprint>/`. The fingerprint includes input FASTA
+`work/<analysis>/orthogroups/mapping/<chunk>/<fingerprint>/`. The fingerprint includes input FASTA
 contents, the reference record, mapping settings, software records, and worker
 code. Matching incomplete work can be resumed; changed inputs or settings use a
 different work directory. Changing chunk membership, `odb.threads`, or

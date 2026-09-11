@@ -2,11 +2,11 @@
 # Paths are relative to the project root (run Snakemake there).
 analysis: full
 inputs:
-  metadata: metadata/metadata.tsv
-  species_trait: species_trait/species_trait.tsv
-  busco: transcriptome_assembly/multispecies_summary/busco_full_longest_cds.tsv
-  cds_dir: transcriptome_assembly/longest_cds
-  quant_dir: transcriptome_assembly/amalgkit_quant
+  metadata: input/metadata.tsv
+  species_trait: input/species_trait.tsv
+  busco: input/busco/summary.tsv
+  cds_dir: input/cds
+  quant_dir: input/quant
 selection:
   busco_threshold: 0.5
   species_list: null
@@ -52,7 +52,7 @@ phylogeny:
   enabled: false
   species_sets: [all]  # all | phenotyped; both: [all, phenotyped], with separate outputs
   trait: C4  # nonmissing column in inputs.species_trait for the phenotyped set
-  busco_full_dir: null
+  busco_full_dir: input/busco/full  # required only for BUSCO phylogeny targets
   busco_full_suffix: .busco.full.tsv
   lineage: embryophyta_odb12
   # Original oriented, in-frame CDS, or original protein FASTA used by BUSCO.
@@ -77,7 +77,7 @@ phylogeny:
   dating:
     enabled: false
     calibration_source: file  # file | timetree
-    calibrations: null  # TSV: taxa, min_age_ma, max_age_ma, source
+    calibrations: input/calibrations.tsv  # optional TSV: taxa, min_age_ma, max_age_ma, source
     mem_gb: 4
     lsd2:
       variance: 1  # 0: unweighted; 1: input lengths; 2: reweight after initial fit
@@ -106,3 +106,13 @@ taxonomy_audit:
 # Manual postprocessing only; exact species IDs from metadata/samples.tsv.
 # Run the explicit filter_species target to export results/<analysis>/filtered/.
 exclude_species: []
+# Collect completed outputs only: this target never starts missing analyses.
+phenoradar:
+  # auto: include when complete; true: require; false: omit.
+  orthogroups: auto
+  kegg: auto
+  alignments: auto
+  kegg_groups: [module]  # module and/or pathway; [] exports KO expression only
+  orthogroup_annotations: null  # existing headerless OG/taxid/description TSV[.gz]
+  contrast: null  # phylogeny/{all,phenotyped,representatives}/contrast
+  tree: null  # explicit Newick file with the same species as the selected dataset

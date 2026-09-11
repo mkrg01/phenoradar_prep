@@ -4,6 +4,9 @@ import json
 import math
 
 from common import write_json, write_tsv
+from layout import PHYLOGENY_BRANCHES
+
+ALL_PHYLOGENY = PHYLOGENY_BRANCHES["all"]
 
 
 def read_tree(text, allowed, exact=False):
@@ -64,8 +67,8 @@ def filter_fasta(source, destination, keep, allowed):
 
 def export_phylogeny(job):
     from filter_species import safe_name
-    source, out = job.source / "phylogeny", job.stage / "phylogeny"
-    out.mkdir()
+    source, out = job.source / ALL_PHYLOGENY, job.stage / ALL_PHYLOGENY
+    out.mkdir(parents=True)
     original = json.loads(job.input(source / "species_tree.json").read_text())
     tree = read_tree(job.input(source / "species_tree.nwk").read_text(), job.species, exact=True)
     if original.get("species") != len(job.species):
@@ -120,7 +123,7 @@ def export_phylogeny(job):
             if path.is_file():
                 before, after, columns = filter_fasta(job.input(path), out / folder / path.name,
                                                        job.keep, job.species)
-                job.counts[f"phylogeny/{folder}/{path.name}"] = dict(before=before, after=after, columns=columns)
+                job.counts[f"{ALL_PHYLOGENY}/{folder}/{path.name}"] = dict(before=before, after=after, columns=columns)
                 column_map = path.with_suffix(".columns.tsv")
                 if column_map.is_file() and after:
                     job.copy(column_map, out / folder / column_map.name)

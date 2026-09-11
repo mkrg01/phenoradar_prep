@@ -1,5 +1,10 @@
 # Manual species exclusion from completed outputs
 
+When selected taxonomy metadata is available, filtering also prepares
+`metadata/species_metadata.tsv` for the [PhenoRadar input collector](phenoradar_inputs.md),
+using retained species and the supplied trait table. The collector validates and
+uses this completed snapshot when `exclude_species` is nonempty.
+
 Use a **top-level YAML list** of exact `species` IDs from the original
 `metadata/samples.tsv`:
 
@@ -59,7 +64,7 @@ For archived results outside the ordinary workflow layout:
 python workflow/scripts/filter_species.py \
   --source /path/to/completed/analysis \
   --exclude-species '["Lespedeza_davurica"]' \
-  --traits species_trait/species_trait.tsv \
+  --traits input/species_trait.tsv \
   --outdir /path/to/new/filtered
 ```
 
@@ -83,16 +88,16 @@ the guise of new calculations.
 | `metadata/species_trait.tsv` when available | Remaining species' original phenotype columns, preserving zero and missing values; spaces in species IDs normalized |
 | `excluded_samples.tsv` | Removed species/run identities and taxids for review |
 | `proteins/` when complete | Symlinks to original files for remaining species, using the manifest's `odb_species` filename mapping |
-| `odb/merged/mappings.sqlite`, `gene_orthogroups.tsv`, `filter_qc.json` | Subset of the original gene ownership/mapping database, including all retained copies and ambiguous gene/OG assignments |
-| `tpm/*.tsv` | Original long/wide tables and run QC with excluded runs removed |
+| `orthogroups/mapping/mappings.sqlite`, `gene_orthogroups.tsv`, `filter_qc.json` | Subset of the original gene ownership/mapping database, including all retained copies and ambiguous gene/OG assignments |
+| `orthogroups/expression/*.tsv` | Original long/wide tables and run QC with excluded runs removed |
 | `kegg/*.tsv` | Filtered gene/KO membership, expression, support and run QC; feature descriptions retained |
-| `alignments/*.faa`, `filter_qc.json` | Retained gene rows with original full headers, residues and site coordinates; empty OGs omitted and listed |
-| `phylogeny/species_tree.pruned.nwk` | All-species tree with excluded tips removed, when at least two tips remain |
-| `phylogeny/gene_trees.pruned.nwk`, `gene_trees/*.pruned.nwk`, `gene_trees.tsv` | Per-marker derivatives and a marker/retention index; trees with fewer than two tips omitted |
-| `phylogeny/alignments/`, including `raw/` when present | Available retained-marker alignments with excluded species rows removed; saved column maps unchanged |
-| `phylogeny/species_coverage.tsv`, `pruning.json` | Recounted retained-tree coverage, root status and explicit pruning limitations |
-| `phylogeny/dating/species_tree.dated.pruned.nwk` when available | Pruned source time tree, without refitting ages or calibration constraints |
-| `phylogeny/contrast/`, `phylogeny_phenotyped/contrast/` when ready | Fresh pair IDs, species membership, observed/summary trees and PDF/SVG figures computed from the corresponding original molecular tree after exclusions |
+| `orthogroups/alignments/*.faa`, `filter_qc.json` | Retained gene rows with original full headers, residues and site coordinates; empty OGs omitted and listed |
+| `phylogeny/all/species_tree.pruned.nwk` | All-species tree with excluded tips removed, when at least two tips remain |
+| `phylogeny/all/gene_trees.pruned.nwk`, `gene_trees/*.pruned.nwk`, `gene_trees.tsv` | Per-marker derivatives and a marker/retention index; trees with fewer than two tips omitted |
+| `phylogeny/all/alignments/`, including `raw/` when present | Available retained-marker alignments with excluded species rows removed; saved column maps unchanged |
+| `phylogeny/all/species_coverage.tsv`, `pruning.json` | Recounted retained-tree coverage, root status and explicit pruning limitations |
+| `phylogeny/all/dating/species_tree.dated.pruned.nwk` when available | Pruned source time tree, without refitting ages or calibration constraints |
+| `phylogeny/all/contrast/`, `phylogeny/phenotyped/contrast/` when ready | Fresh pair IDs, species membership, observed/summary trees and PDF/SVG figures computed from the corresponding original molecular tree after exclusions |
 | `manifest.json` | Exclusion list, retained identities, before/after counts, exported/skipped branches and input/output/code checksums |
 
 For OG alignments, filenames identify OGs and gene IDs use `{species}_g{number}`.
@@ -108,7 +113,7 @@ CDS/abundance inputs remain source caches; they are not duplicated. Paths in
 the selected-sample manifest still point to the original inputs.
 
 The full source phenotype table and all original trees/pairs are unchanged.
-The NCBI representative analysis under `contrast/` is neither copied nor
+The NCBI representative analysis under `phylogeny/representatives/` is neither copied nor
 recomputed. Phenotyped inference outputs are not copied, but completed full
 and phenotyped species trees are both used to recompute contrast pairs inside
 the curated bundle, regardless of `phylogeny.species_sets`. Previous pair
@@ -133,7 +138,7 @@ the retained runs' denominators. KO zeros and unavailable values remain distinct
 OG/KO feature columns retain the original axes, including all-zero or empty
 columns; this stage does not perform feature selection. An OG can therefore
 remain a table column after its last alignment sequence has been removed.
-Such empty alignments are listed in `alignments/filter_qc.json`.
+Such empty alignments are listed in `orthogroups/alignments/filter_qc.json`.
 
 Alignment row removal retains every column, including columns that become all
 gap. It is not a new alignment or a new trimAl pass. Marker selection is not

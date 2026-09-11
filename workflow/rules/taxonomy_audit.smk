@@ -1,9 +1,9 @@
 rule audit_phylogeny:
-    wildcard_constraints: phylo_branch="phylogeny|phylogeny_phenotyped"
+    wildcard_constraints: phylo_branch=MOLECULAR_BRANCH_PATTERN
     input:
         tree=f"{PHYLO_RUN}/species_tree.nwk",
         tree_qc=f"{PHYLO_RUN}/species_tree.json",
-        samples=lambda wc: f"{PHENOTYPED}/selection/samples.tsv" if wc.phylo_branch == "phylogeny_phenotyped" else f"{META}/samples.tsv",
+        samples=lambda wc: f"{PHENOTYPED}/selection/samples.tsv" if wc.phylo_branch == PHYLO_BRANCHES["phenotyped"] else f"{META}/samples.tsv",
         taxonomy=TAXONOMY_DB,
         code=f"{SCRIPTS}/taxonomy_audit.py",
         monophy=f"{SCRIPTS}/taxonomy_audit.R",

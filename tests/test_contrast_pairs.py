@@ -209,31 +209,32 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
         return result.stdout
     run(["contrast_pairs"])
     result = tmp_path / "results/test"
-    assert not (result / "phylogeny").exists()
-    assert (result / "contrast/phylogeny/rooting/outgroup.txt").read_text().strip() == species[1]
-    assert json.loads((result / "contrast/phylogeny/species_tree.json").read_text())["outgroup"] == species[1]
-    selected = {r["species"] for r in read_tsv(result / "contrast/selection/samples.tsv")}
-    assert selected == {r["leaf_name"] for r in read_tsv(result / "contrast/selection/ncbi_skim.sampled.tsv")}
+    assert not (result / "phylogeny/all/species_tree.nwk").exists()
+    assert not (result / "phylogeny/all/gene_trees.nwk").exists()
+    assert (result / "phylogeny/representatives/rooting/outgroup.txt").read_text().strip() == species[1]
+    assert json.loads((result / "phylogeny/representatives/species_tree.json").read_text())["outgroup"] == species[1]
+    selected = {r["species"] for r in read_tsv(result / "phylogeny/representatives/selection/samples.tsv")}
+    assert selected == {r["leaf_name"] for r in read_tsv(result / "phylogeny/representatives/selection/ncbi_skim.sampled.tsv")}
     assert species[0] not in selected and species[1] in selected
     assert "Nothing to be done" in run(["contrast_pairs"])
     run(["phylogeny"])
-    assert (result / "phylogeny/rooting/outgroup.txt").read_text().strip() == species[0]
-    assert json.loads((result / "phylogeny/species_tree.json").read_text())["outgroup"] == species[0]
-    full_tree = result / "phylogeny/species_tree.nwk"
+    assert (result / "phylogeny/all/rooting/outgroup.txt").read_text().strip() == species[0]
+    assert json.loads((result / "phylogeny/all/species_tree.json").read_text())["outgroup"] == species[0]
+    full_tree = result / "phylogeny/all/species_tree.nwk"
     full_mtime = full_tree.stat().st_mtime_ns
-    contrast_tree = result / "contrast/phylogeny/species_tree.nwk"
+    contrast_tree = result / "phylogeny/representatives/species_tree.nwk"
     contrast_mtime = contrast_tree.stat().st_mtime_ns
     # The post-inference target uses the completed full tree, with no NCBI
     # representative selection. Selecting additional runs retains old outputs.
     run(["phylogeny_contrast_pairs"])
-    full_pairs = result / "phylogeny/contrast/contrast_pairs.tsv"
+    full_pairs = result / "phylogeny/all/contrast/contrast_pairs.tsv"
     full_pair_mtime = full_pairs.stat().st_mtime_ns
     assert {r["species"] for r in read_tsv(full_pairs.parent / "species_metadata.tsv")} == set(species)
     assert "Nothing to be done" in run(["phylogeny_contrast_pairs"])
     cfg["phylogeny"]["species_sets"] = ["phenotyped"]
     config.write_text(yaml.safe_dump(cfg))
     run(["phylogeny_contrast_pairs"])
-    observed = result / "phylogeny_phenotyped"
+    observed = result / "phylogeny/phenotyped"
     assert {r["species"] for r in read_tsv(observed / "contrast/species_metadata.tsv")} == set(species[1:])
     observed_mtime = (observed / "species_tree.nwk").stat().st_mtime_ns
     cfg["phylogeny"]["species_sets"] = ["all", "phenotyped"]
@@ -248,7 +249,7 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     assert (observed / "species_tree.nwk").stat().st_mtime_ns == observed_mtime
     cfg["phylogeny"]["species_sets"] = ["all"]
     config.write_text(yaml.safe_dump(cfg))
-    (result / "contrast/summary_tree.pdf").unlink()
+    (result / "phylogeny/representatives/contrast/summary_tree.pdf").unlink()
     run(["contrast_pairs"])
     assert contrast_tree.stat().st_mtime_ns == contrast_mtime
     assert full_tree.stat().st_mtime_ns == full_mtime
@@ -259,4 +260,4 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     write_tsv(traits, ["species", "C4"], rows)
     run(["contrast_pairs", "phylogeny"])
     assert full_tree.stat().st_mtime_ns == full_mtime
-    assert not (result / "tpm").exists() and not (result / "odb/merged").exists()
+    assert not (result / "orthogroups/expression").exists() and not (result / "orthogroups/mapping").exists()

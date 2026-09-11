@@ -52,6 +52,57 @@ checkpoint select_metadata:
         "{params.subset_flag} {input.subset:q} > {log:q} 2>&1"
 
 
+# Phenotypes are optional for base metadata. A configured file that has not been
+# supplied yet leaves blank traits; adding it later creates an input dependency.
+PHENORADAR_TRAITS = config["inputs"].get("species_trait")
+if not PHENORADAR_TRAITS or not Path(PHENORADAR_TRAITS).is_file():
+    PHENORADAR_TRAITS = ""
+
+
+rule prepare_phenoradar_metadata:
+    input:
+        samples=f"{META}/samples.tsv",
+        metadata=f"{META}/metadata_high_busco.tsv",
+        traits=[PHENORADAR_TRAITS] if PHENORADAR_TRAITS else [],
+        code=f"{SCRIPTS}/phenoradar_metadata.py",
+        helpers=[f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/common.py"]
+    output: f"{META}/species_metadata.tsv"
+    params:
+        trait=config["contrast"]["trait"],
+        traits_source=PHENORADAR_TRAITS,
+        traits_flag="--traits" if PHENORADAR_TRAITS else ""
+    log: f"{LOG}/phenoradar_metadata.log"
+    conda: "../envs/analysis.yaml"
+    resources: mem_mb=1000
+    shell:
+        "{PYTHON:q} {input.code:q} --samples {input.samples:q} --metadata {input.metadata:q} "
+        "--output {output:q} --trait {params.trait:q} "
+        "{params.traits_flag} {input.traits:q} > {log:q} 2>&1"
+
+
+rule phenoradar_metadata:
+    # Backfill from an existing selection without rerunning that checkpoint.
+    # The normal pipeline uses prepare_phenoradar_metadata above instead.
+    input:
+        samples=str(Path(f"{META}/samples.tsv").resolve()),
+        metadata=str(Path(f"{META}/metadata_high_busco.tsv").resolve()),
+        traits=[PHENORADAR_TRAITS] if PHENORADAR_TRAITS else [],
+        code=f"{SCRIPTS}/phenoradar_metadata.py",
+        helpers=[f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/common.py"]
+    params:
+        output=f"{META}/species_metadata.tsv",
+        trait=config["contrast"]["trait"],
+        traits_source=PHENORADAR_TRAITS,
+        traits_flag="--traits" if PHENORADAR_TRAITS else ""
+    log: f"{LOG}/phenoradar_metadata.log"
+    conda: "../envs/analysis.yaml"
+    resources: mem_mb=1000
+    shell:
+        "{PYTHON:q} {input.code:q} --samples {input.samples:q} --metadata {input.metadata:q} "
+        "--output {params.output:q} --trait {params.trait:q} "
+        "{params.traits_flag} {input.traits:q} > {log:q} 2>&1"
+
+
 rule record_run:
     input:
         selection=f"{META}/selection.json",

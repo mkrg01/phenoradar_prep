@@ -115,7 +115,7 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
         return {p: p.stat().st_mtime_ns for folder in folders for p in folder.rglob("*") if p.is_file()}
 
     result = tmp_path / "results/test"
-    full, observed = result / "phylogeny", result / "phylogeny_phenotyped"
+    full, observed = result / "phylogeny/all", result / "phylogeny/phenotyped"
     run(["phenotyped"], "phylogeny_prepare")
     assert not full.exists() and not (observed / "species_tree.nwk").exists()
     assert {r["species"] for r in read_tsv(observed / "plan/species.tsv")} == set(species[1:])
@@ -124,7 +124,7 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
     run(["phenotyped"])
     read_tree(observed / "species_tree.nwk", species[1:])
     observed_times = timestamps(observed)
-    assert not full.exists() and not (result / "rooting").exists()
+    assert not full.exists() and not (result / "phylogeny/all/rooting").exists()
     # The all-species branch must not even require the phenotype input file.
     unavailable = traits.with_suffix(".unavailable")
     traits.rename(unavailable)
@@ -180,4 +180,4 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
     read_tree(observed / "species_tree.nwk", species[1:-1])
     assert timestamps(full) == full_times
     assert "Nothing to be done" in run(["all", "phenotyped"])
-    assert not (result / "contrast").exists() and not (result / "tpm").exists()
+    assert not (result / "phylogeny/representatives").exists() and not (result / "orthogroups/expression").exists()

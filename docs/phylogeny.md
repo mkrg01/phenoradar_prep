@@ -29,8 +29,8 @@ phylogeny:
 
 | Set | Inference species | Directory under `results/<analysis>/` |
 | --- | --- | --- |
-| `all` | All species passing the ordinary BUSCO/species-list selection | `phylogeny/` (unchanged) |
-| `phenotyped` | Those selected species with a nonmissing value in `phylogeny.trait` | `phylogeny_phenotyped/` |
+| `all` | All species passing the ordinary BUSCO/species-list selection | `phylogeny/all/` |
+| `phenotyped` | Those selected species with a nonmissing value in `phylogeny.trait` | `phylogeny/phenotyped/` |
 
 Traits come only from `inputs.species_trait`; metadata trait columns are ignored.
 The existing name normalization and missing-value rules apply: blanks, `NA`,
@@ -47,10 +47,11 @@ To try observed species first, run `phylogeny` with `[phenotyped]`. Later change
 the list to `[all]` or `[all, phenotyped]` and run the same target. Switching this
 list alone does not delete or recompute completed inference or dating outputs.
 Each directory retains its own marker plan, alignments, gene trees, rooting,
-calibrations, dating, and benchmarks; logs use matching branch directories.
+calibrations, and dating; logs and benchmarks use matching branch directories
+under `logs/<analysis>/phylogeny/`.
 Changing source inputs or inference settings still triggers the affected jobs.
 The shared `run.json` records the latest configuration; branch provenance and
-`phylogeny_phenotyped/selection/selection.json` retain the relevant input records.
+`phylogeny/phenotyped/selection/selection.json` retain the relevant input records.
 Use different `analysis` names to retain multiple trait definitions or inference
 settings simultaneously.
 
@@ -72,7 +73,8 @@ the existing cache.
 
 ## Input requirements
 
-Set `phylogeny.busco_full_dir` to a directory of per-species BUSCO full tables.
+Set `phylogeny.busco_full_dir` to a directory of per-species BUSCO full tables;
+its default is `input/busco/full/`.
 The default filename is `<species>.busco.full.tsv`; `.tsv.gz` is supported when
 configured in `busco_full_suffix`. A summary containing only S/D/F/M counts is
 not sufficient. Full tables must have `Busco id`, `Status`, `Sequence`, `Score`,
@@ -200,11 +202,11 @@ Unresolved roots or two multi-species root sides require an explicit outgroup.
 No OpenTree/TimeTree request is made for rooting. The root position is a
 reference-based choice, not an ancestral-root estimate from BUSCO sequences.
 
-`results/<analysis>/rooting/` contains the dataset-wide `ncbi_tree.nwk` and
+`results/<analysis>/phylogeny/all/rooting/` contains the dataset-wide `ncbi_tree.nwk` and
 `taxids.tsv`. The phenotyped branch builds its own guide from its selected
-species under `phylogeny_phenotyped/rooting/`. Each inference branch writes its
-own `rooting/outgroup.txt` and `rooting/outgroup.json` under `phylogeny/`,
-`phylogeny_phenotyped/`, or `contrast/phylogeny/` (candidate
+species under `phylogeny/phenotyped/rooting/`. Each inference branch writes its
+own `rooting/outgroup.txt` and `rooting/outgroup.json` under `phylogeny/all/`,
+`phylogeny/phenotyped/`, or `phylogeny/representatives/` (candidate
 manifest/count, source, reference checksum and root split). An explicit outgroup
 bypasses automatic selection and must already belong to that run's inference
 manifest; a name absent from the skim representatives fails rather than adding
@@ -372,7 +374,7 @@ node, contradictory ancestral bounds, and unknown species are rejected.
 phylogeny:
   dating:
     enabled: true
-    calibrations: config/calibrations.tsv
+    calibrations: input/calibrations.tsv
 ```
 
 Run the same launcher with target `timetree`; enabling dating also adds it to
@@ -572,8 +574,8 @@ See the [TimeTree FAQ](https://timetree.org/faqs),
 
 ## Outputs and validation
 
-Outputs are under `results/<analysis>/phylogeny/` for `all`, and
-`results/<analysis>/phylogeny_phenotyped/` for `phenotyped`:
+Outputs are under `results/<analysis>/phylogeny/all/` for `all`, and
+`results/<analysis>/phylogeny/phenotyped/` for `phenotyped`:
 
 | Output | Meaning |
 | --- | --- |
@@ -593,7 +595,9 @@ Outputs are under `results/<analysis>/phylogeny/` for `all`, and
 | `dating/lsd2.dated.date.nexus`, `dating/lsd2.fitted.nwk` | Native time Nexus and fitted substitution tree, respectively |
 | `dating/lsd2.report.txt`, `dating/lsd2.dates.txt`, `dating/lsd2.input.nwk`, `dating/lsd2.command.json` | Native fit report, date constraints, input tree and invocation |
 | `dating/provenance.json`, `dating/lsd2_runs/` | Settings, units, fit/rate diagnostics, executable/build hashes and retained native runs/logs |
-| `benchmarks/` | Runtime and maximum resident memory measurements |
+
+Runtime and maximum resident memory measurements are stored separately in
+`logs/<analysis>/phylogeny/<set>/benchmarks/`.
 
 Unit tests cover coverage-based selection and deterministic ties independently
 of order labels, row order, replicate counts and BUSCO match lengths, retention

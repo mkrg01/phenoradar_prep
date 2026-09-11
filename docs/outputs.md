@@ -13,28 +13,44 @@ results/<analysis>/
     metadata_all.tsv
     metadata_high_busco.tsv
     samples.tsv
+    species_metadata.tsv            # species, trait, contrast_pair_id, family for PhenoRadar
     species_high_busco.txt
     selection.json                  # Selection counts and input/taxonomy hashes
     busco_completeness.svg
   proteins/                         # Species FASTA files and translation provenance
-  odb/
-    manifests/                      # Chunk plan and FASTA manifests
-    chunks/chunk_000/                # Annotations, hits, summary, provenance, native results
-    merged/
+  orthogroups/
+    mapping/
+      manifests/                    # Chunk plan and FASTA manifests
+      chunks/chunk_000/              # Annotations, hits, summary, provenance, native results
       gene_orthogroups.tsv           # Unique #query / ODB_OG pairs
       mappings.sqlite               # Indexed gene-to-OG mappings
       merge_qc.json
-  tpm/
-    runs/                           # Per-run results and QC JSON
-    tpm_sum.tsv                     # Sums of input TPM by orthogroup
-    tpm.tsv                         # OG TPM rescaled to one million per run
-    tpm_sum_wide.tsv
-    tpm_wide.tsv
-    mapping_qc.tsv
+    expression/
+      runs/                         # Per-run results and QC JSON
+      tpm_sum.tsv                   # Sums of input TPM by orthogroup
+      tpm.tsv                       # OG TPM rescaled to one million per run
+      tpm_sum_wide.tsv
+      tpm_wide.tsv
+      mapping_qc.tsv
+    alignments/                     # Optional all-copy OG protein alignments
+  kegg/                             # Independent optional KO annotations/expression
+  phylogeny/
+    all/                            # All selected species
+    phenotyped/                     # Species with an observed phenotype
+    representatives/                # Trait-guided representative selection and inference
+  phenoradar_inputs/                 # Selected completed inputs for PhenoRadar
+  filtered/                         # Corresponding species-filtered result layout
 ```
 
-Logs and ODB resource benchmarks are saved under `logs/<analysis>/`. Temporary
-ODB work is stored under `work/<analysis>/odb/`.
+Logs and ODB resource benchmarks are saved under
+`logs/<analysis>/orthogroups/mapping/`. Temporary
+ODB work is stored under `work/<analysis>/orthogroups/mapping/`.
+
+The explicit [PhenoRadar input collection](phenoradar_inputs.md) publishes
+`results/<analysis>/phenoradar_inputs/`. It links selected completed outputs and
+uses base metadata prepared by the metadata step. Optional contrast pair IDs
+are left-joined without removing unpaired or unannotated species. KEGG inputs
+remain independent of OG mapping.
 
 The optional [MonoPhy review](taxonomy_audit.md) writes `taxonomy_audit/` under
 each selected species-tree branch. It includes taxonomic group results,
@@ -45,9 +61,9 @@ It reads the species tree and taxonomy only; gene trees are not audit inputs.
 writes `contrast/` under each selected molecular-tree branch, including pair
 and species tables, source/assignment records, the observed subtree and summary
 figures. Manual exclusion recomputes these results under
-`filtered/phylogeny/contrast/` and `filtered/phylogeny_phenotyped/contrast/` when
+`filtered/phylogeny/all/contrast/` and `filtered/phylogeny/phenotyped/contrast/` when
 inputs are complete. Original trees and the representative analysis at
-`results/<analysis>/contrast/` remain unchanged.
+`results/<analysis>/phylogeny/representatives/contrast/` remain unchanged.
 
 ## TPM interpretation
 
@@ -97,7 +113,7 @@ retained TPM under `duplicate`; it is excluded only when `drop` is selected.
 
 ## Optional OG alignments
 
-The [alignment branch](alignments.md) writes `results/<analysis>/alignments/`:
+The [alignment branch](alignments.md) writes `results/<analysis>/orthogroups/alignments/`:
 
 - `{og}.faa`: untrimmed protein MSA, one row per original gene ID, with all copies.
 - `provenance.json`: alignment hashes and links to collection/execution records.

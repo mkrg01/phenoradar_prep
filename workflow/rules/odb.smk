@@ -26,7 +26,7 @@ rule make_manifests:
         common=f"{SCRIPTS}/common.py"
     output: directory(MANIFESTS)
     params: proteins=PROTEINS, chunk_size=config["odb"]["chunk_size"]
-    log: f"{LOG}/manifests.log"
+    log: f"{LOG}/{ORTHOGROUP_MAPPING}/manifests.log"
     conda: "../envs/analysis.yaml"
     resources: mem_mb=1000
     shell:
@@ -51,7 +51,7 @@ rule prepare_odb_reference:
         node=config["odb"]["node"],
         free=config["odb"]["reference_min_free_gb"],
         storage="--allow-nonlocal" if config["odb"]["allow_nonlocal"] else ""
-    log: f"{LOG}/odb_reference.log"
+    log: f"{LOG}/{ORTHOGROUP_MAPPING}/reference.log"
     conda: "../envs/odb.yaml"
     threads: 1
     resources: mem_mb=32000
@@ -77,7 +77,7 @@ rule odb_map:
     params:
         manifest=lambda wc: f"{MANIFESTS}/{wc.chunk}.fs",
         out=lambda wc: f"{CHUNKS}/{wc.chunk}",
-        work=f"{WORK}/odb",
+        work=f"{WORK}/{ORTHOGROUP_MAPPING}",
         command="ODB-mapper",
         prefix="",
         version=ODB_VERSION,
@@ -88,8 +88,8 @@ rule odb_map:
         keep="--keep-work" if config["odb"]["keep_work"] else ""
     threads: config["odb"]["threads"]
     resources: mem_mb=config["odb"]["mem_gb"] * 1000
-    log: f"{LOG}/odb/{{chunk}}.log"
-    benchmark: f"{LOG}/benchmarks/odb_{{chunk}}.tsv"
+    log: f"{LOG}/{ORTHOGROUP_MAPPING}/chunks/{{chunk}}.log"
+    benchmark: f"{LOG}/{ORTHOGROUP_MAPPING}/benchmarks/{{chunk}}.tsv"
     conda: "../envs/odb.yaml"
     shell:
         "{PYTHON:q} {input.code:q} --manifest {params.manifest:q} --reference {input.reference:q} "
@@ -112,14 +112,14 @@ rule merge_odb:
         code=f"{SCRIPTS}/merge_odb.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/translate_cds.py"]
     output:
-        database=f"{MERGED}/mappings.sqlite",
-        mappings=f"{MERGED}/gene_orthogroups.tsv",
-        qc=f"{MERGED}/merge_qc.json"
+        database=f"{MAPPING}/mappings.sqlite",
+        mappings=f"{MAPPING}/gene_orthogroups.tsv",
+        qc=f"{MAPPING}/merge_qc.json"
     params:
         chunks=CHUNKS, proteins=PROTEINS, plan=f"{MANIFESTS}/chunks.json",
         existing=["--existing", EXISTING_ODB] if EXISTING_ODB else [],
         version=ODB_VERSION, node=config["odb"]["node"]
-    log: f"{LOG}/merge_odb.log"
+    log: f"{LOG}/{ORTHOGROUP_MAPPING}/merge.log"
     conda: "../envs/analysis.yaml"
     resources: mem_mb=8000
     shell:

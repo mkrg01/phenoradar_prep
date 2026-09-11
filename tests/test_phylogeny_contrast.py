@@ -40,22 +40,22 @@ def molecular_snapshot(tmp_path):
     write_tsv(traits, ["species", "C4", "other"],
               [dict(species=s, C4="" if s in {"O", "U"} else int(s in {"B", "D"}),
                     other="" if s == "B" else int(s == "D")) for s in SPECIES])
-    full = source / "phylogeny"
-    full.mkdir()
+    full = source / "phylogeny/all"
+    full.mkdir(parents=True)
     (full / "species_tree.nwk").write_text(TREE + "\n")
     write_json(full / "species_tree.json", {"species": len(SPECIES), "outgroup": "O"})
-    observed = source / "phylogeny_phenotyped"
+    observed = source / "phylogeny/phenotyped"
     write_tsv(observed / "selection/samples.tsv", list(rows[0]), [r for r in rows if r["species"] in KNOWN])
     (observed / "species_tree.nwk").write_text("(A:1,((A2:1,B:1)0.9:1,(C:1,(D:1,E:1)0.9:1)0.9:1)0.9:1);\n")
     write_json(observed / "species_tree.json", {"species": len(KNOWN), "outgroup": "A"})
     # This legacy representative result must never be read, pruned or rerun.
-    (source / "contrast").mkdir()
-    (source / "contrast/contrast_pairs.tsv").write_text("historical NCBI representative result\n")
+    (source / "phylogeny/representatives/contrast").mkdir(parents=True)
+    (source / "phylogeny/representatives/contrast/contrast_pairs.tsv").write_text("historical NCBI representative result\n")
     return source, traits
 
 
-def inputs(source, traits, branch="phylogeny"):
-    samples = source / ("metadata/samples.tsv" if branch == "phylogeny" else f"{branch}/selection/samples.tsv")
+def inputs(source, traits, branch="phylogeny/all"):
+    samples = source / ("metadata/samples.tsv" if branch == "phylogeny/all" else f"{branch}/selection/samples.tsv")
     return dict(tree=source / branch / "species_tree.nwk", tree_qc=source / branch / "species_tree.json",
                 samples=samples, metadata=source / "metadata/metadata_high_busco.tsv", traits=traits)
 
@@ -121,7 +121,7 @@ def test_degenerate_subsets_clear_pairs_and_render(molecular_snapshot, tmp_path,
 def test_phenotyped_scope_and_different_pair_trait(molecular_snapshot, tmp_path):
     source, traits = molecular_snapshot
     out = tmp_path / "pairs"
-    report = from_tree(**inputs(source, traits, "phylogeny_phenotyped"), outdir=out, trait="other", exclude_species=["A", "O"])
+    report = from_tree(**inputs(source, traits, "phylogeny/phenotyped"), outdir=out, trait="other", exclude_species=["A", "O"])
     meta = {r["species"]: r for r in read_tsv(out / "species_metadata.tsv")}
     assert set(meta) == set(KNOWN) - {"A"}
     assert meta["B"]["group"] == meta["B"]["contrast_pair_id"] == ""
@@ -156,19 +156,19 @@ def test_filter_recomputes_both_completed_trees_without_inference(molecular_snap
     before = state(source)
     out = tmp_path / "filtered"
     report = export(source, ["E"], out, traits)
-    for branch in ["phylogeny", "phylogeny_phenotyped"]:
+    for branch in ["phylogeny/all", "phylogeny/phenotyped"]:
         assert report["sections"][f"{branch}_contrast"]["status"] == "ready"
         assert frozenset(["C", "D"]) in pair_members(out / branch / "contrast")
         assert not (out / branch / "species_tree.nwk").exists()
         assert not (out / branch / "gene_trees.nwk").exists()
-    assert not (out / "contrast").exists()
+    assert not (out / "phylogeny/representatives").exists()
     assert state(source) == before
     assert all(sha256(out / r["path"]) == r["sha256"] for r in report["outputs"])
     export(source, [], out, traits)
-    assert frozenset(["D", "E"]) in pair_members(out / "phylogeny/contrast")
+    assert frozenset(["D", "E"]) in pair_members(out / "phylogeny/all/contrast")
     export(source, KNOWN, out, traits)
-    assert read_tsv(out / "phylogeny_phenotyped/contrast/species_metadata.tsv") == []
-    assert read_tsv(out / "phylogeny/contrast/contrast_pairs.tsv") == []
+    assert read_tsv(out / "phylogeny/phenotyped/contrast/species_metadata.tsv") == []
+    assert read_tsv(out / "phylogeny/all/contrast/contrast_pairs.tsv") == []
     assert state(source) == before
 
 
@@ -176,11 +176,11 @@ def test_filter_inventory_tracks_new_trees_but_not_legacy_pairs(molecular_snapsh
     source, traits = molecular_snapshot
     original = discover(source, traits)
     assert not any("/contrast/" in p for p in original["files"])
-    (source / "contrast/contrast_pairs.tsv").write_text("changed history\n")
+    (source / "phylogeny/representatives/contrast/contrast_pairs.tsv").write_text("changed history\n")
     assert discover(source, traits) == original
-    (source / "phylogeny_phenotyped/species_tree.nwk").unlink()
+    (source / "phylogeny/phenotyped/species_tree.nwk").unlink()
     changed = discover(source, traits)
-    assert changed != original and changed["sections"]["phylogeny_phenotyped_contrast"]["status"] == "incomplete"
+    assert changed != original and changed["sections"]["phylogeny/phenotyped_contrast"]["status"] == "incomplete"
 
 
 def test_full_snakefile_exclusions_never_request_inference(molecular_snapshot, workflow_project, command_environment):
@@ -206,10 +206,10 @@ def test_full_snakefile_exclusions_never_request_inference(molecular_snapshot, w
         return process.stdout
     run(["E"])
     out = target / "filtered"
-    assert frozenset(["C", "D"]) in pair_members(out / "phylogeny/contrast")
+    assert frozenset(["C", "D"]) in pair_members(out / "phylogeny/all/contrast")
     assert "Nothing to be done" in run(["E"])
     run(["A"], "filter_species")
-    assert frozenset(["A2", "B"]) in pair_members(out / "phylogeny/contrast")
+    assert frozenset(["A2", "B"]) in pair_members(out / "phylogeny/all/contrast")
     assert "Nothing to be done" in run(["A"])
     assert {p: v for p, v in state(target).items() if not p.startswith("filtered/")} == before
     assert not list(target.rglob("gene_trees.nwk"))

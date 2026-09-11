@@ -40,6 +40,15 @@ abundance-only updates, independence from TPM ambiguity policy, and species
 selection changes. These tests do not benchmark full-scale OG alignments or
 validate biological homology.
 
+PhenoRadar preparation tests cover minimal metadata and contrast-pair left
+joins, KO-only inputs without OG dependencies, optional completed branches,
+run/species and numeric validation, KEGG/alignment checksums, selected Newick
+tip sets, filtered snapshots, and preservation of source values. Real Snakemake
+tests supply completed results with no raw upstream inputs and check manual
+metadata backfilling and input collection. Failed validation and unrecognized
+publication contents must leave the previous input directory intact, including
+when invoked through Snakemake. These tests do not fit PhenoRadar models.
+
 Taxonomy bootstrap tests build a real ETE4 database from a small synthetic
 taxdump, substituting only the network response. They check download/build
 failure recovery, local source copying, and reuse of existing snapshots. The

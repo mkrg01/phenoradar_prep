@@ -40,7 +40,7 @@ The explicit target works with `enabled: false`:
 
 The target follows `phylogeny.species_sets`: `[all]`, `[phenotyped]`, or both.
 Reports go into the selected branch's `taxonomy_audit/` directory. The separate
-representative tree under `contrast/phylogeny/` is not an audit target.
+representative tree under `phylogeny/representatives/` is not an audit target.
 With `enabled: true`, reports are included in `phylogeny`, and in `all` when
 `phylogeny.enabled: true`.
 
@@ -71,11 +71,11 @@ the MonoPhy environment and run the script directly:
 
 ```bash
 python workflow/scripts/taxonomy_audit.py \
-  --tree results/ANALYSIS/phylogeny/species_tree.nwk \
-  --tree-qc results/ANALYSIS/phylogeny/species_tree.json \
+  --tree results/ANALYSIS/phylogeny/all/species_tree.nwk \
+  --tree-qc results/ANALYSIS/phylogeny/all/species_tree.json \
   --samples results/ANALYSIS/metadata/samples.tsv \
   --taxonomy resources/taxonomy/taxa.sqlite \
-  --outdir results/ANALYSIS/phylogeny/taxonomy_audit
+  --outdir results/ANALYSIS/phylogeny/all/taxonomy_audit
 ```
 
 For phenotyped trees, supply their selection manifest and species-tree/QC files.

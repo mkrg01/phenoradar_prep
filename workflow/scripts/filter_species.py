@@ -12,19 +12,24 @@ import sqlite3
 import tempfile
 
 from common import file_record, now, species_from_gene_id, write_json, write_tsv
+from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
+                    PHYLOGENY_BRANCHES, REPRESENTATIVES)
+
+ALL_PHYLOGENY = PHYLOGENY_BRANCHES["all"]
+PHENOTYPED_PHYLOGENY = PHYLOGENY_BRANCHES["phenotyped"]
 
 
 SAFE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 BUNDLES = {
-    "odb": ["odb/merged/mappings.sqlite", "odb/merged/gene_orthogroups.tsv", "odb/merged/merge_qc.json"],
-    "tpm": [f"tpm/{n}.tsv" for n in ["tpm", "tpm_wide", "tpm_sum", "tpm_sum_wide", "mapping_qc"]],
-    "alignments": ["alignments/provenance.json"],
+    "odb": [f"{ORTHOGROUP_MAPPING}/mappings.sqlite", f"{ORTHOGROUP_MAPPING}/gene_orthogroups.tsv", f"{ORTHOGROUP_MAPPING}/merge_qc.json"],
+    "tpm": [f"{ORTHOGROUP_EXPRESSION}/{n}.tsv" for n in ["tpm", "tpm_wide", "tpm_sum", "tpm_sum_wide", "mapping_qc"]],
+    "alignments": [f"{ORTHOGROUP_ALIGNMENTS}/provenance.json"],
     "kegg": [f"kegg/{n}.tsv" for n in ["genes", "gene_kos", "ko_tpm_sum", "ko_tpm_sum_wide", "ko_support", "mapping_qc"]],
-    "phylogeny": ["phylogeny/species_tree.nwk", "phylogeny/species_tree.json", "phylogeny/gene_trees.nwk",
-                  "phylogeny/gene_trees.json", "phylogeny/species_coverage.tsv"],
+    "phylogeny": [f"{ALL_PHYLOGENY}/species_tree.nwk", f"{ALL_PHYLOGENY}/species_tree.json", f"{ALL_PHYLOGENY}/gene_trees.nwk",
+                  f"{ALL_PHYLOGENY}/gene_trees.json", f"{ALL_PHYLOGENY}/species_coverage.tsv"],
 }
-CONTRAST_BRANCHES = {"phylogeny": "metadata/samples.tsv",
-                     "phylogeny_phenotyped": "phylogeny_phenotyped/selection/samples.tsv"}
+CONTRAST_BRANCHES = {ALL_PHYLOGENY: "metadata/samples.tsv",
+                     PHENOTYPED_PHYLOGENY: f"{PHENOTYPED_PHYLOGENY}/selection/samples.tsv"}
 
 
 def safe_name(value):
@@ -95,7 +100,7 @@ def discover(source, traits=None):
                           "missing": missing}
         files.update(source / n for n in names if (source / n).is_file())
     if sections["alignments"]["status"] == "absent":
-        unfinished = list((source / "alignments").glob("*.faa"))
+        unfinished = list((source / ORTHOGROUP_ALIGNMENTS).glob("*.faa"))
         if unfinished:
             sections["alignments"]["status"] = "incomplete"
             files.update(unfinished)
@@ -109,19 +114,19 @@ def discover(source, traits=None):
                             "files_present": len(existing_proteins), "files_expected": len(proteins)}
     files.update(existing_proteins)
     if sections["alignments"]["status"] == "ready":
-        report = json.loads((source / "alignments/provenance.json").read_text())
+        report = json.loads((source / f"{ORTHOGROUP_ALIGNMENTS}/provenance.json").read_text())
         for record in report["alignments"]:
-            files.add(source / "alignments" / f"{safe_name(record['orthogroup'])}.faa")
+            files.add(source / ORTHOGROUP_ALIGNMENTS / f"{safe_name(record['orthogroup'])}.faa")
     if sections["phylogeny"]["status"] == "ready":
-        report = json.loads((source / "phylogeny/gene_trees.json").read_text())
+        report = json.loads((source / f"{ALL_PHYLOGENY}/gene_trees.json").read_text())
         for record in report["retained"]:
             marker = safe_name(record["marker"])
             for folder in ["alignments", "alignments/raw"]:
                 for suffix in [".faa", ".columns.tsv"]:
-                    path = source / "phylogeny" / folder / (marker + suffix)
+                    path = source / ALL_PHYLOGENY / folder / (marker + suffix)
                     if path.is_file():
                         files.add(path)
-        path = source / "phylogeny/dating/species_tree.dated.nwk"
+        path = source / f"{ALL_PHYLOGENY}/dating/species_tree.dated.nwk"
         if path.is_file():
             files.add(path)
     if traits and Path(traits).is_file():
@@ -188,8 +193,8 @@ class Export:
         self.keep_runs = {r for r, s in self.runs.items() if s in self.keep}
         self.inventory, self.records, self.stats, self.counts = inventory, {}, {}, {}
         self.allowed_inputs = set(inventory["files"])
-        self.ignored = ["phylogeny_phenotyped inference outputs (contrast pairs are recomputed)",
-                        "contrast", "taxonomy_audit", "phylogeny/taxonomy_audit",
+        self.ignored = [f"{PHENOTYPED_PHYLOGENY} inference outputs (contrast pairs are recomputed)",
+                        REPRESENTATIVES, "taxonomy_audit", f"{ALL_PHYLOGENY}/taxonomy_audit",
                         "raw logs, chunk results, and per-run computation caches"]
 
     def input(self, path, expected_hash=None):
@@ -238,7 +243,7 @@ class Export:
             raise ValueError(f"missing/extra runs in {relative}")
         self.counts[relative] = dict(before=before, after=after)
 
-    def metadata(self):
+    def metadata(self, trait="C4"):
         self.input(self.source / "metadata/samples.tsv")
         retained = [r for r in self.rows if r["species"] in self.keep]
         write_tsv(self.stage / "metadata/samples.tsv", self.fields, retained)
@@ -264,6 +269,13 @@ class Export:
                 if name in self.keep:
                     rows.append({**row, "species": name})
             write_tsv(self.stage / "metadata/species_trait.tsv", fields, rows)
+        selected = self.stage / "metadata/metadata_high_busco.tsv"
+        if selected.is_file() and "family" in next(table(selected)):
+            from phenoradar_metadata import prepare
+            traits = self.inventory["sections"]["traits"]
+            prepare(self.stage / "metadata/samples.tsv", selected,
+                    self.input(traits["path"]) if traits["status"] == "ready" else None,
+                    self.stage / "metadata/species_metadata.tsv", trait=trait)
         self.counts["species"] = dict(before=len(self.species), after=len(self.keep))
         self.counts["runs"] = dict(before=len(self.rows), after=len(retained))
 
@@ -276,9 +288,9 @@ class Export:
         self.counts["protein_files"] = dict(before=len(self.species), after=len(self.keep))
 
     def odb(self):
-        destination = self.stage / "odb/merged"
+        destination = self.stage / ORTHOGROUP_MAPPING
         destination.mkdir(parents=True)
-        path = self.input(self.source / "odb/merged/mappings.sqlite")
+        path = self.input(self.source / f"{ORTHOGROUP_MAPPING}/mappings.sqlite")
         with sqlite3.connect(destination / "mappings.sqlite", uri=True) as db:
             db.execute("ATTACH DATABASE ? AS original", (path.as_uri() + "?mode=ro",))
             unknown = db.execute("SELECT DISTINCT species FROM original.genes").fetchall()
@@ -317,7 +329,7 @@ class Export:
     def verify_gene_owners(self, db, table_name, gene_column):
         if self.inventory["sections"]["odb"]["status"] != "ready":
             return
-        original = self.input(self.source / "odb/merged/mappings.sqlite")
+        original = self.input(self.source / f"{ORTHOGROUP_MAPPING}/mappings.sqlite")
         db.execute("ATTACH DATABASE ? AS original_odb", (original.as_uri() + "?mode=ro",))
         # Identifiers below are fixed internal table/column names, never config.
         bad = db.execute(f"SELECT m.{gene_column} FROM {table_name} m LEFT JOIN original_odb.genes g "
@@ -326,9 +338,9 @@ class Export:
             raise ValueError("gene/species ownership differs from ODB: " + bad[0])
 
     def alignments(self):
-        destination = self.stage / "alignments"
-        destination.mkdir()
-        report = json.loads(self.input(self.source / "alignments/provenance.json").read_text())
+        destination = self.stage / ORTHOGROUP_ALIGNMENTS
+        destination.mkdir(parents=True)
+        report = json.loads(self.input(self.source / f"{ORTHOGROUP_ALIGNMENTS}/provenance.json").read_text())
         declared = [safe_name(r["orthogroup"]) for r in report["alignments"]]
         if len(set(declared)) != len(declared):
             raise ValueError("duplicate OG in completed alignment inventory")
@@ -337,7 +349,7 @@ class Export:
             db.execute("CREATE TABLE members(og TEXT, gene TEXT, species TEXT, PRIMARY KEY(og,gene)) WITHOUT ROWID")
             for record in report["alignments"]:
                 og = record["orthogroup"]
-                path = self.input(self.source / "alignments" / f"{og}.faa", record["alignment"]["sha256"])
+                path = self.input(self.source / ORTHOGROUP_ALIGNMENTS / f"{og}.faa", record["alignment"]["sha256"])
                 seen, width, after, batch = set(), None, 0, []
                 output = destination / f"{og}.faa"
                 with output.open("w") as fasta:
@@ -450,7 +462,7 @@ def export(source, exclusions, outdir=None, traits=None, contrast_trait="C4", se
         stage.mkdir()
         job = Export(source, stage, exclusions, inventory)
         print(f"Species filter: {len(job.species)} -> {len(job.keep)} species", flush=True)
-        job.metadata()
+        job.metadata(contrast_trait)
         for name, section in inventory["sections"].items():
             if name == "traits":
                 continue
@@ -486,7 +498,8 @@ def export(source, exclusions, outdir=None, traits=None, contrast_trait="C4", se
                    "contrast": {"trait": contrast_trait, "seed": seed},
                    "code": [file_record(Path(__file__).with_name(name)) for name in
                             ["filter_species.py", "filter_species_phylogeny.py", "contrast_pairs.py",
-                             "plot_contrast_tree.py", "species_traits.py", "phylogeny_root.py", "common.py"]],
+                             "plot_contrast_tree.py", "species_traits.py", "phylogeny_root.py",
+                             "phenoradar_metadata.py", "layout.py", "common.py"]],
                    "policies": {"sequence_inference_recomputed": False,
                                 "contrast_pairs": "recomputed from completed molecular trees after exclusions; NCBI representative analysis untouched",
                                 "expression_values": "original strings preserved",

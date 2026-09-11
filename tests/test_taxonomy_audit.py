@@ -27,7 +27,7 @@ def require_monophy():
 @pytest.fixture
 def audit_inputs(tmp_path):
     folder = tmp_path / "source"
-    folder.mkdir()
+    folder.mkdir(parents=True)
     taxonomy = folder / "taxa.sqlite"
     with sqlite3.connect(taxonomy) as db:
         db.executescript("""
@@ -209,15 +209,15 @@ def test_snakemake_reuses_species_tree_without_gene_inputs(audit_inputs, workflo
     shutil.copyfile(audit_inputs["taxonomy"], taxdir / "taxa.sqlite")
     originals = [metadata / "samples.tsv", taxdir / "taxa.sqlite"]
     (project / "results/test/run.json").write_text("{}\n")
-    for branch in ["phylogeny", "phylogeny_phenotyped"]:
+    for branch in ["phylogeny/all", "phylogeny/phenotyped"]:
         folder = project / "results/test" / branch
-        folder.mkdir()
+        folder.mkdir(parents=True)
         for key in ["tree", "tree_qc"]:
             dest = folder / audit_inputs[key].name
             shutil.copyfile(audit_inputs[key], dest)
             originals.append(dest)
         (folder / "species_coverage.tsv").write_text("species\tgene_trees\n")
-        if branch == "phylogeny_phenotyped":
+        if branch == "phylogeny/phenotyped":
             (folder / "selection").mkdir()
             shutil.copyfile(audit_inputs["samples"], folder / "selection/samples.tsv")
     before = {p: (sha256(p), p.stat().st_mtime_ns) for p in originals}
@@ -236,8 +236,8 @@ def test_snakemake_reuses_species_tree_without_gene_inputs(audit_inputs, workflo
         process = subprocess.run(argv + [target], cwd=project, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         assert process.returncode == 0, process.stdout + "\n" + "\n".join(p.read_text() for p in (project/"logs").rglob("*.log"))
         return process.stdout
-    full = project / "results/test/phylogeny/taxonomy_audit"
-    phenotyped = project / "results/test/phylogeny_phenotyped/taxonomy_audit"
+    full = project / "results/test/phylogeny/all/taxonomy_audit"
+    phenotyped = project / "results/test/phylogeny/phenotyped/taxonomy_audit"
     assert "Nothing to be done" in run("phylogeny")
     run()
     assert json.loads((full/"summary.json").read_text())["candidate_species"] == 1
@@ -253,4 +253,4 @@ def test_snakemake_reuses_species_tree_without_gene_inputs(audit_inputs, workflo
     assert {p: p.stat().st_mtime_ns for p in full.rglob("*") if p.is_file()} == full_times
     assert {p: (sha256(p), p.stat().st_mtime_ns) for p in originals} == before
     assert not list((project / "results").rglob("gene_trees.nwk"))
-    assert not (project / "results/test/contrast").exists()
+    assert not (project / "results/test/phylogeny/representatives").exists()

@@ -142,13 +142,20 @@ ROOT = str(Path(workflow.basedir).parent)
 ASTRAL = str(Path(ROOT) / "resources/phylogeny_tools/bin/astral4_int128")
 SCRIPTS = str(Path(workflow.basedir) / "scripts")
 sys.path.insert(0, SCRIPTS)
+from layout import (
+    ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
+    PHYLOGENY_BRANCHES, REPRESENTATIVES as REPRESENTATIVES_REL,
+    ROOTING as ROOTING_REL, CONTRAST_BRANCHES,
+)
 from make_manifests import chunk_plan
 from date_phylogeny import validate_settings as validate_lsd2_settings
 validate_lsd2_settings(PHY["dating"]["lsd2"])
 from taxonomy_audit import validate_settings as validate_audit_settings
 from filter_species import validate_exclusions, discover as discover_filter_inputs
+from phenoradar_inputs import validate_settings as validate_phenoradar_settings, discover as discover_phenoradar_inputs
 try:
     AUDIT = validate_audit_settings(config.get("taxonomy_audit", {}))
+    PHENORADAR = validate_phenoradar_settings(config.get("phenoradar", {}))
     EXCLUDE_SPECIES = validate_exclusions(config.get("exclude_species", []))
     if "species_filter" in config:
         raise ValueError("use top-level exclude_species, not a nested species_filter configuration")
@@ -159,12 +166,12 @@ WORK = f'work/{config["analysis"]}'
 LOG = f'logs/{config["analysis"]}'
 PROTEINS = str(Path(f"{OUT}/proteins").resolve())
 META = f"{OUT}/metadata"
-MANIFESTS = f"{OUT}/odb/manifests"
-CHUNKS = f"{OUT}/odb/chunks"
-MERGED = f"{OUT}/odb/merged"
-TPM = f"{OUT}/tpm"
-ALIGNMENTS = f"{OUT}/alignments"
-ALIGNMENT_INPUTS = f"{WORK}/alignments/inputs"
+MAPPING = f"{OUT}/{ORTHOGROUP_MAPPING}"
+MANIFESTS = f"{MAPPING}/manifests"
+CHUNKS = f"{MAPPING}/chunks"
+TPM = f"{OUT}/{ORTHOGROUP_EXPRESSION}"
+ALIGNMENTS = f"{OUT}/{ORTHOGROUP_ALIGNMENTS}"
+ALIGNMENT_INPUTS = f"{WORK}/{ORTHOGROUP_ALIGNMENTS}/inputs"
 ALIGNMENT_FINAL = [f"{ALIGNMENTS}/provenance.json"]
 REFERENCE = f'resources/orthodb/{ODB_VERSION}_{config["odb"]["node"]}'
 KEGG = f"{OUT}/kegg"
@@ -176,14 +183,19 @@ KEGG_FINAL = [f"{KEGG}/{name}" for name in [
     "ko_support.tsv", "mapping_qc.tsv", "ko_modules.tsv", "ko_pathways.tsv",
     "reference_qc.json",
 ]]
-PHYLO_BRANCHES = {"all": "phylogeny", "phenotyped": "phylogeny_phenotyped"}
-PHENOTYPED = f"{OUT}/phylogeny_phenotyped"
+PHYLO_BRANCHES = PHYLOGENY_BRANCHES
+PHENOTYPED = f"{OUT}/{PHYLO_BRANCHES['phenotyped']}"
+REPRESENTATIVES = f"{OUT}/{REPRESENTATIVES_REL}"
+PHYLO_BRANCH_PATTERN = "|".join(re.escape(branch) for branch in [*PHYLO_BRANCHES.values(), REPRESENTATIVES_REL])
+MOLECULAR_BRANCH_PATTERN = "|".join(re.escape(branch) for branch in PHYLO_BRANCHES.values())
+CONTRAST_BRANCH_PATTERN = "|".join(re.escape(branch) for branch in sorted(CONTRAST_BRANCHES))
+GUIDE_BRANCH_PATTERN = "|".join(re.escape(f"{branch}/rooting") for branch in PHYLO_BRANCHES.values())
 # All inference runs use the same rules, environments and settings.
 PHYLO_RUN = f"{OUT}/{{phylo_branch}}"
 wildcard_constraints:
-    phylo_branch="phylogeny|phylogeny_phenotyped|contrast/phylogeny"
-CONTRAST = f"{OUT}/contrast"
-ROOTING = f"{OUT}/rooting"
+    phylo_branch=PHYLO_BRANCH_PATTERN
+CONTRAST = f"{REPRESENTATIVES}/contrast"
+ROOTING = f"{OUT}/{ROOTING_REL}"
 CONTRAST_OUTPUTS = [
     "contrast_pairs.tsv", "species_metadata.tsv", "summary.json", "summary_tree.nwk",
     "summary_tree.pdf", "summary_tree.svg", "contrastive.nwk"]
@@ -283,6 +295,7 @@ def kegg_run_outputs(wildcards, suffix):
 rule all:
     input:
         f"{OUT}/run.json",
+        f"{META}/species_metadata.tsv",
         f"{TPM}/tpm.tsv",
         f"{TPM}/tpm_wide.tsv",
         f"{TPM}/tpm_sum.tsv",
@@ -298,6 +311,7 @@ rule prepare:
     input:
         f"{OUT}/run.json",
         f"{META}/samples.tsv",
+        f"{META}/species_metadata.tsv",
         f"{META}/selection.json",
         f"{META}/busco_completeness.svg",
         MANIFESTS
@@ -324,14 +338,15 @@ rule proteins:
 
 rule mapping:
     input:
-        f"{MERGED}/mappings.sqlite",
-        f"{MERGED}/gene_orthogroups.tsv",
-        f"{MERGED}/merge_qc.json"
+        f"{MAPPING}/mappings.sqlite",
+        f"{MAPPING}/gene_orthogroups.tsv",
+        f"{MAPPING}/merge_qc.json"
 
 
 rule kegg:
     input:
         f"{OUT}/run.json",
+        f"{META}/species_metadata.tsv",
         KEGG_FINAL
 
 
@@ -359,6 +374,7 @@ rule taxonomy_audit:
 rule contrast_pairs:
     input:
         f"{OUT}/run.json",
+        f"{META}/species_metadata.tsv",
         CONTRAST_FINAL
 
 
@@ -387,3 +403,4 @@ include: "rules/phylogeny.smk"
 include: "rules/contrast.smk"
 include: "rules/taxonomy_audit.smk"
 include: "rules/filter_species.smk"
+include: "rules/phenoradar.smk"

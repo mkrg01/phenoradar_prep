@@ -1,7 +1,7 @@
 def phylogeny_samples(wc):
-    if wc.phylo_branch == "contrast/phylogeny":
+    if wc.phylo_branch == REPRESENTATIVES_REL:
         return checkpoints.select_contrast_representatives.get().output.samples
-    if wc.phylo_branch == "phylogeny_phenotyped":
+    if wc.phylo_branch == PHYLO_BRANCHES["phenotyped"]:
         return checkpoints.select_phenotyped_species.get().output.samples
     return checkpoints.select_metadata.get().output.samples
 
@@ -9,9 +9,9 @@ def phylogeny_samples(wc):
 def phylogeny_root_guide(wc):
     if PHY["outgroup"] != "auto":
         return []
-    if wc.phylo_branch == "contrast/phylogeny":
+    if wc.phylo_branch == REPRESENTATIVES_REL:
         return [checkpoints.select_contrast_representatives.get().output.tree]
-    if wc.phylo_branch == "phylogeny_phenotyped":
+    if wc.phylo_branch == PHYLO_BRANCHES["phenotyped"]:
         return [f"{PHENOTYPED}/rooting/ncbi_tree.nwk"]
     return [f"{ROOTING}/ncbi_tree.nwk"]
 
@@ -65,7 +65,7 @@ checkpoint select_phenotyped_species:
         outdir=f"{PHENOTYPED}/selection", trait=PHY["trait"], min_taxa=PHY["min_taxa"]
     conda: "../envs/analysis.yaml"
     resources: mem_mb=4000
-    log: f"{LOG}/phylogeny_phenotyped/selection.log"
+    log: f"{LOG}/{PHYLO_BRANCHES['phenotyped']}/selection.log"
     shell:
         "{PYTHON:q} {input.code:q} --samples {input.samples:q} --traits {input.traits:q} "
         "--trait {params.trait:q} --min-taxa {params.min_taxa} --outdir {params.outdir:q} > {log:q} 2>&1"
@@ -152,7 +152,7 @@ rule align_busco_marker:
     resources: mem_mb=PHY["alignment_mem_gb"] * 1000
     conda: "../envs/phylogeny.yaml"
     log: f"{LOG}/{{phylo_branch}}/align/{{marker}}.log"
-    benchmark: f"{PHYLO_RUN}/benchmarks/align.{{marker}}.tsv"
+    benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/align.{{marker}}.tsv"
     shell:
         "{PYTHON:q} {input.code:q} align --fasta {params.fasta:q} --output {output.alignment:q} "
         "--qc {output.qc:q} --command {params.command:q} --threads {threads} "
@@ -177,7 +177,7 @@ rule trim_busco_marker:
     resources: mem_mb=PHY["trimming_mem_gb"] * 1000
     conda: "../envs/phylogeny.yaml"
     log: f"{LOG}/{{phylo_branch}}/trim/{{marker}}.log"
-    benchmark: f"{PHYLO_RUN}/benchmarks/trim.{{marker}}.tsv"
+    benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/trim.{{marker}}.tsv"
     shell:
         "{PYTHON:q} {input.code:q} trim --alignment {input.alignment:q} --raw-qc {input.raw_qc:q} "
         "--output {output.alignment:q} --qc {output.qc:q} --columns {output.columns:q} "
@@ -198,7 +198,7 @@ rule infer_busco_gene_tree:
     resources: mem_mb=PHY["tree_mem_gb"] * 1000
     conda: "../envs/phylogeny.yaml"
     log: f"{LOG}/{{phylo_branch}}/tree/{{marker}}.log"
-    benchmark: f"{PHYLO_RUN}/benchmarks/tree.{{marker}}.tsv"
+    benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/tree.{{marker}}.tsv"
     shell:
         "{PYTHON:q} {input.code:q} gene_tree --alignment {input.alignment:q} --alignment-qc {input.alignment_qc:q} "
         "--output {output.tree:q} --qc {output.qc:q} --command {params.command:q} --threads {threads} "
@@ -244,7 +244,7 @@ rule infer_busco_species_tree:
     resources: mem_mb=PHY["astral_mem_gb"] * 1000
     conda: "../envs/phylogeny.yaml"
     log: f"{LOG}/{{phylo_branch}}/astral.log"
-    benchmark: f"{PHYLO_RUN}/benchmarks/astral.tsv"
+    benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/astral.tsv"
     shell:
         "{PYTHON:q} {input.code:q} astral --trees {input.trees:q} --merge-qc {input.merge_qc:q} "
         "--manifest {input.manifest:q} --output {output.tree:q} --qc {output.qc:q} "
@@ -253,7 +253,7 @@ rule infer_busco_species_tree:
 
 
 rule prepare_timetree_calibrations:
-    wildcard_constraints: phylo_branch="phylogeny|phylogeny_phenotyped"
+    wildcard_constraints: phylo_branch=MOLECULAR_BRANCH_PATTERN
     input:
         tree=f"{PHYLO_RUN}/species_tree.nwk",
         metadata=f"{META}/metadata_high_busco.tsv",
@@ -279,7 +279,7 @@ rule prepare_timetree_calibrations:
     conda: "../envs/timetree.yaml"
     resources: mem_mb=PHY["dating"]["mem_gb"] * 1000
     log: f"{LOG}/{{phylo_branch}}/timetree.log"
-    benchmark: f"{PHYLO_RUN}/benchmarks/timetree.tsv"
+    benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/timetree.tsv"
     shell:
         "{PYTHON:q} {input.code:q} --tree {input.tree:q} --metadata {input.metadata:q} "
         "--taxonomy-db {input.taxonomy:q} --coverage {input.coverage:q} --outdir {params.outdir:q} "
@@ -288,7 +288,7 @@ rule prepare_timetree_calibrations:
 
 
 rule date_busco_species_tree:
-    wildcard_constraints: phylo_branch="phylogeny|phylogeny_phenotyped"
+    wildcard_constraints: phylo_branch=MOLECULAR_BRANCH_PATTERN
     input:
         tree=f"{PHYLO_RUN}/species_tree.nwk",
         provenance=f"{PHYLO_RUN}/species_tree.json",
@@ -315,7 +315,7 @@ rule date_busco_species_tree:
     threads: 1
     resources: mem_mb=PHY["dating"]["mem_gb"] * 1000
     log: f"{LOG}/{{phylo_branch}}/dating.log"
-    benchmark: f"{PHYLO_RUN}/benchmarks/dating.tsv"
+    benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/dating.tsv"
     shell:
         "{PYTHON:q} {input.code:q} --tree {input.tree:q} --provenance {input.provenance:q} "
         "--calibrations {input.calibrations:q} --outdir {params.outdir:q} --command {params.command:q} "

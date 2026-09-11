@@ -1,8 +1,8 @@
 rule prepare_ncbi_guide:
-    wildcard_constraints: guide_branch="rooting|phylogeny_phenotyped/rooting"
+    wildcard_constraints: guide_branch=GUIDE_BRANCH_PATTERN
     input:
         samples=lambda wc: (checkpoints.select_phenotyped_species.get().output.samples
-                            if wc.guide_branch == "phylogeny_phenotyped/rooting"
+                            if wc.guide_branch == f"{PHYLO_BRANCHES['phenotyped']}/rooting"
                             else checkpoints.select_metadata.get().output.samples),
         taxonomy=TAXONOMY_DB,
         code=f"{SCRIPTS}/phylogeny_root.py",
@@ -50,17 +50,17 @@ checkpoint select_contrast_representatives:
         code=f"{SCRIPTS}/contrast_pairs.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/phylogeny_root.py"]
     output:
-        samples=f"{CONTRAST}/selection/samples.tsv",
-        traits=f"{CONTRAST}/selection/traits.tsv",
-        tree=f"{CONTRAST}/selection/ncbi_skim.nwk",
-        all=f"{CONTRAST}/selection/ncbi_skim.all.tsv",
-        sampled=f"{CONTRAST}/selection/ncbi_skim.sampled.tsv",
-        qc=f"{CONTRAST}/selection/selection.json"
+        samples=f"{REPRESENTATIVES}/selection/samples.tsv",
+        traits=f"{REPRESENTATIVES}/selection/traits.tsv",
+        tree=f"{REPRESENTATIVES}/selection/ncbi_skim.nwk",
+        all=f"{REPRESENTATIVES}/selection/ncbi_skim.all.tsv",
+        sampled=f"{REPRESENTATIVES}/selection/ncbi_skim.sampled.tsv",
+        qc=f"{REPRESENTATIVES}/selection/selection.json"
     params:
-        outdir=f"{CONTRAST}/selection", trait=config["contrast"]["trait"], seed=PHY["seed"]
+        outdir=f"{REPRESENTATIVES}/selection", trait=config["contrast"]["trait"], seed=PHY["seed"]
     conda: "../envs/timetree.yaml"
     resources: mem_mb=4000
-    log: f"{LOG}/contrast/selection.log"
+    log: f"{LOG}/{REPRESENTATIVES_REL}/selection.log"
     shell:
         "{PYTHON:q} {input.code:q} prepare --samples {input.samples:q} --metadata {input.metadata:q} "
         "--traits {input.traits:q} --tree {input.tree:q} "
@@ -69,8 +69,8 @@ checkpoint select_contrast_representatives:
 
 rule identify_contrast_pairs:
     input:
-        tree=f"{CONTRAST}/phylogeny/species_tree.nwk",
-        outgroup=f"{CONTRAST}/phylogeny/rooting/outgroup.txt",
+        tree=f"{REPRESENTATIVES}/species_tree.nwk",
+        outgroup=f"{REPRESENTATIVES}/rooting/outgroup.txt",
         selection=rules.select_contrast_representatives.output,
         code=f"{SCRIPTS}/contrast_pairs.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/phylogeny_root.py"]
@@ -85,17 +85,17 @@ rule identify_contrast_pairs:
         metadata=f"{CONTRAST}/species_metadata.tsv",
         qc=f"{CONTRAST}/summary.json"
     params:
-        selection=f"{CONTRAST}/selection", outdir=CONTRAST, seed=PHY["seed"]
+        selection=f"{REPRESENTATIVES}/selection", outdir=CONTRAST, seed=PHY["seed"]
     conda: "../envs/timetree.yaml"
     resources: mem_mb=4000
-    log: f"{LOG}/contrast/pairs.log"
+    log: f"{LOG}/{REPRESENTATIVES_REL}/contrast/pairs.log"
     shell:
         "{PYTHON:q} {input.code:q} summarize --tree {input.tree:q} --selection-dir {params.selection:q} "
         "--outgroup-file {input.outgroup:q} --outdir {params.outdir:q} --seed {params.seed} > {log:q} 2>&1"
 
 
 rule plot_contrast_tree:
-    wildcard_constraints: contrast_branch="contrast|phylogeny/contrast|phylogeny_phenotyped/contrast"
+    wildcard_constraints: contrast_branch=CONTRAST_BRANCH_PATTERN
     input:
         tree=f"{OUT}/{{contrast_branch}}/summary_tree.nwk",
         metadata=f"{OUT}/{{contrast_branch}}/species_metadata.tsv",
@@ -114,11 +114,11 @@ rule plot_contrast_tree:
 
 
 rule identify_phylogeny_contrast_pairs:
-    wildcard_constraints: phylo_branch="phylogeny|phylogeny_phenotyped"
+    wildcard_constraints: phylo_branch=MOLECULAR_BRANCH_PATTERN
     input:
         tree=f"{PHYLO_RUN}/species_tree.nwk",
         tree_qc=f"{PHYLO_RUN}/species_tree.json",
-        samples=lambda wc: f"{PHENOTYPED}/selection/samples.tsv" if wc.phylo_branch == "phylogeny_phenotyped" else f"{META}/samples.tsv",
+        samples=lambda wc: f"{PHENOTYPED}/selection/samples.tsv" if wc.phylo_branch == PHYLO_BRANCHES["phenotyped"] else f"{META}/samples.tsv",
         metadata=f"{META}/metadata_high_busco.tsv",
         traits=config["inputs"]["species_trait"],
         code=f"{SCRIPTS}/contrast_pairs.py",

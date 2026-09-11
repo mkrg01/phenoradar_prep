@@ -2,7 +2,7 @@
 analysis: pilot
 selection:
   # This user-provided file is intentionally not distributed with the workflow.
-  species_list: config/pilot_species.txt
+  species_list: input/pilot_species.txt
 odb:
   chunk_size: 2
   threads: 8

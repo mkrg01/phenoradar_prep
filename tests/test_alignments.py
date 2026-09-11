@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from align_orthogroups import align, collect, fasta_records, finish
-from common import read_tsv, species_from_gene_id, write_tsv
+from common import file_record, read_tsv, species_from_gene_id, write_tsv
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -130,6 +130,42 @@ def test_singleton_is_saved_without_running_famsa(collected_inputs, tmp_path):
     align(inputs / "OG2.faa", output, report, command="nonexistent-famsa")
     assert output.read_bytes() == (inputs / "OG2.faa").read_bytes()
     assert json.loads(report.read_text())["method"] == "singleton"
+
+
+def test_finish_accepts_relocated_results_and_preserves_historical_reports(collected_inputs, tmp_path):
+    samples, database, proteins, inputs = collected_inputs
+    # Singleton groups exercise completed-job provenance without an aligner.
+    with sqlite3.connect(database) as db:
+        db.execute("DELETE FROM mappings WHERE og = 'OG1'")
+    collect(samples, database, proteins, inputs)
+    output, reports = tmp_path / "alignments", tmp_path / "reports"
+    for fasta in inputs.glob("*.faa"):
+        align(fasta, output / fasta.name, reports / f"{fasta.stem}.json", command="nonexistent-famsa")
+    finish(inputs, output, reports)
+    historical = {p.name: p.read_bytes() for p in reports.glob("*.json")}
+
+    relocated = tmp_path / "relocated"
+    moved_inputs = relocated / "work/test/orthogroups/alignments/inputs"
+    moved_output = relocated / "results/test/orthogroups/alignments"
+    moved_reports = relocated / "logs/test/orthogroups/alignments"
+    for original, destination in [(inputs, moved_inputs), (output, moved_output), (reports, moved_reports)]:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        original.rename(destination)
+
+    finish(moved_inputs, moved_output, moved_reports)
+    assert {p.name: p.read_bytes() for p in moved_reports.glob("*.json")} == historical
+    published = json.loads((moved_output / "provenance.json").read_text())
+    assert published["collection"] == file_record(moved_inputs / "provenance.json")
+    for record in published["alignments"]:
+        og = record["orthogroup"]
+        assert record["alignment"] == file_record(moved_output / f"{og}.faa")
+        assert record["provenance"] == file_record(moved_reports / f"{og}.json")
+    previous = (moved_output / "provenance.json").read_bytes()
+    fasta = moved_output / "OG2.faa"
+    fasta.write_text(fasta.read_text().replace("MAU", "MGU"))  # Same size, different residues.
+    with pytest.raises(ValueError, match="changed after its job completed"):
+        finish(moved_inputs, moved_output, moved_reports)
+    assert (moved_output / "provenance.json").read_bytes() == previous
 
 
 def test_alignment_rejects_noncanonical_gene_id_before_running_famsa(tmp_path):
@@ -267,7 +303,7 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
         return result.stdout
 
     execute()
-    out = tmp_path / "results/test/alignments"
+    out = tmp_path / "results/test/orthogroups/alignments"
     assert {p.name for p in out.glob("*.faa")} == {"OG1.faa", "OG2.faa", "OG3.faa"}
     assert len(list(fasta_records(out / "OG1.faa"))) == 4
     assert len(list(fasta_records(out / "OG2.faa"))) == 2
@@ -276,8 +312,8 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     assert not (out / "members.tsv").exists()
     assert sorted(events.read_text().splitlines()) == ["OG1", "OG2"]
     assert len(odb_events.read_text().splitlines()) == 2
-    assert not (out.parent / "tpm").exists()
-    assert not (out.parent / "phylogeny").exists()
+    assert not (out.parent / "expression").exists()
+    assert not (out.parents[1] / "phylogeny").exists()
     times = {p.name: p.stat().st_mtime_ns for p in out.glob("*.faa")}
     assert "Nothing to be done" in execute()
 
@@ -302,7 +338,7 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     times = {p.name: p.stat().st_mtime_ns for p in out.glob("*.faa")}
     (out / "OG2.faa").unlink()
     execute(targets=())
-    assert (out.parent / "tpm/tpm.tsv").exists()
+    assert (out.parent / "expression/tpm.tsv").exists()
     assert (out / "OG2.faa").exists()
     assert all((out / name).stat().st_mtime_ns == t for name, t in times.items() if name != "OG2.faa")
     assert len(alignment_members(out)) == 7  # multi-OG copies still present

@@ -140,11 +140,12 @@ def finish(inputs, outdir, reports):
         report_path = reports / f"{og}.json"
         report = json.loads(report_path.read_text())
         expected = outdir / f"{og}.faa"
-        if not expected.is_file() or report["alignment"]["path"] != str(expected.resolve()):
+        if not expected.is_file() or Path(report["alignment"]["path"]).name != expected.name:
             raise ValueError(f"missing or misplaced OG alignment: {og}")
-        if file_record(expected) != report["alignment"]:
+        current = file_record(expected)
+        if any(current[key] != report["alignment"][key] for key in ["bytes", "sha256"]):
             raise ValueError(f"OG alignment changed after its job completed: {og}")
-        alignments.append({"orthogroup": og, "alignment": report["alignment"],
+        alignments.append({"orthogroup": og, "alignment": current,
                            "provenance": file_record(report_path)})
     outdir.mkdir(parents=True, exist_ok=True)
     # This output directory owns its *.faa files. Prune obsolete OGs only once

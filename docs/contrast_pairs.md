@@ -33,8 +33,8 @@ dating or the NCBI representative-selection analysis.
 
 | Input tree under `results/<analysis>/` | Pair output directory |
 | --- | --- |
-| `phylogeny/species_tree.nwk` | `phylogeny/contrast/` |
-| `phylogeny_phenotyped/species_tree.nwk` | `phylogeny_phenotyped/contrast/` |
+| `phylogeny/all/species_tree.nwk` | `phylogeny/all/contrast/` |
+| `phylogeny/phenotyped/species_tree.nwk` | `phylogeny/phenotyped/contrast/` |
 
 Inputs are the rooted molecular tree and its QC record, that run's sample
 manifest, `metadata/metadata_high_busco.tsv` for representative scores, and
@@ -72,13 +72,13 @@ reports unavailable branches in `filtered/manifest.json` and exports what is rea
 trees**, independent of `phylogeny.species_sets`, even when they had no previous
 pair output. It requires the tree/QC, sample manifest, BUSCO score table and
 trait table; gene trees and raw sequence inputs are unnecessary for pairs.
-Results go to `filtered/phylogeny/contrast/` and, when available,
-`filtered/phylogeny_phenotyped/contrast/`. Excluded species are removed before
+Results go to `filtered/phylogeny/all/contrast/` and, when available,
+`filtered/phylogeny/phenotyped/contrast/`. Excluded species are removed before
 grouping and pair detection, so surviving species can form different pairs.
 Every export starts from the original trees, allowing exclusions to be reversed.
 An empty exclusion list with `filter_species` restores the unexcluded export.
 
-The original `contrast/` representative analysis is neither read nor recomputed.
+The original `phylogeny/representatives/` representative analysis is neither read nor recomputed.
 Original full/phenotyped trees and pair outputs also remain unchanged. Pair IDs
 are local to each result and can change after exclusion; join by species and
 the result directory, not by an ID shared between analyses. `summary.json`
@@ -113,7 +113,7 @@ the analysis. The observed species must have exactly two states.
 
 ```yaml
 inputs:
-  species_trait: species_trait/species_trait.tsv
+  species_trait: input/species_trait.tsv
 phylogeny:
   busco_full_dir: /path/to/busco_full_longest_cds
   sequence_dir: /path/to/longest_cds
@@ -148,9 +148,9 @@ From the project root, after building ASTRAL as described in the phylogeny guide
 
 Set `contrast.enabled: true` to include these outputs in `all`. The explicit
 target works while false. For preparation only, target
-`results/<analysis>/contrast/selection/selection.json`. To also resolve the
+`results/<analysis>/phylogeny/representatives/selection/selection.json`. To also resolve the
 outgroup without inferring trees, target
-`results/<analysis>/contrast/phylogeny/rooting/outgroup.json`.
+`results/<analysis>/phylogeny/representatives/rooting/outgroup.json`.
 
 ## Processing
 
@@ -179,20 +179,20 @@ species names; IDs can change when membership changes between analyses.
 
 ## Outputs
 
-Under `results/<analysis>/contrast/`:
+Under `results/<analysis>/phylogeny/representatives/`:
 
 | Output | Contents |
 | --- | --- |
 | `selection/ncbi_skim.nwk`, `.all.tsv`, `.sampled.tsv` | Initial compressed NCBI tree and complete first-stage membership |
 | `selection/samples.tsv`, `traits.tsv`, `selection.json` | Inference manifest, dataset-wide normalized traits/roles, source hash and selection counts |
-| `phylogeny/` | The same marker plans, alignments, gene trees, coverage and rooted species tree as the full branch |
-| `phylogeny/rooting/outgroup.txt`, `outgroup.json` | Outgroup selected within the representative set, candidate manifest/count and selection evidence |
-| `summary_tree.nwk`, `.all.tsv`, `.sampled.tsv` | Second skim on the inferred molecular tree |
-| `contrastive.nwk`, `.all.tsv`, `.sampled.tsv` | Raw nwkit contrastive-clade selection, including unresolved multiway candidates |
-| `contrast_pairs.tsv` | One row per pair: state values, representatives, final groups and original species counts |
-| `species_metadata.tsv` | All selected species: original trait, role, final group/representative and nullable pair ID |
-| `summary.json` | Pair counts, unresolved clades, source records and assignment interpretation |
-| `summary_tree.pdf`, `summary_tree.svg` | Trait-colored tips, italic species names, and aligned columns for species counts (`n`), group IDs and bold pair IDs |
+| `plan/`, `alignments/`, `gene_trees/`, `species_tree.nwk` | The same marker plans, alignments, gene trees, coverage and rooted species tree as the full branch |
+| `rooting/outgroup.txt`, `outgroup.json` | Outgroup selected within the representative set, candidate manifest/count and selection evidence |
+| `contrast/summary_tree.nwk`, `.all.tsv`, `.sampled.tsv` | Second skim on the inferred molecular tree |
+| `contrast/contrastive.nwk`, `.all.tsv`, `.sampled.tsv` | Raw nwkit contrastive-clade selection, including unresolved multiway candidates |
+| `contrast/contrast_pairs.tsv` | One row per pair: state values, representatives, final groups and original species counts |
+| `contrast/species_metadata.tsv` | All selected species: original trait, role, final group/representative and nullable pair ID |
+| `contrast/summary.json` | Pair counts, unresolved clades, source records and assignment interpretation |
+| `contrast/summary_tree.pdf`, `summary_tree.svg` | Trait-colored tips, italic species names, and aligned columns for species counts (`n`), group IDs and bold pair IDs |
 
 The figure uses Matplotlib already supplied with nwkit; no R environment is
 required. Species names use 8 pt italic type; annotation columns use upright

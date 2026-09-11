@@ -1,6 +1,4 @@
-/transcriptome_assembly/
-/metadata/
-/species_trait/
+/input/
 /results/
 /work/
 /logs/
@@ -10,7 +8,6 @@
 # User-specific execution settings and species selections.
 /config/mydata.yaml
 /config/*.local.yaml
-/config/pilot_species.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

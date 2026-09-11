@@ -309,10 +309,10 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     execute()
     env.pop("FAKE_ODB_BARRIER_COUNT", None)
     out = tmp_path / "results/test"
-    assert len(read_tsv(out / "tpm/tpm_wide.tsv")) == 3
+    assert len(read_tsv(out / "orthogroups/expression/tpm_wide.tsv")) == 3
     events = tmp_path / "events.txt"
     assert (len(events.read_text().splitlines()) if events.exists() else 0) == (0 if reuse else 2)
-    assert json.loads((out / "odb/merged/merge_qc.json").read_text())["duplicate_pairs_removed"] == 4
+    assert json.loads((out / "orthogroups/mapping/merge_qc.json").read_text())["duplicate_pairs_removed"] == 4
     assert "Nothing to be done" in execute(["--dry-run"])
     abundance = Path(tiny_inputs["quant_dir"]) / "Alpha_plant/A1/A1_abundance.tsv"
     rows = read_tsv(abundance)
@@ -330,10 +330,10 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     config["selection"] = {"species_list": str(subset)}
     configfile.write_text(yaml.safe_dump(config))
     execute()
-    assert [r["run"] for r in read_tsv(out / "tpm/tpm_wide.tsv")] == ["B1"]
+    assert [r["run"] for r in read_tsv(out / "orthogroups/expression/tpm_wide.tsv")] == ["B1"]
     if reuse:
         assert not events.exists()
-        qc = json.loads((out / "odb/merged/merge_qc.json").read_text())
+        qc = json.loads((out / "orthogroups/mapping/merge_qc.json").read_text())
         assert qc["mode"] == "existing"
         assert qc["excluded_annotation_rows"] == 4
         assert qc["duplicate_pairs_removed"] == 2
