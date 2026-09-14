@@ -19,6 +19,11 @@ The workflow loads `config/config.yaml`, then overlays files supplied with
 Unknown keys, including retired settings, are rejected before workflow execution
 with their full configuration path. Configuration sections must be mappings.
 
+`container_image: auto` resolves to the GHCR image matching the repository's
+`VERSION`, including in source archives without Git metadata. An explicit URI
+or absolute SIF path overrides it. With native execution, `auto` resolves to
+`null`. Resolved image URIs are recorded in the run configuration.
+
 ```bash
 ./run_pipeline.sh --configfile config/mydata.yaml config/pilot.yaml \
   --cores 8 --resources mem_gb=64 -- prepare
@@ -45,7 +50,7 @@ are fixed; see the [directory layout](outputs.md#directory-layout).
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `run_name` | `run001` | Simple directory name: letters, digits, underscores, dots, or hyphens; starts with a letter or digit |
-| `container_image` | `null` (unset) | Release image URI or absolute SIF path; required by the launcher's default Singularity mode; see [containers](containers.md) |
+| `container_image` | `auto` | Image matching `VERSION`; override with a release URI or absolute SIF path; see [containers](containers.md) |
 | `inputs.metadata` | `input/metadata.tsv` | Sample metadata |
 | `inputs.busco` | `input/busco/summary.tsv` | BUSCO summary for species selection |
 | `inputs.cds_dir` | `input/cds` | Per-species CDS directory |

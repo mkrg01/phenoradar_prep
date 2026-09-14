@@ -1,3 +1,5 @@
+# Optional pinned environment for CI and container generation.
+# Workflow users may install Snakemake by any supported method.
 channels:
   - conda-forge
   - bioconda

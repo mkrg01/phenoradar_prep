@@ -5,10 +5,10 @@
 # Changing only this name does not change species selection or enabled analyses.
 # Use letters/digits, underscores, dots, or hyphens; start with a letter/digit.
 run_name: run001
-# Required for default Singularity execution: set to a release docker:// URI or
-# an absolute SIF path. See docs/containers.md for image preparation.
-# For native Conda, leave null and pass --software-deployment-method conda.
-container_image: null
+# auto selects the image matching the repository's VERSION file.
+# Override with a docker:// URI or absolute SIF path; see docs/containers.md.
+# Native Conda execution (--software-deployment-method conda) ignores auto.
+container_image: auto
 inputs:
   metadata: input/metadata.tsv
   species_trait: input/species_trait.tsv

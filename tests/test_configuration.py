@@ -5,6 +5,7 @@ import pytest
 import yaml
 
 from configuration import KEYS, validate_keys
+from versioning import IMAGE_REPOSITORY, read_version, resolve_container_image
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,3 +57,32 @@ def test_sections_require_mappings(config, section):
 def test_invalid_container_images(image):
     with pytest.raises(ValueError, match="container_image must be null or"):
         validate_keys({"container_image": image})
+
+
+def test_auto_image_follows_version_without_git(tmp_path):
+    (tmp_path / "VERSION").write_text("0.2.0\n")
+    assert resolve_container_image("auto", tmp_path, enabled=True) == f"docker://{IMAGE_REPOSITORY}:v0.2.0"
+    (tmp_path / "VERSION").write_text("1.0.1\n")
+    assert resolve_container_image("auto", tmp_path, enabled=True).endswith(":v1.0.1")
+    assert not (tmp_path / ".git").exists()
+
+
+@pytest.mark.parametrize("image", [None, "/data/custom image.sif", "docker://example/image:v1"])
+def test_explicit_image_does_not_need_version_file(tmp_path, image):
+    assert resolve_container_image(image, tmp_path, enabled=True) == image
+
+
+def test_native_auto_does_not_need_a_container_or_version_file(tmp_path):
+    assert resolve_container_image("auto", tmp_path, enabled=False) is None
+
+
+@pytest.mark.parametrize("version", ["", "v0.2.0", "0.2", "01.2.3", "1.2.3-rc1", "1.2.3\n2.0.0"])
+def test_invalid_release_versions_fail_clearly(tmp_path, version):
+    (tmp_path / "VERSION").write_text(version)
+    with pytest.raises(ValueError, match="VERSION must contain"):
+        read_version(tmp_path)
+
+
+def test_missing_version_has_archive_instructions(tmp_path):
+    with pytest.raises(ValueError, match="complete workflow checkout or release archive"):
+        resolve_container_image("auto", tmp_path, enabled=True)

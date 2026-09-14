@@ -10,22 +10,21 @@ automatically.
 
 ## Installation
 
-Use Linux with Bash, Conda, and Singularity (or Apptainer). Create the host
-Snakemake environment:
+Install [Snakemake and Apptainer/Singularity](../README.md#requirements) on Linux
+with Bash. Make `snakemake` and `singularity` available on `PATH`, including on
+Slurm compute nodes; load your site's software modules if needed. The launcher
+uses the available Snakemake installation directly. A dedicated Conda environment
+is not required, and the default container execution uses Conda inside the image.
 
-```bash
-conda env create -n phenoradar-workflow -f environment.yaml
-conda activate phenoradar-workflow
-```
-
-Set `container_image` in your dataset configuration to a matching release image
-URI or an absolute SIF path. See [container setup](containers.md) for obtaining
-the image and binding external data directories. The `singularity` command must
+The default `container_image: auto` selects the release image matching the
+checkout's `VERSION` file. Use a published release checkout and leave this setting
+unchanged. See [container setup](containers.md) for a local SIF, another image,
+and binding external data directories. The `singularity` command must
 be available on the execution host, including Slurm compute nodes. The launcher
 enables the container and its bundled Conda environments in both execution modes;
 no deployment flags are needed in the commands below.
 
-`SNAKEMAKE_BIN` can select the host Snakemake executable. The launcher stores its
+`SNAKEMAKE_BIN` can select a specific host Snakemake executable. The launcher stores its
 Snakemake cache in `.cache/` through `XDG_CACHE_HOME`. Native Conda and existing
 software installations are [alternative deployment modes](containers.md#native-execution).
 Missing database snapshots are [prepared automatically](references.md) when a
@@ -74,7 +73,7 @@ Filtering and PhenoRadar collection are always manual targets.
 
 If using Slurm, adjust the `#SBATCH` settings in `run_pipeline.sh` for your
 computing environment: CPUs, memory, time limit, and any required partition or
-account. Activate the workflow environment and create `logs/` before submitting:
+account. Make the required commands available and create `logs/` before submitting:
 
 ```bash
 mkdir -p logs

@@ -9,9 +9,13 @@ defined in [layout.py](../workflow/scripts/layout.py).
 
 ## Running tests
 
+[environment.yaml](../environment.yaml) provides an optional pinned Snakemake
+9.8.0 and pytest environment for CI and container generation. It is not required
+for running the workflow.
+
 Run tests from the repository root in a Python environment containing `pytest`,
 `pandas`, `ete4`, `matplotlib`, `PyYAML`, `numpy`, `biopython`, and the pinned
-cdskit from [phylogeny.yaml](../workflow/envs/phylogeny.yaml). The launcher
+cdskit from [phylogeny.yaml](../workflow/envs/phylogeny.yaml). The optional CI
 environment alone does not contain all test dependencies.
 
 ```bash

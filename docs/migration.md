@@ -13,9 +13,11 @@ Rename the top-level `analysis` key to **`run_name`**. The default is now
 `logs/run001/`. Command-line overrides use `--config run_name=YOUR_RUN_NAME`.
 
 `run_pipeline.sh` now enables Singularity in both direct and Slurm execution.
-Set `container_image` to a matching release image URI or an absolute SIF path;
-see [container setup](containers.md). To continue native Conda execution, keep
-`container_image: null` and pass `--software-deployment-method conda` explicitly.
+The default `container_image: auto` selects the image matching `VERSION`.
+Existing dataset configurations with `container_image: null` must change it to
+`auto` to use this default, or specify a matching image URI/absolute SIF path;
+see [container setup](containers.md). For native Conda execution, pass
+`--software-deployment-method conda`; either `auto` or `null` works.
 
 Generated paths, tool commands, OrthoDB v12, serial LSD2 execution, and the
 one-second delay between uncached TimeTree requests are fixed by the workflow.

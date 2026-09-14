@@ -12,18 +12,27 @@ ROOT = str(Path(workflow.basedir).parent)
 SCRIPTS = str(Path(workflow.basedir) / "scripts")
 sys.path.insert(0, SCRIPTS)
 from configuration import validate_keys
+from versioning import resolve_container_image
+USE_CONTAINER = DeploymentMethod.APPTAINER in workflow.deployment_settings.deployment_method
 try:
     validate_keys(config)
+    config["container_image"] = resolve_container_image(
+        config.get("container_image", "auto"), ROOT, enabled=USE_CONTAINER
+    )
 except ValueError as error:
     raise WorkflowError(str(error))
 
-if DeploymentMethod.APPTAINER in workflow.deployment_settings.deployment_method:
+if USE_CONTAINER:
     if not config.get("container_image"):
         raise WorkflowError(
-            "Set container_image in your dataset config to a release image URI or an "
+            "Set container_image in your dataset config to auto, a release image URI or an "
             "absolute SIF path (see docs/containers.md). For native Conda execution, "
             "pass --software-deployment-method conda."
         )
+    # Snakemake 9's local executor otherwise probes Conda on the host, even for
+    # containerized jobs. The Miniforge image supplies its own Conda installation.
+    if workflow.deployment_settings.conda_base_path is None:
+        workflow.deployment_settings.conda_base_path = Path("/opt/conda")
 
 containerized: config.get("container_image")
 

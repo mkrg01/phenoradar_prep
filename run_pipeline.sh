@@ -9,7 +9,7 @@
 #SBATCH --output=logs/pipeline-%j.log
 
 # Adjust SBATCH settings for your cluster; see docs/running.md and docs/containers.md.
-# Activate the host Snakemake environment and configure container_image, then run:
+# Make snakemake and singularity available on PATH and configure container_image:
 # mkdir -p logs
 # sbatch run_pipeline.sh --configfile config/mydata.yaml
 # Direct execution uses --cores and --resources mem_gb=...; SBATCH lines are ignored.
@@ -48,8 +48,10 @@ else
     root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 fi
 cd "$root"
-command -v "${SNAKEMAKE_BIN:-snakemake}" >/dev/null 2>&1 ||
-    die 'Snakemake is unavailable. Activate the workflow Conda environment first.'
+
+snakemake_bin=${SNAKEMAKE_BIN:-snakemake}
+command -v "$snakemake_bin" >/dev/null 2>&1 ||
+    die "Snakemake is unavailable: $snakemake_bin. Install Snakemake and add it to PATH, or set SNAKEMAKE_BIN; see README.md requirements."
 export XDG_CACHE_HOME="$root/.cache"
 mkdir -p "$XDG_CACHE_HOME"
 
@@ -82,7 +84,7 @@ done
 # Quote the bind path for Snakemake's shell command. User deployment flags can
 # override these defaults; the local executor and allocation limits apply last.
 printf -v container_root '%q' "$root"
-exec "${SNAKEMAKE_BIN:-snakemake}" --printshellcmds --rerun-incomplete \
+exec "$snakemake_bin" --printshellcmds --rerun-incomplete \
     --snakefile workflow/Snakefile \
     --software-deployment-method conda apptainer \
     --apptainer-args "--cleanenv --bind $container_root" "${workflow_args[@]}" \

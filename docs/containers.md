@@ -3,15 +3,14 @@
 [Documentation](index.md)
 
 Singularity is the default execution mode for `run_pipeline.sh`, both directly
-and under Slurm. Snakemake runs on the host using
-[environment.yaml](../environment.yaml); processing tools run in a Linux x86-64
+and under Slurm. Snakemake runs on the host; processing tools run in a Linux x86-64
 image containing all nine workflow Conda environments, including LSD2, MonoPhy,
 and ASTRAL-IV int128.
 
 ## Set up Singularity
 
 Make the `singularity` command available on the execution host, including Slurm
-compute nodes. SingularityCE and Apptainer are supported; the pinned Snakemake
+compute nodes. SingularityCE and Apptainer are supported; the tested Snakemake
 9.8.0 calls `singularity`, so an Apptainer installation must provide its
 `singularity` compatibility command on `PATH`. Check it with:
 
@@ -19,17 +18,22 @@ compute nodes. SingularityCE and Apptainer are supported; the pinned Snakemake
 singularity --version
 ```
 
-Use a published release image matching your workflow checkout. Releases are built
-and published by the [Container workflow](#build-and-publish-with-github-actions). Set
-`container_image` in `config/mydata.yaml`. Replace `RELEASE_DIGEST` with the
-actual published image digest to fix the version:
+Use a published release checkout. The default `container_image: auto` reads
+[VERSION](../VERSION) and selects `docker://ghcr.io/mkrg01/phenoradar_prep:v<VERSION>`.
+No image setting is required. This also works with release ZIP/tar archives.
+Snakemake pulls and caches the image on first use.
+
+To override this choice, set `container_image` to another URI or an absolute SIF
+path. Each new [release](releases.md) includes an `image.json` asset with the
+exact image digest. Replace `RELEASE_DIGEST` below with that digest to fix the
+image contents:
 
 ```yaml
 container_image: docker://ghcr.io/mkrg01/phenoradar_prep@sha256:RELEASE_DIGEST
 ```
 
-Snakemake pulls and caches a remote image on first use. To prepare a local SIF
-before submitting a job, download it on a host with network access:
+To prepare a local SIF before submitting a job, download it on a host with
+network access:
 
 ```bash
 singularity pull phenoradar_prep.sif \
@@ -45,7 +49,7 @@ container_image: /absolute/path/to/phenoradar_prep.sif
 
 ## Run the workflow
 
-After activating the host Snakemake environment and configuring your inputs:
+After making `snakemake` available on `PATH` and configuring your inputs:
 
 ```bash
 ./run_pipeline.sh --configfile config/mydata.yaml \
@@ -57,7 +61,10 @@ adjusting the [allocation settings](running.md#slurm). Both modes enable
 `--software-deployment-method conda apptainer` automatically. Snakemake calls
 this deployment method `apptainer` for both SingularityCE and Apptainer; the
 `conda` component activates the environments already built into the image.
-The launcher stops with setup instructions if `container_image` is unset.
+The workflow supplies the image's Conda base path so Snakemake does not require
+a host Conda installation in this mode.
+An explicit `container_image: null` stops container execution with setup
+instructions; use `auto` to enable automatic selection.
 
 The launcher passes `--cleanenv` and binds the repository at its existing path.
 For external input, reference, and work directories, including symlink targets,
@@ -76,8 +83,9 @@ targets, pilots, resource budgets, and resuming.
 
 ## Native execution
 
-For native Conda execution, leave `container_image: null` and explicitly select
-Conda to create and use the environments in `workflow/envs/` on the host:
+For native Conda execution, install Conda on the host and explicitly select Conda
+to create and use the
+environments in `workflow/envs/` on the host:
 
 ```bash
 ./run_pipeline.sh --software-deployment-method conda \
@@ -96,10 +104,12 @@ The [Container workflow](../.github/workflows/container.yml) runs as follows:
 | --- | --- |
 | Pull request or push to `main` | Check Dockerfile consistency and run related tests |
 | Manual **Run workflow** | Build the image and test all nine environments and real tools |
-| Push a `v*` tag | Run the checks, build and test the image, then publish |
 
-Releases publish to `ghcr.io/mkrg01/phenoradar_prep` with the version tag and
-`latest`, using `GITHUB_TOKEN`. Manual runs do not publish images.
+The separate [Release workflow](../.github/workflows/release.yml) publishes when
+`VERSION` changes on `main`. It derives the Git tag, image tag, and GitHub Release
+from that file, without committing to `main`. See [releasing a version](releases.md)
+for the maintainer steps and recovery after a failed publication. The Container
+workflow only checks/builds images; it does not publish them.
 
 After changing environment definitions or install scripts, run
 `python workflow/scripts/generate_container.py` in the Snakemake 9.8.0 workflow
@@ -114,3 +124,8 @@ selected image and its environment/source manifest. Retain the built image:
 rebuilding can resolve different transitive Conda dependencies. Reference data
 is managed separately, and API-backed stages still need network access;
 see [references](references.md).
+
+Automatic selection follows the local `VERSION`, not `latest`. Updating an image
+does not change an existing checkout. For development changes to environment
+recipes, build a matching image or finish a new release before using `auto`;
+unpublished versions cannot be downloaded yet.

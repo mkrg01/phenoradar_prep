@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phenoradar-release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      version: ${{ steps.plan.outputs.version }}
+      revision: ${{ steps.plan.outputs.revision }}
+    steps:
+      - name: Require main
+        run: test "$GITHUB_REF" = refs/heads/main
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Inspect VERSION and existing releases
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/release.py plan --output "$GITHUB_OUTPUT"
+
+  check:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    uses: ./.github/workflows/checks.yml
+
+  publish:
+    needs: [plan, check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.plan.outputs.revision }}
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the release image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          # Publish one platform manifest so the recorded digest identifies it.
+          provenance: false
+          sbom: false
+          tags: phenoradar_prep:ci
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.plan.outputs.version }}
+            org.opencontainers.image.revision=${{ needs.plan.outputs.revision }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Check all environments and real tools without network access
+        run: docker run --rm --network none -v "$PWD:/workspace:ro" -w /workspace phenoradar_prep:ci python tests/container_smoke.py
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the image, Git tag, and GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/release.py publish

@@ -116,8 +116,32 @@ def test_invalid_direct_memory_fails_before_work(batch_workspace, memory):
     assert "mem_gb must be a positive integer in GB" in result.stderr
 
 
+@pytest.mark.parametrize("mode", ["batch", "direct"])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_missing_snakemake_reports_installation_instructions(batch_workspace, tmp_path,
+                                                           mode, explicit):
+    checkout, script, env = batch_workspace
+    host_bin = tmp_path / "host bin"
+    host_bin.mkdir()
+    for name in ("bash", "dirname"):
+        (host_bin / name).symlink_to(shutil.which(name))
+    env["PATH"] = str(host_bin)
+    env.pop("SNAKEMAKE_BIN", None)
+    if explicit:
+        env["SNAKEMAKE_BIN"] = str(tmp_path / "missing snakemake")
+    if mode == "direct":
+        env = {key: value for key, value in env.items() if not key.startswith("SLURM_")}
+        script = checkout / "run_pipeline.sh"
+    result = subprocess.run([str(script)], cwd=checkout, env=env,
+                            capture_output=True, text=True)
+    assert result.returncode == 2
+    assert "Install Snakemake and add it to PATH" in result.stderr
+    assert "README.md requirements" in result.stderr
+    assert not (checkout / ".cache").exists()
+
+
 @pytest.mark.parametrize("mode", ["batch", "direct", "direct_equals",
-                                 "batch_conda", "direct_conda"])
+                                 "batch_conda", "direct_conda", "batch_path", "direct_path"])
 def test_launcher_runs_dag_locally_without_submitting_jobs(batch_workspace, tmp_path, mode):
     checkout, script, env = batch_workspace
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
@@ -126,18 +150,35 @@ def test_launcher_runs_dag_locally_without_submitting_jobs(batch_workspace, tmp_
     env["SNAKEMAKE_BIN"] = str(Path(snakemake).resolve())
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    marker = tmp_path / "unexpected-submission"
-    for command in ("sbatch", "srun"):
+    marker = tmp_path / "unexpected-host-command"
+    forbidden_commands = ("sbatch", "srun", "conda") if mode.endswith("_path") else ("sbatch", "srun")
+    for command in forbidden_commands:
         executable = fake_bin / command
         executable.write_text(f"#!{sys.executable}\nfrom pathlib import Path\n"
                               f"Path({str(marker)!r}).touch()\nraise SystemExit(99)\n")
         executable.chmod(0o755)
     env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
-    (checkout / "workflow/Snakefile").write_text('''rule all:
-    input: "a.txt", "b.txt"
+    if mode.endswith("_path"):
+        # A PATH-based install must work without activation or host Conda calls.
+        (fake_bin / "snakemake").symlink_to(Path(snakemake).resolve())
+        env = {key: value for key, value in env.items()
+               if not key.startswith(("CONDA_", "_CONDA_", "_CE_", "BASH_FUNC_"))
+               and key not in ("SNAKEMAKE_BIN", "BASH_ENV")}
+        env["PATH"] = str(fake_bin) + os.pathsep + os.defpath
+    if mode.endswith("_path"):
+        # Load the real container configuration, then run small host-side probe
+        # jobs to exercise the local executor without downloading an image.
+        shutil.copytree(ROOT / "workflow", checkout / "workflow", dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(ROOT / "config", checkout / "config")
+    else:
+        (checkout / "workflow/Snakefile").write_text('rule all:\n    input: "a.txt", "b.txt"\n')
+    with (checkout / "workflow/Snakefile").open("a") as handle:
+        handle.write('''
 
 rule task:
     output: "{sample}.txt"
+    container: None
     threads: 2
     resources: mem_mb=3000
     params:
@@ -166,6 +207,8 @@ rule task:
     custom_container_args = "--cleanenv --bind /external/data"
     if mode.endswith("_equals"):
         arguments = [f"--singularity-args={custom_container_args}", *arguments]
+    if mode.endswith("_path"):
+        arguments += ["--config", "container_image=/images/release.sif", "--", "a.txt", "b.txt"]
     result = subprocess.run([str(script), *arguments], cwd=cwd, env=env,
                             capture_output=True, text=True, timeout=90)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -184,7 +227,7 @@ rule task:
 
 
 @pytest.mark.parametrize("mode", ["batch", "direct"])
-@pytest.mark.parametrize("deployment", ["missing_image", "configured_image", "native"])
+@pytest.mark.parametrize("deployment", ["auto", "missing_image", "configured_image", "native"])
 def test_real_workflow_container_setup(batch_workspace, mode, deployment):
     checkout, script, env = batch_workspace
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
@@ -194,11 +237,15 @@ def test_real_workflow_container_setup(batch_workspace, mode, deployment):
     shutil.copytree(ROOT / "workflow", checkout / "workflow", dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(ROOT / "config", checkout / "config")
+    shutil.copyfile(ROOT / "VERSION", checkout / "VERSION")
     if mode == "direct":
         env = {key: value for key, value in env.items() if not key.startswith("SLURM_")}
         script = checkout / "run_pipeline.sh"
     arguments = ["--cores", "2", "--list-rules"]
-    if deployment == "configured_image":
+    if deployment == "missing_image":
+        (checkout / "config/image.yaml").write_text("container_image: null\n")
+        arguments += ["--configfile", "config/image.yaml"]
+    elif deployment == "configured_image":
         # Listing rules checks the real config overlays without downloading an image.
         (checkout / "config/image.yaml").write_text("container_image: /images/release.sif\n")
         (checkout / "config/run.yaml").write_text("run_name: pilot\n")
