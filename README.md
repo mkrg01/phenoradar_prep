@@ -3,17 +3,17 @@
 A Snakemake workflow for preparing comparative expression data from transcriptome
 CDS assemblies and abundance estimates. It selects species by BUSCO completeness,
 maps genes to OrthoDB orthogroups, and produces orthogroup TPM tables. Optional
-analyses provide KO expression, protein alignments, BUSCO species trees, and
+analyses provide KO assignments, protein alignments, BUSCO species trees, and
 trait contrast pairs. Completed results can be used for
 [PhenoRadar](https://github.com/mkrg01/phenoradar), which predicts binary
 phenotypes from comparative expression data.
 
-The input dataset was prepared upstream with
+You can prepare input data upstream with
 [AMALGKIT](https://github.com/kfuku52/amalgkit) for RNA-seq metadata creation and
 [GeneGalleon](https://github.com/kfuku52/genegalleon) for transcriptome assembly,
 CDS extraction, expression quantification, and BUSCO gene identification and
 completeness assessment. phenoradar_prep starts from those outputs and prepares
-them for downstream analysis. See [input provenance and formats](docs/inputs.md#upstream-data-preparation)
+them for downstream analysis. See [input preparation and formats](docs/inputs.md#upstream-data-preparation)
 for how the upstream outputs enter this workflow.
 
 ## Quick start

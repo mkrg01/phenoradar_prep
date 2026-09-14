@@ -5,11 +5,12 @@ The default workflow selects species, translates CDS, maps proteins to OrthoDB,
 and aggregates expression by orthogroup. Optional branches share the selected
 sample metadata but can be requested separately.
 
-The input dataset comes from [AMALGKIT](https://github.com/kfuku52/amalgkit)
-metadata creation and [GeneGalleon](https://github.com/kfuku52/genegalleon)
-transcriptome assembly, CDS extraction, expression quantification, and BUSCO
-analysis. [Input provenance](inputs.md#upstream-data-preparation) maps those
-outputs to this workflow's inputs; completed results can then be collected for
+You can prepare inputs with [AMALGKIT](https://github.com/kfuku52/amalgkit)
+for RNA-seq sample metadata and [GeneGalleon](https://github.com/kfuku52/genegalleon)
+for transcriptome assembly, CDS extraction, expression quantification, and BUSCO
+analysis. [Upstream data preparation](inputs.md#upstream-data-preparation)
+explains how to map those outputs to this workflow's inputs. Completed results
+can then be collected for
 [PhenoRadar](https://github.com/mkrg01/phenoradar).
 
 ## Start a dataset

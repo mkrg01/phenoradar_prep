@@ -8,16 +8,17 @@ paths and symbolic links can be used to avoid copying large files.
 
 ## Upstream data preparation
 
-The input dataset was generated using
+You can prepare the input data using
 [AMALGKIT](https://github.com/kfuku52/amalgkit) and
-[GeneGalleon](https://github.com/kfuku52/genegalleon). AMALGKIT was used to create
-the RNA-seq sample metadata. Its
+[GeneGalleon](https://github.com/kfuku52/genegalleon). AMALGKIT creates
+RNA-seq sample metadata. Its
 [`metadata` command](https://github.com/kfuku52/amalgkit/wiki/amalgkit-metadata)
 retrieves SRA metadata, including species, run accessions, and sample attributes.
-GeneGalleon was used for transcriptome assembly, longest-CDS extraction,
+GeneGalleon performs transcriptome assembly, longest-CDS extraction,
 expression quantification, and BUSCO gene identification and completeness
 assessment. Its [transcriptome generation stage](https://github.com/kfuku52/genegalleon/blob/main/docs/main-stages-and-what-they-do.md#gg_transcriptome_generation_entrypointsh)
-integrates AMALGKIT steps and produces the sequence and abundance data used here.
+integrates AMALGKIT steps and produces the sequence and abundance data used by
+phenoradar_prep.
 
 | Upstream output | Input in phenoradar_prep | Use here |
 | --- | --- | --- |
@@ -27,8 +28,8 @@ integrates AMALGKIT steps and produces the sequence and abundance data used here
 | GeneGalleon BUSCO completeness summary | `input/busco/summary.tsv` | Species selection by complete BUSCO fraction |
 | GeneGalleon per-species BUSCO full tables | `input/busco/full/{species}.busco.full.tsv` | Existing marker assignments for optional species-tree inference |
 
-These are the local input paths; upstream directory layouts may differ. Point
-the configuration to the corresponding outputs or stage them at these paths,
+Upstream directory layouts may differ. Point the configuration to the
+corresponding outputs or stage them at the paths above,
 preserving the identifiers and formats below. The BUSCO full tables must match
 the original sequences and satisfy the [phylogeny input requirements](phylogeny.md#inputs).
 
