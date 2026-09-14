@@ -2,6 +2,14 @@
 
 [Documentation](index.md)
 
+The downstream application is [PhenoRadar](https://github.com/mkrg01/phenoradar),
+a CLI tool for binary phenotype prediction from orthogroup-level TPM. This
+workflow prepares its comparative expression and associated inputs from the
+[AMALGKIT and GeneGalleon outputs](inputs.md#upstream-data-preparation).
+See PhenoRadar's [quick start](https://github.com/mkrg01/phenoradar/blob/main/docs/quickstart.md)
+and [data formats](https://github.com/mkrg01/phenoradar/blob/main/docs/data-format.md)
+for downstream use.
+
 The explicit `phenoradar_inputs` target collects completed results into
 `results/<analysis>/phenoradar_inputs/`. It validates the selected dataset and
 links existing files instead of copying expression tables or protein alignments.
