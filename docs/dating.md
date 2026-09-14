@@ -50,8 +50,8 @@ phylogeny:
 Run the target `timetree`; enabling dating also adds it to `phylogeny`:
 
 ```bash
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 32 --resources mem_gb=128 -- timetree
+./run_pipeline.sh --configfile config/mydata.yaml \
+  --cores 32 --resources mem_gb=128 -- timetree
 ```
 
 This can schedule missing inference. Completed unchanged trees are reused.
@@ -143,13 +143,13 @@ phylogeny:
 
 ```bash
 # Infer/reuse the species tree and retrieve calibration candidates, without dating.
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml \
+./run_pipeline.sh --configfile config/mydata.yaml \
+  \
   --cores 32 --resources mem_gb=128 -- phylogeny_calibrations
 
 # Infer/reuse the tree, retrieve/reuse the calibrations, then run LSD2.
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml \
+./run_pipeline.sh --configfile config/mydata.yaml \
+  \
   --cores 32 --resources mem_gb=128 -- timetree
 ```
 
@@ -203,7 +203,7 @@ is the input to LSD2 and is never replaced by a calibration-only tree.
 The cache has no automatic expiry: repeat runs use the frozen responses.
 `offline: true` prohibits requests and fails on a cache miss. For an intentional
 refresh, archive `resources/timetree_cache/` with the previous analysis record,
-then rerun online with a new `analysis` name or explicitly force
+then rerun online with a new `run_name` or explicitly force
 `prepare_timetree_calibrations` using `--forcerun`. Removing the cache alone does
 not invalidate completed calibration outputs. Keep retrieved datasets with the analysis records, outside this source repository.
 
@@ -220,7 +220,7 @@ See the [TimeTree FAQ](https://timetree.org/faqs),
 
 ## Outputs
 
-Files are written under `results/<analysis>/phylogeny/<set>/`, where `<set>` is
+Files are written under `results/<run_name>/phylogeny/<set>/`, where `<set>` is
 `all` or `phenotyped`. Calibration labels must be valid for every requested tree;
 automatic representatives and bounds are selected separately for each.
 
@@ -235,7 +235,7 @@ automatic representatives and bounds are selected separately for each.
 | `dating/lsd2.report.txt`, `lsd2.dates.txt`, `lsd2.input.nwk`, `lsd2.command.json` | Native fit report, constraints, input tree, and invocation |
 | `dating/provenance.json`, `lsd2_runs/` | Fit/rate diagnostics, units, settings, executable/build hashes, retained native runs and logs |
 
-Logs and benchmarks use the matching branch under `logs/<analysis>/phylogeny/`.
+Logs and benchmarks use the matching branch under `logs/<run_name>/phylogeny/`.
 Changes confined to dating settings or missing dated outputs reuse completed
 inference. Review `dating/provenance.json` for warnings before using the tree.
 

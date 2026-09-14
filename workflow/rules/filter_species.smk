@@ -1,6 +1,6 @@
 def filter_snapshot():
     # Absolute input paths intentionally describe an already completed snapshot.
-    # They do not request producers under results/<analysis>/, so this explicit
+    # They do not request producers under results/<run_name>/, so this explicit
     # export cannot trigger old selection, mapping or inference checkpoints.
     return discover_filter_inputs(OUT, config["inputs"].get("species_trait"))
 

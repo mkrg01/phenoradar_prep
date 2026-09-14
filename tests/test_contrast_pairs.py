@@ -187,7 +187,7 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     traits = source / "traits.tsv"
     write_tsv(traits, ["species", "C4"], [{"species": n.replace("_", " "), "C4": "" if i == 0 else i % 2}
                                          for i, n in enumerate(species)])
-    cfg = {"analysis": "test", "inputs": {"metadata": str(source / "metadata.tsv"), "species_trait": str(traits),
+    cfg = {"run_name": "test", "inputs": {"metadata": str(source / "metadata.tsv"), "species_trait": str(traits),
            "busco": str(source / "busco.tsv"), "cds_dir": str(source / "cds"), "quant_dir": str(source / "quant")},
            "taxonomy": {"source": str(source / "taxa.sqlite")},
            "phylogeny": {"busco_full_dir": str(source / "busco"), "outgroup": "auto", "max_markers": 3,

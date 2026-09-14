@@ -93,7 +93,7 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     odb_reference.symlink_to(frozen_reference, target_is_directory=True)
     command = fake_kofam_command(tmp_path)
     config = {
-        "analysis": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
+        "run_name": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
         "taxonomy": {"source": tiny_inputs["taxonomy_db"]},
         "odb": {"chunk_size": 1, "threads": 1, "batch_size": 1,
                 "mem_gb": 3, "min_free_gb": 0, "allow_nonlocal": True},

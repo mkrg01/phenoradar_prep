@@ -4,8 +4,8 @@
 
 ## Directory layout
 
-The configured `analysis` name selects `results/<analysis>/`, `work/<analysis>/`,
-and `logs/<analysis>/`. Reusable references live in `resources/`.
+The configured `run_name` selects `results/<run_name>/`, `work/<run_name>/`,
+and `logs/<run_name>/`. Reusable references live in `resources/`.
 
 | Shared resource | Fixed location |
 | --- | --- |
@@ -19,7 +19,7 @@ and `logs/<analysis>/`. Reusable references live in `resources/`.
 ## Result files
 
 ```text
-results/<analysis>/
+results/<run_name>/
   run.json                          # Resolved configuration, code hashes, Python environment
   metadata/
     metadata_all.tsv
@@ -55,8 +55,8 @@ results/<analysis>/
 ```
 
 Logs and ODB resource benchmarks are saved under
-`logs/<analysis>/orthogroups/mapping/`. Temporary
-ODB work is stored under `work/<analysis>/orthogroups/mapping/`.
+`logs/<run_name>/orthogroups/mapping/`. Temporary
+ODB work is stored under `work/<run_name>/orthogroups/mapping/`.
 
 Branch-specific inventories are in the [KEGG](kegg.md#outputs),
 [alignment](alignments.md#outputs-and-phenoradar), [phylogeny](phylogeny.md#outputs),

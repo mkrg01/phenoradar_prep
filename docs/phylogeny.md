@@ -53,7 +53,7 @@ phylogeny:
   trait: C4
 ```
 
-| Set | Species | Output under `results/<analysis>/` |
+| Set | Species | Output under `results/<run_name>/` |
 | --- | --- | --- |
 | `all` (default) | All species passing BUSCO and optional species-list selection | `phylogeny/all/` |
 | `phenotyped` | Selected species with a nonmissing `phylogeny.trait` | `phylogeny/phenotyped/` |
@@ -66,7 +66,7 @@ requires no trait file.
 These sets have independent marker plans, alignments, gene trees, and roots.
 Coverage is ranked within each set. Changing only `species_sets` requests the
 chosen branches without deleting or recomputing unchanged completed branches.
-Use a new `analysis` name to retain alternative traits or inference settings.
+Use a new `run_name` to retain alternative traits or inference settings.
 
 `phylogeny`, `phylogeny_prepare`, `phylogeny_calibrations`, `timetree`, and
 `taxonomy_audit` follow this list. [Molecular-tree contrast pairs](contrast_pairs.md)
@@ -75,10 +75,11 @@ tree under `phylogeny/representatives/`.
 
 ## Setup and execution
 
-With Conda deployment, the [phylogeny environment](../workflow/envs/phylogeny.yaml)
+The [phylogeny environment](../workflow/envs/phylogeny.yaml), bundled in the container,
 supplies cdskit 0.27.0, FAMSA 2.4.1, trimAl 1.5.1, and VeryFastTree 4.0.5.
 The [timetree environment](../workflow/envs/timetree.yaml) supplies nwkit 0.27.0
-for reference-based rooting and contrast analysis.
+for reference-based rooting and contrast analysis. Native Conda execution uses
+the same environment definitions.
 
 The workflow prepares ASTRAL-IV on first use. Native Conda execution builds the
 pinned official source; [container execution](containers.md) exports the verified
@@ -100,14 +101,17 @@ the plan or run inference:
 
 ```bash
 # Resolve the outgroup and select markers, without inferring trees.
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 4 --resources mem_gb=16 -- phylogeny_prepare
+./run_pipeline.sh --configfile config/mydata.yaml \
+  --cores 4 --resources mem_gb=16 -- phylogeny_prepare
 
-# Infer gene trees and species trees inside one allocation.
+# If using Slurm, infer gene trees and species trees inside one allocation.
 mkdir -p logs
-sbatch --partition=YOUR_PARTITION run_pipeline.sh \
+sbatch run_pipeline.sh \
   --configfile config/mydata.yaml -- phylogeny
 ```
+
+For Slurm, adjust the [allocation settings](running.md#slurm) for your computing
+environment before submitting.
 
 The explicit target works with `phylogeny.enabled: false`. Set it to `true` to
 include the selected trees in `all`. Stages resume independently; current
@@ -231,7 +235,7 @@ for concurrency and allocation sizing.
 
 ## Outputs
 
-Each `results/<analysis>/phylogeny/<set>/` directory contains:
+Each `results/<run_name>/phylogeny/<set>/` directory contains:
 
 | Output | Contents |
 | --- | --- |
@@ -247,7 +251,7 @@ Each `results/<analysis>/phylogeny/<set>/` directory contains:
 | `species_tree.nwk`, `species_tree.json` | Rooted tree in substitutions/site and inference provenance |
 
 Logs and resource benchmarks follow the same branch under
-`logs/<analysis>/phylogeny/`. Optional [dating](dating.md),
+`logs/<run_name>/phylogeny/`. Optional [dating](dating.md),
 [taxonomic review](taxonomy_audit.md), and [contrast-pair](contrast_pairs.md)
 outputs live beside their source tree.
 

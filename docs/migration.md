@@ -8,6 +8,15 @@ workflow rejects the obsolete settings below rather than silently ignoring them.
 
 ## Configuration changes
 
+Rename the top-level `analysis` key to **`run_name`**. The default is now
+`run_name: run001`, which selects `results/run001/`, `work/run001/`, and
+`logs/run001/`. Command-line overrides use `--config run_name=YOUR_RUN_NAME`.
+
+`run_pipeline.sh` now enables Singularity in both direct and Slurm execution.
+Set `container_image` to a matching release image URI or an absolute SIF path;
+see [container setup](containers.md). To continue native Conda execution, keep
+`container_image: null` and pass `--software-deployment-method conda` explicitly.
+
 Generated paths, tool commands, OrthoDB v12, serial LSD2 execution, and the
 one-second delay between uncached TimeTree requests are fixed by the workflow.
 Remove these old override keys:
@@ -82,8 +91,8 @@ If completed results lack `metadata/species_metadata.tsv`, prepare it before
 collecting downstream inputs:
 
 ```bash
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 1 --resources mem_gb=4 -- phenoradar_metadata
+./run_pipeline.sh --configfile config/mydata.yaml \
+  --cores 1 --resources mem_gb=4 -- phenoradar_metadata
 ```
 
 This uses completed selected metadata and the trait source. See

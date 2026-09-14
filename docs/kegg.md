@@ -25,14 +25,13 @@ kegg:
 target works regardless of the flag:
 
 ```bash
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 24 --resources mem_gb=128 -- kegg
+./run_pipeline.sh --configfile config/mydata.yaml \
+  --cores 24 --resources mem_gb=128 -- kegg
 ```
 
-The rule-specific environment installs KofamScan 1.3.0 and its dependencies; its
-executable is `exec_annotation`. Without Conda deployment, install KofamScan,
-HMMER, GNU Parallel, and Ruby and expose them on `PATH`, along with the metadata
-and translation dependencies.
+The container includes KofamScan 1.3.0 and its dependencies in the rule's Conda
+environment; its executable is `exec_annotation`. Native Conda execution uses
+the same environment definition.
 
 Annotation runs once per species, searching all profiles in the snapshot.
 Abundance-only or `kegg.ambiguity` changes repeat aggregation while reusing
@@ -92,7 +91,7 @@ errors.
 ## Outputs
 
 ```text
-results/<analysis>/kegg/
+results/<run_name>/kegg/
   reference_qc.json
   ko_modules.tsv                   # ko, module
   ko_pathways.tsv                  # ko, pathway
@@ -115,7 +114,7 @@ results/<analysis>/kegg/
 ```
 
 Snakemake elapsed time and sampled resource use are saved separately at
-`logs/<analysis>/kegg/benchmarks/<odb_species>.tsv`.
+`logs/<run_name>/kegg/benchmarks/<odb_species>.tsv`.
 
 Per-run and support columns are `species`, `run`, `ko`, `tpm_sum`,
 `annotated_genes`, and `quantified_genes`; the merged numeric long table contains

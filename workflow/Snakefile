@@ -4,6 +4,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from snakemake_interface_executor_plugins.settings import DeploymentMethod
 
 configfile: "config/config.yaml"
 
@@ -16,6 +17,14 @@ try:
 except ValueError as error:
     raise WorkflowError(str(error))
 
+if DeploymentMethod.APPTAINER in workflow.deployment_settings.deployment_method:
+    if not config.get("container_image"):
+        raise WorkflowError(
+            "Set container_image in your dataset config to a release image URI or an "
+            "absolute SIF path (see docs/containers.md). For native Conda execution, "
+            "pass --software-deployment-method conda."
+        )
+
 containerized: config.get("container_image")
 
 ODB_VERSION = "v12"
@@ -23,8 +32,8 @@ PYTHON = "python"
 TAXONOMY_DB = "resources/taxonomy/taxa.sqlite"
 TIMETREE_CACHE = "resources/timetree_cache"
 
-if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", str(config["analysis"])):
-    raise WorkflowError("analysis must be a simple directory name")
+if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", str(config["run_name"])):
+    raise WorkflowError("run_name must be a simple directory name")
 EXISTING_ODB = config["odb"]["existing_results"]
 if EXISTING_ODB is not None and (not isinstance(EXISTING_ODB, str) or not EXISTING_ODB.strip()):
     raise WorkflowError("odb.existing_results must be null or a snapshot directory")
@@ -117,9 +126,9 @@ try:
     EXCLUDE_SPECIES = validate_exclusions(config["exclude_species"])
 except ValueError as error:
     raise WorkflowError(str(error))
-OUT = f'results/{config["analysis"]}'
-WORK = f'work/{config["analysis"]}'
-LOG = f'logs/{config["analysis"]}'
+OUT = f'results/{config["run_name"]}'
+WORK = f'work/{config["run_name"]}'
+LOG = f'logs/{config["run_name"]}'
 PROTEINS = str(Path(f"{OUT}/proteins").resolve())
 META = f"{OUT}/metadata"
 MAPPING = f"{OUT}/{ORTHOGROUP_MAPPING}"

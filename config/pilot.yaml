@@ -1,5 +1,5 @@
 # Generic pilot settings. Create your own species list after running prepare.
-analysis: pilot
+run_name: pilot
 selection:
   # This user-provided file is intentionally not distributed with the workflow.
   species_list: input/pilot_species.txt

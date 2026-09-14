@@ -10,8 +10,8 @@ OG in the selected species' ODB mappings, retaining all mapped gene copies.
 To request alignments explicitly, run from the repository root:
 
 ```bash
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 16 --resources mem_gb=192 -- alignments
+./run_pipeline.sh --configfile config/mydata.yaml \
+  --cores 16 --resources mem_gb=192 -- alignments
 ```
 
 Prerequisite metadata selection, translation and ODB mapping are included
@@ -55,7 +55,7 @@ unchanged gene IDs, equal aligned lengths and exact ungapped residue preservatio
 ## Outputs and PhenoRadar
 
 ```text
-results/<analysis>/orthogroups/alignments/
+results/<run_name>/orthogroups/alignments/
   {og}.faa
   provenance.json
 ```
@@ -80,9 +80,9 @@ evidence of a biological gene deletion.
 
 ## Resuming and provenance
 
-Collected FASTA and input records live in `work/<analysis>/orthogroups/alignments/inputs/`.
+Collected FASTA and input records live in `work/<run_name>/orthogroups/alignments/inputs/`.
 Each OG is a separate Snakemake job with a log and execution JSON under
-`logs/<analysis>/orthogroups/alignments/` and a resource TSV in its `benchmarks/`
+`logs/<run_name>/orthogroups/alignments/` and a resource TSV in its `benchmarks/`
 subdirectory. The execution JSON records the input/output hashes, actual
 command, thread count and FAMSA executable hash; singletons record a direct copy.
 

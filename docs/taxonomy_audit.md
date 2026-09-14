@@ -26,8 +26,8 @@ taxonomy_audit:
 The explicit target works with `enabled: false`:
 
 ```bash
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml \
+./run_pipeline.sh --configfile config/mydata.yaml \
+  \
   --cores 1 --resources mem_gb=8 -- taxonomy_audit
 ```
 

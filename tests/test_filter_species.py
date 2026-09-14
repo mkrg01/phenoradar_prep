@@ -332,7 +332,7 @@ def test_full_snakefile_exports_frozen_results_without_upstream_inputs(snapshot,
     environment = command_environment({"python": sys.executable})
     argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(cfg), "--cores", "1", "--", "filter_species"]
     def run(excluded):
-        cfg.write_text(yaml.safe_dump({"analysis": "test", "exclude_species": excluded,
+        cfg.write_text(yaml.safe_dump({"run_name": "test", "exclude_species": excluded,
                                       "inputs": {"species_trait": str(traits)}}))
         process = subprocess.run(argv, cwd=project, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         assert process.returncode == 0, process.stdout + "\n" + "\n".join(p.read_text() for p in (project / "logs").rglob("*.log"))

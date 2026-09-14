@@ -160,7 +160,7 @@ def test_explicit_metadata_target_backfills_completed_selection_without_raw_inpu
                for row in samples])
     before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in metadata_dir.iterdir()}
     cfg = project / "override.yaml"
-    cfg.write_text(yaml.safe_dump({"analysis": "test", "inputs": {
+    cfg.write_text(yaml.safe_dump({"run_name": "test", "inputs": {
         "metadata": str(raw / "metadata.tsv"), "species_trait": str(raw / "traits.tsv"),
         "busco": str(raw / "busco.tsv"), "cds_dir": str(raw / "cds"), "quant_dir": str(raw / "quant"),
     }}))

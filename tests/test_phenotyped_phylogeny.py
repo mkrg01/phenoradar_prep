@@ -89,7 +89,7 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
     traits = source / "traits.tsv"
     trait_rows = [{"species": n, "C4": "" if i == 0 else "0"} for i, n in enumerate(species)]
     write_tsv(traits, ["species", "C4"], trait_rows)
-    cfg = {"analysis": "test", "inputs": {
+    cfg = {"run_name": "test", "inputs": {
         "metadata": str(source / "metadata.tsv"), "species_trait": str(traits),
         "busco": str(source / "busco.tsv"), "cds_dir": str(source / "cds"), "quant_dir": str(source / "quant")},
         "taxonomy": {"source": str(source / "taxa.sqlite")},

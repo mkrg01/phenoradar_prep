@@ -197,7 +197,7 @@ def test_full_snakefile_exclusions_never_request_inference(molecular_snapshot, w
     environment = command_environment({"python": sys.executable})
     argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(cfg), "--cores", "1", "--"]
     def run(excluded, target_name="phylogeny_contrast_pairs"):
-        cfg.write_text(yaml.safe_dump({"analysis": "test", "exclude_species": excluded,
+        cfg.write_text(yaml.safe_dump({"run_name": "test", "exclude_species": excluded,
                                       "phylogeny": {"species_sets": ["all", "phenotyped"]},
                                       "inputs": {"species_trait": str(traits)}}))
         process = subprocess.run(argv + [target_name], cwd=project, env=environment, text=True,

@@ -3,7 +3,7 @@
 [Documentation](index.md)
 
 The `phenoradar_inputs` target validates and links completed results into
-`results/<analysis>/phenoradar_inputs/` for
+`results/<run_name>/phenoradar_inputs/` for
 [PhenoRadar](https://github.com/mkrg01/phenoradar). It does not start producer
 analyses. Each invocation refreshes the links; failed validation preserves the
 previous collection. Keep linked source results and external references available.
@@ -17,8 +17,8 @@ For downstream use, see PhenoRadar's
 Run the desired expression and optional analyses first, then collect:
 
 ```bash
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 1 --resources mem_gb=4 -- phenoradar_inputs
+./run_pipeline.sh --configfile config/mydata.yaml \
+  --cores 1 --resources mem_gb=4 -- phenoradar_inputs
 ```
 
 At least one expression branch must be complete. Collection also needs
@@ -26,13 +26,13 @@ At least one expression branch must be complete. Collection also needs
 or `contrast_pairs`. For older results lacking it, use the
 [metadata backfill target](migration.md#backfilling-phenoradar-metadata).
 
-The log at `logs/<analysis>/phenoradar_inputs.log` lists ready, absent, incomplete,
+The log at `logs/<run_name>/phenoradar_inputs.log` lists ready, absent, incomplete,
 and disabled branches with their source paths.
 
 ## Published files
 
 ```text
-results/<analysis>/phenoradar_inputs/
+results/<run_name>/phenoradar_inputs/
   species_metadata.tsv
   tpm.tsv                         # When OG expression is selected
   kegg/                           # When KO expression is selected
@@ -116,13 +116,13 @@ TPM in several KO features. For KO expression, use these PhenoRadar data options
 
 ```yaml
 data:
-  tpm_path: results/full/phenoradar_inputs/kegg/ko_tpm_sum.tsv
+  tpm_path: results/run001/phenoradar_inputs/kegg/ko_tpm_sum.tsv
   feature_col: ko
   value_col: tpm_sum
   orthogroup_annotation_path: null
 ```
 
-Replace `full` with the analysis name.
+Replace `run001` with the run name.
 
 Protein alignments retain all gene copies and columns. OG IDs come from FASTA
 filenames, and species come from the `{species}_g{number}` gene IDs. Original
@@ -131,7 +131,7 @@ headers and sequences are linked unchanged; no `species=` attribute is added.
 ## Species exclusions
 
 With a nonempty top-level `exclude_species`, first run `filter_species`.
-The collector uses the matching completed `results/<analysis>/filtered/`
+The collector uses the matching completed `results/<run_name>/filtered/`
 snapshot, checks the recorded source, retained species/runs, exclusions and
 selected output hashes, and publishes it at the same `phenoradar_inputs/` path.
 It never creates or refreshes the filtered snapshot itself.
@@ -139,5 +139,5 @@ It never creates or refreshes the filtered snapshot itself.
 Filtering prepares minimal species metadata from retained sample/taxonomy
 rows and the supplied trait source. Recomputed molecular contrast branches can
 be selected as above. Set `tree` to the matching pruned tree, such as
-`results/<analysis>/filtered/phylogeny/all/species_tree.pruned.nwk`, when using it.
+`results/<run_name>/filtered/phylogeny/all/species_tree.pruned.nwk`, when using it.
 Clearing `exclude_species` selects the original dataset on the next collection.

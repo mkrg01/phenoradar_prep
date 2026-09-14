@@ -264,7 +264,7 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
         pytest.skip("set SNAKEMAKE_BIN and SEQKIT_BIN to run the workflow integration test")
     import yaml
     config = {
-        "analysis": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
+        "run_name": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
         "taxonomy": {"source": tiny_inputs["taxonomy_db"]},
         "odb": {"chunk_size": 1, "threads": 1, "batch_size": 1, "mem_gb": 3,
                 "min_free_gb": 0, "allow_nonlocal": True, "keep_work": True},

@@ -1,7 +1,7 @@
 """Accepted configuration keys; defaults live in config/config.yaml."""
 
 KEYS = {
-    "": "analysis inputs selection taxonomy translation odb tpm alignment kegg phylogeny "
+    "": "run_name inputs selection taxonomy translation odb tpm alignment kegg phylogeny "
         "contrast taxonomy_audit exclude_species phenoradar container_image",
     "inputs": "metadata species_trait busco cds_dir quant_dir",
     "selection": "busco_threshold species_list missing_taxonomy",

@@ -395,7 +395,7 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
         commands["lsd2"] = lsd2
     env = command_environment(commands)
     source, species = phylogeny_inputs(tmp_path)
-    cfg = {"analysis": "test", "inputs": {"metadata": str(source / "metadata.tsv"), "busco": str(source / "busco.tsv"),
+    cfg = {"run_name": "test", "inputs": {"metadata": str(source / "metadata.tsv"), "busco": str(source / "busco.tsv"),
            "cds_dir": str(source / "cds"), "quant_dir": str(source / "quant")},
            "taxonomy": {"source": str(source / "taxa.sqlite")},
            "phylogeny": {"busco_full_dir": str(source / "busco"), "outgroup": species[0],

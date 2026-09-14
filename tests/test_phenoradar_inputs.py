@@ -345,7 +345,7 @@ def test_full_snakefile_collects_frozen_results_without_upstream_inputs(snapshot
     shutil.copytree(snapshot, target)
     before = state(target)
     cfg = project / "override.yaml"
-    cfg.write_text(yaml.safe_dump({"analysis": "test", "phenoradar": {"kegg_groups": ["module"]}}))
+    cfg.write_text(yaml.safe_dump({"run_name": "test", "phenoradar": {"kegg_groups": ["module"]}}))
     environment = command_environment({"python": sys.executable})
     argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(cfg),
             "--cores", "1", "--", "phenoradar_inputs"]
@@ -390,7 +390,7 @@ def test_full_snakefile_collects_frozen_results_without_upstream_inputs(snapshot
     assert user_file.read_text() == "user-owned file must survive a rejected refresh\n"
     user_file.unlink()
     # Changing selected branches removes stale links without requesting producers.
-    cfg.write_text(yaml.safe_dump({"analysis": "test", "phenoradar": {"kegg": False, "alignments": False}}))
+    cfg.write_text(yaml.safe_dump({"run_name": "test", "phenoradar": {"kegg": False, "alignments": False}}))
     run()
     assert not (out / "kegg").exists()
     assert not (out / "alignments").exists()

@@ -64,7 +64,7 @@ review; its boundary test substitutes only the HTTP response.
 | Contrast pairs | Representative maps, deterministic ties, unknown traits, unresolved/empty pairs, figures, direct molecular membership, pair reformation after exclusions |
 | Taxonomic review | Real MonoPhy agreement, intruder/outlier roles, run linkage, missing ranks, singleton groups, report replacement |
 | Filtering and collection | Completed-result operation without raw inputs, identity/checksum validation, retained values and alignment columns, pruned path lengths, reversible exclusions, failed collection preserving prior output |
-| Launcher | Direct/Slurm argument handling, spooled script paths, resource budgets, exit status, real local Snakemake execution |
+| Launcher | Default container deployment, native Conda override, image setup checks, bind arguments, direct/Slurm budgets and exit status, real local Snakemake execution |
 | Containers | Complete environment coverage, deterministic Dockerfile generation, post-deploy script hashing, verified ASTRAL bundle export |
 
 Integration fixtures create isolated projects, expose tools under the workflow's

@@ -20,18 +20,20 @@ Unknown keys, including retired settings, are rejected before workflow execution
 with their full configuration path. Configuration sections must be mappings.
 
 ```bash
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml config/pilot.yaml \
+./run_pipeline.sh --configfile config/mydata.yaml config/pilot.yaml \
   --cores 8 --resources mem_gb=64 -- prepare
 ```
 
 Put all options before `--` and targets after it. `--configfile` accepts multiple
 filenames, so a target placed next to a filename can be read as another file.
 
-`analysis` selects a directory name under `results/`, `work/`, and `logs/`.
-Use a new name to retain results for comparison. The default is `full`;
+`run_name` is a free-form label for the directories under `results/`, `work/`,
+and `logs/`, for example `run001`, `run002`, or `pilot`.
+Use a new name, such as `run002`, to retain results for comparison.
+The default is fixed at `run001`;
 [config/pilot.yaml](../config/pilot.yaml) uses `pilot` and a user-supplied species
-list. The name itself does not change species selection.
+list. The name itself does not change species selection or enabled analyses.
+For older configurations using `analysis`, see [migration](migration.md#configuration-changes).
 
 Paths are relative to the repository root unless absolute. Direct execution of
 `run_pipeline.sh` changes to that directory. Submit Slurm jobs from the repository
@@ -42,8 +44,8 @@ are fixed; see the [directory layout](outputs.md#directory-layout).
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `analysis` | `full` | Simple directory name: letters, digits, underscores, dots, or hyphens; starts with a letter or digit |
-| `container_image` | `null` | Image URI or absolute SIF path for `--sdm conda apptainer`; see [containers](containers.md) |
+| `run_name` | `run001` | Simple directory name: letters, digits, underscores, dots, or hyphens; starts with a letter or digit |
+| `container_image` | `null` (unset) | Release image URI or absolute SIF path; required by the launcher's default Singularity mode; see [containers](containers.md) |
 | `inputs.metadata` | `input/metadata.tsv` | Sample metadata |
 | `inputs.busco` | `input/busco/summary.tsv` | BUSCO summary for species selection |
 | `inputs.cds_dir` | `input/cds` | Per-species CDS directory |
@@ -58,12 +60,14 @@ are fixed; see the [directory layout](outputs.md#directory-layout).
 
 ## OrthoDB settings
 
-The supported OrthoDB release is v12. **Review `odb.node` for your dataset**;
-the default `3193` is dataset-specific and selects `resources/orthodb/v12_3193/`.
+The supported OrthoDB release is v12. `odb.node` is the **NCBI Taxonomy ID of an
+OrthoDB level of orthology**. The default `3193` means **Embryophyta (land plants)**
+and selects `resources/orthodb/v12_3193/`. **Review it for your dataset** using
+[the source databases, supported-node lookup, and examples](references.md#choosing-an-orthodb-node).
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `odb.node` | `3193` | Positive integer taxonomic node |
+| `odb.node` | `3193` | NCBI Taxonomy ID of a supported OrthoDB v12 mapping level; Embryophyta by default |
 | `odb.chunk_size` | `50` | Maximum species per mapping chunk |
 | `odb.threads` | `16` | Workers per chunk |
 | `odb.batch_size` | `64` | Batch size; must be at least `odb.threads` |

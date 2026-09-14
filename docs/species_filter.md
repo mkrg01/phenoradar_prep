@@ -3,7 +3,7 @@
 [Documentation](index.md) · [PhenoRadar inputs](phenoradar_inputs.md)
 
 `filter_species` exports a subset of completed results to
-`results/<analysis>/filtered/`. It removes every run and gene copy of the named
+`results/<run_name>/filtered/`. It removes every run and gene copy of the named
 species, preserving the original analysis. It can also recompute contrast pairs
 from completed full and phenotyped trees after pruning excluded species.
 
@@ -29,8 +29,8 @@ Save the list in your existing local configuration or a separate local override,
 for example `config/exclusions.local.yaml`, then run:
 
 ```bash
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml config/exclusions.local.yaml \
+./run_pipeline.sh --configfile config/mydata.yaml \
+  config/exclusions.local.yaml \
   --cores 1 --resources mem_gb=8 -- filter_species
 ```
 

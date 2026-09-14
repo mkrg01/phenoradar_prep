@@ -20,8 +20,8 @@ and can change when membership changes.
 Set `phylogeny.species_sets` to `[all]`, `[phenotyped]`, or both, then run:
 
 ```bash
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 32 --resources mem_gb=128 \
+./run_pipeline.sh --configfile config/mydata.yaml \
+  --cores 32 --resources mem_gb=128 \
   -- phylogeny_contrast_pairs
 ```
 
@@ -32,7 +32,7 @@ pair assignment remains. A budget of one core and 8 GB fits the declared
 pair-only jobs.
 `contrast.enabled` does not control this target.
 
-| Input under `results/<analysis>/` | Pair results |
+| Input under `results/<run_name>/` | Pair results |
 | --- | --- |
 | `phylogeny/all/species_tree.nwk` | `phylogeny/all/contrast/` |
 | `phylogeny/phenotyped/species_tree.nwk` | `phylogeny/phenotyped/contrast/` |
@@ -65,19 +65,19 @@ two states and yield at least four representatives.
 Run:
 
 ```bash
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 32 --resources mem_gb=128 -- contrast_pairs
+./run_pipeline.sh --configfile config/mydata.yaml \
+  --cores 32 --resources mem_gb=128 -- contrast_pairs
 ```
 
 Set `contrast.enabled: true` to include this analysis in `all`. Its output is
-`results/<analysis>/phylogeny/representatives/`. Marker coverage is ranked within
+`results/<run_name>/phylogeny/representatives/`. Marker coverage is ranked within
 that subset; alignments and gene trees are inferred independently. Dating is
 not part of this target.
 
 For selection alone, target
-`results/<analysis>/phylogeny/representatives/selection/selection.json`.
+`results/<run_name>/phylogeny/representatives/selection/selection.json`.
 To also resolve the outgroup, target
-`results/<analysis>/phylogeny/representatives/rooting/outgroup.json`.
+`results/<run_name>/phylogeny/representatives/rooting/outgroup.json`.
 A manual `phylogeny.outgroup` must be among the selected representatives;
 `auto` chooses within that set.
 

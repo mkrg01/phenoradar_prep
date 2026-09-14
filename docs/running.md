@@ -2,31 +2,32 @@
 
 [Documentation](index.md) · [Configuration](configuration.md)
 
-Run commands from the repository root after configuring the [inputs](inputs.md).
-The launcher runs Snakemake locally, either on the current host or inside one
-Slurm allocation. It prints shell commands and reruns incomplete jobs automatically.
+Run commands from the repository root after configuring the [inputs](inputs.md)
+and [container image](containers.md). The launcher runs Snakemake on the host,
+either directly or inside one Slurm allocation, and executes processing steps
+with Singularity by default. It prints shell commands and reruns incomplete jobs
+automatically.
 
 ## Installation
 
-Use Linux with Bash and Conda:
+Use Linux with Bash, Conda, and Singularity (or Apptainer). Create the host
+Snakemake environment:
 
 ```bash
 conda env create -n phenoradar-workflow -f environment.yaml
 conda activate phenoradar-workflow
 ```
 
-This installs Snakemake. Processing tools have separate environments in
-`workflow/envs/`; direct execution needs `--software-deployment-method conda`
-to create and use them. The launcher enables Conda automatically inside Slurm.
-Definitions pin the main packages but are not complete dependency lockfiles.
+Set `container_image` in your dataset configuration to a matching release image
+URI or an absolute SIF path. See [container setup](containers.md) for obtaining
+the image and binding external data directories. The `singularity` command must
+be available on the execution host, including Slurm compute nodes. The launcher
+enables the container and its bundled Conda environments in both execution modes;
+no deployment flags are needed in the commands below.
 
-If using an existing software installation, expose the workflow's fixed commands
-on `PATH` and omit the deployment option during direct execution.
-`SNAKEMAKE_BIN` can select the Snakemake executable. The launcher stores its
-Snakemake cache in `.cache/` through `XDG_CACHE_HOME`.
-
-Phylogeny prepares the [ASTRAL tool](phylogeny.md#setup-and-execution) on first use.
-For container releases and Apptainer execution, see [containers](containers.md).
+`SNAKEMAKE_BIN` can select the host Snakemake executable. The launcher stores its
+Snakemake cache in `.cache/` through `XDG_CACHE_HOME`. Native Conda and existing
+software installations are [alternative deployment modes](containers.md#native-execution).
 Missing database snapshots are [prepared automatically](references.md) when a
 requested branch needs them. First use therefore needs download access unless
 references and software have been prepared locally.
@@ -36,8 +37,8 @@ references and software have been prepared locally.
 Put targets after `--`, with every option before it:
 
 ```bash
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 2 --resources mem_gb=16 -- prepare
+./run_pipeline.sh --configfile config/mydata.yaml \
+  --cores 2 --resources mem_gb=16 -- prepare
 ```
 
 Explicit analysis targets work even when their `enabled` flag is false.
@@ -71,21 +72,23 @@ Filtering and PhenoRadar collection are always manual targets.
 
 ## Slurm
 
-Activate the workflow environment and create `logs/` before submitting. Replace
-`YOUR_PARTITION` and add your cluster's account option if needed:
+If using Slurm, adjust the `#SBATCH` settings in `run_pipeline.sh` for your
+computing environment: CPUs, memory, time limit, and any required partition or
+account. Activate the workflow environment and create `logs/` before submitting:
 
 ```bash
 mkdir -p logs
-sbatch --partition=YOUR_PARTITION \
-  run_pipeline.sh --configfile config/mydata.yaml
+sbatch run_pipeline.sh --configfile config/mydata.yaml
 ```
 
-The script requests one node, one task, 16 CPUs, 192 GiB, and up to 21 days by
-default. All steps share that allocation. Set allocation options before the
-script name and workflow options after it. For example, preparation can use:
+The script requests one node, one task, 16 CPUs, 192 GiB, and up to 21 days on the
+`debug` partition by default. Adjust these settings for your cluster and workload,
+and add an account if required. All steps share that allocation. You can also
+override settings with `sbatch` options before the script name; workflow options
+go after it. For example, preparation can use:
 
 ```bash
-sbatch --partition=YOUR_PARTITION --cpus-per-task=2 --mem=16G --time=01:00:00 \
+sbatch --cpus-per-task=2 --mem=16G --time=01:00:00 \
   run_pipeline.sh --configfile config/mydata.yaml -- prepare
 ```
 
@@ -102,23 +105,22 @@ scancel JOB_ID
 ```
 
 Resubmit the same command to resume after cancellation or interruption. The
-script requests an interrupt shortly before its time limit and preserves
-Snakemake's exit status as the batch job's exit status.
+script preserves Snakemake's exit status as the batch job's exit status.
 
 ## Direct execution
 
 Supply a CPU and memory budget for the current host:
 
 ```bash
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 16 --resources mem_gb=192
+./run_pipeline.sh --configfile config/mydata.yaml \
+  --cores 16 --resources mem_gb=192
 ```
 
 Leave physical memory for Snakemake and other processes beyond the scheduling
 budget. The `#SBATCH` lines are comments in this mode and reserve no resources.
 Inside an existing Slurm allocation (`SLURM_JOB_ID` is set), the launcher instead
-uses that allocation's resources and enables Conda. Run from the repository root
-in that case.
+uses that allocation's resources. The default container deployment applies in
+either case. Run from the repository root inside an existing allocation.
 
 ## Resource budgets
 
@@ -128,7 +130,7 @@ and 384 GB of workflow memory; one needs 16 CPUs and 192 GB. Increase the
 allocation to permit more concurrency:
 
 ```bash
-sbatch --partition=YOUR_PARTITION --cpus-per-task=32 --mem=384G \
+sbatch --cpus-per-task=32 --mem=384G \
   run_pipeline.sh --configfile config/mydata.yaml
 ```
 
@@ -155,22 +157,22 @@ preparation or mapping. Selection is a checkpoint, so a dry-run before preparati
 may not show every downstream job. Inspect the plan again after preparation:
 
 ```bash
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 16 --resources mem_gb=192 --dry-run
+./run_pipeline.sh --configfile config/mydata.yaml \
+  --cores 16 --resources mem_gb=192 --dry-run
 ```
 
 Review `metadata/selection.json`, `samples.tsv`, and `busco_completeness.svg`
-under your analysis directory before scaling up.
+under `results/<run_name>/` before scaling up.
 
 ## Pilot run
 
 After preparation, choose a few eligible IDs from
-`results/<analysis>/metadata/species_high_busco.txt`. For the default `full`
-analysis, this gives a starting list to review:
+`results/<run_name>/metadata/species_high_busco.txt`. For the default
+`run_name: run001`, this gives a starting list to review:
 
 ```bash
-head -n 3 results/full/metadata/species_high_busco.txt > input/pilot_species.txt
-sbatch --partition=YOUR_PARTITION --cpus-per-task=8 --mem=80G \
+head -n 3 results/run001/metadata/species_high_busco.txt > input/pilot_species.txt
+sbatch --cpus-per-task=8 --mem=80G \
   run_pipeline.sh --configfile config/mydata.yaml config/pilot.yaml
 ```
 
@@ -187,7 +189,7 @@ analyses. Final merged tables use only current species/runs, even when older
 per-run files remain on disk.
 
 ODB jobs retain interrupted work under
-`work/<analysis>/orthogroups/mapping/<chunk>/<fingerprint>/`. The fingerprint
+`work/<run_name>/orthogroups/mapping/<chunk>/<fingerprint>/`. The fingerprint
 includes protein contents, reference, mapping options, software records, and
 worker code. Matching work can resume; changed inputs use a new directory.
 Chunk membership, `odb.threads`, and `odb.batch_size` affect this identity;
@@ -198,7 +200,7 @@ directory, unless `odb.keep_work: true`. Work for other fingerprints is retained
 Replacing installed ODB software in place may require an explicit rerun:
 
 ```bash
-sbatch --partition=YOUR_PARTITION run_pipeline.sh \
+sbatch run_pipeline.sh \
   --configfile config/mydata.yaml --forcerun odb_map
 ```
 

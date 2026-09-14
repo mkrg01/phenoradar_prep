@@ -1,6 +1,7 @@
 """Validate the shared launcher for direct execution and one Slurm allocation."""
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -13,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def batch_workspace(tmp_path):
-    checkout = tmp_path / "checkout"
+    checkout = tmp_path / "checkout with spaces"
     (checkout / "workflow").mkdir(parents=True)
     (checkout / "workflow/Snakefile").touch()
     shutil.copy2(ROOT / "run_pipeline.sh", checkout / "run_pipeline.sh")
@@ -59,7 +60,7 @@ def test_launcher_arguments_and_exit_status(batch_workspace, tmp_path, mode, exi
         # Ordinary execution must find the repository even from another directory.
         cwd = tmp_path
         arguments = ["--cores", "3", "--resources", "mem_gb=7", "disk_mb=12000",
-                     "--software-deployment-method", "conda", *arguments]
+                     *arguments]
     result = subprocess.run([str(script), *arguments], cwd=cwd,
                             env=env, capture_output=True, text=True)
     assert result.returncode == exit_code, result.stderr
@@ -69,7 +70,10 @@ def test_launcher_arguments_and_exit_status(batch_workspace, tmp_path, mode, exi
         "config/data with spaces.yaml", "config/pilot.yaml"]
     assert argv[-3:] == ["--", "prepare", "proteins"]
     assert argv[argv.index("--executor") + 1] == "local"
-    assert argv[argv.index("--software-deployment-method") + 1] == "conda"
+    deployment_index = argv.index("--software-deployment-method")
+    assert argv[deployment_index + 1:deployment_index + 3] == ["conda", "apptainer"]
+    assert shlex.split(argv[argv.index("--apptainer-args") + 1]) == [
+        "--cleanenv", "--bind", str(checkout)]
     assert argv[argv.index("--config") + 1] == "mem_gb=99"
     assert argv[argv.index("--cores") + 1] == ("3" if mode == "direct" else "2")
     assert ("mem_mb=7000" if mode == "direct" else "mem_mb=4589") in argv
@@ -112,7 +116,8 @@ def test_invalid_direct_memory_fails_before_work(batch_workspace, memory):
     assert "mem_gb must be a positive integer in GB" in result.stderr
 
 
-@pytest.mark.parametrize("mode", ["batch", "direct", "direct_equals"])
+@pytest.mark.parametrize("mode", ["batch", "direct", "direct_equals",
+                                 "batch_conda", "direct_conda"])
 def test_launcher_runs_dag_locally_without_submitting_jobs(batch_workspace, tmp_path, mode):
     checkout, script, env = batch_workspace
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
@@ -135,9 +140,12 @@ rule task:
     output: "{sample}.txt"
     threads: 2
     resources: mem_mb=3000
-    shell: "echo {threads} > {output}"
+    params:
+        methods=",".join(sorted(method.name for method in workflow.deployment_settings.deployment_method)),
+        container_args=workflow.deployment_settings.apptainer_args
+    shell: "printf '%s\\n' {threads} {params.methods:q} {params.container_args:q} > {output:q}"
 ''')
-    if mode == "batch":
+    if mode.startswith("batch"):
         # Allocation settings must win over accidentally supplied larger budgets.
         arguments = ["--cores", "999", "--resources", "mem_gb=999"]
         cwd = checkout
@@ -150,12 +158,62 @@ rule task:
                       else ["--resources", "mem_gb=3"])
         cwd = tmp_path
         expected_cores, expected_memory = "1", "3000"
+    if mode.endswith("_conda"):
+        arguments = ["--sdm", "conda", *arguments]
+        expected_methods = "CONDA"
+    else:
+        expected_methods = "APPTAINER,CONDA"
+    custom_container_args = "--cleanenv --bind /external/data"
+    if mode.endswith("_equals"):
+        arguments = [f"--singularity-args={custom_container_args}", *arguments]
     result = subprocess.run([str(script), *arguments], cwd=cwd, env=env,
                             capture_output=True, text=True, timeout=90)
     assert result.returncode == 0, result.stdout + result.stderr
     assert not marker.exists()
-    assert (checkout / "a.txt").read_text().strip() == expected_cores
-    assert (checkout / "b.txt").read_text().strip() == expected_cores
+    for name in ("a.txt", "b.txt"):
+        cores, methods, container_args = (checkout / name).read_text().splitlines()
+        assert cores == expected_cores
+        assert methods == expected_methods
+        if mode.endswith("_equals"):
+            assert container_args == custom_container_args
+        else:
+            assert shlex.split(container_args) == ["--cleanenv", "--bind", str(checkout)]
     assert f"Provided cores: {expected_cores}" in result.stdout + result.stderr
     assert f"mem_mb={expected_memory}" in result.stdout + result.stderr
     assert "odb_slots" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("mode", ["batch", "direct"])
+@pytest.mark.parametrize("deployment", ["missing_image", "configured_image", "native"])
+def test_real_workflow_container_setup(batch_workspace, mode, deployment):
+    checkout, script, env = batch_workspace
+    snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
+    if not snakemake:
+        pytest.skip("Snakemake is not available")
+    env["SNAKEMAKE_BIN"] = str(Path(snakemake).resolve())
+    shutil.copytree(ROOT / "workflow", checkout / "workflow", dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(ROOT / "config", checkout / "config")
+    if mode == "direct":
+        env = {key: value for key, value in env.items() if not key.startswith("SLURM_")}
+        script = checkout / "run_pipeline.sh"
+    arguments = ["--cores", "2", "--list-rules"]
+    if deployment == "configured_image":
+        # Listing rules checks the real config overlays without downloading an image.
+        (checkout / "config/image.yaml").write_text("container_image: /images/release.sif\n")
+        (checkout / "config/run.yaml").write_text("run_name: pilot\n")
+        arguments += ["--configfile", "config/image.yaml", "config/run.yaml"]
+    elif deployment == "native":
+        arguments += ["--software-deployment-method=conda"]
+    result = subprocess.run([str(script), *arguments], cwd=checkout, env=env,
+                            capture_output=True, text=True, timeout=90)
+    output = result.stdout + result.stderr
+    if deployment == "missing_image":
+        assert result.returncode != 0
+        assert "Set container_image in your dataset config" in output
+        assert "--software-deployment-method conda" in output
+    else:
+        assert result.returncode == 0, output
+        assert "prepare" in result.stdout
+    for directory in ("results", "resources", "work"):
+        assert not (checkout / directory).exists()

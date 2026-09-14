@@ -20,9 +20,11 @@ def test_config_keys_match_documented_defaults():
     validate_keys(yaml.safe_load((ROOT / "config/pilot.yaml").read_text()))
     validate_keys({"phylogeny": {"dating": {"lsd2": {"variance": 0}}}})
     validate_keys({"odb": {"existing_results": "/data/snapshot"}})
+    validate_keys({"run_name": "c4_run1"})
 
 
 @pytest.mark.parametrize("config,path", [
+    ({"analysis": "pilot"}, "analysis"),
     ({"tools": {}}, "tools"),
     ({"odb": {"mem_mb": 8000}}, "odb.mem_mb"),
     ({"phylogeny": {"min_occupancy": 0.5}}, "phylogeny.min_occupancy"),

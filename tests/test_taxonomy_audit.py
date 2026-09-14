@@ -222,7 +222,7 @@ def test_snakemake_reuses_species_tree_without_gene_inputs(audit_inputs, workflo
             shutil.copyfile(audit_inputs["samples"], folder / "selection/samples.tsv")
     before = {p: (sha256(p), p.stat().st_mtime_ns) for p in originals}
     override = project / "override.yaml"
-    cfg = {"analysis": "test", "phylogeny": {"species_sets": ["all"]}, "taxonomy_audit": {"ranks": ["family"]}}
+    cfg = {"run_name": "test", "phylogeny": {"species_sets": ["all"]}, "taxonomy_audit": {"ranks": ["family"]}}
     environment = command_environment({"python": sys.executable})
     wrapper = project / "workflow/AuditSnakefile"
     wrapper.parent.mkdir()
