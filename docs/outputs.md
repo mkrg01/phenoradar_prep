@@ -7,63 +7,40 @@
 The configured `run_name` selects `results/<run_name>/`, `work/<run_name>/`,
 and `logs/<run_name>/`. Reusable references live in `resources/`.
 
-| Shared resource | Fixed location |
-| --- | --- |
-| Taxonomy snapshot | `resources/taxonomy/taxa.sqlite` |
-| OrthoDB v12 node | `resources/orthodb/v12_<node>/` |
-| KOfam/KEGG snapshot and downloads | `resources/kegg/snapshot_v1/`, `resources/kegg/downloads/` |
-| ASTRAL build | `resources/phylogeny_tools/` |
-| TimeTree responses | `resources/timetree_cache/` |
-| Launcher-managed cache | `.cache/` |
-
 ## Result files
 
 ```text
 results/<run_name>/
-  run.json                          # Resolved configuration, code hashes, Python environment
-  metadata/
-    metadata_all.tsv
-    metadata_high_busco.tsv
-    samples.tsv
-    species_metadata.tsv            # species, trait, contrast_pair_id, family for PhenoRadar
-    species_high_busco.txt
-    selection.json                  # Selection counts and input/taxonomy hashes
-    busco_completeness.svg
-  proteins/                         # Species FASTA files and translation provenance
+  run.json                          # Configuration and provenance
+  metadata/                         # Selection, samples, traits, BUSCO QC
+  proteins/                         # Translated species FASTAs
   orthogroups/
-    mapping/
-      manifests/                    # Chunk plan and FASTA manifests
-      chunks/chunk_000/              # Annotations, hits, summary, provenance, native results
-      gene_orthogroups.tsv           # Unique #query / ODB_OG pairs
-      mappings.sqlite               # Indexed gene-to-OG mappings
-      merge_qc.json
+    mapping/gene_orthogroups.tsv     # Gene-to-OG assignments
+    mapping/mappings.sqlite         # Indexed mappings
     expression/
-      runs/                         # Per-run results and QC JSON
-      tpm_sum.tsv                   # Sums of input TPM by orthogroup
-      tpm.tsv                       # OG TPM rescaled to one million per run
+      tpm_sum.tsv                   # Original TPM sums by OG
+      tpm.tsv                       # Rescaled OG TPM
       tpm_sum_wide.tsv
       tpm_wide.tsv
       mapping_qc.tsv
-    alignments/                     # Optional all-copy OG protein alignments
-  kegg/                             # Independent optional KO annotations/expression
-  phylogeny/
-    all/                            # All selected species
-    phenotyped/                     # Species with an observed phenotype
-    representatives/                # Trait-guided representative selection and inference
-  phenoradar_inputs/                 # Selected completed inputs for PhenoRadar
-  filtered/                         # Corresponding species-filtered result layout
+    alignments/                     # Optional all-copy OG alignments
+  kegg/                             # Optional KO annotations/expression
+  phylogeny/{all,phenotyped,representatives}/
+  filtered/                         # Curated species subset
+  phenoradar_inputs/                 # Collected downstream inputs
 ```
 
-Logs and ODB resource benchmarks are saved under
-`logs/<run_name>/orthogroups/mapping/`. Temporary
-ODB work is stored under `work/<run_name>/orthogroups/mapping/`.
+Selection results include `metadata_all.tsv`, `metadata_high_busco.tsv`,
+`samples.tsv`, `species_high_busco.txt`, `selection.json`, and
+`busco_completeness.svg`. `species_metadata.tsv` provides PhenoRadar metadata.
+Logs/benchmarks are under `logs/<run_name>/`; temporary files are under
+`work/<run_name>/`. Reference locations are listed in [references](references.md).
 
-Branch-specific inventories are in the [KEGG](kegg.md#outputs),
-[alignment](alignments.md#outputs-and-phenoradar), [phylogeny](phylogeny.md#outputs),
-[dating](dating.md#outputs), [taxonomic review](taxonomy_audit.md#outputs-and-figures),
-and [contrast-pair](contrast_pairs.md#outputs) guides. The
-[filtered export](species_filter.md#exported-dataset) has its own manifest;
-[PhenoRadar collection](phenoradar_inputs.md#published-files) links selected inputs.
+See branch guides for [KO expression](kegg.md#outputs),
+[alignments](alignments.md#outputs-and-phenoradar), [phylogeny](phylogeny.md#outputs),
+[dating](dating.md#outputs), [taxonomy review](taxonomy_audit.md#outputs-and-figures),
+[contrast pairs](contrast_pairs.md#outputs), [filtered data](species_filter.md#exported-dataset),
+and [PhenoRadar inputs](phenoradar_inputs.md#published-files).
 
 ## TPM interpretation
 
@@ -91,11 +68,8 @@ counts, the retained TPM fraction, and other mapping statistics. Aggregation
 rejects duplicate target IDs, negative or nonfinite TPM values, and runs with no
 positive TPM retained after mapping and ambiguity handling.
 
-## Provenance and optional results
+## Provenance
 
-Retain `run.json`, branch-specific input checksums, QC, and execution records
-with the reference snapshots. See [KO quantification](kegg.md#assignment-and-quantification)
-for KO expression semantics and [OG alignments](alignments.md) for sequence outputs.
-
-For results moved from an older directory structure, see the
-[migration record guidance](migration.md#relocated-results).
+Keep `run.json`, branch QC/provenance, image digests or SIF checksums, and reference
+snapshots with the analysis. See [migration](migration.md#relocated-results) for
+relocated results.

@@ -1,156 +1,86 @@
-# Manual species exclusion from completed outputs
+# Manual species exclusion
 
 [Documentation](index.md) · [PhenoRadar inputs](phenoradar_inputs.md)
 
-`filter_species` exports a subset of completed results to
-`results/<run_name>/filtered/`. It removes every run and gene copy of the named
-species, preserving the original analysis. It can also recompute contrast pairs
-from completed full and phenotyped trees after pruning excluded species.
-
-Use a **top-level YAML list** of exact `species` IDs from the original
-`metadata/samples.tsv`:
+`filter_species` exports completed results to `results/<run_name>/filtered/`,
+removing all runs and gene copies of named species while preserving the original
+analysis. Choose exact IDs from `metadata/samples.tsv` in a top-level YAML list:
 
 ```yaml
 exclude_species:
   - Lespedeza_davurica
   - Cleistogenes_squarrosa
-  - Phragmites_karka
 ```
 
-These names illustrate the format; the default is `exclude_species: []`.
-Choose exclusions after review. Taxonomy-audit flags do not populate this list
-automatically.
-Unknown IDs, duplicates, invalid identifiers, and removal of every selected
-species fail. IDs use underscores in place of spaces; existing hyphens remain.
+These are format examples. The default is `[]`; taxonomy-audit flags never set
+exclusions automatically. Unknown/duplicate IDs and removal of all species fail.
 
 ## Execute after the source analysis
 
-Save the list in your existing local configuration or a separate local override,
-for example `config/exclusions.local.yaml`, then run:
+Save exclusions in the dataset config or a local override:
 
 ```bash
-./run_pipeline.sh --configfile config/mydata.yaml \
-  config/exclusions.local.yaml \
+./run_pipeline.sh --configfile config/mydata.yaml config/exclusions.local.yaml \
   --cores 1 --resources mem_gb=8 -- filter_species
 ```
 
-The target requires the original `metadata/samples.tsv` and completed analysis
-files. Add `--dry-run` before `-- filter_species` to inspect the plan.
+The target needs the original sample manifest and completed outputs, not raw
+sequences or reference preparation. It exports complete branches and reports
+absent/incomplete branches in `manifest.json`; it never starts upstream analyses.
+Inconsistent identities/checksums or missing files claimed by completion records fail.
 
-Only completed output groups are exported. A branch with no final outputs is
-`absent`; a partially completed group is `incomplete`, with missing filenames
-listed in the new manifest. Neither starts upstream jobs. Missing files claimed
-by a completed alignment inventory, or inconsistent identities/checksums within
-completed inputs, fail rather than produce a partial success.
-
-Raw inputs and reference preparation are unnecessary. The `timetree` Conda
-environment supplies ETE4 and nwkit for pruning, pairs, and figures; no TimeTree
-query is made.
-
-Changing the list regenerates only the export. Changed source files or a newly
-completed optional branch invalidate it on the next invocation. Unchanged
-inputs/list reuse the existing export. Every export starts from the original
-analysis, so removing an ID from the exclusion list restores that species.
-Using a previous filtered export as the source is rejected.
-
-For archived results outside the ordinary workflow layout:
+Changing exclusions or source outputs refreshes the export. Every export starts
+from the original analysis, so removing an exclusion restores that species.
+For archived results outside the workflow layout:
 
 ```bash
 python workflow/scripts/filter_species.py \
   --source /path/to/completed/analysis \
   --exclude-species '["Lespedeza_davurica"]' \
-  --traits input/species_trait.tsv \
-  --outdir /path/to/new/filtered
+  --traits input/species_trait.tsv --outdir /path/to/new/filtered
 ```
 
-`--traits` and `--outdir` are optional; the latter defaults to `<source>/filtered`.
-The standalone script validates and stages a complete export before replacing
-its own previous directory. Original inputs and unrelated output directories
-are never overwritten. Normal Snakemake failed-output cleanup still applies
-when using the workflow target.
+`--outdir` defaults to `<source>/filtered`. The script requires the workflow's
+`timetree` environment; it makes no TimeTree query.
 
 ## Exported dataset
 
-`manifest.json` records this export's provenance and available sections.
-When selected taxonomy metadata is present, filtering also prepares minimal
-`metadata/species_metadata.tsv` from the retained rows and supplied traits for
-PhenoRadar collection. Original execution records stay with the source analysis.
+Only available, completed sections are exported:
 
-| Output under `filtered/` | Behavior |
+| Output under `filtered/` | Contents |
 | --- | --- |
-| `metadata/samples.tsv`, `metadata/species.txt` | Remaining selected samples/species; original sample columns and run IDs retained |
-| `metadata/metadata_all.tsv`, `metadata/metadata_high_busco.tsv` when available | Only remaining active sample rows; pre-BUSCO excluded rows are not reintroduced |
-| `metadata/species_trait.tsv` when available | Remaining species' original phenotype columns, preserving zero and missing values; spaces in species IDs normalized |
-| `excluded_samples.tsv` | Removed species/run identities and taxids for review |
-| `proteins/` when complete | Symlinks to original files for remaining species, using the manifest's `odb_species` filename mapping |
-| `orthogroups/mapping/mappings.sqlite`, `gene_orthogroups.tsv`, `filter_qc.json` | Subset of the original gene ownership/mapping database, including all retained copies and ambiguous gene/OG assignments |
-| `orthogroups/expression/*.tsv` | Original long/wide tables and run QC with excluded runs removed |
-| `kegg/*.tsv` | Filtered gene/KO membership, expression, support and run QC; feature descriptions retained |
-| `orthogroups/alignments/*.faa`, `filter_qc.json` | Retained gene rows with original full headers, residues and site coordinates; empty OGs omitted and listed |
-| `phylogeny/all/species_tree.pruned.nwk` | All-species tree with excluded tips removed, when at least two tips remain |
-| `phylogeny/all/gene_trees.pruned.nwk`, `gene_trees/*.pruned.nwk`, `gene_trees.tsv` | Per-marker derivatives and a marker/retention index; trees with fewer than two tips omitted |
-| `phylogeny/all/alignments/`, including `raw/` when present | Available retained-marker alignments with excluded species rows removed; saved column maps unchanged |
-| `phylogeny/all/species_coverage.tsv`, `pruning.json` | Recounted retained-tree coverage, root status and explicit pruning limitations |
-| `phylogeny/all/dating/species_tree.dated.pruned.nwk` when available | Pruned source time tree, without refitting ages or calibration constraints |
-| `phylogeny/all/contrast/`, `phylogeny/phenotyped/contrast/` when ready | Fresh pair IDs, species membership, observed/summary trees and PDF/SVG figures computed from the corresponding original molecular tree after exclusions |
-| `manifest.json` | Exclusion list, retained identities, before/after counts, exported/skipped branches and input/output/code checksums |
+| `metadata/`, `excluded_samples.tsv` | Retained metadata and excluded run/species identities |
+| `proteins/` | Symlinks to retained species' proteins |
+| `orthogroups/mapping/` | Retained gene ownership and all gene/OG assignments |
+| `orthogroups/expression/`, `kegg/` | Expression, membership, support, and QC with excluded runs/genes removed |
+| `orthogroups/alignments/` | Retained gene rows; empty OGs omitted and listed in `filter_qc.json` |
+| `phylogeny/all/` | Pruned species/gene trees, available alignments, and dated tree |
+| `phylogeny/all/contrast/`, `phylogeny/phenotyped/contrast/` | Recomputed pairs when tree/QC, manifest, BUSCO scores, and traits are ready |
+| `manifest.json` | Available/skipped sections, exclusions, identities, and checksums |
 
-OG alignment IDs follow the [alignment format](alignments.md#outputs-and-phenoradar).
-Nonconforming IDs and unknown species fail. No `members.tsv` is required or
-exported. A completed alignment inventory and FASTA checksums are required;
-FASTAs without a completion record are reported as an incomplete branch.
-Where ODB mappings exist, every alignment
-gene/species/OG assignment must agree with that database. KO ownership continues
-to come from its gene tables and is checked against ODB when available.
-Original per-run outputs, chunk results, logs and external
-CDS/abundance inputs remain source caches; they are not duplicated. Paths in
-the selected-sample manifest still point to the original inputs.
+OG alignments require a completed inventory and valid [gene IDs](alignments.md#outputs-and-phenoradar).
+The representative analysis, phenotyped inference files, and taxonomy-audit reports
+stay in the source analysis. Completed phenotyped trees can still supply new pairs.
+Missing pair inputs are recorded, without triggering inference.
 
-The NCBI representative analysis under `phylogeny/representatives/` is neither copied nor
-recomputed. Phenotyped inference outputs are not copied, but completed full
-and phenotyped species trees are both used to recompute contrast pairs inside
-the curated bundle, regardless of `phylogeny.species_sets`. Previous pair
-outputs need not exist. Missing tree/QC, manifest, trait or BUSCO-score inputs
-are recorded as unavailable pair sections in `manifest.json`; they never
-trigger inference. Taxonomy-audit reports stay with the source analysis.
-
-Pair assignment uses `contrast.trait` and `phylogeny.seed`. The standalone
-export accepts `--contrast-trait` and `--seed` for the same settings. Removing
-a species can change surviving clades and create different pairs, so old pair
-IDs are not preserved. Zero/one-state subsets produce zero pairs, including
-when no species remain in the phenotyped branch. See
-[post-inference pairs](contrast_pairs.md#pairs-from-full-or-phenotyped-trees)
-for outputs, root interpretation and the `phylogeny_contrast_pairs` target,
-which uses this export when `exclude_species` is nonempty.
+Pair assignment uses `contrast.trait` and `phylogeny.seed` (standalone options
+`--contrast-trait` and `--seed`). Exclusions can change clades and pair IDs;
+zero/one-state subsets produce zero pairs. See [contrast pairs](contrast_pairs.md).
 
 ## Numerical and phylogenetic meaning
 
-Expression values are copied as strings without reaggregation or normalization.
-OG TPM is normalized within each run, so removing other runs does not change
-the retained runs' denominators. KO zeros and unavailable values remain distinct.
-OG/KO feature columns retain the original axes, including all-zero or empty
-columns; this stage does not perform feature selection. An OG can therefore
-remain a table column after its last alignment sequence has been removed.
-Such empty alignments are listed in `orthogroups/alignments/filter_qc.json`.
+Expression values and feature axes are retained without reaggregation or
+normalization. KO zeros remain distinct from unavailable values. Alignments keep
+all columns, including newly all-gap columns; marker selection and alignment
+are not repeated.
 
-Alignment row removal retains every column, including columns that become all
-gap. It is not a new alignment or a new trimAl pass. Marker selection is not
-rerun. Original alignments remain available if a later analysis needs to revisit
-alignment or site selection after exclusion.
-
-Pruned trees retain path lengths by summing contracted edges. They are **not
-new species-tree, gene-tree or dating estimates**: the original inference can
-still reflect the excluded sequences. Internal labels/supports are omitted
-because supports on the contracted tree have not been recomputed. Original
-support values remain in the source trees. If the original outgroup is removed,
-`pruning.json` marks the root as requiring review; no new biological root is
-silently inferred. `gene_trees.tsv:at_least_four_tips` records tip-count eligibility
-only; it does not verify suitability for an inference program's other settings.
-Trees with two or three tips are retained as derivatives. Old node IDs, age tables, calibration tables
-and inference-QC files are not relabeled as filtered calculations.
+Pruned trees retain path lengths but are not new inference or dating estimates.
+Internal supports are omitted because they have not been recalculated. If the
+outgroup is removed, `pruning.json` marks the root for review; no new root is
+chosen. Original node-age/calibration tables remain with the original analysis.
 
 ## Storage and verification
 
-Filtered tables and the mapping database require new disk space. Protein files
-use symlinks: keep the originals available, since editing through a link changes
-the original. Checksum verification also reads linked files.
+Tables and databases take new disk space. Protein symlinks and metadata paths
+still refer to original files; keep those sources available. Use the
+[collector](phenoradar_inputs.md#species-exclusions) to pass the subset to PhenoRadar.

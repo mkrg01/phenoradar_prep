@@ -63,83 +63,42 @@ single-state or continuous trait can also define the phenotyped subset. Each
 inference set needs at least `min_taxa` species (default four). The `all` tree
 requires no trait file.
 
-These sets have independent marker plans, alignments, gene trees, and roots.
-Coverage is ranked within each set. Changing only `species_sets` requests the
-chosen branches without deleting or recomputing unchanged completed branches.
-Use a new `run_name` to retain alternative traits or inference settings.
-
-`phylogeny`, `phylogeny_prepare`, `phylogeny_calibrations`, `timetree`, and
-`taxonomy_audit` follow this list. [Molecular-tree contrast pairs](contrast_pairs.md)
-do too. The separate `contrast_pairs` target selects and infers a representative
-tree under `phylogeny/representatives/`.
+Each set has independent markers, alignments, trees, and roots. All phylogeny,
+dating, audit, and molecular-pair targets follow `species_sets`. The separate
+`contrast_pairs` target infers a representative tree. Use a new `run_name` to
+retain alternative traits or settings.
 
 ## Setup and execution
 
-The [phylogeny environment](../workflow/envs/phylogeny.yaml), bundled in the container,
-supplies cdskit 0.27.0, FAMSA 2.4.1, trimAl 1.5.1, and VeryFastTree 4.0.5.
-The [timetree environment](../workflow/envs/timetree.yaml) supplies nwkit 0.27.0
-for reference-based rooting and contrast analysis. Native Conda execution uses
-the same environment definitions.
-
-The workflow prepares ASTRAL-IV on first use. Native Conda execution builds the
-pinned official source; [container execution](containers.md) exports the verified
-binary already built into the image.
-To prepare it manually with Python 3.12+ and GNU C++ available:
+Analysis tools are bundled in the container. Native execution uses
+[phylogeny.yaml](../workflow/envs/phylogeny.yaml) and
+[timetree.yaml](../workflow/envs/timetree.yaml); ASTRAL-IV is prepared automatically.
 
 ```bash
-python workflow/scripts/prepare_phylogeny_tools.py
-```
-
-The helper verifies the pinned official source and builds
-`resources/phylogeny_tools/bin/astral4_int128` with `LARGE_DATA` (128-bit integers).
-It records source/compiler provenance and the executable hash, and reuses a
-verified existing build. This build is required above 5,000 species. For offline
-compilation, pass `--archives /path/to/archives` containing verified `aster.tar.gz`.
-
-Add the relevant `phylogeny` settings to your dataset configuration, then inspect
-the plan or run inference:
-
-```bash
-# Resolve the outgroup and select markers, without inferring trees.
+# Select markers and resolve the outgroup.
 ./run_pipeline.sh --configfile config/mydata.yaml \
   --cores 4 --resources mem_gb=16 -- phylogeny_prepare
 
-# If using Slurm, infer gene trees and species trees inside one allocation.
-mkdir -p logs
-sbatch run_pipeline.sh \
-  --configfile config/mydata.yaml -- phylogeny
+# Infer gene trees and species trees.
+./run_pipeline.sh --configfile config/mydata.yaml \
+  --cores 32 --resources mem_gb=128 -- phylogeny
 ```
 
-For Slurm, adjust the [allocation settings](running.md#slurm) for your computing
-environment before submitting.
-
-The explicit target works with `phylogeny.enabled: false`. Set it to `true` to
-include the selected trees in `all`. Stages resume independently; current
-manifests determine membership even if files for old markers remain on disk.
+Set `phylogeny.enabled: true` to include trees in `all`. For offline native ASTRAL
+setup, run `python workflow/scripts/prepare_phylogeny_tools.py --archives /path/to/archives`
+with the verified `aster.tar.gz`, Python 3.12+, and GNU C++. The helper builds the
+pinned 128-bit ASTRAL-IV executable required for datasets above 5,000 species.
 
 ## Rooting
 
-`phylogeny.outgroup` accepts `auto` (default) or one exact species label present
-in every requested inference set. Automatic rooting selects within each set;
-representative selection therefore precedes root selection for `contrast_pairs`.
-No extra species is added, and different sets can select different outgroups.
+`phylogeny.outgroup` accepts `auto` or one exact species ID present in every
+requested set. Automatic selection uses the local NCBI guide, with nwkit's APG IV
+order tree as a fallback for angiosperms. It chooses within each set and adds no
+species. If no unambiguous outgroup is found, supply one explicitly.
 
-The workflow builds an NCBI guide from the frozen local taxonomy using nwkit.
-A binary guide root with a singleton side supplies the outgroup directly. For
-an unresolved root, it selects the highest-BUSCO species from each basal lineage
-(ties by species ID) and consults nwkit's bundled APG IV order tree. Every basal
-lineage must resolve to an order, and the reference must identify a singleton
-side that was also a singleton lineage in the input guide.
-
-APG IV is an angiosperm reference. An unresolved root or two multi-species root
-sides requires an explicit outgroup. Rooting makes no TimeTree/OpenTree request.
-`rooting/outgroup.json` records the candidate manifest, reference checksums, and
-root split. The dataset-wide guide lives in `phylogeny/all/rooting/`; phenotyped
-inference builds its own guide, and representatives use their compressed guide.
-
-The root is supplied before CASTLES-II length estimation. Its biological
-interpretation requires review; the molecular topology itself is not constrained
-to NCBI or APG IV.
+Review `rooting/outgroup.json` for the choice and supporting guide. The outgroup
+is supplied before CASTLES-II length estimation; molecular topology is not
+constrained to the guide.
 
 ## Marker and sequence selection
 
@@ -157,66 +116,36 @@ so replicate expression runs do not increase a species' weight.
 | `trimal_mode` | `gappyout` | `gappyout` or `automated1` |
 | `seed` | `12345` | Seed for inference and representative selection |
 
-Coverage is measured before translation and alignment QC, without a minimum
-coverage fraction or order-specific condition. Mean BUSCO match length is
-recorded but does not affect selection. Loci lost after selection are not
-replaced with lower-ranked markers.
+Coverage is ranked before sequence/alignment QC; loci lost later are not replaced.
+There is no minimum coverage fraction or order-specific condition.
 
-CDS preparation calls the pinned cdskit `pad`, `mask`, and `translate` functions,
-passing `translation.table` throughout. Module hashes and sequence changes are
-recorded. Padding adds N to complete codons and can add bases at the 5′ end to
-reduce internal stops. It can change the reading frame and is not proof of a
-correct ORF. Original bases are not deleted. U becomes T, X becomes N, and `.`
-becomes `-`; other invalid nucleotide symbols fail extraction.
-
-Masking turns stops and unresolved codons into NNN, translated as X, including
-terminal stops. Resolvable ambiguity such as GCN → A is retained. Partial-gap
-codons are masked; complete-gap codons are translated as gaps and normalized
-to X before alignment. Supplied proteins instead have one terminal stop removed,
-reject internal stops, and normalize nonstandard residues to X. Known-residue
-and unknown-fraction limits then apply.
-
-Single-copy status and sequence QC do not rule out hidden paralogy, gene fusions,
-or incorrect translations. Frame changes and masked positions are retained
-for inspection in `species/*.json`.
+CDS preparation uses cdskit `pad`, `mask`, and `translate` with `translation.table`.
+Padding can change the reading frame; stops and unresolved codons become X.
+Supplied proteins have one terminal stop removed, reject internal stops, and
+normalize nonstandard residues to X. Inspect changes and masking in `species/*.json`:
+single-copy status and QC do not establish a correct ORF or exclude hidden paralogy.
 
 ## Alignment and tree inference
 
-FAMSA saves raw alignments in `alignments/raw/`. trimAl selects columns using
-`gappyout` by default. `automated1` is available but computes all sequence-pair
-identities first. The `gappyout` default avoids that repeated cost across loci
-with thousands of species; it does not imply equivalent alignment accuracy.
+FAMSA saves raw alignments, then trimAl selects columns (`gappyout` by default;
+`automated1` is available). X is treated as a gap for column selection, then the
+selected columns are recovered from the original alignment, preserving X.
+Final-to-raw column indices in `alignments/*.columns.tsv` are 1-based.
 
-For column selection, X is temporarily represented as a gap. The saved column
-map is applied to the original FAMSA alignment, preserving its residues and X.
-Headers, IDs, residues, and column correspondence are checked. Post-trimming
-QC removes sequences with fewer than `min_protein_length` known residues and
-columns with no known residues among the remaining species.
+After trimming, sequences need `min_protein_length` known residues. Columns with
+no known residues are removed. Each locus needs `min_taxa` species and at least
+one variable amino-acid site; parsimony-informative sites are diagnostic only.
+Changing trimAl mode reuses raw FAMSA alignments.
 
-Markers need `min_taxa` species and at least one variable site with two distinct
-standard amino acids. Alignment length and parsimony-informative sites remain
-diagnostics; variable loci with zero informative sites can pass. X and gaps
-are not observed amino-acid states. Final-to-raw column indices in
-`alignments/*.columns.tsv` are 1-based.
+VeryFastTree uses double precision and `-lg -gamma`: LG+CAT topology search with
+Gamma20 length rescaling. SH-like local supports are saved without bootstrap
+replicates or support filtering.
 
-Changing only trimAl mode reuses raw FAMSA alignments. Changing the protein-length
-threshold also affects extraction and its downstream alignments. Marker ranking
-is independent of that length threshold.
-
-VeryFastTree uses double precision and `-lg -gamma`: topology search uses LG+CAT,
-then Gamma20 rescales lengths and evaluates likelihoods. This is not a full
-LG+Gamma topology search. SH-like local supports are saved, without bootstrap
-replicates or support-based filtering.
-
-Gene-tree merging records actual retained coverage and each species' gene-tree
-count. ASTRAL requires every selected species in at least one retained gene
-tree; zero coverage stops inference and preserves diagnostics. Presence in one
-tree is a completeness check, not evidence of adequate phylogenetic information.
-
-ASTRAL-IV estimates topology, local posterior probabilities, and integrated
-CASTLES-II substitution lengths using the root, fixed seed, and mean retained
-alignment length. No supermatrix is constructed. Missing data, gene-tree error,
-hidden paralogy, and model assumptions can affect both topology and lengths.
+ASTRAL-IV combines gene trees and estimates local posterior probabilities and
+CASTLES-II branch lengths in substitutions/site. Every selected species must
+occur in at least one retained gene tree; inspect `species_coverage.tsv` for
+uneven coverage. No supermatrix is constructed. Missing data, gene-tree error,
+paralogy, and model assumptions can affect topology and lengths.
 
 ## Resources
 

@@ -2,13 +2,9 @@
 
 [Documentation](index.md) · [Species exclusion](species_filter.md)
 
-The `taxonomy_audit` target compares a rooted BUSCO species tree with registered
-NCBI taxonomy using MonoPhy 1.3.2. It reports non-monophyletic groups and
-intruder/outlier tips, linked to all associated run IDs. Assessment uses the
-species tree; gene trees are not audit inputs.
-
-Reports do not determine which sample is mislabeled. After review, use
-[manual species exclusion](species_filter.md) to export a curated subset.
+`taxonomy_audit` compares rooted BUSCO species trees with NCBI taxonomy using
+MonoPhy. It reports non-monophyletic groups and intruder/outlier tips, linked to
+sample run IDs. Flags support review and do not automatically exclude species.
 
 ## Configuration and execution
 
@@ -23,137 +19,60 @@ taxonomy_audit:
   mem_gb: 8
 ```
 
-The explicit target works with `enabled: false`:
-
 ```bash
 ./run_pipeline.sh --configfile config/mydata.yaml \
-  \
   --cores 1 --resources mem_gb=8 -- taxonomy_audit
 ```
 
-The target follows `phylogeny.species_sets`: `[all]`, `[phenotyped]`, or both.
-Reports go into the selected branch's `taxonomy_audit/` directory. The separate
-representative tree under `phylogeny/representatives/` is not an audit target.
-With `enabled: true`, reports are included in `phylogeny`, and in `all` when
-`phylogeny.enabled: true`.
+The target follows `phylogeny.species_sets` and can schedule missing tree inference;
+check `--dry-run` and increase resources if needed. Set `enabled: true` to attach
+reports to `phylogeny`. Representative trees are not audited.
 
-`ranks` may include other named NCBI ranks, such as order, class or subgenus.
-Each requested rank is evaluated separately. MonoPhy itself can accept arbitrary
-group memberships, but this workflow currently constructs columns from named
-NCBI ranks only; it does not accept `no rank` as a single ambiguous grouping.
+Choose named NCBI `ranks`. `outlierlevel` is the required focal-group fraction
+within a candidate core clade, in `(0, 1]`; it is not confidence.
+`collapse_monophyletic` changes figures only. The container supplies MonoPhy;
+for offline native installation, `MONOPHY_SOURCE_ARCHIVE` can supply its pinned
+archive from [monophy.yaml](../workflow/envs/monophy.yaml)'s installer.
 
-`outlierlevel` is MonoPhy's core-clade threshold, a number in `(0, 1]`. It is the
-fraction of tips assigned to the focal group within a candidate clade, not a
-confidence value, gene agreement fraction or fraction of that group's members
-retained. The default is MonoPhy's 0.5. A higher threshold does not necessarily
-mean fewer or more reliable flags. `collapse_monophyletic` affects display only;
-there is no tip-count limit on assessment or plots.
-
-The rule uses `workflow/envs/monophy.yaml`. Its adjacent post-deploy script
-installs the unmodified official CRAN MonoPhy 1.3.2 source, verified by SHA-256.
-For offline installation, set `MONOPHY_SOURCE_ARCHIVE` to that same archive.
-No external reference sequence database is downloaded.
-
-Completed species trees are reused under normal Snakemake dependency checks.
-Missing or outdated trees can schedule inference. Use `--dry-run` to inspect
-upstream work, and increase the example's CPU/memory budget if inference is
-needed.
-
-For an archived result whose upstream workflow inputs are unavailable, activate
-the MonoPhy environment and run the script directly:
-
-```bash
-python workflow/scripts/taxonomy_audit.py \
-  --tree results/ANALYSIS/phylogeny/all/species_tree.nwk \
-  --tree-qc results/ANALYSIS/phylogeny/all/species_tree.json \
-  --samples results/ANALYSIS/metadata/samples.tsv \
-  --taxonomy resources/taxonomy/taxa.sqlite \
-  --outdir results/ANALYSIS/phylogeny/all/taxonomy_audit
-```
-
-For phenotyped trees, supply their selection manifest and species-tree/QC files.
-The script requires exact agreement between tree tips and manifest species,
-unique runs, consistent within-species metadata, and a rooted tree matching the
-single outgroup recorded in its QC. It preserves the source root and does not
-choose a new one. Input and code checksums and R/package versions are recorded.
+For archived results, [taxonomy_audit.py](../workflow/scripts/taxonomy_audit.py)
+also accepts tree, QC, sample-manifest, and taxonomy paths directly (`--help`).
+Tree tips and the manifest must agree, including the recorded root/outgroup.
 
 ## Interpretation
 
-MonoPhy checks each registered group against the descendants of its most recent
-common ancestor. If those descendants contain other groups, the group is
-non-monophyletic. Its outlier procedure may select a smaller core clade using
-`outlierlevel` and the numbers of focal-group tips in descendant branches.
-Members outside the selected core are outliers; other groups' tips within it
-are intruders. Ties and multifurcations can prevent the core search from resolving
-which part to select. There is no branch-support threshold or calibrated
-probability of mislabeling.
+An **outlier** is a focal group's member outside its selected core clade; an
+**intruder** belongs to another group but lies inside that core. A tip can have
+both roles for different focal groups. `focal_taxon` is the assessed group,
+not a corrected identity. Some non-monophyletic groups yield no selected outlier.
 
-An event is relative to a **focal group**. A tip registered in group A can be an
-outlier of A and an intruder of B simultaneously. Both events are retained in
-`candidates.tsv`; MonoPhy's native `TipStates` instead gives intruder precedence.
-`focal_taxon` is the group whose monophyly is being checked, not an inferred or
-corrected identity for the tip.
+Missing ranks are omitted separately for each assessment. A one-tip group cannot
+be assessed for its own monophyly, but its tip can intrude into another group.
+There is no branch-support filter or calibrated probability of mislabeling.
 
-Missing ranks are omitted separately **before** each MonoPhy assessment and
-recorded as `missing_taxonomy_rank`. They are not treated as intruders or pooled
-into an artificial unknown group. The pruned assessment tree is exported for
-that rank. If fewer than two annotated tips remain, that rank is not passed to
-MonoPhy. A one-tip group is `Monotypic`: it cannot be evaluated for its own
-monophyly, although its tip can be reported as an intruder of another group.
-Species-level assessment is consequently uninformative for within-species
-monophyly when the input contains one tip per species.
-
-Neither no flag nor monophyly verifies identity. Grouped mislabels, uneven
-sampling, outdated taxonomy, genuinely non-monophyletic groups, hidden paralogy
-and tree estimation errors can affect results. In particular, a majority of
-incorrect labels can cause a correct tip to be flagged. The tool exposes
-conflicts for review; it does not resolve that ambiguity. Several RNA-seq runs
-may feed one species-level CDS set, so the report cannot identify which run is
-responsible without separate sequence analysis.
+Neither monophyly nor absence of flags verifies identity. Sampling, taxonomy,
+paralogy, and tree errors can produce conflicts. Species-level results cannot
+identify which RNA-seq run is responsible without further sequence analysis.
 
 ## Outputs and figures
 
+Reports are in `results/<run_name>/phylogeny/<set>/taxonomy_audit/`.
+
 | File | Contents |
 | --- | --- |
-| `taxonomy.tsv` | Species-tree tip IDs and registered group columns; names include taxids to avoid ambiguous homonyms |
-| `samples.tsv` | Original run manifest with review status and candidate event IDs |
-| `taxon_results.tsv` | Each rank/group's monophyly, original MRCA node number, member and intruder/outlier counts |
-| `rank_status.tsv` | Each species/rank's own-group status and separate intruder/outlier indicators |
-| `candidates.tsv` | One native MonoPhy event per species/rank/focal group/role, with all associated runs |
-| `events.tsv` | The same events before metadata enrichment |
-| `group_members.tsv` | All focal-group members, its outliers, and other groups' intruder tips |
-| `plot_members.tsv` | Every species' color, role symbol and display representative at each rank |
-| `ranks/<rank>/monophy.rds` | Unmodified native MonoPhy result object, when assessment was possible |
-| `ranks/<rank>/native_results.tsv`, `native_tip_states.tsv` | Native result and tip-state tables |
-| `ranks/<rank>/assessment_tree.nwk` | Exact tree passed to MonoPhy, after omitting missing-rank tips; native MRCA numbers refer to this tree |
-| `ranks/<rank>/tree.pdf`, `tree.svg`, `display_tree.nwk` | Publication figures in vector formats and corresponding display topology |
-| `ranks/<rank>/figure.json` | Figure dimensions, font sizes and displayed group counts |
-| `ranks/<rank>/not_assessed.txt` | Explanation when fewer than two annotated tips remain |
-| `engine.json`, `R_session.txt`, `summary.json` | Engine settings, R/package versions, provenance and limitations |
+| `taxon_results.tsv` | Monophyly and intruder/outlier counts for every rank/group; start here |
+| `candidates.tsv` | Tip events by focal group and role, linked to runs |
+| `samples.tsv`, `rank_status.tsv` | Run-level review status and species/rank roles |
+| `taxonomy.tsv`, `group_members.tsv` | Registered taxonomy and assessed group membership |
+| `ranks/<rank>/assessment_tree.nwk`, `monophy.rds` | Exact assessed tree and native MonoPhy result |
+| `ranks/<rank>/tree.pdf`, `tree.svg` | Figures; `plot_members.tsv` records displayed membership |
+| `summary.json`, `engine.json`, `R_session.txt` | Settings and provenance |
 
-`candidates.tsv` is an intruder/outlier list, not a complete list of all affected
-species. Start with `taxon_results.tsv` to see every non-monophyletic group,
-including those for which no outlier was selected. `samples.tsv` distinguishes
-`review_flag`, `non_monophyletic_group`, `no_flag` and `not_assessable`.
-
-Each rank has a PDF with embedded fonts, an SVG, and a display cladogram based
-on native MonoPhy results and ape geometry. Scientific names are italic;
-registered groups appear in a separate column. Page size adapts to labels and tip counts.
-
-Registered groups share colors in both the tip markers and group annotations.
-Small circles indicate unflagged tips; triangles indicate intruders, squares
-outliers and diamonds both roles. An A tip within B keeps A's color. Missing-rank
-tips have gray circles and blank group annotations. `plot_members.tsv` records
-labels, taxids, colors, and symbols. Internal branches remain neutral gray.
-
-Unflagged monophyletic groups can be folded to one labeled representative;
-non-monophyletic groups and flagged tips remain expanded. Folding affects display
-only and is recorded in `plot_members.tsv`. Missing-rank tips remain visible in
-gray despite being omitted from assessment. Inspect source or assessment Newick
-files for branch lengths and supports.
+Colors denote registered groups; triangles mark intruders, squares outliers, and
+diamonds both. Unflagged monophyletic groups may be folded for display. Missing-rank
+tips remain gray. Use source/assessment trees for branch lengths and support.
 
 ## References
 
 - [MonoPhy paper](https://doi.org/10.7717/peerj-cs.56)
 - [CRAN package](https://CRAN.R-project.org/package=MonoPhy)
-- [Official source repository](https://github.com/oschwery/MonoPhy)
+- [Source](https://github.com/oschwery/MonoPhy)

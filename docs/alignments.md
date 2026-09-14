@@ -2,23 +2,18 @@
 
 [Documentation](index.md)
 
-The `alignments` target uses FAMSA to save untrimmed protein alignments for every
-OG in the selected species' ODB mappings, retaining all mapped gene copies.
+The `alignments` target uses FAMSA to create untrimmed protein alignments for
+all mapped OGs, retaining every gene copy.
 
 ## Running
-
-To request alignments explicitly, run from the repository root:
 
 ```bash
 ./run_pipeline.sh --configfile config/mydata.yaml \
   --cores 16 --resources mem_gb=192 -- alignments
 ```
 
-Prerequisite metadata selection, translation and ODB mapping are included
-automatically. Existing mappings, including `odb.existing_results` snapshots,
-are reused.
-
-To include alignments in the default full workflow, set:
+Selection, translation, and ODB mapping are scheduled as needed. To include this
+branch in `all`:
 
 ```yaml
 alignment:
@@ -27,30 +22,19 @@ alignment:
   mem_gb: 8
 ```
 
-`enabled` defaults to `false`; the explicit `alignments` target works either way.
-FAMSA 2.4.1 is supplied by `workflow/envs/alignment.yaml`. Threads are per OG;
-`mem_gb` is the scheduling budget per branch job, including collection and
-finalization. Concurrency follows the workflow's overall resource budget.
+Resources apply per job. The explicit target also works when disabled.
 
 ## Preserved information
 
-- All copies from a species are kept, including identical sequences with different
-  gene IDs. Multiple expression runs do not duplicate protein sequences.
-- A gene assigned to several OGs appears in each. This is independent of
-  `tpm.multimap`, which controls expression aggregation only.
-- A singleton OG is saved directly without invoking FAMSA.
-- OGs are not filtered by species count, copy count, sequence length, unknown
-  residue fraction, or variation. No columns are trimmed or masked.
-- Stop symbols (`*`, including terminal stops) and ambiguity symbols from the
-  existing translation are preserved. No reading-frame correction or retranslation
-  is performed here.
+All copies are kept, including identical sequences with different IDs. A gene
+mapped to several OGs appears in each, independently of `tpm.multimap`. Replicate
+expression runs do not duplicate sequences. Singletons are copied directly.
+There is no OG/site filtering or trimming; translation symbols, including stops,
+are preserved.
 
-Inputs must contain nonempty, ungapped protein sequences (letters A–Z and `*`).
-Mapped gene IDs must use `{species}_g{number}`, with an ASCII nonnegative integer
-suffix and the exact metadata species ID. Malformed inputs, missing mapped genes,
-gene IDs encoding a different species, and duplicate gene IDs fail the job
-instead of silently dropping records. Multi-sequence outputs are checked for
-unchanged gene IDs, equal aligned lengths and exact ungapped residue preservation.
+Mapped gene IDs must be `{species}_g{number}` using the exact metadata species ID
+and a nonnegative integer. Inputs must be nonempty, ungapped proteins (A–Z and `*`).
+Missing genes, invalid IDs, and changed ungapped residues fail validation.
 
 ## Outputs and PhenoRadar
 
@@ -60,38 +44,19 @@ results/<run_name>/orthogroups/alignments/
   provenance.json
 ```
 
-FASTA headers retain the original gene IDs; output rows follow collected input
-order. PhenoRadar's sequence inputs are just the `{og}.faa` files: the filename
-gives the orthogroup, the first header token gives the gene ID, and removing the
-final `_g{number}` gives the species. For example, `100007at3193.faa` containing
-`>Abelia_chinensis_g0` identifies OG `100007at3193`, gene `Abelia_chinensis_g0`,
-and species `Abelia_chinensis`.
-Species IDs match metadata and TPM outputs exactly, including underscores and
-hyphens; only ODB protein filenames normalize hyphens. Splitting on the first
-underscore is incorrect. Unmapped genes do not appear in these outputs.
+The filename identifies the OG; FASTA headers preserve gene IDs. Remove the final
+`_g{number}` to recover the species, including its underscores and hyphens.
+For example, `>Abelia_chinensis_g0` belongs to `Abelia_chinensis`.
 
-MSA columns identify sites; count non-gap symbols to recover original protein
-positions. No site-coordinate table is stored. Column numbers can change when
-inputs or alignment settings change.
-
-Representative-copy selection, OG/site selection and feature encoding are left
-to PhenoRadar. A species without a sequence has no FASTA row; this alone is not
-evidence of a biological gene deletion.
+Alignment columns identify sites; count non-gap residues for protein positions.
+Columns can change after input/settings updates. PhenoRadar handles copy and
+site selection. A missing sequence alone does not establish gene deletion.
 
 ## Resuming and provenance
 
-Collected FASTA and input records live in `work/<run_name>/orthogroups/alignments/inputs/`.
-Each OG is a separate Snakemake job with a log and execution JSON under
-`logs/<run_name>/orthogroups/alignments/` and a resource TSV in its `benchmarks/`
-subdirectory. The execution JSON records the input/output hashes, actual
-command, thread count and FAMSA executable hash; singletons record a direct copy.
+Rerun the same command to reuse completed OG jobs. Abundance-only and TPM-policy
+changes do not recompute alignments. Species/protein/mapping changes rebuild them;
+obsolete OG FASTAs are removed from the workflow-owned results directory.
 
-Rerun the same command after interruption; completed OG jobs are reused.
-Changing abundance values or the TPM ambiguity policy does not recompute
-alignments. Changes to selected species,
-proteins or mappings rebuild collection and its dependent alignments.
-
-Finalization verifies alignment hashes and publishes provenance only after all
-current OG jobs have succeeded. On selection/mapping updates it removes obsolete
-`*.faa` files from the workflow-owned results
-alignment directory, so the directory reflects the current OG set.
+Logs and per-OG execution records are under
+`logs/<run_name>/orthogroups/alignments/`; `provenance.json` records the completed set.

@@ -14,36 +14,21 @@ Keep an existing dataset configuration when resuming. `config/mydata.yaml` and
 
 ## Loading settings and paths
 
-The workflow loads `config/config.yaml`, then overlays files supplied with
-`--configfile` in order. Command-line `--config` values take precedence.
-Unknown keys, including retired settings, are rejected before workflow execution
-with their full configuration path. Configuration sections must be mappings.
-
-`container_image: auto` resolves to the GHCR image matching the repository's
-`VERSION`, including in source archives without Git metadata. An explicit URI
-or absolute SIF path overrides it. With native execution, `auto` resolves to
-`null`. Resolved image URIs are recorded in the run configuration.
+Settings load in this order: `config/config.yaml`, `--configfile` files from left
+to right, then command-line `--config` values. Unknown keys are rejected.
 
 ```bash
 ./run_pipeline.sh --configfile config/mydata.yaml config/pilot.yaml \
   --cores 8 --resources mem_gb=64 -- prepare
 ```
 
-Put all options before `--` and targets after it. `--configfile` accepts multiple
-filenames, so a target placed next to a filename can be read as another file.
+Put options before `--` and targets after it. Paths are relative to the repository
+root unless absolute; submit Slurm jobs there or use `sbatch --chdir`.
 
-`run_name` is a free-form label for the directories under `results/`, `work/`,
-and `logs/`, for example `run001`, `run002`, or `pilot`.
-Use a new name, such as `run002`, to retain results for comparison.
-The default is fixed at `run001`;
-[config/pilot.yaml](../config/pilot.yaml) uses `pilot` and a user-supplied species
-list. The name itself does not change species selection or enabled analyses.
-For older configurations using `analysis`, see [migration](migration.md#configuration-changes).
-
-Paths are relative to the repository root unless absolute. Direct execution of
-`run_pipeline.sh` changes to that directory. Submit Slurm jobs from the repository
-root, or use `sbatch --chdir=/path/to/phenoradar_prep`. Generated storage locations
-are fixed; see the [directory layout](outputs.md#directory-layout).
+`run_name` selects directories under `results/`, `work/`, and `logs/`.
+Use a new name to retain an earlier analysis. It does not change species selection
+or enabled branches. `container_image: auto` selects the matching release image;
+see [container setup](containers.md) for overrides.
 
 ## Core settings
 
@@ -65,10 +50,9 @@ are fixed; see the [directory layout](outputs.md#directory-layout).
 
 ## OrthoDB settings
 
-The supported OrthoDB release is v12. `odb.node` is the **NCBI Taxonomy ID of an
-OrthoDB level of orthology**. The default `3193` means **Embryophyta (land plants)**
-and selects `resources/orthodb/v12_3193/`. **Review it for your dataset** using
-[the source databases, supported-node lookup, and examples](references.md#choosing-an-orthodb-node).
+Set `odb.node` to a supported OrthoDB v12 mapping level covering your species.
+The default `3193` is Embryophyta (land plants). See
+[node selection](references.md#choosing-an-orthodb-node) before running a new dataset.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
