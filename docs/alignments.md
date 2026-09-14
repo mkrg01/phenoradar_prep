@@ -2,13 +2,8 @@
 
 [Documentation](index.md)
 
-This optional branch saves untrimmed amino-acid alignments for **every OG observed
-in the selected species' ODB mappings**, retaining all mapped gene copies. It
-reuses the translated protein FASTA and `orthogroups/mapping/mappings.sqlite`:
-
-```text
-Protein FASTA + ODB mappings -> collect by OG -> FAMSA -> untrimmed FASTA
-```
+The `alignments` target uses FAMSA to save untrimmed protein alignments for every
+OG in the selected species' ODB mappings, retaining all mapped gene copies.
 
 ## Running
 
@@ -21,8 +16,7 @@ To request alignments explicitly, run from the repository root:
 
 Prerequisite metadata selection, translation and ODB mapping are included
 automatically. Existing mappings, including `odb.existing_results` snapshots,
-are reused through the normal workflow rules. This target does not aggregate TPM,
-annotate KO, or infer trees.
+are reused.
 
 To include alignments in the default full workflow, set:
 
@@ -57,7 +51,6 @@ suffix and the exact metadata species ID. Malformed inputs, missing mapped genes
 gene IDs encoding a different species, and duplicate gene IDs fail the job
 instead of silently dropping records. Multi-sequence outputs are checked for
 unchanged gene IDs, equal aligned lengths and exact ungapped residue preservation.
-These checks validate processing integrity, not orthology or alignment accuracy.
 
 ## Outputs and PhenoRadar
 
@@ -77,10 +70,9 @@ Species IDs match metadata and TPM outputs exactly, including underscores and
 hyphens; only ODB protein filenames normalize hyphens. Splitting on the first
 underscore is incorrect. Unmapped genes do not appear in these outputs.
 
-PhenoRadar can use MSA column numbers directly. If needed, original protein
-positions can be reconstructed by counting non-gap symbols along each row. No
-site-coordinate table is stored. Column numbers refer to the particular saved
-alignment and can change when its inputs or alignment settings change.
+MSA columns identify sites; count non-gap symbols to recover original protein
+positions. No site-coordinate table is stored. Column numbers can change when
+inputs or alignment settings change.
 
 Representative-copy selection, OG/site selection and feature encoding are left
 to PhenoRadar. A species without a sequence has no FASTA row; this alone is not
@@ -88,18 +80,15 @@ evidence of a biological gene deletion.
 
 ## Resuming and provenance
 
-Collection reads each selected species' protein file once for sequence extraction,
-keeps mappings for one species in memory, and caps simultaneously open OG files.
 Collected FASTA and input records live in `work/<analysis>/orthogroups/alignments/inputs/`.
 Each OG is a separate Snakemake job with a log and execution JSON under
 `logs/<analysis>/orthogroups/alignments/` and a resource TSV in its `benchmarks/`
 subdirectory. The execution JSON records the input/output hashes, actual
 command, thread count and FAMSA executable hash; singletons record a direct copy.
-The normal `run.json` records workflow code and resolved configuration.
 
-After interruption, rerun the same launcher command; it already passes
-`--rerun-incomplete`. Completed OG jobs are reused. Changing abundance values or the TPM
-ambiguity policy does not recompute alignments. Changes to selected species,
+Rerun the same command after interruption; completed OG jobs are reused.
+Changing abundance values or the TPM ambiguity policy does not recompute
+alignments. Changes to selected species,
 proteins or mappings rebuild collection and its dependent alignments.
 
 Finalization verifies alignment hashes and publishes provenance only after all

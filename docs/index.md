@@ -1,18 +1,5 @@
 # Documentation
 
-phenoradar_prep prepares expression and sequence data for comparative analyses.
-The default workflow selects species, translates CDS, maps proteins to OrthoDB,
-and aggregates expression by orthogroup. Optional branches share the selected
-sample metadata but can be requested separately.
-
-You can prepare inputs with [AMALGKIT](https://github.com/kfuku52/amalgkit)
-for RNA-seq sample metadata and [GeneGalleon](https://github.com/kfuku52/genegalleon)
-for transcriptome assembly, CDS extraction, expression quantification, and BUSCO
-analysis. [Upstream data preparation](inputs.md#upstream-data-preparation)
-explains how to map those outputs to this workflow's inputs. Completed results
-can then be collected for
-[PhenoRadar](https://github.com/mkrg01/phenoradar).
-
 ## Start a dataset
 
 1. Check the [input formats and species selection](inputs.md).
@@ -20,10 +7,8 @@ can then be collected for
 3. Run [preparation and a pilot](running.md#prepare-and-inspect) before the full dataset.
 4. Inspect the [expression tables and QC](outputs.md#tpm-interpretation).
 
-The [running guide](running.md#targets) lists every public target and its
-dependencies. [Reference data](references.md) explains downloads, offline setup,
-and deliberate updates. The [output layout](outputs.md#directory-layout) shows
-where results, work files, and logs are kept.
+[Workflow targets](running.md#targets) · [Reference data](references.md) ·
+[Output layout](outputs.md#directory-layout)
 
 ## Choose an analysis
 
@@ -40,15 +25,11 @@ where results, work files, and logs are kept.
 
 After the required analyses finish, use [manual species exclusion](species_filter.md)
 to export a curated subset if needed, then [collect PhenoRadar inputs](phenoradar_inputs.md).
-Both targets read completed results. Collection requires one run per species,
-although the expression workflow itself supports multiple runs.
 
-## Maintenance and method notes
+## Maintenance
 
+- [Container releases and Apptainer](containers.md)
 - [Development and tests](development.md)
 - [Updating older configurations and results](migration.md)
-- [GeneGalleon method comparison](notes/phylogeny_comparison.md)
-- [Dating-tool evaluation, September 2026](notes/dating_evaluation.md)
-- [Recorded dataset checks](notes/validation.md)
 
 [Project README](../README.md)

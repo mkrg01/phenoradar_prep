@@ -43,6 +43,7 @@ are fixed; see the [directory layout](outputs.md#directory-layout).
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `analysis` | `full` | Simple directory name: letters, digits, underscores, dots, or hyphens; starts with a letter or digit |
+| `container_image` | `null` | Image URI or absolute SIF path for `--sdm conda apptainer`; see [containers](containers.md) |
 | `inputs.metadata` | `input/metadata.tsv` | Sample metadata |
 | `inputs.busco` | `input/busco/summary.tsv` | BUSCO summary for species selection |
 | `inputs.cds_dir` | `input/cds` | Per-species CDS directory |
@@ -73,11 +74,8 @@ the default `3193` is dataset-specific and selects `resources/orthodb/v12_3193/`
 | `odb.keep_work` | `false` | Retain successful mapping work directories |
 | `odb.existing_results` | `null` | Verified import snapshot of earlier annotations; see [importing ODB results](migration.md#importing-odb-results) |
 
-Chunks run concurrently when their combined CPU and memory reservations fit the
-workflow budget. Resource defaults are starting estimates; measure a pilot for
-your data. Configuration memory values use positive whole decimal GB
-(1 GB = 1000 MB). See [resource budgets](running.md#resource-budgets) for the
-distinction between per-job estimates and the total allocation.
+Memory settings use positive whole decimal GB (1 GB = 1000 MB). See
+[resource budgets](running.md#resource-budgets) for allocation sizing and concurrency.
 
 ## Optional analyses and exports
 
@@ -94,10 +92,5 @@ Branch-specific settings are documented with their methods and outputs:
 | `exclude_species` | [Manual exclusion from completed results](species_filter.md) |
 | `phenoradar` | [Selection of completed downstream inputs](phenoradar_inputs.md) |
 
-Optional analyses have explicit targets that work regardless of their `enabled`
-flag. The [target table](running.md#targets) explains how flags add work to the
-default run. Exclusion and input collection are manual targets.
-
-Executables and interpreters are supplied by the rule environments under fixed
-names. ASTRAL-IV uses the verified local build described in the phylogeny guide.
-For rejected settings in an older override, consult the [migration guide](migration.md).
+See [targets](running.md#targets) for enabling and requesting analyses, and
+[migration](migration.md) for rejected settings in older overrides.

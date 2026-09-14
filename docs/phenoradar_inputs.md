@@ -2,22 +2,15 @@
 
 [Documentation](index.md)
 
-The downstream application is [PhenoRadar](https://github.com/mkrg01/phenoradar),
-a CLI tool for binary phenotype prediction from orthogroup-level TPM. This
-workflow prepares its comparative expression and associated inputs from the
-[AMALGKIT and GeneGalleon outputs](inputs.md#upstream-data-preparation).
-See PhenoRadar's [quick start](https://github.com/mkrg01/phenoradar/blob/main/docs/quickstart.md)
-and [data formats](https://github.com/mkrg01/phenoradar/blob/main/docs/data-format.md)
-for downstream use.
+The `phenoradar_inputs` target validates and links completed results into
+`results/<analysis>/phenoradar_inputs/` for
+[PhenoRadar](https://github.com/mkrg01/phenoradar). It does not start producer
+analyses. Each invocation refreshes the links; failed validation preserves the
+previous collection. Keep linked source results and external references available.
 
-The explicit `phenoradar_inputs` target collects completed results into
-`results/<analysis>/phenoradar_inputs/`. It validates the selected dataset and
-links existing files instead of copying expression tables or protein alignments.
-It does not start missing ODB, KEGG, alignment, filtering, or phylogeny jobs.
-Each invocation validates and refreshes the directory, removing stale optional
-links. A failed validation preserves the previous publication. Keep the source
-results and external references available: this directory contains links, not
-an independent data archive.
+For downstream use, see PhenoRadar's
+[quick start](https://github.com/mkrg01/phenoradar/blob/main/docs/quickstart.md) and
+[data formats](https://github.com/mkrg01/phenoradar/blob/main/docs/data-format.md).
 
 ## Collecting results
 
@@ -34,8 +27,7 @@ or `contrast_pairs`. For older results lacking it, use the
 [metadata backfill target](migration.md#backfilling-phenoradar-metadata).
 
 The log at `logs/<analysis>/phenoradar_inputs.log` lists ready, absent, incomplete,
-and disabled branches with their source paths. Collection is separate from the
-default workflow and refreshes its links on every invocation.
+and disabled branches with their source paths.
 
 ## Published files
 
@@ -52,9 +44,7 @@ results/<analysis>/phenoradar_inputs/
   species_tree.nwk                 # Optional explicitly selected Newick tree
 ```
 
-Producer QC and provenance stay in the source directories. The collection
-contains the selected data files and links; downstream model configuration is
-managed in PhenoRadar.
+Producer QC and provenance stay in the source directories.
 
 `species_metadata.tsv` contains `species`, the trait selected by `contrast.trait`
 (normally `C4`), `contrast_pair_id`, and `family`. Taxonomic family comes from
@@ -84,8 +74,7 @@ by a completion record must exist and pass validation; corruption is an error.
 Set `kegg_groups: [module, pathway]` to include both existing KO membership maps,
 or `[]` to publish KO expression alone. These fixed maps require no OG results.
 For a KO-only analysis, set `orthogroups: false` and `alignments: false`
-alongside a completed KEGG branch. Group maps supply memberships for downstream
-analysis; collection does not calculate module scores.
+alongside a completed KEGG branch.
 
 `orthogroup_annotations` can point to an existing headerless three-column
 OG/taxid/description TSV or gzip TSV. The collector checks its format and overlap
@@ -111,10 +100,8 @@ species in the metadata. The collector does not prune or infer trees.
 
 The collector requires **one run per species** and rejects duplicate
 species/feature coordinates. It preserves the four-column long expression
-tables, including `run`, without pooling or averaging. This prevents consumers
-that sum duplicate coordinates from combining distinct runs implicitly.
-Select compatible runs explicitly before using this target for a dataset with
-multiple runs per species.
+tables, including `run`, without pooling or averaging. For datasets with multiple
+runs per species, select one run per species before collection.
 
 For each selected expression table, species and run identities must match the
 sample manifest; values must be numeric, finite, and nonnegative. Every selected
@@ -135,9 +122,7 @@ data:
   orthogroup_annotation_path: null
 ```
 
-Replace `full` with the analysis name. Check that the consumer version supports
-the selected group or sequence inputs, and configure its missing-value policy
-using the producer support/QC records.
+Replace `full` with the analysis name.
 
 Protein alignments retain all gene copies and columns. OG IDs come from FASTA
 filenames, and species come from the `{species}_g{number}` gene IDs. Original
@@ -156,5 +141,3 @@ rows and the supplied trait source. Recomputed molecular contrast branches can
 be selected as above. Set `tree` to the matching pruned tree, such as
 `results/<analysis>/filtered/phylogeny/all/species_tree.pruned.nwk`, when using it.
 Clearing `exclude_species` selects the original dataset on the next collection.
-
-See the [output guide](outputs.md) for producer paths and expression semantics.

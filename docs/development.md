@@ -41,6 +41,11 @@ location. `PHYLOGENY_CONDA_PREFIX` enables testing with actual stage Conda
 environments. `LSD2_SOURCE_ARCHIVE` can supply the verified LSD2 source offline.
 The executable variables above select test tools; production commands are fixed.
 
+[Container CI](containers.md#build-and-publish-with-github-actions) tests all nine
+environments with real tools using [container_smoke.py](../tests/container_smoke.py).
+[tests/container/Snakefile](../tests/container/Snakefile) checks Snakemake's
+environment activation through Apptainer.
+
 The TimeTree adapter calls `nwkit.mcmctree._fetch_timetree_url` and validates
 the pinned client-module hash. Changes to that private API require adapter
 review; its boundary test substitutes only the HTTP response.
@@ -60,6 +65,7 @@ review; its boundary test substitutes only the HTTP response.
 | Taxonomic review | Real MonoPhy agreement, intruder/outlier roles, run linkage, missing ranks, singleton groups, report replacement |
 | Filtering and collection | Completed-result operation without raw inputs, identity/checksum validation, retained values and alignment columns, pruned path lengths, reversible exclusions, failed collection preserving prior output |
 | Launcher | Direct/Slurm argument handling, spooled script paths, resource budgets, exit status, real local Snakemake execution |
+| Containers | Complete environment coverage, deterministic Dockerfile generation, post-deploy script hashing, verified ASTRAL bundle export |
 
 Integration fixtures create isolated projects, expose tools under the workflow's
 fixed command names, and exercise unchanged reruns and targeted recovery. Tests
@@ -73,8 +79,3 @@ These checks establish processing behavior and integration. Test substitutes
 cannot validate real ODB or KO assignments, synthetic phylogenies do not measure
 biological accuracy, and small inputs do not establish full-scale resource use.
 Run a real pilot for the intended dataset.
-
-Historical real-input checks are recorded in [dataset checks](notes/validation.md).
-The [method comparison](notes/phylogeny_comparison.md) and
-[dating-tool evaluation](notes/dating_evaluation.md) retain methodological review
-and dated measurements separately from the test instructions.

@@ -1,20 +1,11 @@
 # phenoradar_prep
 
-A Snakemake workflow for preparing comparative expression data from transcriptome
-CDS assemblies and abundance estimates. It selects species by BUSCO completeness,
-maps genes to OrthoDB orthogroups, and produces orthogroup TPM tables. Optional
-analyses provide KO assignments, protein alignments, BUSCO species trees, and
-trait contrast pairs. Completed results can be used for
-[PhenoRadar](https://github.com/mkrg01/phenoradar), which predicts binary
-phenotypes from comparative expression data.
-
-You can prepare input data upstream with
-[AMALGKIT](https://github.com/kfuku52/amalgkit) for RNA-seq metadata creation and
-[GeneGalleon](https://github.com/kfuku52/genegalleon) for transcriptome assembly,
-CDS extraction, expression quantification, and BUSCO gene identification and
-completeness assessment. phenoradar_prep starts from those outputs and prepares
-them for downstream analysis. See [input preparation and formats](docs/inputs.md#upstream-data-preparation)
-for how the upstream outputs enter this workflow.
+A Snakemake workflow that selects species by BUSCO completeness, maps transcriptome
+CDS to OrthoDB orthogroups, and aggregates expression for
+[PhenoRadar](https://github.com/mkrg01/phenoradar). Optional analyses provide KO
+assignments, protein alignments, BUSCO species trees, and trait contrast pairs.
+See [input preparation and formats](docs/inputs.md) for upstream data from
+AMALGKIT and GeneGalleon.
 
 ## Quick start
 
@@ -41,6 +32,8 @@ sbatch --partition=YOUR_PARTITION \
 The workflow runs within one allocation; the default request is 16 CPUs and
 192 GiB. See [running the workflow](docs/running.md) for preparation, pilots,
 direct execution, resource budgets, and resuming a run.
+
+For container releases and Apptainer execution, see [containers](docs/containers.md).
 
 ## Results
 

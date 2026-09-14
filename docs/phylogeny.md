@@ -3,8 +3,7 @@
 [Documentation](index.md) · [Dating](dating.md)
 
 The `phylogeny` target infers a rooted species tree from existing BUSCO full
-tables and original CDS or proteins. It uses a separate sequence preparation
-path from ODB/KEGG and requires no orthogroup mapping or expression aggregation.
+tables and original CDS or proteins, independently of ODB/KEGG analyses.
 
 ```text
 BUSCO markers -> cdskit CDS preparation -> FAMSA -> trimAl -> alignment QC
@@ -36,9 +35,9 @@ reconstruct spliced proteins.
 | `sequence_dir` | `null` | Reuse CDS paths in `samples.tsv`; required in protein mode |
 | `sequence_suffix` | `_longestCDS.fa.gz` | Suffix when using `sequence_dir` |
 
-CDS inputs must be the original, oriented, in-frame coding sequences rather
-than unprocessed transcripts or genomes. Protein mode uses the original protein
-FASTA associated with BUSCO and bypasses CDS preparation.
+Use the original sequences from each BUSCO run. CDS must be oriented, in-frame
+coding sequences rather than unprocessed transcripts or genomes. Protein mode
+uses the corresponding protein FASTA and bypasses CDS preparation.
 
 BUSCO/MetaEuk IDs such as `Species_g123:60-698` map to `Species_g123` in the
 original FASTA. The full CDS is translated; coordinates are not used to slice
@@ -81,7 +80,10 @@ supplies cdskit 0.27.0, FAMSA 2.4.1, trimAl 1.5.1, and VeryFastTree 4.0.5.
 The [timetree environment](../workflow/envs/timetree.yaml) supplies nwkit 0.27.0
 for reference-based rooting and contrast analysis.
 
-Build ASTRAL-IV once with Python 3.12+ and GNU C++ available:
+The workflow prepares ASTRAL-IV on first use. Native Conda execution builds the
+pinned official source; [container execution](containers.md) exports the verified
+binary already built into the image.
+To prepare it manually with Python 3.12+ and GNU C++ available:
 
 ```bash
 python workflow/scripts/prepare_phylogeny_tools.py
@@ -178,8 +180,8 @@ for inspection in `species/*.json`.
 
 FAMSA saves raw alignments in `alignments/raw/`. trimAl selects columns using
 `gappyout` by default. `automated1` is available but computes all sequence-pair
-identities first; the [method comparison](notes/phylogeny_comparison.md) explains
-this choice and its limits.
+identities first. The `gappyout` default avoids that repeated cost across loci
+with thousands of species; it does not imply equivalent alignment accuracy.
 
 For column selection, X is temporarily represented as a gap. The saved column
 map is applied to the original FAMSA alignment, preserving its residues and X.
@@ -224,10 +226,8 @@ Threads and decimal-GB memory below are per-job scheduling reservations:
 | VeryFastTree | `tree_threads: 4` | `tree_mem_gb: 8` |
 | ASTRAL-IV | `astral_threads: 32` | `astral_mem_gb: 64` |
 
-All settings belong under `phylogeny`. Concurrency follows the total
-[resource budget](running.md#resource-budgets). Extraction reads sequences once
-per species, then transposes them into per-marker inputs. Measure real-data
-benchmarks before scaling up.
+All settings belong under `phylogeny`; see [resource budgets](running.md#resource-budgets)
+for concurrency and allocation sizing.
 
 ## Outputs
 
@@ -250,10 +250,6 @@ Logs and resource benchmarks follow the same branch under
 `logs/<analysis>/phylogeny/`. Optional [dating](dating.md),
 [taxonomic review](taxonomy_audit.md), and [contrast-pair](contrast_pairs.md)
 outputs live beside their source tree.
-
-[Automated test coverage](development.md) and [recorded dataset checks](notes/validation.md)
-describe what has been validated. The [method comparison](notes/phylogeny_comparison.md)
-discusses scientific limitations beyond the processing checks.
 
 ## Methods and source documentation
 

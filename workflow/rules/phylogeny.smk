@@ -228,6 +228,25 @@ rule merge_busco_gene_trees:
         "--qc {output.qc:q} > {log:q} 2>&1"
 
 
+# Native Conda builds the pinned official source; containers export the verified
+# binary built into the image. Existing user-prepared tools remain external inputs.
+if not Path(ASTRAL).is_file() or not Path(ASTRAL).parent.parent.joinpath("aster.json").is_file():
+    rule prepare_astral:
+        input:
+            code=f"{SCRIPTS}/prepare_phylogeny_tools.py",
+            common=f"{SCRIPTS}/common.py"
+        output:
+            binary=ASTRAL,
+            provenance=str(Path(ASTRAL).parent.parent / "aster.json")
+        params: destination=str(Path(ASTRAL).parent.parent)
+        conda: "../envs/dating.yaml"
+        threads: 1
+        resources: mem_mb=8000
+        log: f"{LOG}/astral_prepare.log"
+        shell:
+            "{PYTHON:q} {input.code:q} --destination {params.destination:q} > {log:q} 2>&1"
+
+
 rule infer_busco_species_tree:
     input:
         trees=f"{PHYLO_RUN}/gene_trees.nwk",

@@ -7,8 +7,7 @@ NCBI taxonomy using MonoPhy 1.3.2. It reports non-monophyletic groups and
 intruder/outlier tips, linked to all associated run IDs. Assessment uses the
 species tree; gene trees are not audit inputs.
 
-Reports identify conflicts for review and leave the source analysis intact.
-They do not determine which sample is mislabeled. After review, use
+Reports do not determine which sample is mislabeled. After review, use
 [manual species exclusion](species_filter.md) to export a curated subset.
 
 ## Configuration and execution
@@ -58,8 +57,7 @@ No external reference sequence database is downloaded.
 Completed species trees are reused under normal Snakemake dependency checks.
 Missing or outdated trees can schedule inference. Use `--dry-run` to inspect
 upstream work, and increase the example's CPU/memory budget if inference is
-needed. Species-tree inference may require gene trees even though the audit
-itself reads only the species tree.
+needed.
 
 For an archived result whose upstream workflow inputs are unavailable, activate
 the MonoPhy environment and run the script directly:
@@ -138,31 +136,23 @@ species. Start with `taxon_results.tsv` to see every non-monophyletic group,
 including those for which no outlier was selected. `samples.tsv` distinguishes
 `review_flag`, `non_monophyletic_group`, `no_flag` and `not_assessable`.
 
-Figures are cladograms based on native MonoPhy results and ape geometry.
-Each rank has a vector PDF with embedded fonts, an SVG, and its display tree.
-Scientific names are italic; registered groups appear in a separate aligned
-column. Page dimensions adapt to label widths and displayed tip counts.
+Each rank has a PDF with embedded fonts, an SVG, and a display cladogram based
+on native MonoPhy results and ape geometry. Scientific names are italic;
+registered groups appear in a separate column. Page size adapts to labels and tip counts.
 
 Registered groups share colors in both the tip markers and group annotations.
 Small circles indicate unflagged tips; triangles indicate intruders, squares
 outliers and diamonds both roles. An A tip within B keeps A's color. Missing-rank
-tips have gray circles and blank group annotations. Role definitions belong in
-the manuscript figure caption; `plot_members.tsv` retains every label, taxid,
-color and symbol mapping. Internal branches remain neutral gray; no ancestral
-color is interpreted as an inferred taxonomic assignment.
+tips have gray circles and blank group annotations. `plot_members.tsv` records
+labels, taxids, colors, and symbols. Internal branches remain neutral gray.
 
-Each requested rank has separate PDF and SVG files. Unflagged monophyletic groups can be
-folded to one labeled representative; non-monophyletic groups and all flagged
-tips remain expanded. The fold is a display operation only and never reruns the
-assessment. Species with missing rank annotations remain visible in gray on the
-full-tree figure even though they were omitted from that rank's assessment.
-`plot_members.tsv` records all folds. Figures are cladograms; branch lengths and
-support labels should be inspected in the source or assessment Newick files.
+Unflagged monophyletic groups can be folded to one labeled representative;
+non-monophyletic groups and flagged tips remain expanded. Folding affects display
+only and is recorded in `plot_members.tsv`. Missing-rank tips remain visible in
+gray despite being omitted from assessment. Inspect source or assessment Newick
+files for branch lengths and supports.
 
 ## References
-
-The [test guide](development.md) describes real MonoPhy comparisons and workflow
-checks. They validate integration, not sensitivity or specificity for the samples.
 
 - [MonoPhy paper](https://doi.org/10.7717/peerj-cs.56)
 - [CRAN package](https://CRAN.R-project.org/package=MonoPhy)

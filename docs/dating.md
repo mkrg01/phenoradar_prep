@@ -18,8 +18,8 @@ makefile. Build provenance is in `share/lsd2/build.json` inside the environment.
 For an offline source build, set `LSD2_SOURCE_ARCHIVE` to the verified archive
 for that commit. Conda dependencies must also be available locally. TimeTree
 retrieval uses the separate [nwkit environment](../workflow/envs/timetree.yaml).
-The [tool evaluation](notes/dating_evaluation.md) records the installation choice
-and synthetic benchmarks.
+Native Conda deployment and [container builds](containers.md) use the same
+verified upstream installer, without custom Conda packages or source patches.
 
 ## Manual calibrations
 
@@ -126,8 +126,7 @@ validation, with `provenance.json` last as the completion record.
 Review calibration placement and sensitivity to defensible alternative bounds,
 variance settings and site counts before scientific interpretation. Calibration,
 gene-tree and branch-length uncertainty is not propagated into confidence
-intervals. [The evaluation](notes/dating_evaluation.md) records synthetic runtime
-measurements and their limits.
+intervals.
 
 ## TimeTree calibrations
 

@@ -3,6 +3,7 @@
 /work/
 /logs/
 /resources/
+*.sif
 /.snakemake/
 
 # User-specific execution settings and species selections.

@@ -2,14 +2,10 @@
 
 [Documentation](index.md)
 
-Output paths use the `analysis` name from your [configuration](configuration.md).
-
 ## Directory layout
 
-Dataset inputs conventionally live in `input/`, configuration in `config/`, and
-reusable references in `resources/`. Configured external input paths and symlinks
-are supported. Results, temporary work, and logs use `results/<analysis>/`,
-`work/<analysis>/`, and `logs/<analysis>/`, respectively.
+The configured `analysis` name selects `results/<analysis>/`, `work/<analysis>/`,
+and `logs/<analysis>/`. Reusable references live in `resources/`.
 
 | Shared resource | Fixed location |
 | --- | --- |
@@ -19,10 +15,6 @@ are supported. Results, temporary work, and logs use `results/<analysis>/`,
 | ASTRAL build | `resources/phylogeny_tools/` |
 | TimeTree responses | `resources/timetree_cache/` |
 | Launcher-managed cache | `.cache/` |
-
-Optional directories are created when used. Each phylogeny species set has its
-own tree, alignments, gene trees, and rooting records. Its dating, taxonomy review,
-and contrast results are stored beside the tree that produced them.
 
 ## Result files
 
@@ -101,18 +93,9 @@ positive TPM retained after mapping and ambiguity handling.
 
 ## Provenance and optional results
 
-`run.json` records resolved configuration, workflow source hashes, and the Python
-environment. Selection, translation, mapping, and optional branches keep their
-own input checksums, QC, and execution records. When comparing analyses, retain
-these records with the reference snapshots.
-
-KO expression has different semantics from normalized OG TPM: it sums original
-input TPM, permits overlapping KO contributions, and distinguishes unavailable
-observations from measured zeros. See [KO quantification](kegg.md#assignment-and-quantification).
-
-OG alignments retain every mapped gene copy and all columns. Their membership
-is independent of the expression ambiguity policy. Missing FASTA rows alone
-are not evidence of biological gene absence; see [OG alignments](alignments.md).
+Retain `run.json`, branch-specific input checksums, QC, and execution records
+with the reference snapshots. See [KO quantification](kegg.md#assignment-and-quantification)
+for KO expression semantics and [OG alignments](alignments.md) for sequence outputs.
 
 For results moved from an older directory structure, see the
 [migration record guidance](migration.md#relocated-results).

@@ -16,6 +16,8 @@ try:
 except ValueError as error:
     raise WorkflowError(str(error))
 
+containerized: config.get("container_image")
+
 ODB_VERSION = "v12"
 PYTHON = "python"
 TAXONOMY_DB = "resources/taxonomy/taxa.sqlite"

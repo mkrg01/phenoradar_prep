@@ -91,24 +91,11 @@ This uses completed selected metadata and the trait source. See
 
 ## Relocated results
 
-The recorded layout migration used filesystem renames for the large datasets
-and retained no directory aliases. Where that migration was performed, records
-and original versions of rewritten operational files are under
-`logs/layout_migration/<timestamp>/`. This is a record of a local move, not an
-automatic migration target.
+After moving inputs, update absolute CDS and abundance paths in selected-sample
+manifests. Refresh PhenoRadar links after moving producer outputs, and regenerate
+filtered exports from the relocated sources before reuse. Verify files and links
+at their new locations.
 
-Selected-sample manifests contain absolute CDS and abundance paths, so those
-operational paths must follow the input move. Existing PhenoRadar links must
-also follow the moved producer outputs. The migration records source and
-destination locations and verifies retained files and links; changing a path
-does not imply a new sequence analysis or expression calculation.
-
-Historical `run.json` and provenance records remain unchanged as evidence of
-the original execution. They may name former locations. Archived originals and
-the migration record explain changed operational files without rewriting old
-commands, timestamps, or execution claims. New jobs write records for their
-current inputs and locations. Historical filtered snapshots retain their
-recorded contents; regenerate filtered results from the relocated sources
-before using them in a new analysis. See [outputs](outputs.md) and the
-[phylogeny guide](phylogeny.md#outputs) for the complete contents
-of each result branch.
+Preserve historical `run.json` and provenance records. Archive the original
+operational files and record path changes separately; the earlier local migration
+used `logs/layout_migration/<timestamp>/`. See [outputs](outputs.md) for the current layout.

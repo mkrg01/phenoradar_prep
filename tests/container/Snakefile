@@ -1,0 +1,21 @@
+"""Run real image smoke checks through Snakemake and Apptainer."""
+from pathlib import Path
+
+ROOT = Path(workflow.basedir).parents[1]
+ENVIRONMENTS = sorted((ROOT / "workflow/envs").glob("*.yaml"))
+containerized: config["container_image"]
+
+rule all:
+    input: [f"smoke/{path.stem}.done" for path in ENVIRONMENTS]
+
+for index, environment in enumerate(ENVIRONMENTS):
+    rule:
+        name: f"check_{environment.stem}"
+        input: str(ROOT / "tests/container_smoke.py")
+        output: f"smoke/{environment.stem}.done"
+        params: environment=environment.stem
+        conda: str(environment)
+        log: f"smoke/{environment.stem}.log"
+        shell:
+            "PYTHONDONTWRITEBYTECODE=1 python {input:q} --environment {params.environment:q} "
+            "> {log:q} 2>&1 && touch {output:q}"

@@ -2,10 +2,8 @@
 
 [Documentation](index.md)
 
-This optional branch annotates translated proteins with KofamScan and sums the
-original abundance-table TPM by KEGG Orthology (KO). It runs independently of ODB
-mapping. Preserved gene IDs connect protein annotations to `target_id` values;
-OG TPM is never used to reconstruct KO expression.
+The `kegg` target annotates translated proteins with KofamScan and sums original
+input TPM by KEGG Orthology (KO), independently of ODB mapping.
 
 ## Run the branch
 
@@ -23,9 +21,8 @@ kegg:
   ambiguity: duplicate
 ```
 
-`enabled: true` adds KEGG outputs to the default full workflow. With the default
-`false`, OG-only runs require no KOfam reference or software. The explicit
-`kegg` target requests this branch regardless of the flag, without ODB mapping:
+`enabled: true` adds KEGG outputs to the default workflow. The explicit `kegg`
+target works regardless of the flag:
 
 ```bash
 ./run_pipeline.sh --software-deployment-method conda \
@@ -34,25 +31,15 @@ kegg:
 
 The rule-specific environment installs KofamScan 1.3.0 and its dependencies; its
 executable is `exec_annotation`. Without Conda deployment, install KofamScan,
-HMMER, GNU Parallel, and Ruby and expose them on `PATH`. Standard metadata and
-translation dependencies are also required. The resource values above are
-starting budgets, not measured requirements for every dataset.
+HMMER, GNU Parallel, and Ruby and expose them on `PATH`, along with the metadata
+and translation dependencies.
 
-Annotation runs once per species and is reused across its runs. Abundance-only
-updates repeat TPM aggregation without repeating annotation. When an annotation
-job runs, its content fingerprint binds reuse to the protein, reference, code,
-executable, and options; completed outputs are verified before reuse. Failed
-searches retain diagnostic work and retry fresh. Partial output is never treated
-as complete. Snakemake normally schedules jobs from file timestamps and recorded
-parameters; force the annotation rule after replacing software in place without
-changing its configured path.
-
-Changing only `kegg.ambiguity` repeats aggregation and merging while reusing
-completed species annotations.
-
-All profiles in the snapshot are searched. For deliberately restricted sets,
-record the choice and assess coverage, including organellar genes, before
-interpreting unassigned KOs biologically.
+Annotation runs once per species, searching all profiles in the snapshot.
+Abundance-only or `kegg.ambiguity` changes repeat aggregation while reusing
+annotations. Reuse checks bind results to proteins, references, code, executables,
+and options. Failed searches retain diagnostics and retry fresh. Force the
+annotation rule after replacing software in place, because Snakemake normally
+schedules from file timestamps and recorded parameters.
 
 ## Assignment and quantification
 
@@ -140,20 +127,14 @@ and wide tables and no row in the numeric long table. Partially quantified KOs
 sum only observed genes, with counts exposing incomplete support. Merged tables
 use the current manifest and omit stale species/runs from earlier selections.
 
-Support is not proof of genomic absence or reaction completeness. MODULE
-membership does not capture required steps and alternative reactions. This
-extension does not compute metabolic flux, pathway activity, or MODULE
-completeness.
+Support and MODULE membership do not establish genomic absence, pathway activity,
+flux, or reaction/MODULE completeness.
 
 ## Passing KO features to PhenoRadar
 
 Use the [input collector](phenoradar_inputs.md) to link KO expression and the
 requested KO-to-module/pathway maps. It requires one run per species and checks
 expression coverage. The collection guide gives the KO column settings.
-
-KO features remain independent of OG mapping. Membership maps describe fixed
-functional groups; they do not measure module activity, completeness, or flux.
-Learned aggregation and feature selection belong in the downstream analysis.
 
 ## References
 

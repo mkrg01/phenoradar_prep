@@ -22,9 +22,7 @@ SOURCES = {
 def prepare(destination, archives=None):
     root = Path(destination).resolve()
     (root / "bin").mkdir(parents=True, exist_ok=True)
-    compiler = shutil.which("g++")
-    if not compiler:
-        raise ValueError("g++ is required to build the phylogeny tools")
+    bundle = os.environ.get("PHENORADAR_PHYLOGENY_TOOLS")
     for name, spec in SOURCES.items():
         target = root / "bin" / spec["binary"]
         manifest = root / f"{name}.json"
@@ -34,6 +32,22 @@ def prepare(destination, archives=None):
                 print(f"Reusing {target}")
                 continue
             raise ValueError(f"existing tool differs from pinned build: {target}; use a new destination")
+        if bundle:
+            source_binary = Path(bundle) / "bin" / spec["binary"]
+            record = json.loads((Path(bundle) / f"{name}.json").read_text())
+            if (record.get("source") != spec or "LARGE_DATA" not in record.get("command", [])
+                    or record.get("executable", {}).get("sha256") != sha256(source_binary)):
+                raise ValueError(f"bundled phylogeny tool differs from pinned build: {source_binary}")
+            with atomic_writer(target, "wb") as output, source_binary.open("rb") as handle:
+                shutil.copyfileobj(handle, output)
+            os.chmod(target, 0o755)
+            record["bundle_executable"] = record["executable"]
+            record["executable"] = file_record(target)
+            write_json(manifest, record)
+            continue
+        compiler = shutil.which(os.environ.get("CXX", "g++"))
+        if not compiler:
+            raise ValueError("A C++ compiler (CXX or g++) is required to build the phylogeny tools")
         with tempfile.TemporaryDirectory(prefix=f".{name}-", dir=root) as temporary:
             tmp = Path(temporary)
             archive = Path(archives) / f"{name}.tar.gz" if archives else tmp / f"{name}.tar.gz"

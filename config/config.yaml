@@ -1,6 +1,9 @@
 # Dataset, analysis, and resource settings. Commands and storage layout are fixed.
 # Paths are relative to the project root (run Snakemake there).
 analysis: full
+# null uses native Conda. Set to a published docker:// URI or an absolute SIF path
+# and run with --software-deployment-method conda apptainer to use the image.
+container_image: null
 inputs:
   metadata: input/metadata.tsv
   species_trait: input/species_trait.tsv

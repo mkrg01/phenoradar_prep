@@ -34,11 +34,8 @@ for example `config/exclusions.local.yaml`, then run:
   --cores 1 --resources mem_gb=8 -- filter_species
 ```
 
-`filter_species` is an explicit postprocessing target. It is not automatically
-included in `all`, `phylogeny`, or `contrast_pairs`. It reads completed files
-under `results/<analysis>/` and writes `results/<analysis>/filtered/`.
-The original selected-sample manifest must exist. A dry run is available with
-`--dry-run` before `-- filter_species`.
+The target requires the original `metadata/samples.tsv` and completed analysis
+files. Add `--dry-run` before `-- filter_species` to inspect the plan.
 
 Only completed output groups are exported. A branch with no final outputs is
 `absent`; a partially completed group is `incomplete`, with missing filenames
@@ -46,10 +43,9 @@ listed in the new manifest. Neither starts upstream jobs. Missing files claimed
 by a completed alignment inventory, or inconsistent identities/checksums within
 completed inputs, fail rather than produce a partial success.
 
-The target consumes completed results, so raw CDS, abundance files, BUSCO inputs,
-and reference preparation are not required. Its `timetree` Conda environment
-supplies ETE4 and nwkit for tree pruning, pair assignment, and figures. No
-TimeTree query is made.
+Raw inputs and reference preparation are unnecessary. The `timetree` Conda
+environment supplies ETE4 and nwkit for pruning, pairs, and figures; no TimeTree
+query is made.
 
 Changing the list regenerates only the export. Changed source files or a newly
 completed optional branch invalidate it on the next invocation. Unchanged
@@ -99,19 +95,17 @@ PhenoRadar collection. Original execution records stay with the source analysis.
 | `phylogeny/all/contrast/`, `phylogeny/phenotyped/contrast/` when ready | Fresh pair IDs, species membership, observed/summary trees and PDF/SVG figures computed from the corresponding original molecular tree after exclusions |
 | `manifest.json` | Exclusion list, retained identities, before/after counts, exported/skipped branches and input/output/code checksums |
 
-For OG alignments, filenames identify OGs and gene IDs use `{species}_g{number}`.
-Removing the final `_g{number}` recovers the exact source metadata species ID,
-preserving underscores and hyphens. Nonconforming IDs and unknown species fail.
-No `members.tsv` is required or exported. A completed alignment inventory and
-its FASTA checksums are still required; FASTAs without a completion record are
-reported as an incomplete branch. Where ODB mappings exist, every alignment
+OG alignment IDs follow the [alignment format](alignments.md#outputs-and-phenoradar).
+Nonconforming IDs and unknown species fail. No `members.tsv` is required or
+exported. A completed alignment inventory and FASTA checksums are required;
+FASTAs without a completion record are reported as an incomplete branch.
+Where ODB mappings exist, every alignment
 gene/species/OG assignment must agree with that database. KO ownership continues
 to come from its gene tables and is checked against ODB when available.
 Original per-run outputs, chunk results, logs and external
 CDS/abundance inputs remain source caches; they are not duplicated. Paths in
 the selected-sample manifest still point to the original inputs.
 
-The full source phenotype table and all original trees/pairs are unchanged.
 The NCBI representative analysis under `phylogeny/representatives/` is neither copied nor
 recomputed. Phenotyped inference outputs are not copied, but completed full
 and phenotyped species trees are both used to recompute contrast pairs inside
@@ -155,19 +149,8 @@ only; it does not verify suitability for an inference program's other settings.
 Trees with two or three tips are retained as derivatives. Old node IDs, age tables, calibration tables
 and inference-QC files are not relabeled as filtered calculations.
 
-The saved BUSCO alignments permit later tree inference without redoing RNA-seq
-assembly, translation or ODB mapping. This export does not automatically run
-that inference. It does recompute contrast pairs from the completed molecular
-trees with excluded tips removed, inheriting the source root orientation.
-
 ## Storage and verification
 
-Large tabular inputs are streamed or joined through SQLite. Filtered tables and
-the mapping database require new disk space; this is data export rather than
-sequence reanalysis. Protein files use symlinks to avoid duplicating the large
-FASTA collection. Keep original results available and treat linked protein
-files as shared input data; editing through a link would edit the original.
-Input/output checksum verification still reads those files.
-
-See [test coverage](development.md) for preservation, pruning, and completed-result
-integration checks.
+Filtered tables and the mapping database require new disk space. Protein files
+use symlinks: keep the originals available, since editing through a link changes
+the original. Checksum verification also reads linked files.

@@ -1,0 +1,11 @@
+# Only software definitions and the shared ASTRAL builder enter the build context.
+**
+!workflow/
+!workflow/envs/
+!workflow/envs/*.yaml
+!workflow/envs/*.post-deploy.sh
+!workflow/scripts/
+!workflow/scripts/prepare_phylogeny_tools.py
+!workflow/scripts/common.py
+!Dockerfile
+!.dockerignore

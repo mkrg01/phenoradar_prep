@@ -25,7 +25,8 @@ on `PATH` and omit the deployment option during direct execution.
 `SNAKEMAKE_BIN` can select the Snakemake executable. The launcher stores its
 Snakemake cache in `.cache/` through `XDG_CACHE_HOME`.
 
-Phylogeny also needs the [one-time ASTRAL build](phylogeny.md#setup-and-execution).
+Phylogeny prepares the [ASTRAL tool](phylogeny.md#setup-and-execution) on first use.
+For container releases and Apptainer execution, see [containers](containers.md).
 Missing database snapshots are [prepared automatically](references.md) when a
 requested branch needs them. First use therefore needs download access unless
 references and software have been prepared locally.
@@ -80,8 +81,7 @@ sbatch --partition=YOUR_PARTITION \
 ```
 
 The script requests one node, one task, 16 CPUs, 192 GiB, and up to 21 days by
-default. All steps share that allocation; no additional Slurm jobs are submitted.
-The terminal can be closed after submission. Set allocation options before the
+default. All steps share that allocation. Set allocation options before the
 script name and workflow options after it. For example, preparation can use:
 
 ```bash
@@ -89,10 +89,9 @@ sbatch --partition=YOUR_PARTITION --cpus-per-task=2 --mem=16G --time=01:00:00 \
   run_pipeline.sh --configfile config/mydata.yaml -- prepare
 ```
 
-The first taxonomy build may need a longer allocation; download/build time
-varies by host and taxonomy release. With a prepared snapshot, 8 GiB fits the
-declared preparation budgets. Preparation is also included in `all`; avoid
-concurrent submissions writing the same outputs.
+The first taxonomy build may need a longer allocation. With a prepared snapshot,
+8 GiB fits the declared preparation budgets. Avoid concurrent submissions writing
+the same outputs.
 
 Monitor or stop a job using its printed ID:
 

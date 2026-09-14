@@ -19,7 +19,10 @@ def record(config_json, selection, workflow_dir, output):
             packages[name] = None
     code = sorted(p for p in root.rglob("*") if p.is_file() and
                   (p.suffix in {".py", ".sh", ".smk", ".yaml"} or p.name == "Snakefile"))
+    image_manifest = Path("/opt/phenoradar/container.json")
+    image = json.loads(image_manifest.read_text()) if image_manifest.is_file() else None
     write_json(output, {"created_at": now(), "config": json.loads(config_json),
+                        "container": image,
                         "python": platform.python_version(), "packages": packages,
                         "selection": file_record(selection), "workflow_files": [file_record(p) for p in code]})
 

@@ -48,3 +48,9 @@ def test_unknown_settings_name_the_full_path(config, path):
 def test_sections_require_mappings(config, section):
     with pytest.raises(ValueError, match=f"{section} must be a mapping"):
         validate_keys(config)
+
+
+@pytest.mark.parametrize("image", [False, 12, [], {}, "", "  "])
+def test_invalid_container_images(image):
+    with pytest.raises(ValueError, match="container_image must be null or"):
+        validate_keys({"container_image": image})

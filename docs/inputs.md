@@ -8,17 +8,11 @@ paths and symbolic links can be used to avoid copying large files.
 
 ## Upstream data preparation
 
-You can prepare the input data using
-[AMALGKIT](https://github.com/kfuku52/amalgkit) and
-[GeneGalleon](https://github.com/kfuku52/genegalleon). AMALGKIT creates
-RNA-seq sample metadata. Its
+[AMALGKIT](https://github.com/kfuku52/amalgkit)'s
 [`metadata` command](https://github.com/kfuku52/amalgkit/wiki/amalgkit-metadata)
-retrieves SRA metadata, including species, run accessions, and sample attributes.
-GeneGalleon performs transcriptome assembly, longest-CDS extraction,
-expression quantification, and BUSCO gene identification and completeness
-assessment. Its [transcriptome generation stage](https://github.com/kfuku52/genegalleon/blob/main/docs/main-stages-and-what-they-do.md#gg_transcriptome_generation_entrypointsh)
-integrates AMALGKIT steps and produces the sequence and abundance data used by
-phenoradar_prep.
+retrieves RNA-seq sample metadata. [GeneGalleon](https://github.com/kfuku52/genegalleon)'s
+[transcriptome generation stage](https://github.com/kfuku52/genegalleon/blob/main/docs/main-stages-and-what-they-do.md#gg_transcriptome_generation_entrypointsh)
+produces assemblies, longest CDS, expression estimates, and BUSCO results.
 
 | Upstream output | Input in phenoradar_prep | Use here |
 | --- | --- | --- |
@@ -27,18 +21,6 @@ phenoradar_prep.
 | GeneGalleon expression estimates | `input/quant/{species}/{run}/{run}_abundance.tsv` | Input TPM for OG and KO aggregation |
 | GeneGalleon BUSCO completeness summary | `input/busco/summary.tsv` | Species selection by complete BUSCO fraction |
 | GeneGalleon per-species BUSCO full tables | `input/busco/full/{species}.busco.full.tsv` | Existing marker assignments for optional species-tree inference |
-
-Upstream directory layouts may differ. Point the configuration to the
-corresponding outputs or stage them at the paths above,
-preserving the identifiers and formats below. The BUSCO full tables must match
-the original sequences and satisfy the [phylogeny input requirements](phylogeny.md#inputs).
-
-Assembly, read-level expression quantification, and BUSCO identification take
-place upstream. phenoradar_prep reuses their results for species selection,
-annotation, expression aggregation, and optional sequence analyses, then
-[collects inputs](phenoradar_inputs.md) for
-[PhenoRadar](https://github.com/mkrg01/phenoradar). Species traits are supplied
-separately as described [below](#traits).
 
 ## File formats
 

@@ -3,8 +3,7 @@
 [Documentation](index.md) · [BUSCO phylogeny](phylogeny.md)
 
 Two targets assign pairs using nwkit's homogeneous-clade grouping and
-contrastive-clade selection. Choose the route by which species should contribute
-to the molecular tree:
+contrastive-clade selection:
 
 | Target | Tree used | Membership of non-representative species |
 | --- | --- | --- |
@@ -63,7 +62,7 @@ It needs the ordinary metadata/BUSCO/CDS inputs, valid abundance paths during
 selection, and `phylogeny.busco_full_dir`. The observed species must have exactly
 two states and yield at least four representatives.
 
-Complete the [ASTRAL setup](phylogeny.md#setup-and-execution), then run:
+Run:
 
 ```bash
 ./run_pipeline.sh --software-deployment-method conda \
@@ -81,8 +80,6 @@ To also resolve the outgroup, target
 `results/<analysis>/phylogeny/representatives/rooting/outgroup.json`.
 A manual `phylogeny.outgroup` must be among the selected representatives;
 `auto` chooses within that set.
-
-The representative route proceeds as follows:
 
 1. Build the NCBI guide from the selected dataset and frozen taxonomy snapshot.
 2. Keep observed-trait species and skim homogeneous clades, choosing the species
@@ -113,10 +110,8 @@ the tree/QC, manifest, BUSCO scores, and traits; raw sequences and gene trees ar
 unnecessary for pair assignment. Results go to `filtered/phylogeny/all/contrast/`
 and `filtered/phylogeny/phenotyped/contrast/` when ready.
 
-Each export starts from the original trees. Removing exclusions restores species,
-but new groupings can produce different pairs. Root direction is inherited even
-if the source outgroup is excluded. The representative analysis remains at its
-original location and is not recomputed by filtering.
+Exports use the original trees and root direction, even if the outgroup is excluded.
+Changing exclusions can change pair IDs. The representative analysis is not filtered.
 
 ## Outputs
 
@@ -153,8 +148,3 @@ origins of C4. A species can belong to a pair without being a representative.
 In the representative route, membership inherited from an NCBI group has not
 been separately tested by molecular inference for every member. Missing-trait
 species have no assignment, and multiway contrasts are left unresolved.
-
-Review topology, root choice, trait coverage, and group membership before using
-pairs downstream. [Test coverage](development.md) and
-[recorded dataset checks](notes/validation.md#contrast-representatives) describe
-the available implementation validation.

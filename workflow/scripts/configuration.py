@@ -2,7 +2,7 @@
 
 KEYS = {
     "": "analysis inputs selection taxonomy translation odb tpm alignment kegg phylogeny "
-        "contrast taxonomy_audit exclude_species phenoradar",
+        "contrast taxonomy_audit exclude_species phenoradar container_image",
     "inputs": "metadata species_trait busco cds_dir quant_dir",
     "selection": "busco_threshold species_list missing_taxonomy",
     "taxonomy": "source",
@@ -37,3 +37,6 @@ def validate_keys(config):
         if unknown:
             paths = [f"{section}.{key}" if section else str(key) for key in unknown]
             raise ValueError("unknown configuration settings: " + ", ".join(paths))
+    image = config.get("container_image")
+    if image is not None and (not isinstance(image, str) or not image.strip()):
+        raise ValueError("container_image must be null or a nonempty image URI/SIF path")
