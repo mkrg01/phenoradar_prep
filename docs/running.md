@@ -1,146 +1,100 @@
-# Running and resuming the workflow
+# Running the workflow
 
-[Back to README](../README.md)
+[Documentation](index.md) · [Configuration](configuration.md)
 
-Run all commands from the repository root. First configure your [inputs](configuration.md).
-A missing [taxonomy snapshot](references.md#taxonomy-reference) is prepared automatically.
+Run commands from the repository root after configuring the [inputs](inputs.md).
+The launcher runs Snakemake locally, either on the current host or inside one
+Slurm allocation. It prints shell commands and reruns incomplete jobs automatically.
 
 ## Installation
 
-Use Linux with Bash and Conda available. Run these commands from the repository root:
+Use Linux with Bash and Conda:
 
 ```bash
 conda env create -n phenoradar-workflow -f environment.yaml
 conda activate phenoradar-workflow
 ```
 
-This environment provides Snakemake. For direct execution, add
-`--software-deployment-method conda` to create the separate software environments
-defined in `workflow/envs/` for each processing step. Inside a Slurm allocation,
-the launcher enables this option automatically.
+This installs Snakemake. Processing tools have separate environments in
+`workflow/envs/`; direct execution needs `--software-deployment-method conda`
+to create and use them. The launcher enables Conda automatically inside Slurm.
+Definitions pin the main packages but are not complete dependency lockfiles.
 
-The environment definitions pin the main package versions, including Snakemake
-9.8.0 and Orthologer 3.8.1. They are not complete dependency lockfiles.
+If using an existing software installation, expose the workflow's fixed commands
+on `PATH` and omit the deployment option during direct execution.
+`SNAKEMAKE_BIN` can select the Snakemake executable. The launcher stores its
+Snakemake cache in `.cache/` through `XDG_CACHE_HOME`.
 
-The workflow uses fixed command names supplied by these environments, including
-`python`, `seqkit`, `ODB-mapper`, `exec_annotation`, `famsa`, `trimal`,
-`VeryFastTree`, and `lsd2`. ASTRAL-IV uses its official local 128-bit build;
-see [phylogeny setup](phylogeny.md#setup-and-execution).
-For direct execution with existing software environments, put the commands on
-`PATH` and use `run_pipeline.sh` without `--software-deployment-method conda`.
-Executable and interpreter overrides are not configuration options. Remove old
-command settings using the [migration notes](configuration.md#configuration).
-The installed ODB-mapper command must support OrthoDB v12.
+Phylogeny also needs the [one-time ASTRAL build](phylogeny.md#setup-and-execution).
+Missing database snapshots are [prepared automatically](references.md) when a
+requested branch needs them. First use therefore needs download access unless
+references and software have been prepared locally.
 
-## Execution modes
+## Targets
 
-Use the same `run_pipeline.sh` script for both modes:
-
-- `sbatch run_pipeline.sh ...` reserves one Slurm allocation for the whole workflow.
-- `./run_pipeline.sh ...` runs the workflow on the current host.
-
-The `#SBATCH` lines at the top of the script set batch defaults. Bash treats them
-as comments during direct execution, so they do not reserve resources in that mode.
-Snakemake uses its local executor in both modes.
-
-Choose a target to stop at a particular stage. Put targets after `--`, with all
-options before it, for example `--configfile config/mydata.yaml -- mapping`.
-This also keeps `--configfile` from interpreting the target as another filename.
-
-| Target | Result |
-| --- | --- |
-| `all` (default) | Combined TPM and QC tables, plus enabled optional branches |
-| `prepare` | Selected metadata, provenance, and sample/chunk manifests |
-| `references` | Prepared OrthoDB reference snapshot |
-| `kegg_references` | Prepared KOfam/KEGG reference snapshot; no assemblies required |
-| `proteins` | Translated CDS for the selected species |
-| `mapping` | ODB chunk results and the merged gene-to-orthogroup index |
-| `alignments` | Untrimmed protein MSA for every mapped OG, all copies retained; includes ODB mapping but no TPM aggregation or tree inference |
-| `kegg` | KO annotations and original-TPM sums; independent of ODB mapping, with automatic [KEGG reference setup](kegg.md) |
-| `phylogeny_contrast_pairs` | [Pairs from full/phenotyped molecular trees](contrast_pairs.md#pairs-after-full-or-phenotyped-inference); with exclusions, uses completed snapshots and recomputes filtered pairs without inference |
-| `filter_species` | [Export completed results after manual exclusions](species_filter.md), including recomputed molecular-tree pairs; preserves the original NCBI representative analysis |
-
-Prerequisite steps are included automatically. See [reference setup](references.md)
-and [output formats](outputs.md) for details.
-
-## Slurm: run the workflow in one allocation
-
-`sbatch run_pipeline.sh` reserves one Slurm allocation and runs Snakemake with its
-**local executor** inside that allocation. All processing steps run as ordinary
-processes on the allocated node. They share its CPU and memory budget and do not
-submit additional Slurm jobs. You can close the terminal after `sbatch` returns.
-
-From the repository root, activate the environment and create the log directory
-**before** submission. Replace `YOUR_PARTITION` with your cluster's partition:
+Put targets after `--`, with every option before it:
 
 ```bash
-conda activate phenoradar-workflow
-mkdir -p logs
+./run_pipeline.sh --software-deployment-method conda \
+  --configfile config/mydata.yaml --cores 2 --resources mem_gb=16 -- prepare
+```
 
-# Run the full workflow: 16 CPUs, 192 GiB, up to 21 days by default.
+Explicit analysis targets work even when their `enabled` flag is false.
+Prerequisites are scheduled automatically, including missing or outdated tree
+inference for `taxonomy_audit` and unfiltered `phylogeny_contrast_pairs`.
+
+| Target | Work requested |
+| --- | --- |
+| `all` (default) | OG expression/QC and branches enabled by `alignment`, `kegg`, `phylogeny`, and `contrast` |
+| `prepare` | Metadata selection, PhenoRadar species metadata, run record, sample/chunk manifests |
+| `references` | OrthoDB snapshot only |
+| `kegg_references` | KOfam/KEGG snapshot only; no assemblies required |
+| `proteins` | CDS translation for selected species |
+| `mapping` | ODB mapping and merged gene-to-OG index |
+| `alignments` | [All-copy OG alignments](alignments.md), including mapping |
+| `kegg` | [KO annotation and original-TPM sums](kegg.md), independent of ODB |
+| `phylogeny_prepare` | BUSCO input audit, outgroup resolution, and marker plan |
+| `phylogeny` | [BUSCO species-tree inference](phylogeny.md); also dating/audit when their flags are enabled |
+| `phylogeny_calibrations` | Species-tree inference and [TimeTree calibration retrieval](dating.md#timetree-calibrations), without dating |
+| `timetree` | Species-tree inference and [LSD2 dating](dating.md) using the selected calibration source |
+| `taxonomy_audit` | [MonoPhy review](taxonomy_audit.md) of full/phenotyped species trees |
+| `contrast_pairs` | [Representative selection, inference, and trait pairs](contrast_pairs.md#representative-analysis) |
+| `phylogeny_contrast_pairs` | [Trait pairs from full/phenotyped trees](contrast_pairs.md#pairs-from-full-or-phenotyped-trees); with exclusions, requires completed results and uses the filtered export |
+| `phenoradar_metadata` | Minimal species metadata, useful for backfilling older results |
+| `filter_species` | [Export completed results after exclusions](species_filter.md); does not start producer analyses |
+| `phenoradar_inputs` | [Validate and collect completed inputs](phenoradar_inputs.md); does not start producer analyses |
+
+The full/phenotyped phylogeny targets follow `phylogeny.species_sets`.
+`contrast.enabled` adds only the separate representative analysis to `all`.
+Filtering and PhenoRadar collection are always manual targets.
+
+## Slurm
+
+Activate the workflow environment and create `logs/` before submitting. Replace
+`YOUR_PARTITION` and add your cluster's account option if needed:
+
+```bash
+mkdir -p logs
 sbatch --partition=YOUR_PARTITION \
   run_pipeline.sh --configfile config/mydata.yaml
 ```
 
-To run only preparation, request a smaller allocation:
+The script requests one node, one task, 16 CPUs, 192 GiB, and up to 21 days by
+default. All steps share that allocation; no additional Slurm jobs are submitted.
+The terminal can be closed after submission. Set allocation options before the
+script name and workflow options after it. For example, preparation can use:
 
 ```bash
 sbatch --partition=YOUR_PARTITION --cpus-per-task=2 --mem=16G --time=01:00:00 \
   run_pipeline.sh --configfile config/mydata.yaml -- prepare
 ```
 
-Preparation is also included automatically in the full workflow. Do not start
-both commands concurrently for the same outputs. Arguments before the script
-name configure the Slurm allocation; arguments after it specify workflow options
-and targets. The activated environment is exported to the job, and Conda manages
-the processing environments automatically.
+The first taxonomy build may need a longer allocation; download/build time
+varies by host and taxonomy release. With a prepared snapshot, 8 GiB fits the
+declared preparation budgets. Preparation is also included in `all`; avoid
+concurrent submissions writing the same outputs.
 
-The preparation allocation includes an initial allowance for taxonomy generation
-when the database is missing. That first run needs NCBI network access unless
-`taxonomy.source` points to an existing SQLite database. Download and build time
-depend on the taxonomy release and host; increase the time or memory allocation
-if needed. With a prepared database, `--mem=8G` is sufficient for the declared
-preparation rule budgets.
-
-| Setting | Meaning in this mode |
-| --- | --- |
-| `#SBATCH --cpus-per-task=16` | CPU budget shared by all concurrently running steps; passed to Snakemake as `--cores` |
-| `#SBATCH --mem=192G` | Total allocation memory, including Snakemake and its processes |
-| `#SBATCH --time=21-00:00:00` | Time limit for the entire workflow after the allocation starts |
-| Rule `threads`, including `odb.threads` | Threads used by a step, capped by the allocation's CPU budget |
-| `odb.mem_gb` | Memory estimate for one mapping step, in GB; converted to Snakemake's `mem_mb` scheduling resource |
-
-The script derives the memory budget from Slurm's allocation and leaves 4 GB
-for Snakemake and environment management. It displays the budget in GB.
-Declared rule memory values are scheduling estimates; Slurm enforces the overall
-allocation limit. Use one node, one task, and an explicit finite memory request.
-Both `--mem` and `--mem-per-cpu` are supported. Change the total budget with
-`sbatch` options, for example:
-
-```bash
-sbatch --partition=YOUR_PARTITION --cpus-per-task=32 --mem=384G --time=21-00:00:00 \
-  run_pipeline.sh --configfile config/mydata.yaml
-```
-
-These defaults are initial allowances, not measured requirements. The allocation
-must fit the largest processing step and last long enough for the whole workflow,
-including every ODB chunk. Reserving resources once avoids queue waits
-between steps, but keeps those resources reserved during lighter steps as well.
-A larger or longer allocation may also wait longer before starting.
-
-ODB concurrency follows the available CPU and memory budgets. Each chunk defaults
-to 16 workers and a 192 GB memory estimate. Two chunks can run together with at
-least 32 CPUs and 384 GB of workflow memory available, plus the overhead reserved
-by the launcher when using Slurm. The default 16-CPU, 192-GiB allocation fits one
-ODB chunk at a time; increasing both budgets as needed permits more chunks.
-
-The entry point enforces local execution and the allocation budgets. Specify
-the partition and any required account with `sbatch --partition=...` and
-`sbatch --account=...`. The compute node needs access to the configured files and
-any required package/download services. Choose paths consistent with the
-workflow's storage checks.
-
-`sbatch` prints a single job ID. Monitor or stop the whole workflow with:
+Monitor or stop a job using its printed ID:
 
 ```bash
 squeue -u "$USER"
@@ -148,105 +102,107 @@ tail -f logs/pipeline-JOB_ID.log
 scancel JOB_ID
 ```
 
-Replace `JOB_ID` with the printed ID. Stopping this allocation stops its processing
-steps. Resubmit the same command to resume missing or incomplete outputs. The
-script requests an interrupt shortly before the time limit for orderly cleanup;
-it preserves Snakemake's exit status as the batch job's exit status.
+Resubmit the same command to resume after cancellation or interruption. The
+script requests an interrupt shortly before its time limit and preserves
+Snakemake's exit status as the batch job's exit status.
 
 ## Direct execution
 
-Outside Slurm, specify an appropriate CPU and memory budget:
+Supply a CPU and memory budget for the current host:
 
 ```bash
 ./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 16 \
-  --resources mem_gb=192
+  --configfile config/mydata.yaml --cores 16 --resources mem_gb=192
 ```
 
-This runs processing on the current host. The memory value is a scheduling budget,
-so leave additional physical memory for Snakemake and other processes. For shared
-clusters, submit the same script with `sbatch` to reserve resources and keep running
-after terminal disconnection.
+Leave physical memory for Snakemake and other processes beyond the scheduling
+budget. The `#SBATCH` lines are comments in this mode and reserve no resources.
+Inside an existing Slurm allocation (`SLURM_JOB_ID` is set), the launcher instead
+uses that allocation's resources and enables Conda. Run from the repository root
+in that case.
 
-When `SLURM_JOB_ID` is present, including direct execution inside an existing
-Slurm allocation, the script uses that allocation's CPU and memory budgets and
-enables Conda automatically. Run from the repository root in that case; set the
-total resources when requesting the allocation.
+## Resource budgets
 
-## Memory units
+Rule threads and memory settings describe one job. The launcher budget limits
+the sum of concurrent jobs. For example, two default ODB chunks need 32 CPUs
+and 384 GB of workflow memory; one needs 16 CPUs and 192 GB. Increase the
+allocation to permit more concurrency:
 
-Use positive whole numbers for `odb.mem_gb` in the configuration and
-`--resources mem_gb=...` when launching directly. Both use decimal GB:
-`192` means 192 GB, equivalent to 192000 MB. `odb.mem_gb` is the estimate for one
-mapping step; the command-line resource is the total budget for concurrent steps.
+```bash
+sbatch --partition=YOUR_PARTITION --cpus-per-task=32 --mem=384G \
+  run_pipeline.sh --configfile config/mydata.yaml
+```
 
-The launcher and workflow convert these values to Snakemake's standard `mem_mb`
-resource internally. Snakemake's own job listings can therefore still show MB.
-Slurm's `--mem=192G` uses GiB (1 GiB = 1024 cubed bytes). The launcher accounts for
-that difference when calculating the budget from the allocation; no manual
-conversion is needed when submitting with `sbatch`. The default 192 GiB leaves
-about 202.2 GB for workflow steps after reserving 4 GB for overhead, enough for
-the 192 GB ODB estimate.
+Rule thread counts are capped by available cores. Rule memory values are
+scheduling estimates, while Slurm enforces total allocation memory. Defaults
+should be checked against pilot benchmarks. An allocation must fit the largest
+step and last long enough for all chunks; its resources remain reserved during
+lighter stages too.
+
+Configuration `mem_gb` values and direct `--resources mem_gb=...` use positive
+whole decimal GB (1 GB = 1000 MB), converted internally to Snakemake `mem_mb`.
+Slurm `--mem=192G` uses GiB. The launcher converts Slurm's units and leaves 4 GB
+for Snakemake and environment management; that default allocation provides
+about 202.2 GB for jobs, enough for one 192 GB ODB chunk.
+
+The launcher enforces the local executor and, under Slurm, allocation-derived
+budgets. Request one node, one task, and finite memory with `--mem` or
+`--mem-per-cpu`; set total resources when requesting the allocation.
 
 ## Prepare and inspect
 
-To select species and create the sample and chunk manifests without downloading
-OrthoDB or running ODB-mapper, use the `prepare` batch command above. Species
-selection is a checkpoint: a dry-run before preparation may not display all
-downstream jobs. After `prepare` finishes, inspect the complete plan with:
+Run `prepare` to select species and create manifests before ODB reference
+preparation or mapping. Selection is a checkpoint, so a dry-run before preparation
+may not show every downstream job. Inspect the plan again after preparation:
 
 ```bash
 ./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml --cores 16 --dry-run
+  --configfile config/mydata.yaml --cores 16 --resources mem_gb=192 --dry-run
 ```
+
+Review `metadata/selection.json`, `samples.tsv`, and `busco_completeness.svg`
+under your analysis directory before scaling up.
 
 ## Pilot run
 
-After preparation, create `input/pilot_species.txt` with a small set of eligible
-species from `results/<analysis>/metadata/species_high_busco.txt`. For example,
-with the default analysis name `full`, select the first three species and review
-or edit the list:
+After preparation, choose a few eligible IDs from
+`results/<analysis>/metadata/species_high_busco.txt`. For the default `full`
+analysis, this gives a starting list to review:
 
 ```bash
 head -n 3 results/full/metadata/species_high_busco.txt > input/pilot_species.txt
-```
-
-The generic `config/pilot.yaml` reads that list, uses two species per ODB chunk,
-retains work directories, and writes to `results/pilot/`. A missing list causes
-an input error. Run the pilot in one allocation with:
-
-```bash
 sbatch --partition=YOUR_PARTITION --cpus-per-task=8 --mem=80G \
   run_pipeline.sh --configfile config/mydata.yaml config/pilot.yaml
 ```
 
+`config/pilot.yaml` uses two-species ODB chunks, retains work directories, and
+writes to `results/pilot/`. The species list is user-supplied and ignored by Git.
+Check mapping quality, runtime, disk use, and peak memory before the full run.
+
 ## Re-running and recovery
 
-Run the same command again to process missing or outdated outputs. Snakemake
-tracks declared inputs, parameters, code, and software environment definitions.
-Protein FASTA files are individually declared as inputs to ODB jobs. Changing only
-an abundance TSV recalculates that run's TPM and the combined tables.
+Snakemake tracks declared inputs, parameters, code, and environment definitions.
+Changing only an abundance file recalculates expression for that run and the
+combined tables. Changing selected species updates the relevant manifests and
+analyses. Final merged tables use only current species/runs, even when older
+per-run files remain on disk.
+
+ODB jobs retain interrupted work under
+`work/<analysis>/orthogroups/mapping/<chunk>/<fingerprint>/`. The fingerprint
+includes protein contents, reference, mapping options, software records, and
+worker code. Matching work can resume; changed inputs use a new directory.
+Chunk membership, `odb.threads`, and `odb.batch_size` affect this identity;
+`odb.mem_gb` alone does not.
+
+Successful ODB jobs copy native results and logs out before removing their work
+directory, unless `odb.keep_work: true`. Work for other fingerprints is retained.
+Replacing installed ODB software in place may require an explicit rerun:
 
 ```bash
-# Resume after an interruption.
-sbatch --partition=YOUR_PARTITION \
-  run_pipeline.sh --configfile config/mydata.yaml
-
-# Explicitly rerun mapping after manually changing installed ODB software.
-sbatch --partition=YOUR_PARTITION \
-  run_pipeline.sh --configfile config/mydata.yaml --forcerun odb_map
+sbatch --partition=YOUR_PARTITION run_pipeline.sh \
+  --configfile config/mydata.yaml --forcerun odb_map
 ```
 
-Incomplete ODB work is retained under
-`work/<analysis>/orthogroups/mapping/<chunk>/<fingerprint>/`. The fingerprint includes input FASTA
-contents, the reference record, mapping settings, software records, and worker
-code. Matching incomplete work can be resumed; changed inputs or settings use a
-different work directory. Changing chunk membership, `odb.threads`, or
-`odb.batch_size` changes that identity; changing only `odb.mem_gb` does not.
-A completed result is not skipped merely because a success marker exists.
-
-After a successful job, native results and logs are copied out before that job's
-work directory is removed. Set `odb.keep_work: true` to retain it, as the pilot
-configuration does. Work from other fingerprints and older outputs are not
-automatically deleted. Final tables use only the species and runs in the current
-sample manifest, even when older per-run outputs remain on disk.
+Reference updates have separate [snapshot refresh procedures](references.md).
+Use the [migration guide](migration.md) when resuming results from older layouts
+or configurations.

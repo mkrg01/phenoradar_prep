@@ -1,20 +1,22 @@
 # Reference data
 
-[Back to README](../README.md)
+[Documentation](index.md)
 
 `resources/` holds reusable reference snapshots, separate from the input assemblies and analysis outputs.
 The workflow prepares missing taxonomy, OrthoDB, and KOfam/KEGG references
 automatically when they are needed. These databases are not distributed with
 the repository, and their storage locations are fixed by the workflow.
 
-The optional KEGG branch uses its own immutable KOfam/KEGG snapshot at
-`resources/kegg/snapshot_v1/`. It is created on first use, independently of ODB.
-The `kegg_references` target prepares it separately; `references` prepares only
-OrthoDB. See [KEGG setup](kegg.md) for download caching and offline preparation.
+| Target or stage | Reference used |
+| --- | --- |
+| Metadata preparation | NCBI taxonomy snapshot |
+| `references`, ODB mapping | OrthoDB v12 at `odb.node` |
+| `kegg_references`, KEGG analysis | KOfam/KEGG snapshot |
+| TimeTree calibration retrieval | Cached API responses; see [dating](dating.md#timetree-calibrations) |
 
 Run all commands from the repository root. For the batch command below, activate
 the workflow environment and create `logs/` before submission, as described in
-the [Slurm instructions](running.md#slurm-run-the-workflow-in-one-allocation).
+the [Slurm instructions](running.md#slurm).
 
 ## Taxonomy reference
 
@@ -100,3 +102,68 @@ python workflow/scripts/verify_odb_reference.py \
 ```
 
 Replace `3193` with your configured node when verifying another reference.
+
+## KOfam and KEGG reference
+
+The workflow automatically creates `resources/kegg/snapshot_v1/` when a KEGG
+target first needs it. It downloads `profiles.tar.gz` and `ko_list.gz` from the
+[official KOfam distribution](https://www.genome.jp/ftp/db/kofam/) and KO-to-MODULE
+and KO-to-PATHWAY tables from KEGG REST. Initial setup needs network access and
+space for the archives, extracted profiles, and final snapshot.
+
+To prepare the reference separately, without assemblies or annotation:
+
+```bash
+./run_pipeline.sh --software-deployment-method conda \
+  --cores 1 --resources mem_gb=4 -- kegg_references
+```
+
+Completed downloads and their URL, retrieval time, byte count, and SHA-256
+records stay in `resources/kegg/downloads/`. Retrying after a failed download
+reuses verified completed files and restarts the interrupted file. Extraction
+and validation must all succeed before the snapshot is published. Existing
+snapshots are reused without network access or automatic updates; corrupt
+snapshots or cached downloads cause an error rather than being silently replaced.
+Preparation logs are in `logs/<analysis>/kegg/reference_prepare.log`.
+
+For manual setup using locally extracted profiles and a matching `ko_list`, the
+offline helper remains available. The fixed destination must be absent:
+
+```bash
+python workflow/scripts/prepare_kegg_reference.py \
+  --profiles-dir /path/to/extracted/kofam/profiles \
+  --ko-list /path/to/extracted/kofam/ko_list \
+  --reference-dir resources/kegg/snapshot_v1 \
+  --release YOUR_KOFAM_RELEASE_OR_DOWNLOAD_DATE
+```
+
+This manual command fetches the small KO-to-MODULE and KO-to-PATHWAY link tables from KEGG REST.
+For offline setup, also pass `--module-links /path/to/ko_module_links.tsv` and
+`--pathway-links /path/to/ko_pathway_links.tsv`. These are headerless two-column
+responses from `https://rest.kegg.jp/link/module/ko` and
+`https://rest.kegg.jp/link/pathway/ko`, respectively.
+
+Either link direction is accepted. Duplicate memberships are removed;
+`path:koNNNNN` and `path:mapNNNNN` normalize to `mapNNNNN`. Multiple memberships
+are retained. The complete supplied membership tables are saved, including KOs
+without a searched profile.
+
+The snapshot contains `profiles/`, `ko_list`, raw mappings, normalized
+`ko_modules.tsv` and `ko_pathways.tsv`, `files.json`, and `reference.json`.
+Checksums, source/retrieval information, profile counts, and the release label
+are recorded. Existing snapshot directories are never overwritten. To refresh
+deliberately, archive the whole `resources/kegg/` directory, including its download
+cache, and run again with a new `analysis` name to preserve previous results.
+Keeping the old download cache would reuse the old downloaded data.
+
+Snapshots must remain immutable. The workflow verifies all file checksums once
+before annotation. Species jobs also check the inventory hash, file set, and
+sizes, without repeatedly hashing all HMMs. Explicit full verification is:
+
+```bash
+python workflow/scripts/verify_kegg_reference.py \
+  --reference resources/kegg/snapshot_v1/reference.json
+```
+
+Changing files inside an existing snapshot is unsupported, including changes
+that preserve timestamps. Keep each completed snapshot with its analysis records.

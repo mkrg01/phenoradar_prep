@@ -1,78 +1,17 @@
 # KEGG annotation and KO expression
 
-[Back to README](../README.md)
+[Documentation](index.md)
 
 This optional branch annotates translated proteins with KofamScan and sums the
 original abundance-table TPM by KEGG Orthology (KO). It runs independently of ODB
 mapping. Preserved gene IDs connect protein annotations to `target_id` values;
 OG TPM is never used to reconstruct KO expression.
 
-## Prepare a reference snapshot
-
-The workflow automatically creates `resources/kegg/snapshot_v1/` when a KEGG
-target first needs it. It downloads `profiles.tar.gz` and `ko_list.gz` from the
-[official KOfam distribution](https://www.genome.jp/ftp/db/kofam/) and KO-to-MODULE
-and KO-to-PATHWAY tables from KEGG REST. Initial setup needs network access and
-space for the archives, extracted profiles, and final snapshot.
-
-To prepare the reference separately, without assemblies or annotation:
-
-```bash
-./run_pipeline.sh --software-deployment-method conda \
-  --cores 1 --resources mem_gb=4 -- kegg_references
-```
-
-Completed downloads and their URL, retrieval time, byte count, and SHA-256
-records stay in `resources/kegg/downloads/`. Retrying after a failed download
-reuses verified completed files and restarts the interrupted file. Extraction
-and validation must all succeed before the snapshot is published. Existing
-snapshots are reused without network access or automatic updates; corrupt
-snapshots or cached downloads cause an error rather than being silently replaced.
-Preparation logs are in `logs/<analysis>/kegg/reference_prepare.log`.
-
-For manual setup using locally extracted profiles and a matching `ko_list`, the
-offline helper remains available. The fixed destination must be absent:
-
-```bash
-python workflow/scripts/prepare_kegg_reference.py \
-  --profiles-dir /path/to/extracted/kofam/profiles \
-  --ko-list /path/to/extracted/kofam/ko_list \
-  --reference-dir resources/kegg/snapshot_v1 \
-  --release YOUR_KOFAM_RELEASE_OR_DOWNLOAD_DATE
-```
-
-This manual command fetches the small KO-to-MODULE and KO-to-PATHWAY link tables from KEGG REST.
-For offline setup, also pass `--module-links /path/to/ko_module_links.tsv` and
-`--pathway-links /path/to/ko_pathway_links.tsv`. These are headerless two-column
-responses from `https://rest.kegg.jp/link/module/ko` and
-`https://rest.kegg.jp/link/pathway/ko`, respectively.
-
-Either link direction is accepted. Duplicate memberships are removed;
-`path:koNNNNN` and `path:mapNNNNN` normalize to `mapNNNNN`. Multiple memberships
-are retained. The complete supplied membership tables are saved, including KOs
-without a searched profile.
-
-The snapshot contains `profiles/`, `ko_list`, raw mappings, normalized
-`ko_modules.tsv` and `ko_pathways.tsv`, `files.json`, and `reference.json`.
-Checksums, source/retrieval information, profile counts, and the release label
-are recorded. Existing snapshot directories are never overwritten. To refresh
-deliberately, archive the whole `resources/kegg/` directory, including its download
-cache, and run again with a new `analysis` name to preserve previous results.
-Keeping the old download cache would reuse the old downloaded data.
-
-Snapshots must remain immutable. The workflow verifies all file checksums once
-before annotation. Species jobs also check the inventory hash, file set, and
-sizes, without repeatedly hashing all HMMs. Explicit full verification is:
-
-```bash
-python workflow/scripts/verify_kegg_reference.py \
-  --reference resources/kegg/snapshot_v1/reference.json
-```
-
-Changing files inside an existing snapshot is unsupported, including changes
-that preserve timestamps. Keep each completed snapshot with its analysis records.
-
 ## Run the branch
+
+The branch prepares a missing `resources/kegg/snapshot_v1/` automatically.
+See [KOfam/KEGG reference setup](references.md#kofam-and-kegg-reference) for
+separate preparation, offline inputs, verification, and deliberate updates.
 
 Add these settings to your dataset configuration:
 
@@ -108,10 +47,8 @@ as complete. Snakemake normally schedules jobs from file timestamps and recorded
 parameters; force the annotation rule after replacing software in place without
 changing its configured path.
 
-Changing only `kegg.ambiguity` also repeats aggregation and merging while reusing
-completed species annotations. Explicit `drop` settings in older dataset
-configurations continue to exclude multi-KO genes; omit the setting or choose
-`duplicate` to use the new default.
+Changing only `kegg.ambiguity` repeats aggregation and merging while reusing
+completed species annotations.
 
 All profiles in the snapshot are searched. For deliberately restricted sets,
 record the choice and assess coverage, including organellar genes, before
@@ -210,31 +147,13 @@ completeness.
 
 ## Passing KO features to PhenoRadar
 
-The explicit [`phenoradar_inputs` target](phenoradar_inputs.md) can collect
-`ko_tpm_sum.tsv` and the requested KO–module/pathway maps directly, without ODB
-mapping or an OG–KEGG join. It validates one run per species and expression
-coverage before publishing links. Grouping or module scoring is not performed
-by this preparation workflow.
+Use the [input collector](phenoradar_inputs.md) to link KO expression and the
+requested KO-to-module/pathway maps. It requires one run per species and checks
+expression coverage. The collection guide gives the KO column settings.
 
-After selecting compatible tissue/condition runs, use one run per species.
-The collected long table can be passed directly, with KO identifiers as feature IDs:
-
-```yaml
-data:
-  tpm_path: results/full/phenoradar_inputs/kegg/ko_tpm_sum.tsv
-  feature_col: ko
-  value_col: tpm_sum
-  orthogroup_annotation_path: null
-```
-
-Prep preserves runs; it does not choose or average them into a species. Do not
-pass multiple runs of one species to a consumer that sums duplicate
-species/feature rows. Check support/QC before using consumers whose default
-missing-feature value is zero.
-
-Module scoring, learned scaling, phenotype-dependent selection, and group-lasso
-fitting belong inside PhenoRadar's training folds. These outputs provide fixed,
-label-independent annotation and expression inputs.
+KO features remain independent of OG mapping. Membership maps describe fixed
+functional groups; they do not measure module activity, completeness, or flux.
+Learned aggregation and feature selection belong in the downstream analysis.
 
 ## References
 

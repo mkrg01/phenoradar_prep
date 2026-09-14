@@ -1,10 +1,30 @@
 # Outputs and TPM interpretation
 
-[Back to README](../README.md)
+[Documentation](index.md)
 
 Output paths use the `analysis` name from your [configuration](configuration.md).
 
-## Output files
+## Directory layout
+
+Dataset inputs conventionally live in `input/`, configuration in `config/`, and
+reusable references in `resources/`. Configured external input paths and symlinks
+are supported. Results, temporary work, and logs use `results/<analysis>/`,
+`work/<analysis>/`, and `logs/<analysis>/`, respectively.
+
+| Shared resource | Fixed location |
+| --- | --- |
+| Taxonomy snapshot | `resources/taxonomy/taxa.sqlite` |
+| OrthoDB v12 node | `resources/orthodb/v12_<node>/` |
+| KOfam/KEGG snapshot and downloads | `resources/kegg/snapshot_v1/`, `resources/kegg/downloads/` |
+| ASTRAL build | `resources/phylogeny_tools/` |
+| TimeTree responses | `resources/timetree_cache/` |
+| Launcher-managed cache | `.cache/` |
+
+Optional directories are created when used. Each phylogeny species set has its
+own tree, alignments, gene trees, and rooting records. Its dating, taxonomy review,
+and contrast results are stored beside the tree that produced them.
+
+## Result files
 
 ```text
 results/<analysis>/
@@ -46,30 +66,14 @@ Logs and ODB resource benchmarks are saved under
 `logs/<analysis>/orthogroups/mapping/`. Temporary
 ODB work is stored under `work/<analysis>/orthogroups/mapping/`.
 
-The explicit [PhenoRadar input collection](phenoradar_inputs.md) publishes
-`results/<analysis>/phenoradar_inputs/`. It links selected completed outputs and
-uses base metadata prepared by the metadata step. Optional contrast pair IDs
-are left-joined without removing unpaired or unannotated species. KEGG inputs
-remain independent of OG mapping.
-
-The optional [MonoPhy review](taxonomy_audit.md) writes `taxonomy_audit/` under
-each selected species-tree branch. It includes taxonomic group results,
-intruder/outlier events, associated run IDs and one review PDF per rank.
-It reads the species tree and taxonomy only; gene trees are not audit inputs.
-
-[`phylogeny_contrast_pairs`](contrast_pairs.md#pairs-after-full-or-phenotyped-inference)
-writes `contrast/` under each selected molecular-tree branch, including pair
-and species tables, source/assignment records, the observed subtree and summary
-figures. Manual exclusion recomputes these results under
-`filtered/phylogeny/all/contrast/` and `filtered/phylogeny/phenotyped/contrast/` when
-inputs are complete. Original trees and the representative analysis at
-`results/<analysis>/phylogeny/representatives/contrast/` remain unchanged.
+Branch-specific inventories are in the [KEGG](kegg.md#outputs),
+[alignment](alignments.md#outputs-and-phenoradar), [phylogeny](phylogeny.md#outputs),
+[dating](dating.md#outputs), [taxonomic review](taxonomy_audit.md#outputs-and-figures),
+and [contrast-pair](contrast_pairs.md#outputs) guides. The
+[filtered export](species_filter.md#exported-dataset) has its own manifest;
+[PhenoRadar collection](phenoradar_inputs.md#published-files) links selected inputs.
 
 ## TPM interpretation
-
-The optional [`filter_species` export](species_filter.md) writes a curated subset
-under `results/<analysis>/filtered/`. Its `manifest.json` records the top-level
-`exclude_species` list and source/output hashes. Original outputs remain available.
 
 Long tables contain `species`, `run`, `orthogroup`, and either `tpm_sum` or `tpm`.
 Wide tables contain one row per run, identified by `species` and `run`, with one
@@ -95,34 +99,20 @@ counts, the retained TPM fraction, and other mapping statistics. Aggregation
 rejects duplicate target IDs, negative or nonfinite TPM values, and runs with no
 positive TPM retained after mapping and ambiguity handling.
 
-## Optional KEGG outputs
+## Provenance and optional results
 
-The [KEGG branch](kegg.md) writes `results/<analysis>/kegg/`, separately from the
-OG tables above. Its `ko_tpm_sum.tsv` contains sums of original input TPM and is
-**not renormalized** to the retained KO set. `ko_support.tsv` records annotated
-and quantified gene counts, including KOs with no quantified genes. Such KOs have
-blank values in support/wide tables and are omitted from the numeric long table;
-observed zero expression remains zero. Run identities are preserved.
+`run.json` records resolved configuration, workflow source hashes, and the Python
+environment. Selection, translation, mapping, and optional branches keep their
+own input checksums, QC, and execution records. When comparing analyses, retain
+these records with the reference snapshots.
 
-By default, `kegg.ambiguity: duplicate` adds a gene's full TPM to every distinct
-accepted KO. KO features can therefore overlap and their total can exceed the
-input TPM. In KEGG `mapping_qc.tsv`, `retained_targets`, `retained_tpm`, and
-`retained_tpm_fraction` count each contributing gene once; `quantified_assignments`
-and `ko_tpm_sum` count all gene/KO contributions. `ambiguous_tpm` is included in
-retained TPM under `duplicate`; it is excluded only when `drop` is selected.
+KO expression has different semantics from normalized OG TPM: it sums original
+input TPM, permits overlapping KO contributions, and distinguishes unavailable
+observations from measured zeros. See [KO quantification](kegg.md#assignment-and-quantification).
 
-## Optional OG alignments
+OG alignments retain every mapped gene copy and all columns. Their membership
+is independent of the expression ambiguity policy. Missing FASTA rows alone
+are not evidence of biological gene absence; see [OG alignments](alignments.md).
 
-The [alignment branch](alignments.md) writes `results/<analysis>/orthogroups/alignments/`:
-
-- `{og}.faa`: untrimmed protein MSA, one row per original gene ID, with all copies.
-- `provenance.json`: alignment hashes and links to collection/execution records.
-
-OG membership comes from the filename. Gene IDs use `{species}_g{number}`, so
-removing the final `_g{number}` recovers the exact metadata species ID. There is
-no separate `members.tsv` or added `species=` header attribute.
-
-Every OG observed in the selected species' ODB mappings is included, even with
-one sequence or no variation. Genes assigned to several OGs occur in each, regardless
-of `tpm.multimap`. Species, gene, OG and site selection for modelling belongs in
-PhenoRadar. No trimming or site-coordinate tables are produced.
+For results moved from an older directory structure, see the
+[migration record guidance](migration.md#relocated-results).

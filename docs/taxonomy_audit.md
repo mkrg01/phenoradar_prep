@@ -1,21 +1,15 @@
 # Taxonomic review with MonoPhy
 
-The `taxonomy_audit` target uses **MonoPhy 1.3.2** to compare an existing rooted
-BUSCO **species tree** with registered NCBI taxonomy. It reports non-monophyletic
-groups and MonoPhy's intruder/outlier tips, linked to all associated run IDs.
-**Gene trees are not audit inputs and are not assessed.**
+[Documentation](index.md) · [Species exclusion](species_filter.md)
 
-This replaces the former custom single-intruder detector entirely. Its
-`min_reference_species` and `max_plot_species` settings are rejected with a
-migration message. The old reference envelopes, per-gene reproduction scores
-and candidate context plots are no longer produced. Regenerating an owned audit
-directory replaces the complete report, including obsolete files.
+The `taxonomy_audit` target compares a rooted BUSCO species tree with registered
+NCBI taxonomy using MonoPhy 1.3.2. It reports non-monophyletic groups and
+intruder/outlier tips, linked to all associated run IDs. Assessment uses the
+species tree; gene trees are not audit inputs.
 
-Reports do not establish which sample is mislabeled. No metadata, inference
-output or contrast pair is changed. After review, manual exclusion remains a
-separate [`filter_species` export](species_filter.md), configured through the
-top-level `exclude_species` list. Phenotyped trees and contrast results remain
-available as provisional results.
+Reports identify conflicts for review and leave the source analysis intact.
+They do not determine which sample is mislabeled. After review, use
+[manual species exclusion](species_filter.md) to export a curated subset.
 
 ## Configuration and execution
 
@@ -34,7 +28,7 @@ The explicit target works with `enabled: false`:
 
 ```bash
 ./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml config/phylogeny.local.yaml \
+  --configfile config/mydata.yaml \
   --cores 1 --resources mem_gb=8 -- taxonomy_audit
 ```
 
@@ -62,9 +56,10 @@ For offline installation, set `MONOPHY_SOURCE_ARCHIVE` to that same archive.
 No external reference sequence database is downloaded.
 
 Completed species trees are reused under normal Snakemake dependency checks.
-If they do not yet exist, the target schedules inference. Use `--dry-run` to
-inspect upstream work before execution. The species-tree inference itself may
-require gene trees; the audit does not read or re-analyze them.
+Missing or outdated trees can schedule inference. Use `--dry-run` to inspect
+upstream work, and increase the example's CPU/memory budget if inference is
+needed. Species-tree inference may require gene trees even though the audit
+itself reads only the species tree.
 
 For an archived result whose upstream workflow inputs are unavailable, activate
 the MonoPhy environment and run the script directly:
@@ -143,12 +138,10 @@ species. Start with `taxon_results.tsv` to see every non-monophyletic group,
 including those for which no outlier was selected. `samples.tsv` distinguishes
 `review_flag`, `non_monophyletic_group`, `no_flag` and `not_assessable`.
 
-Figures use native MonoPhy results and **ape-derived cladogram geometry**.
-Each rank is exported as a vector PDF with embedded fonts and a vector SVG.
-There are no titles, subtitles, footer notes or taxids in the figure itself.
-Scientific names are set in italic at 9 pt; group annotations occupy a separate
-aligned column at 8.1 pt. Page dimensions follow the measured label widths and
-displayed tip count, keeping row spacing and font sizes consistent.
+Figures are cladograms based on native MonoPhy results and ape geometry.
+Each rank has a vector PDF with embedded fonts, an SVG, and its display tree.
+Scientific names are italic; registered groups appear in a separate aligned
+column. Page dimensions adapt to label widths and displayed tip counts.
 
 Registered groups share colors in both the tip markers and group annotations.
 Small circles indicate unflagged tips; triangles indicate intruders, squares
@@ -166,14 +159,10 @@ full-tree figure even though they were omitted from that rank's assessment.
 `plot_members.tsv` records all folds. Figures are cladograms; branch lengths and
 support labels should be inspected in the source or assessment Newick files.
 
-## Validation and references
+## References
 
-Tests invoke real MonoPhy and compare its saved object with a fresh direct
-`AssessMonophyly` call. They cover role/run linkage, multiple grouped intruders,
-missing ranks, singleton groups, parameter changes, obsolete-report replacement,
-input validation and isolated Snakemake reuse with no gene-tree files present.
-The independent manual species filter is also tested. These validate software
-integration, not sensitivity or specificity for the study's samples.
+The [test guide](development.md) describes real MonoPhy comparisons and workflow
+checks. They validate integration, not sensitivity or specificity for the samples.
 
 - [MonoPhy paper](https://doi.org/10.7717/peerj-cs.56)
 - [CRAN package](https://CRAN.R-project.org/package=MonoPhy)

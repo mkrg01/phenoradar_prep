@@ -230,9 +230,6 @@ def select_calibrations(tree, candidates, output):
 
 
 def prepare(tree, metadata, taxonomy_db, coverage, outdir, cache_dir, settings, representatives=None):
-    settings = dict(settings)
-    if "min_clade_taxa" in settings:
-        raise ValueError("TimeTree min_clade_taxa was removed; remove it from settings. Query limits control workload")
     for key in ["max_representatives", "max_queries", "min_studies"]:
         if type(settings[key]) is not int or settings[key] < 1:
             raise ValueError(f"TimeTree {key} must be a positive integer")

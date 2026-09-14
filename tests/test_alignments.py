@@ -231,7 +231,6 @@ def test_real_famsa_preserves_residues_and_finish_prunes_removed_ogs(collected_i
         assert len({len(seq) for seq in result.values()}) == 1
         assert {g: s.replace("-", "") for g, s in result.items()} == dict(fasta_records(fasta))
     (output / "obsolete.faa").write_text(">old\nMAA\n")
-    (output / "members.tsv").write_text("obsolete membership table\n")
     (output / "notes.txt").write_text("keep\n")
     finish(inputs, output, reports)
     assert not (output / "obsolete.faa").exists()
@@ -361,7 +360,7 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     ({"enabled": "yes"}, "alignment.enabled must be true or false"),
     ({"threads": 0}, "alignment.threads must be a positive integer"),
     ({"mem_gb": True}, "alignment.mem_gb must be a positive integer"),
-    ({"command": "custom"}, "fixed by the workflow"),
+    ({"command": "custom"}, "unknown configuration settings: alignment.command"),
 ])
 def test_invalid_alignment_config(tmp_path, workflow_project, settings, message):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")

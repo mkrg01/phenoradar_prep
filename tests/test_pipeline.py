@@ -344,7 +344,7 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     ({"mem_gb": 0}, "odb.mem_gb must be a positive integer"),
     ({"mem_gb": True}, "odb.mem_gb must be a positive integer"),
     ({"mem_gb": 1.5}, "odb.mem_gb must be a positive integer"),
-    ({"mem_mb": 256000}, "Replace odb.mem_mb with odb.mem_gb"),
+    ({"mem_mb": 256000}, "unknown configuration settings: odb.mem_mb"),
 ])
 def test_invalid_memory_config_fails_before_work(tmp_path, memory, message):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")

@@ -1,6 +1,6 @@
 # OG protein alignments
 
-[Back to README](../README.md)
+[Documentation](index.md)
 
 This optional branch saves untrimmed amino-acid alignments for **every OG observed
 in the selected species' ODB mappings**, retaining all mapped gene copies. It
@@ -72,7 +72,7 @@ order. PhenoRadar's sequence inputs are just the `{og}.faa` files: the filename
 gives the orthogroup, the first header token gives the gene ID, and removing the
 final `_g{number}` gives the species. For example, `100007at3193.faa` containing
 `>Abelia_chinensis_g0` identifies OG `100007at3193`, gene `Abelia_chinensis_g0`,
-and species `Abelia_chinensis`. No `species=` attribute or `members.tsv` is added.
+and species `Abelia_chinensis`.
 Species IDs match metadata and TPM outputs exactly, including underscores and
 hyphens; only ODB protein filenames normalize hyphens. Splitting on the first
 underscore is incorrect. Unmapped genes do not appear in these outputs.
@@ -97,13 +97,12 @@ subdirectory. The execution JSON records the input/output hashes, actual
 command, thread count and FAMSA executable hash; singletons record a direct copy.
 The normal `run.json` records workflow code and resolved configuration.
 
-After interruption, rerun the same command (with `--rerun-incomplete` if requested
-by Snakemake). Completed OG jobs are reused. Changing abundance values or the TPM
+After interruption, rerun the same launcher command; it already passes
+`--rerun-incomplete`. Completed OG jobs are reused. Changing abundance values or the TPM
 ambiguity policy does not recompute alignments. Changes to selected species,
 proteins or mappings rebuild collection and its dependent alignments.
 
 Finalization verifies alignment hashes and publishes provenance only after all
-current OG jobs have succeeded. It also removes a legacy `members.tsv` from its
-output directory. On selection/mapping
-updates it also removes obsolete `*.faa` files from the workflow-owned results
+current OG jobs have succeeded. On selection/mapping updates it removes obsolete
+`*.faa` files from the workflow-owned results
 alignment directory, so the directory reflects the current OG set.

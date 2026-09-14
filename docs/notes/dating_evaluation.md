@@ -1,10 +1,12 @@
 # Evaluation of unmodified dating tools
 
+[Documentation](../index.md) · [Current dating guide](../dating.md)
+
 Evaluation date: 2026-09-10. The preferred installation policy is to use
 unmodified upstream software, with standard Conda packages where possible.
 Following this evaluation, the workflow was migrated from treePL to LSD2.
 The treePL observations below describe the previous implementation; current
-configuration, installation and output details are in [phylogeny.md](phylogeny.md).
+configuration, installation and output details are in [dating guide](../dating.md).
 
 ## Unmodified treePL
 

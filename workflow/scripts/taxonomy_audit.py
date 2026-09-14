@@ -26,10 +26,6 @@ MONOPHY_VERSION = "1.3.2"
 def validate_settings(settings):
     if not isinstance(settings, dict):
         raise ValueError("taxonomy_audit must be a mapping")
-    removed = set(settings) & {"min_reference_species", "max_plot_species"}
-    if removed:
-        raise ValueError("removed taxonomy_audit settings; delete " + ", ".join(sorted(removed)) +
-                         "; detection now uses MonoPhy and plots have no tip limit")
     unknown = set(settings) - set(DEFAULTS)
     if unknown:
         raise ValueError("unknown taxonomy_audit settings: " + ", ".join(sorted(unknown)))

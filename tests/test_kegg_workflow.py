@@ -186,7 +186,7 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     ({"threads": 0}, "kegg.threads must be a positive integer"),
     ({"mem_gb": True}, "kegg.mem_gb must be a positive integer"),
     ({"ambiguity": "split"}, "kegg.ambiguity must be duplicate, drop, or error"),
-    ({"command": ""}, "fixed by the workflow"),
+    ({"command": ""}, "unknown configuration settings: kegg.command"),
 ])
 def test_invalid_kegg_config_is_rejected(tmp_path, settings, message):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")

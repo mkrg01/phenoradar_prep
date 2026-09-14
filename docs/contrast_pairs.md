@@ -1,243 +1,160 @@
-# Contrast pairs from species trees
+# Trait contrast pairs
 
-[Back to README](../README.md)
+[Documentation](index.md) · [BUSCO phylogeny](phylogeny.md)
 
-The optional `contrast_pairs` target runs independently of the full species
-tree, ODB/KEGG mapping and expression aggregation. It uses the same BUSCO
-inference rules, tool environments, marker cap (500 by default) and sequence
-QC as `phylogeny`, with a separate representative manifest and output directory.
-It does not run dating. Full and subset alignments/gene trees are separate
-because marker coverage and alignments depend on the selected species set.
+Two targets assign pairs using nwkit's homogeneous-clade grouping and
+contrastive-clade selection. Choose the route by which species should contribute
+to the molecular tree:
 
-The separate `phylogeny_contrast_pairs` target assigns pairs directly from the
-all-species or phenotyped molecular tree. Both routes share the molecular skim,
-pair assignment, TSV export and plotting implementation.
+| Target | Tree used | Membership of non-representative species |
+| --- | --- | --- |
+| `phylogeny_contrast_pairs` | Full or phenotyped BUSCO tree | Determined directly on the molecular tree |
+| `contrast_pairs` | Newly inferred tree of trait-guided NCBI representatives | Inherited through the NCBI and molecular group maps |
 
-## Pairs after full or phenotyped inference
+Both use `inputs.species_trait`, with `contrast.trait: C4` by default. See
+[trait formats](inputs.md#traits). Missing traits remain unknown. Multiple RNA-seq
+runs do not increase a species' weight. Pair IDs belong to one result directory
+and can change when membership changes.
 
-Select `phylogeny.species_sets: [all]`, `[phenotyped]`, or `[all, phenotyped]`,
-then run:
+## Pairs from full or phenotyped trees
+
+Set `phylogeny.species_sets` to `[all]`, `[phenotyped]`, or both, then run:
 
 ```bash
 ./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml config/phylogeny.local.yaml \
-  --cores 1 --resources mem_gb=8 -- phylogeny_contrast_pairs
+  --configfile config/mydata.yaml --cores 32 --resources mem_gb=128 \
+  -- phylogeny_contrast_pairs
 ```
 
-This is an explicit target; `contrast.enabled` continues to control only the
-representative analysis in `all`. With `exclude_species: []`, the target follows
-the ordinary inference dependencies. Completed, unchanged trees are reused;
-missing trees or changed upstream inputs can schedule inference. Use the normal
-inference resource budget if trees still need to be built. It does not request
-dating or the NCBI representative-selection analysis.
+With `exclude_species: []`, this follows normal inference dependencies:
+completed unchanged trees are reused, and missing or outdated trees can schedule
+inference. Use the inference budget above unless a dry-run confirms that only
+pair assignment remains. A budget of one core and 8 GB fits the declared
+pair-only jobs.
+`contrast.enabled` does not control this target.
 
-| Input tree under `results/<analysis>/` | Pair output directory |
+| Input under `results/<analysis>/` | Pair results |
 | --- | --- |
 | `phylogeny/all/species_tree.nwk` | `phylogeny/all/contrast/` |
 | `phylogeny/phenotyped/species_tree.nwk` | `phylogeny/phenotyped/contrast/` |
 
-Inputs are the rooted molecular tree and its QC record, that run's sample
-manifest, `metadata/metadata_high_busco.tsv` for representative scores, and
-`inputs.species_trait`. The pair trait is `contrast.trait`; it may differ from
-the `phylogeny.trait` used to choose the phenotyped inference species.
+Inputs are the rooted tree and QC record, its sample manifest,
+`metadata/metadata_high_busco.tsv` for representative scores, and the trait table.
+`contrast.trait` may differ from the trait used to select phenotyped inference.
 
-The source tree must match the run's species manifest and recorded outgroup.
-After validating its root, the analysis prunes missing-trait tips, preserving
-surviving path lengths and the direction inherited from that root. An unknown
-outgroup can therefore be absent from the observed subtree. No new outgroup is
-selected and no tree, branch length, support or date is reestimated.
+The tree must match its manifest and recorded outgroup. Missing-trait tips are
+pruned with surviving path lengths and root direction preserved. The observed
+subtree may therefore lack the original outgroup. `observed_tree.nwk` records
+this subtree before grouping; no new outgroup is selected.
 
-`observed_tree.nwk` records the subtree before the molecular skim. Subsequent
-outputs have the same names and columns as the representative route below.
-`species_metadata.tsv` contains each retained species in the input run once,
-including unknown-trait species with empty group/pair IDs. Group membership is
-determined directly on the molecular tree; no NCBI membership is inherited.
-Replicated RNA-seq runs do not increase species counts.
+The molecular skim selects representatives and assigns pairs directly from this
+tree. The output species metadata retains every species in the source inference
+set, including unknown-trait species with empty group/pair IDs. Zero or one
+observed state produces zero pairs; more than two states is unsupported. There
+is no four-representative minimum for this postprocessing step. With no observed
+species, Newick files are empty, TSVs retain headers, and figures explain the
+empty result.
 
-Zero or one observed state succeeds with zero pairs. No minimum of four skim
-representatives applies to this postprocessing step. With no observed species,
-the Newick files are empty, the TSVs retain headers, and the figures explain that
-there are no observed species. More than two observed states is unsupported.
-Multiway contrastive clades remain unresolved under the shared pair criteria.
+## Representative analysis
 
-### Recompute after manual species exclusion
+`contrast_pairs` first selects representatives on an NCBI guide, then infers their
+BUSCO tree using the same sequence QC, marker cap, and tools as `phylogeny`.
+It needs the ordinary metadata/BUSCO/CDS inputs, valid abundance paths during
+selection, and `phylogeny.busco_full_dir`. The observed species must have exactly
+two states and yield at least four representatives.
 
-With a nonempty top-level `exclude_species`, `phylogeny_contrast_pairs` uses the
-same completed-snapshot export as `filter_species`. Neither target requests
-upstream inference in this mode. The explicit pair target requires completed
-inputs for the requested `phylogeny.species_sets`; `filter_species` instead
-reports unavailable branches in `filtered/manifest.json` and exports what is ready.
-
-`filter_species` automatically recomputes pairs for **both completed molecular
-trees**, independent of `phylogeny.species_sets`, even when they had no previous
-pair output. It requires the tree/QC, sample manifest, BUSCO score table and
-trait table; gene trees and raw sequence inputs are unnecessary for pairs.
-Results go to `filtered/phylogeny/all/contrast/` and, when available,
-`filtered/phylogeny/phenotyped/contrast/`. Excluded species are removed before
-grouping and pair detection, so surviving species can form different pairs.
-Every export starts from the original trees, allowing exclusions to be reversed.
-An empty exclusion list with `filter_species` restores the unexcluded export.
-
-The original `phylogeny/representatives/` representative analysis is neither read nor recomputed.
-Original full/phenotyped trees and pair outputs also remain unchanged. Pair IDs
-are local to each result and can change after exclusion; join by species and
-the result directory, not by an ID shared between analyses. `summary.json`
-records source checksums, the effective exclusions, missing-trait species,
-trait, seed and inherited-root status. If the source outgroup is excluded,
-the subtree still inherits the original orientation; it has not been rerooted.
-
-The filter export replaces its owned directory as a bundle. To recover a
-manually deleted file inside that bundle, rerun `filter_species` with
-`--forcerun filter_species`. Ordinary unfiltered figures are tracked separately
-and can be regenerated without repeating pair assignment or inference.
-
-## Representative analysis: inputs and execution
-
-Use the ordinary metadata/BUSCO/CDS inputs and `phylogeny.busco_full_dir`.
-Species selection currently also validates the usual abundance input files,
-although contrast inference does not compute expression tables.
-All phenotype annotations come from `inputs.species_trait`, never metadata:
-
-```text
-species	C4
-Plant alpha	0
-Plant beta	1
-Plant gamma	
-```
-
-Space-separated names and normalized underscore IDs are accepted. Hyphens
-are preserved, as in the existing phylogeny labels. Duplicate normalized names
-and invalid C4 values fail validation. Blank/NA annotations and species absent
-from the trait table remain unknown. Extra species in that table do not enter
-the analysis. The observed species must have exactly two states.
-
-```yaml
-inputs:
-  species_trait: input/species_trait.tsv
-phylogeny:
-  busco_full_dir: /path/to/busco_full_longest_cds
-  sequence_dir: /path/to/longest_cds
-  outgroup: auto
-contrast:
-  enabled: false
-  trait: C4
-```
-
-`phylogeny.outgroup: auto` enables
-[automatic outgroup selection](phylogeny.md#setup-and-execution). First skim
-selects the inference species; the outgroup is then chosen **within that exact
-representative set**. No additional species is included for rooting. The full
-and contrast branches apply the same method to their own species sets and can
-choose different outgroups. A manual species label must already occur in the
-relevant inference manifest, including the skim representatives for contrast.
-The chosen outgroup retains its trait/group information and participates in
-the subsequent skims. The figure uses ordinary species labels; the rooting
-record identifies which representative was used as the outgroup.
-
-From the project root, after building ASTRAL as described in the phylogeny guide:
+Complete the [ASTRAL setup](phylogeny.md#setup-and-execution), then run:
 
 ```bash
 ./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml config/phylogeny.local.yaml \
-  --cores 16 --resources mem_gb=80 --dry-run -- contrast_pairs
-
-./run_pipeline.sh --software-deployment-method conda \
-  --configfile config/mydata.yaml config/phylogeny.local.yaml \
-  --cores 16 --resources mem_gb=80 -- contrast_pairs
+  --configfile config/mydata.yaml --cores 32 --resources mem_gb=128 -- contrast_pairs
 ```
 
-Set `contrast.enabled: true` to include these outputs in `all`. The explicit
-target works while false. For preparation only, target
-`results/<analysis>/phylogeny/representatives/selection/selection.json`. To also resolve the
-outgroup without inferring trees, target
+Set `contrast.enabled: true` to include this analysis in `all`. Its output is
+`results/<analysis>/phylogeny/representatives/`. Marker coverage is ranked within
+that subset; alignments and gene trees are inferred independently. Dating is
+not part of this target.
+
+For selection alone, target
+`results/<analysis>/phylogeny/representatives/selection/selection.json`.
+To also resolve the outgroup, target
 `results/<analysis>/phylogeny/representatives/rooting/outgroup.json`.
+A manual `phylogeny.outgroup` must be among the selected representatives;
+`auto` chooses within that set.
 
-## Processing
+The representative route proceeds as follows:
 
-1. Build the NCBI guide from the selected dataset.
-   The pinned nwkit 0.27.0 lineage operations use the frozen SQLite snapshot;
-   they need no traversal pickle or extra taxonomy download.
-2. Restrict the guide to observed traits and run the first nwkit skim:
-   one highest-completeness species per homogeneous clade. Completeness is
-   `(single + duplicated) / total`, without display rounding. The input rows
-   are sorted and `phylogeny.seed` fixes randomized ties.
-3. Resolve the outgroup from the compressed NCBI guide, whose tips are exactly
-   the representatives, and infer their BUSCO tree. At least four
-   representatives are required. Marker coverage is
-   ranked within this subset; the existing sequence/alignment QC remains active.
-4. Skim the rooted molecular tree again, retaining the outgroup as a representative.
-5. Apply nwkit's `only_contrastive_clades` selection. Minimal mixed clades with
-   exactly two opposite-state representatives become pairs. Multiway cases
-   remain unresolved; they are not arbitrarily decomposed into pairs.
-6. Compose the first and second group maps to assign original species to final
-   representatives and pair IDs. Export one summary figure in PDF and SVG.
+1. Build the NCBI guide from the selected dataset and frozen taxonomy snapshot.
+2. Keep observed-trait species and skim homogeneous clades, choosing the species
+   with the highest complete BUSCO fraction in each. Sorted inputs and
+   `phylogeny.seed` make randomized ties reproducible.
+3. Resolve the root within the representative set and infer its BUSCO tree.
+4. Skim the rooted molecular tree, then apply nwkit's `only_contrastive_clades`.
+   Minimal mixed clades with two opposite-state representatives form pairs;
+   multiway cases remain unresolved.
+5. Compose the NCBI and molecular group maps to assign original species to final
+   representatives and pairs.
 
-The adapter calls the grouping, sampling and contrastive-clade functions used
-by `nwkit skim`, without modifying nwkit. Raw nwkit group/contrastive IDs remain
-in the per-stage tables. Public pair IDs are ordered by their representative
-species names; IDs can change when membership changes between analyses.
+The outgroup participates in grouping and pair selection with its observed trait.
+The adapter uses the pinned nwkit grouping and sampling functions; raw stage IDs
+are retained alongside public pair IDs ordered by representative species names.
+
+## After species exclusion
+
+With a nonempty `exclude_species`, `phylogeny_contrast_pairs` uses the same
+completed-result export as [filter_species](species_filter.md). It requires ready
+inputs for the requested species sets and never schedules inference in this mode.
+`filter_species` instead exports what is complete and reports unavailable sections
+in `filtered/manifest.json`.
+
+Filtering recomputes pairs for both completed molecular trees, independent of
+`phylogeny.species_sets`, even if previous pair outputs do not exist. It needs
+the tree/QC, manifest, BUSCO scores, and traits; raw sequences and gene trees are
+unnecessary for pair assignment. Results go to `filtered/phylogeny/all/contrast/`
+and `filtered/phylogeny/phenotyped/contrast/` when ready.
+
+Each export starts from the original trees. Removing exclusions restores species,
+but new groupings can produce different pairs. Root direction is inherited even
+if the source outgroup is excluded. The representative analysis remains at its
+original location and is not recomputed by filtering.
 
 ## Outputs
 
-Under `results/<analysis>/phylogeny/representatives/`:
+Both routes write the following in their branch's `contrast/` directory:
 
-| Output | Contents |
+| File | Contents |
 | --- | --- |
-| `selection/ncbi_skim.nwk`, `.all.tsv`, `.sampled.tsv` | Initial compressed NCBI tree and complete first-stage membership |
-| `selection/samples.tsv`, `traits.tsv`, `selection.json` | Inference manifest, dataset-wide normalized traits/roles, source hash and selection counts |
-| `plan/`, `alignments/`, `gene_trees/`, `species_tree.nwk` | The same marker plans, alignments, gene trees, coverage and rooted species tree as the full branch |
-| `rooting/outgroup.txt`, `outgroup.json` | Outgroup selected within the representative set, candidate manifest/count and selection evidence |
-| `contrast/summary_tree.nwk`, `.all.tsv`, `.sampled.tsv` | Second skim on the inferred molecular tree |
-| `contrast/contrastive.nwk`, `.all.tsv`, `.sampled.tsv` | Raw nwkit contrastive-clade selection, including unresolved multiway candidates |
-| `contrast/contrast_pairs.tsv` | One row per pair: state values, representatives, final groups and original species counts |
-| `contrast/species_metadata.tsv` | All selected species: original trait, role, final group/representative and nullable pair ID |
-| `contrast/summary.json` | Pair counts, unresolved clades, source records and assignment interpretation |
-| `contrast/summary_tree.pdf`, `summary_tree.svg` | Trait-colored tips, italic species names, and aligned columns for species counts (`n`), group IDs and bold pair IDs |
+| `summary_tree.nwk`, `.all.tsv`, `.sampled.tsv` | Molecular skim tree and membership |
+| `contrastive.nwk`, `.all.tsv`, `.sampled.tsv` | Raw contrastive-clade selection, including unresolved multiway candidates |
+| `contrast_pairs.tsv` | Pair states, representatives, final groups, and original species counts |
+| `species_metadata.tsv` | Source species, trait, role, final group/representative, and nullable pair ID |
+| `summary.json` | Counts, unresolved clades, source checksums, settings, and assignment interpretation |
+| `summary_tree.pdf`, `summary_tree.svg` | Trait-colored tree with species counts, group IDs, and pair IDs |
 
-The figure uses Matplotlib already supplied with nwkit; no R environment is
-required. Species names use 8 pt italic type; annotation columns use upright
-type. The nominal width is 7.2 inches (183 mm), expanding only for unusually
-long labels, with height adjusted to the tip count. The PDF embeds TrueType
-fonts and SVG retains editable text. A scale bar reports substitutions/site;
-the figure has no pair-count title or outgroup annotation. Branch lengths are
-not dates. Ladderization only changes the order of siblings in the drawing.
-Original ASTRAL
-supports remain in the inferred and compressed molecular trees; support-based
-pair filtering is not applied. Figure-only recovery reuses the inferred tree.
+Full/phenotyped pair outputs also include `observed_tree.nwk`.
+The representative route adds `selection/ncbi_skim.nwk`, `.all.tsv`, `.sampled.tsv`,
+`samples.tsv`, `traits.tsv`, and `selection.json`, plus the normal BUSCO inference
+and rooting outputs beside `contrast/`.
 
-Unknown traits have no group/pair assignment. The outgroup is an observed
-representative and is processed by the same grouping/pair criteria as other tips.
-A species can be a pair member without being a representative. Pair membership
-for non-representatives is **inherited from the NCBI group**, not separately
-validated by molecular inference. These pairs are comparisons within the sampled
-known-trait tree, not estimates of independent C4 origins. A zero-pair analysis
-is successful with a header-only pair table. When nwkit finds no contrastive
-tips at all, `contrastive.nwk` is empty and `summary.json` reports the result.
+Figures retain editable text in SVG and embedded TrueType fonts in PDF. Their
+scale bar uses substitutions/site. Ladderization changes drawing order only.
+Original ASTRAL supports remain in molecular Newick files; pair assignment does
+not filter by support.
 
-## Validation
+A zero-pair result is successful and has a header-only pair table. When no
+contrastive tips exist, `contrastive.nwk` is empty. Figure-only recovery reuses
+pair assignment and inference. To recover a deleted file inside the filtered
+bundle, use `--forcerun filter_species` with the `filter_species` target.
 
-`tests/test_contrast_pairs.py` covers the frozen NCBI guide, automatic root
-selection, rejection of incomplete/multi-species root assignments, trait-name
-normalization, missing traits, deterministic ties, composition of both group
-maps, multiway candidates, empty contrastive outputs, and PDF/SVG generation.
-The real-tool workflow test runs both inference branches with different
-automatically selected roots. It checks that the full-tree outgroup is not
-added to the contrast representatives, unchanged reruns, recovery of a deleted
-figure, and isolation of the full tree from a trait-only change. It uses
-synthetic sequences and a local taxonomy fixture, not external services.
-It also checks full/phenotyped post-inference targets, switching species sets,
-and figure recovery with unchanged trees. `tests/test_phylogeny_contrast.py`
-checks direct molecular membership, unknown or excluded outgroups, replicated
-runs, empty/one-state subsets, invalid source inputs, and exclusion-driven
-pair reformation. Its full-Snakefile snapshot test has no raw sequence or
-gene-tree inputs and verifies that exclusion leaves source trees and NCBI
-representative results unchanged.
+## Interpretation
 
-On the current dataset, the first skim selects 199 representatives from 2,047
-known-trait species. Root selection chooses `Nymphaea_colorata` within those
-199 representatives, while the full 5,586-species manifest selects
-`Amborella_trichopoda`. The full 199-species contrast inference has not been run.
-A small real-data check selects eight known-trait representatives from nine
-input species, roots on `Nymphaea_colorata`, and completes inference with 20
-markers, three contrast pairs, and both figure formats. This checks execution
-and membership; it does not establish the accuracy of the inferred phylogeny.
+Pairs describe comparisons in the sampled known-trait tree, not independent
+origins of C4. A species can belong to a pair without being a representative.
+In the representative route, membership inherited from an NCBI group has not
+been separately tested by molecular inference for every member. Missing-trait
+species have no assignment, and multiway contrasts are left unresolved.
+
+Review topology, root choice, trait coverage, and group membership before using
+pairs downstream. [Test coverage](development.md) and
+[recorded dataset checks](notes/validation.md#contrast-representatives) describe
+the available implementation validation.

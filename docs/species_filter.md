@@ -1,9 +1,11 @@
 # Manual species exclusion from completed outputs
 
-When selected taxonomy metadata is available, filtering also prepares
-`metadata/species_metadata.tsv` for the [PhenoRadar input collector](phenoradar_inputs.md),
-using retained species and the supplied trait table. The collector validates and
-uses this completed snapshot when `exclude_species` is nonempty.
+[Documentation](index.md) · [PhenoRadar inputs](phenoradar_inputs.md)
+
+`filter_species` exports a subset of completed results to
+`results/<analysis>/filtered/`. It removes every run and gene copy of the named
+species, preserving the original analysis. It can also recompute contrast pairs
+from completed full and phenotyped trees after pruning excluded species.
 
 Use a **top-level YAML list** of exact `species` IDs from the original
 `metadata/samples.tsv`:
@@ -15,10 +17,9 @@ exclude_species:
   - Phragmites_karka
 ```
 
-These names are an example, not an enabled default. The default is
-`exclude_species: []`. There is no `species_filter:` configuration wrapper,
-no automatic use of taxonomy-audit candidates, and no run-specific exclusion
-setting. All runs and gene copies belonging to a listed species are excluded.
+These names illustrate the format; the default is `exclude_species: []`.
+Choose exclusions after review. Taxonomy-audit flags do not populate this list
+automatically.
 Unknown IDs, duplicates, invalid identifiers, and removal of every selected
 species fail. IDs use underscores in place of spaces; existing hyphens remain.
 
@@ -45,12 +46,10 @@ listed in the new manifest. Neither starts upstream jobs. Missing files claimed
 by a completed alignment inventory, or inconsistent identities/checksums within
 completed inputs, fail rather than produce a partial success.
 
-The rule uses absolute paths to completed snapshot files as external inputs.
-The original relative-path producer rules are not dependencies of this target:
-raw RNA-seq, CDS, BUSCO tables, external reference preparation, mapping and
-phylogeny tools do not need to be available. The existing `timetree` Conda
-environment supplies ETE4 and the pinned nwkit for tree pruning, contrast-pair
-assignment and figures; the export makes no TimeTree query.
+The target consumes completed results, so raw CDS, abundance files, BUSCO inputs,
+and reference preparation are not required. Its `timetree` Conda environment
+supplies ETE4 and nwkit for tree pruning, pair assignment, and figures. No
+TimeTree query is made.
 
 Changing the list regenerates only the export. Changed source files or a newly
 completed optional branch invalidate it on the next invocation. Unchanged
@@ -76,10 +75,10 @@ when using the workflow target.
 
 ## Exported dataset
 
-The curated dataset is a downstream input bundle, not a second independent
-execution of the original workflow. `manifest.json` is its provenance record;
-old selection counts, inference QC and execution claims are not copied under
-the guise of new calculations.
+`manifest.json` records this export's provenance and available sections.
+When selected taxonomy metadata is present, filtering also prepares minimal
+`metadata/species_metadata.tsv` from the retained rows and supplied traits for
+PhenoRadar collection. Original execution records stay with the source analysis.
 
 | Output under `filtered/` | Behavior |
 | --- | --- |
@@ -126,7 +125,7 @@ export accepts `--contrast-trait` and `--seed` for the same settings. Removing
 a species can change surviving clades and create different pairs, so old pair
 IDs are not preserved. Zero/one-state subsets produce zero pairs, including
 when no species remain in the phenotyped branch. See
-[post-inference pairs](contrast_pairs.md#pairs-after-full-or-phenotyped-inference)
+[post-inference pairs](contrast_pairs.md#pairs-from-full-or-phenotyped-trees)
 for outputs, root interpretation and the `phylogeny_contrast_pairs` target,
 which uses this export when `exclude_species` is nonempty.
 
@@ -170,12 +169,5 @@ FASTA collection. Keep original results available and treat linked protein
 files as shared input data; editing through a link would edit the original.
 Input/output checksum verification still reads those files.
 
-Tests cover replicated runs, species-encoded alignment IDs, multiple copies and ambiguous
-assignments, numeric-string/zero/missing-value preservation, alignment coordinates,
-empty OGs, path-length preservation, missing outgroups, small trees, exclusion
-reversal, incomplete branches and invalid/stale input rejection. A full-Snakefile
-test runs the export without raw inputs or inference/reference tools and verifies
-that changing the list/source regenerates only the export.
-The contrast tests additionally verify pair reformation after exclusions,
-unchanged original molecular/NCBI results, both inference species sets, and
-successful pair-only processing without gene-tree inputs.
+See [test coverage](development.md) for preservation, pruning, and completed-result
+integration checks.

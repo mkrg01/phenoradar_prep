@@ -7,26 +7,14 @@ from pathlib import Path
 
 configfile: "config/config.yaml"
 
-# These are implementation choices, supplied by rule environments or the
-# official ASTRAL build. Refuse stale overrides rather than silently ignore them.
-fixed_keys = {
-    "": ["tools", "paths"],
-    "taxonomy": ["database"],
-    "odb": ["version", "reference_dir"],
-    "kegg": ["command", "reference_dir"],
-    "alignment": ["command", "famsa_command"],
-    "phylogeny": ["famsa_command", "trimal_command", "veryfasttree_command", "astral_command"],
-    "phylogeny.dating": ["command", "threads"],
-    "phylogeny.dating.timetree": ["python", "request_delay_seconds", "cache_dir"],
-}
-obsolete = []
-for section, keys in fixed_keys.items():
-    values = config
-    for part in section.split(".") if section else []:
-        values = values.get(part, {})
-    obsolete.extend(f"{section}.{key}" if section else key for key in keys if key in values)
-if obsolete:
-    raise WorkflowError("These settings are fixed by the workflow; remove them from your configuration: " + ", ".join(obsolete))
+ROOT = str(Path(workflow.basedir).parent)
+SCRIPTS = str(Path(workflow.basedir) / "scripts")
+sys.path.insert(0, SCRIPTS)
+from configuration import validate_keys
+try:
+    validate_keys(config)
+except ValueError as error:
+    raise WorkflowError(str(error))
 
 ODB_VERSION = "v12"
 PYTHON = "python"
@@ -35,7 +23,7 @@ TIMETREE_CACHE = "resources/timetree_cache"
 
 if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", str(config["analysis"])):
     raise WorkflowError("analysis must be a simple directory name")
-EXISTING_ODB = config["odb"].get("existing_results")
+EXISTING_ODB = config["odb"]["existing_results"]
 if EXISTING_ODB is not None and (not isinstance(EXISTING_ODB, str) or not EXISTING_ODB.strip()):
     raise WorkflowError("odb.existing_results must be null or a snapshot directory")
 if config["odb"]["chunk_size"] < 1 or config["odb"]["threads"] < 1:
@@ -44,64 +32,43 @@ if type(config["odb"]["node"]) is not int or config["odb"]["node"] < 1:
     raise WorkflowError("odb.node must be a positive integer")
 if config["odb"]["batch_size"] < config["odb"]["threads"]:
     raise WorkflowError("ODB batch_size must be >= threads")
-if "mem_mb" in config["odb"]:
-    raise WorkflowError("Replace odb.mem_mb with odb.mem_gb in your configuration (128000 MB = 128 GB)")
 if type(config["odb"]["mem_gb"]) is not int or config["odb"]["mem_gb"] <= 0:
     raise WorkflowError("odb.mem_gb must be a positive integer in GB (1 GB = 1000 MB)")
 if config["tpm"]["multimap"] not in {"error", "drop", "split"}:
     raise WorkflowError("tpm.multimap must be error, drop, or split")
-if type(config["alignment"]["enabled"]) is not bool:
-    raise WorkflowError("alignment.enabled must be true or false")
-for key in ["threads", "mem_gb"]:
-    if type(config["alignment"][key]) is not int or config["alignment"][key] <= 0:
-        raise WorkflowError(f"alignment.{key} must be a positive integer")
-if type(config["kegg"]["enabled"]) is not bool:
-    raise WorkflowError("kegg.enabled must be true or false")
-for key in ["threads", "mem_gb"]:
-    if type(config["kegg"][key]) is not int or config["kegg"][key] <= 0:
-        raise WorkflowError(f"kegg.{key} must be a positive integer")
+for section in ["alignment", "kegg", "contrast", "phylogeny"]:
+    if type(config[section]["enabled"]) is not bool:
+        raise WorkflowError(f"{section}.enabled must be true or false")
+for section in ["alignment", "kegg"]:
+    for key in ["threads", "mem_gb"]:
+        if type(config[section][key]) is not int or config[section][key] <= 0:
+            raise WorkflowError(f"{section}.{key} must be a positive integer")
 if config["kegg"]["ambiguity"] not in {"duplicate", "drop", "error"}:
     raise WorkflowError("kegg.ambiguity must be duplicate, drop, or error")
 PHY = dict(config["phylogeny"], translation_table=config["translation"]["table"])
-if type(config["contrast"]["enabled"]) is not bool:
-    raise WorkflowError("contrast.enabled must be true or false")
 if not isinstance(config["contrast"]["trait"], str) or not config["contrast"]["trait"].strip():
     raise WorkflowError("contrast.trait must name a column in inputs.species_trait")
 if config["contrast"]["trait"] in {"species", "role", "group", "representative", "is_representative", "n_species_in_group", "contrast_pair_id"}:
     raise WorkflowError("contrast.trait conflicts with a reserved output column")
-for key in ["enabled"]:
-    if type(PHY[key]) is not bool:
-        raise WorkflowError(f"phylogeny.{key} must be true or false")
 if (not isinstance(PHY["species_sets"], list) or not PHY["species_sets"]
         or any(not isinstance(s, str) or s not in {"all", "phenotyped"} for s in PHY["species_sets"])
         or len(set(PHY["species_sets"])) != len(PHY["species_sets"])):
     raise WorkflowError("phylogeny.species_sets must be a nonempty list of all and/or phenotyped, without duplicates")
 if not isinstance(PHY["trait"], str) or not PHY["trait"].strip() or PHY["trait"] == "species":
     raise WorkflowError("phylogeny.trait must name a phenotype column in inputs.species_trait")
-for key in ["min_sites", "min_informative_sites", "min_markers_per_species"]:
-    if key in PHY:
-        raise WorkflowError(f"phylogeny.{key} was removed; remove it from your configuration. These counts are now diagnostics")
 for key in ["max_markers", "min_protein_length",
             "min_taxa", "align_threads", "tree_threads", "astral_threads",
             "preparation_mem_gb", "alignment_mem_gb", "trimming_mem_gb", "tree_mem_gb", "astral_mem_gb", "seed"]:
     if type(PHY[key]) is not int or PHY[key] <= 0:
         raise WorkflowError(f"phylogeny.{key} must be a positive integer")
-if "min_occupancy" in PHY:
-    raise WorkflowError("phylogeny.min_occupancy was removed; remove it from your configuration. Coverage is used for ranking and diagnostics")
-for key in ["max_unknown_fraction"]:
-    if type(PHY[key]) not in {int, float} or not 0 <= PHY[key] <= 1:
-        raise WorkflowError(f"phylogeny.{key} must be between 0 and 1")
-if "max_gap_fraction" in PHY:
-    raise WorkflowError("phylogeny.max_gap_fraction was removed; column selection now uses trimAl")
+if type(PHY["max_unknown_fraction"]) not in {int, float} or not 0 <= PHY["max_unknown_fraction"] <= 1:
+    raise WorkflowError("phylogeny.max_unknown_fraction must be between 0 and 1")
 if PHY["trimal_mode"] not in {"gappyout", "automated1"}:
     raise WorkflowError("phylogeny.trimal_mode must be gappyout or automated1")
 if PHY["min_taxa"] < 4:
     raise WorkflowError("phylogeny requires min_taxa >= 4")
 if PHY["sequence_mode"] not in {"cds", "protein"} or (PHY["sequence_mode"] == "protein" and not PHY["sequence_dir"]):
     raise WorkflowError("phylogeny.sequence_mode must be cds or protein; protein mode requires sequence_dir")
-for key in ["clade_rank", "clade_min_species", "min_clade_occupancy"]:
-    if key in PHY:
-        raise WorkflowError(f"phylogeny.{key} was removed; remove it from your configuration. Marker selection uses overall coverage")
 for key in ["busco_full_dir", "sequence_dir"]:
     if PHY[key] is not None and (not isinstance(PHY[key], str) or not PHY[key].strip()):
         raise WorkflowError(f"phylogeny.{key} must be null or a nonempty string")
@@ -110,26 +77,18 @@ if not isinstance(PHY["outgroup"], str) or not PHY["outgroup"].strip():
 for key in ["busco_full_suffix", "sequence_suffix"]:
     if not isinstance(PHY[key], str) or not PHY[key] or "/" in PHY[key] or "\\" in PHY[key]:
         raise WorkflowError(f"phylogeny.{key} must be a nonempty filename suffix")
-for key in ["lineage"]:
-    if not isinstance(PHY[key], str) or not PHY[key].strip():
-        raise WorkflowError(f"phylogeny.{key} must be a nonempty string")
+if not isinstance(PHY["lineage"], str) or not PHY["lineage"].strip():
+    raise WorkflowError("phylogeny.lineage must be a nonempty string")
 if type(PHY["dating"]["enabled"]) is not bool:
     raise WorkflowError("phylogeny.dating.enabled must be true or false")
 if type(PHY["dating"]["mem_gb"]) is not int or PHY["dating"]["mem_gb"] <= 0:
     raise WorkflowError("phylogeny.dating.mem_gb must be a positive integer")
-for key in ["calibrations"]:
-    value = PHY["dating"][key]
-    if value is not None and (not isinstance(value, str) or not value.strip()):
-        raise WorkflowError(f"phylogeny.dating.{key} must be null or a nonempty path")
-if "treepl" in PHY["dating"]:
-    raise WorkflowError("treePL was removed; replace phylogeny.dating.treepl with lsd2 settings")
-if "rate_partitions" in PHY["dating"]:
-    raise WorkflowError("phylogeny.dating.rate_partitions is unsupported; the LSD2 stage estimates one rate")
+value = PHY["dating"]["calibrations"]
+if value is not None and (not isinstance(value, str) or not value.strip()):
+    raise WorkflowError("phylogeny.dating.calibrations must be null or a nonempty path")
 if PHY["dating"]["calibration_source"] not in {"file", "timetree"}:
     raise WorkflowError("phylogeny.dating.calibration_source must be file or timetree")
 TT = PHY["dating"]["timetree"]
-if "min_clade_taxa" in TT:
-    raise WorkflowError("phylogeny.dating.timetree.min_clade_taxa was removed; remove it from your configuration. Query limits control workload")
 for key in ["max_representatives", "max_queries", "min_studies"]:
     if type(TT[key]) is not int or TT[key] < 1:
         raise WorkflowError(f"phylogeny.dating.timetree.{key} must be a positive integer")
@@ -138,10 +97,7 @@ if TT["max_representatives"] < 2 or type(TT["offline"]) is not bool:
 if TT["representatives"] is not None and (not isinstance(TT["representatives"], str) or not TT["representatives"].strip()):
     raise WorkflowError("TimeTree representatives must be null or a nonempty file path")
 
-ROOT = str(Path(workflow.basedir).parent)
 ASTRAL = str(Path(ROOT) / "resources/phylogeny_tools/bin/astral4_int128")
-SCRIPTS = str(Path(workflow.basedir) / "scripts")
-sys.path.insert(0, SCRIPTS)
 from layout import (
     ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
     PHYLOGENY_BRANCHES, REPRESENTATIVES as REPRESENTATIVES_REL,
@@ -154,11 +110,9 @@ from taxonomy_audit import validate_settings as validate_audit_settings
 from filter_species import validate_exclusions, discover as discover_filter_inputs
 from phenoradar_inputs import validate_settings as validate_phenoradar_settings, discover as discover_phenoradar_inputs
 try:
-    AUDIT = validate_audit_settings(config.get("taxonomy_audit", {}))
-    PHENORADAR = validate_phenoradar_settings(config.get("phenoradar", {}))
-    EXCLUDE_SPECIES = validate_exclusions(config.get("exclude_species", []))
-    if "species_filter" in config:
-        raise ValueError("use top-level exclude_species, not a nested species_filter configuration")
+    AUDIT = validate_audit_settings(config["taxonomy_audit"])
+    PHENORADAR = validate_phenoradar_settings(config["phenoradar"])
+    EXCLUDE_SPECIES = validate_exclusions(config["exclude_species"])
 except ValueError as error:
     raise WorkflowError(str(error))
 OUT = f'results/{config["analysis"]}'

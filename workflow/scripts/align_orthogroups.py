@@ -154,8 +154,6 @@ def finish(inputs, outdir, reports):
     for path in outdir.glob("*.faa"):
         if path.name not in expected_names:
             path.unlink()
-    # Retire this workflow-owned output when updating a pre-header-contract run.
-    (outdir / "members.tsv").unlink(missing_ok=True)
     write_json(outdir / "provenance.json", {
         "created_at": now(), "collection": file_record(inputs / "provenance.json"),
         "alignments": alignments,
