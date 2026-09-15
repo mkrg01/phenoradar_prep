@@ -32,7 +32,7 @@ def validate_container_image(image):
     except ValueError:
         raise ValueError(
             "container_image must be auto or a major.minor.patch version without v "
-            "(e.g. '0.1.0'); image URIs and SIF paths are no longer supported"
+            "(e.g. '0.1.0')"
         ) from None
 
 

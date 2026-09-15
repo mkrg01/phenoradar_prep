@@ -274,6 +274,6 @@ def test_real_workflow_container_setup(batch_workspace, mode, deployment):
         assert result.returncode == 0, output
         rules = set(result.stdout.splitlines())
         assert {"all", "references", "proteins"} <= rules
-        assert "prepare" not in rules
+        assert not {"prepare", "phenoradar_metadata"} & rules
     for directory in ("results", "resources", "work"):
         assert not (checkout / directory).exists()

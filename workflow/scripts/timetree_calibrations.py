@@ -300,8 +300,6 @@ def prepare(tree, metadata, taxonomy_db, outdir, cache_dir):
         "outputs": {name: file_record(out / name) for name in
                     ["calibrations.tsv", "candidates.tsv", "candidates.json", "taxa.tsv", "nodes.nwk", "studies.tsv"]},
         "confidence_intervals_propagated": False, "cache_dir": str(Path(cache_dir).resolve())})
-    for name in ["representatives.txt", "representatives.nwk"]:
-        (out / name).unlink(missing_ok=True)
     print(f"TimeTree: {queries} queries, {status['retained']} calibrations, {status['status']}", flush=True)
     if status.get("error"):
         print(status["error"], flush=True)

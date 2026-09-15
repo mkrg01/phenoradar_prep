@@ -145,7 +145,7 @@ VeryFastTree uses double precision and `-lg -gamma`: LG+CAT topology search with
 Gamma20 length rescaling. SH-like local supports are saved without bootstrap
 replicates or support filtering.
 
-VeryFastTree and ASTRAL-IV use the top-level [`seed`](configuration.md#reproducibility),
+VeryFastTree and ASTRAL-IV use the top-level [`seed`](../config/config.yaml),
 shared with representative and contrast-pair selection.
 
 ASTRAL-IV combines gene trees and estimates local posterior probabilities and

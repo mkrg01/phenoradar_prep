@@ -7,7 +7,7 @@ KEYS = {
     "inputs": "metadata species_trait busco cds_dir quant_dir",
     "selection": "busco_threshold species_list missing_taxonomy",
     "translation": "table",
-    "odb": "existing_results node",
+    "odb": "node",
     "tpm": "multimap",
     "alignment": "enabled",
     "kegg": "enabled ambiguity",

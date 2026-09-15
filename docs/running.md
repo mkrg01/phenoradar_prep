@@ -99,7 +99,6 @@ schedule missing prerequisites automatically.
 | `taxonomy_check` | [MonoPhy review](taxonomy_check.md) of full/phenotyped species trees |
 | `contrast_pairs` | [Representative selection, inference, and trait pairs](contrast_pairs.md#representative-analysis) |
 | `phylogeny_contrast_pairs` | [Trait pairs from full/phenotyped trees](contrast_pairs.md#pairs-from-full-or-phenotyped-trees); with exclusions, requires completed results and uses the filtered export |
-| `phenoradar_metadata` | Minimal species metadata, useful for backfilling older results |
 | `filter_species` | [Export completed results after exclusions](species_filter.md); does not start producer analyses |
 | `phenoradar_inputs` | [Automatically collect available completed results](phenoradar_inputs.md); no collection settings or producer analyses |
 
@@ -159,5 +158,4 @@ species annotations are reused; failed annotations restart while retaining
 their previous attempts. Other completed workflow steps follow Snakemake's
 usual reuse rules.
 
-See [reference updates](references.md) and [migration](migration.md) when changing
-snapshots or reusing older results.
+See [reference updates](references.md) when changing snapshots.

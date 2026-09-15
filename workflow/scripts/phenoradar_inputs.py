@@ -41,7 +41,7 @@ def discover(source, exclusions=()):
     for name in ["metadata/samples.tsv", "metadata/species_metadata.tsv"]:
         path = source / name
         if not path.is_file():
-            raise ValueError(f"missing {path}; run phenoradar_metadata (then filter_species if excluding species)")
+            raise ValueError(f"missing required workflow output: {path}")
         files.add(path)
 
     sections, links, hashes, trees, contrasts = {}, {}, {}, {}, []
@@ -301,7 +301,7 @@ def validate_annotations(path, orthogroups):
 def check_destination(out):
     if out.is_symlink():
         raise ValueError("phenoradar_inputs output directory must not be a symlink")
-    allowed = {"species_metadata.tsv", "tpm.tsv", "species_tree.nwk", "orthogroup_annotations.tsv",
+    allowed = {"species_metadata.tsv", "tpm.tsv", "orthogroup_annotations.tsv",
                "orthogroup_annotations.tsv.gz", "run.json", ".snakemake_timestamp"}
     directories = {"metadata", "proteins", "orthogroups", "phylogeny", "alignments", "kegg"}
     if out.exists():

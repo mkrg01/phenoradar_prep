@@ -73,5 +73,4 @@ positive TPM retained after mapping and ambiguity handling.
 ## Provenance
 
 Keep `run.json`, branch QC/provenance, the Release's `image.json`, and reference
-snapshots with the analysis. See [migration](migration.md#relocated-results) for
-relocated results.
+snapshots with the analysis.

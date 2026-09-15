@@ -3,7 +3,7 @@
 ## Start a dataset
 
 1. Check the [input formats and species selection](inputs.md).
-2. Create a [configuration](configuration.md); the matching [container image](containers.md) is selected automatically.
+2. Edit the [configuration](configuration.md); the matching [container image](containers.md) is selected automatically.
 3. [Run the workflow](running.md); optionally start with a [pilot](running.md#pilot-run).
 4. Inspect the [expression tables and QC](outputs.md#tpm-interpretation).
 
@@ -31,6 +31,5 @@ to export a curated subset if needed, then [collect PhenoRadar inputs](phenorada
 - [Container setup and releases](containers.md)
 - [Releasing a version](releases.md)
 - [Development and tests](development.md)
-- [Updating older configurations and results](migration.md)
 
 [Project README](../README.md)

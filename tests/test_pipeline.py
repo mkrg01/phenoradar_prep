@@ -323,59 +323,7 @@ def test_odb_reference_and_mapping_leave_storage_policy_to_user(fake_odb, tmp_pa
     assert (tmp_path / "out/provenance.json").is_file()
 
 
-@pytest.fixture
-def existing_odb(tmp_path):
-    root = tmp_path / "existing"
-    root.mkdir()
-    proteins = tmp_path / "original_proteins"
-    proteins.mkdir()
-    records, annotations = [], ["#query\tODB_OG\n"]
-    for species in ["Alpha_plant", "Beta_sp-X"]:
-        odb_species = species.replace("-", "_")
-        protein = proteins / f"{odb_species}_protein.fa"
-        protein.write_text("".join(f">{species}_g{i}\nMK*\n" for i in [1, 2, 3]))
-        records.append({"species": species, "odb_species": odb_species, **file_record(protein)})
-        for i in [1, 2]:
-            annotations.extend([f"{species}_g{i}\tOG{i}\n"] * 2)
-    annotation = root / "annotations.tsv"
-    annotation.write_text("".join(annotations))
-    write_json(root / "snapshot.json", {"schema_version": 1, "version": "v12", "node": 3193,
-               "proteins": records, "annotations": {**file_record(annotation), "path": "annotations.tsv"}})
-    return root, proteins
-
-
-@pytest.mark.parametrize("problem,message", [
-    ("protein", "protein differs"), ("annotation", "result changed"),
-    ("node", "version/node differs"), ("species", "missing selected species"),
-    ("query", "does not belong"),
-])
-def test_existing_odb_rejects_incompatible_inputs(existing_odb, tmp_path, problem, message):
-    root, proteins = existing_odb
-    snapshot = json.loads((root / "snapshot.json").read_text())
-    rows = [{k: r[k] for k in ["species", "odb_species"]} for r in snapshot["proteins"]]
-    samples = tmp_path / "samples.tsv"
-    write_tsv(samples, list(rows[0]), rows)
-    if problem == "protein":
-        path = proteins / "Alpha_plant_protein.fa"
-        path.write_text(path.read_text().replace("MK*", "MQ*"))
-    elif problem in {"annotation", "query"}:
-        path = root / "annotations.tsv"
-        path.write_text(path.read_text() + "unknown_gene\tOG1\n")
-        if problem == "query":
-            snapshot["annotations"]["sha256"] = file_record(path)["sha256"]
-    elif problem == "node":
-        snapshot["node"] = 1
-    else:
-        snapshot["proteins"].pop()
-    write_json(root / "snapshot.json", snapshot)
-    with pytest.raises(ValueError, match=message):
-        merge_odb(samples, "unused", "unused", proteins, tmp_path / "db.sqlite",
-                  tmp_path / "map.tsv", tmp_path / "qc.json", existing=root)
-    assert not (tmp_path / "db.sqlite").exists()
-
-
-@pytest.mark.parametrize("reuse", [False, True])
-def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, frozen_reference, existing_odb, tmp_path, reuse, command_environment, workflow_project, seed_taxonomy):
+def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, frozen_reference, tmp_path, command_environment, workflow_project, seed_taxonomy):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     seqkit = os.environ.get("SEQKIT_BIN") or shutil.which("seqkit")
     if not snakemake or not seqkit:
@@ -385,20 +333,15 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     taxonomy_before = file_record(taxonomy), taxonomy.stat().st_mtime_ns
     config = {
         "run_name": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
-        "odb": {},
     }
     configfile = tmp_path / "config.yaml"
-    if reuse:
-        config["odb"]["existing_results"] = str(existing_odb[0])
-        # Leave the fixed reference absent; ODB must never execute in import mode.
-    else:
-        reference = workflow_project / "resources/orthodb/v12_3193"
-        reference.parent.mkdir(parents=True)
-        reference.symlink_to(frozen_reference, target_is_directory=True)
+    reference = workflow_project / "resources/orthodb/v12_3193"
+    reference.parent.mkdir(parents=True)
+    reference.symlink_to(frozen_reference, target_is_directory=True)
     configfile.write_text(yaml.safe_dump(config))
     # Supply standard command names as the rule environments do in production.
     env = command_environment({"python": sys.executable, "seqkit": seqkit,
-                               "ODB-mapper": tmp_path / "absent_odb_command" if reuse else fake_odb})
+                               "ODB-mapper": fake_odb})
     env["FAKE_ODB_LOG"] = str(tmp_path / "events.txt")
     base = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(configfile),
             "--cores", "2", "--resources", "mem_mb=16000",
@@ -411,21 +354,20 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
         return result.stdout
     # Resolve the selection checkpoint so the resource plan can be inspected.
     execute(["--", "results/test/metadata/samples.tsv"])
-    if not reuse:
-        defaults = subprocess.run(base[:base.index("--cores")] + [
-            "--cores", "64", "--resources", "mem_mb=384000", "--dry-run", "--printshellcmds"],
-            cwd=workflow_project, env=env, text=True, capture_output=True, timeout=60)
-        assert defaults.returncode == 0, defaults.stdout + defaults.stderr
-        assert defaults.stdout.count("threads: 16") == 1
-        assert defaults.stdout.count("mem_mb=192000") == 1
-        assert defaults.stdout.count("--jobs 16 --batch-size 64") == 1
+    defaults = subprocess.run(base[:base.index("--cores")] + [
+        "--cores", "64", "--resources", "mem_mb=384000", "--dry-run", "--printshellcmds"],
+        cwd=workflow_project, env=env, text=True, capture_output=True, timeout=60)
+    assert defaults.returncode == 0, defaults.stdout + defaults.stderr
+    assert defaults.stdout.count("threads: 16") == 1
+    assert defaults.stdout.count("mem_mb=192000") == 1
+    assert defaults.stdout.count("--jobs 16 --batch-size 64") == 1
     # The workflow uses only the fixed snapshot, without a source configuration.
     Path(tiny_inputs["taxonomy_db"]).unlink()
     plan = execute(["--dry-run"])
     assert "rule prepare_taxonomy:" not in plan
-    assert plan.count("rule odb_map:") == (0 if reuse else 1)
+    assert plan.count("rule odb_map:") == 1
     assert "rule prepare_odb_reference:" not in plan
-    assert plan.count("mem_mb=3000") == (0 if reuse else 1)
+    assert plan.count("mem_mb=3000") == 1
     assert not any("<TBD>" in line for line in plan.splitlines() if "input:" in line)
     execute()
     out = tmp_path / "results/test"
@@ -434,14 +376,14 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     assert (out / "orthogroups/mapping/manifests/chunks.json").is_file()
     assert len(read_tsv(out / "orthogroups/expression/tpm_wide.tsv")) == 3
     events = tmp_path / "events.txt"
-    assert (len(events.read_text().splitlines()) if events.exists() else 0) == (0 if reuse else 1)
+    assert len(events.read_text().splitlines()) == 1
     assert json.loads((out / "orthogroups/mapping/merge_qc.json").read_text())["duplicate_pairs_removed"] == 4
     completed_work = {p: p.stat().st_mtime_ns for p in
                       (tmp_path / "work/test/orthogroups/mapping").glob("chunk_*/*/completed.json")}
-    assert len(completed_work) == (0 if reuse else 1)
+    assert len(completed_work) == 1
     assert "Nothing to be done" in execute()
     assert all(p.stat().st_mtime_ns == stamp for p, stamp in completed_work.items())
-    assert (len(events.read_text().splitlines()) if events.exists() else 0) == (0 if reuse else 1)
+    assert len(events.read_text().splitlines()) == 1
     assert "Nothing to be done" in execute(["--dry-run"])
     abundance = Path(tiny_inputs["quant_dir"]) / "Alpha_plant/A1/A1_abundance.tsv"
     rows = read_tsv(abundance)
@@ -452,7 +394,7 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     assert "rule odb_map:" not in dry
     assert "rule merge_odb:" not in dry
     execute()
-    assert (len(events.read_text().splitlines()) if events.exists() else 0) == (0 if reuse else 1)
+    assert len(events.read_text().splitlines()) == 1
     # Shrinking selection must rebuild the checkpoint DAG and omit stale runs/chunks.
     subset = tmp_path / "subset.txt"
     subset.write_text("Beta_sp-X\nGamma_plant\n")  # Gamma remains below the BUSCO threshold.
@@ -461,12 +403,7 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     execute()
     assert [r["run"] for r in read_tsv(out / "orthogroups/expression/tpm_wide.tsv")] == ["B1"]
     assert json.loads((out / "metadata/selection.json").read_text())["requested_species"] == ["Beta_sp-X", "Gamma_plant"]
-    if reuse:
-        assert not events.exists()
-        qc = json.loads((out / "orthogroups/mapping/merge_qc.json").read_text())
-        assert qc["mode"] == "existing"
-        assert qc["excluded_annotation_rows"] == 4
-        assert qc["duplicate_pairs_removed"] == 2
+    assert len(events.read_text().splitlines()) == 2
     assert (file_record(taxonomy), taxonomy.stat().st_mtime_ns) == taxonomy_before
 
 

@@ -20,64 +20,17 @@ def test_config_keys_match_documented_defaults():
         assert set(values) == set(keys.split()), section
     validate_keys(yaml.safe_load((ROOT / "config/pilot.yaml").read_text()))
     validate_keys({"phylogeny": {"dating": {"calibration_source": "file"}}})
-    validate_keys({"odb": {"existing_results": "/data/snapshot"}})
     validate_keys({"run_name": "c4_run1"})
 
 
 @pytest.mark.parametrize("config,path", [
-    ({"analysis": "pilot"}, "analysis"),
-    ({"tools": {}}, "tools"),
-    ({"taxonomy": {"source": None}}, "taxonomy"),
-    ({"taxonomy_audit": {"enabled": True}}, "taxonomy_audit"),
-    ({"odb": {"mem_mb": 8000}}, "odb.mem_mb"),
-    ({"odb": {"min_free_gb": 750}}, "odb.min_free_gb"),
-    ({"odb": {"reference_min_free_gb": 200}}, "odb.reference_min_free_gb"),
-    ({"odb": {"allow_nonlocal": True}}, "odb.allow_nonlocal"),
-    ({"odb": {"keep_work": True}}, "odb.keep_work"),
-    ({"odb": {"chunk_size": 100}}, "odb.chunk_size"),
-    ({"odb": {"batch_size": 64}}, "odb.batch_size"),
-    ({"phylogeny": {"sequence_mode": "protein"}}, "phylogeny.sequence_mode"),
-    ({"phylogeny": {"sequence_dir": "/data/proteins"}}, "phylogeny.sequence_dir"),
-    ({"phylogeny": {"sequence_suffix": ".fa"}}, "phylogeny.sequence_suffix"),
-    ({"phylogeny": {"busco_full_suffix": ".tsv"}}, "phylogeny.busco_full_suffix"),
-    ({"phylogeny": {"min_occupancy": 0.5}}, "phylogeny.min_occupancy"),
-    ({"phylogeny": {"seed": 12345}}, "phylogeny.seed"),
-    ({"phylogeny": {"dating": {"treepl": {}}}}, "phylogeny.dating.treepl"),
-    ({"phylogeny": {"dating": {"lsd2": {}}}}, "phylogeny.dating.lsd2"),
-    ({"phylogeny": {"dating": {"lsd2": {"variance": 1}}}}, "phylogeny.dating.lsd2"),
-    ({"phylogeny": {"dating": {"lsd2": {"variance_parameter": None}}}}, "phylogeny.dating.lsd2"),
-    ({"phylogeny": {"dating": {"lsd2": {"numsites": None}}}}, "phylogeny.dating.lsd2"),
-    ({"phylogeny": {"dating": {"timetree": {"min_clade_taxa": 8}}}},
-     "phylogeny.dating.timetree"),
-    ({"phylogeny": {"dating": {"timetree": {"representatives": None}}}},
-     "phylogeny.dating.timetree"),
-    ({"phylogeny": {"dating": {"timetree": {"offline": False}}}},
-     "phylogeny.dating.timetree"),
-    ({"phylogeny": {"dating": {"timetree": {}}}}, "phylogeny.dating.timetree"),
-    ({"phylogeny": {"dating": {"timetree": {"max_representatives": 64}}}}, "phylogeny.dating.timetree"),
-    ({"phylogeny": {"dating": {"timetree": {"max_queries": 32}}}}, "phylogeny.dating.timetree"),
-    ({"phylogeny": {"dating": {"timetree": {"min_studies": 5}}}}, "phylogeny.dating.timetree"),
-    ({"kegg": {"thread": 2}}, "kegg.thread"),
-    ({"phenoradar": {"alignments": True}}, "phenoradar"),
-    ({"phenoradar": {}}, "phenoradar"),
-    ({"species_filter": {}}, "species_filter"),
+    ({"unknown": {}}, "unknown"),
+    ({"inputs": {"metdata": "input/metadata.tsv"}}, "inputs.metdata"),
+    ({"odb": {"existing_results": "/data/snapshot"}}, "odb.existing_results"),
+    ({"phylogeny": {"enable": True}}, "phylogeny.enable"),
+    ({"phylogeny": {"dating": {"enable": True}}}, "phylogeny.dating.enable"),
 ])
 def test_unknown_settings_name_the_full_path(config, path):
-    with pytest.raises(ValueError, match=f"unknown configuration settings: {path}"):
-        validate_keys(config)
-
-
-@pytest.mark.parametrize("path", [
-    "odb.threads", "odb.mem_gb", "alignment.threads", "alignment.mem_gb",
-    "kegg.threads", "kegg.mem_gb", "phylogeny.align_threads", "phylogeny.tree_threads",
-    "phylogeny.astral_threads", "phylogeny.preparation_mem_gb", "phylogeny.alignment_mem_gb",
-    "phylogeny.trimming_mem_gb", "phylogeny.tree_mem_gb", "phylogeny.astral_mem_gb",
-    "phylogeny.dating.mem_gb", "taxonomy_check.mem_gb",
-])
-def test_resource_overrides_are_not_workflow_config(path):
-    config = 8
-    for key in reversed(path.split(".")):
-        config = {key: config}
     with pytest.raises(ValueError, match=f"unknown configuration settings: {path}"):
         validate_keys(config)
 

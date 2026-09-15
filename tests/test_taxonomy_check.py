@@ -60,14 +60,13 @@ def run_check(inputs, out, **settings):
     return check(**inputs, outdir=out, settings={"ranks": ["family"], **settings})
 
 
-def test_native_roles_run_linkage_and_legacy_report_replacement(check_inputs, tmp_path):
+def test_native_roles_run_linkage_and_report_replacement(check_inputs, tmp_path):
     before = {k: sha256(v) for k, v in check_inputs.items()}
     out = tmp_path / "check"
     out.mkdir()
-    write_json(out / "summary.json", {"report_type": "taxonomy_check", "schema_version": 1})
-    (out / "gene_evidence.tsv").write_text("obsolete detector output")
-    (out / "contexts").mkdir()
-    (out / "contexts/obsolete.svg").write_text("obsolete plot")
+    write_json(out / "summary.json", {"report_type": "taxonomy_check", "schema_version": 2})
+    (out / "ranks/genus").mkdir(parents=True)
+    (out / "ranks/genus/tree.svg").write_text("previous rank plot")
     result = run_check(check_inputs, out, ranks=["family", "subfamily", "species", "order"])
     assert result["report_type"] == "taxonomy_check"
     assert result["method"] == "MonoPhy" and result["engine"]["version"] == "1.3.2"
@@ -76,8 +75,7 @@ def test_native_roles_run_linkage_and_legacy_report_replacement(check_inputs, tm
     assert {(r["species"], r["role"], r["focal_taxon"]) for r in candidates} == {
         ("A_query", "outlier", "FamilyA"), ("A_query", "intruder", "FamilyB")}
     assert all(r["run_ids"] == "SRR2;SRR99" for r in candidates)
-    assert "gene_trees" not in result and not (out / "gene_evidence.tsv").exists()
-    assert not (out / "contexts").exists()
+    assert not (out / "ranks/genus").exists()
     flagged = [r["run"] for r in read_tsv(out / "samples.tsv") if r["status"] == "review_flag"]
     assert flagged == ["SRR2", "SRR99"]
     rank_states = read_tsv(out / "rank_status.tsv")

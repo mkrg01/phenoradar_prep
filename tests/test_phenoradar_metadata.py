@@ -1,12 +1,6 @@
 """Consumer metadata retains the cohort and rejects conflicting annotations."""
-import os
-from pathlib import Path
-import shutil
-import subprocess
-import sys
 
 import pytest
-import yaml
 
 from common import read_tsv, write_tsv
 from phenoradar_metadata import fields, prepare, read_base, with_pairs
@@ -141,46 +135,3 @@ def test_stored_base_rejects_duplicates_and_bad_headers(inputs):
     inputs["output"].write_text("species\tC4\tcontrast_pair_id\tfamily\tfamily\n")
     with pytest.raises(ValueError, match="duplicate TSV columns"):
         read_base(inputs["output"])
-
-
-def test_explicit_metadata_target_backfills_completed_selection_without_raw_inputs(workflow_project, command_environment):
-    snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
-    if not snakemake:
-        pytest.skip("Snakemake required")
-    project = workflow_project
-    metadata_dir = project / "results/test/metadata"
-    raw = project / "unavailable_inputs"
-    samples = [{"species": species, "scientific_name": species.replace("_", " "),
-                "odb_species": species.replace("-", "_"), "taxid": str(i + 1), "run": f"R{i}",
-                "cds": str(raw / f"{species}.faa"), "abundance": str(raw / f"R{i}.tsv")}
-               for i, species in enumerate(["Plant_A", "Plant_B-x"])]
-    write_tsv(metadata_dir / "samples.tsv", list(samples[0]), samples)
-    write_tsv(metadata_dir / "metadata_high_busco.tsv", ["species", "run", "family", "C4"],
-              [{"species": row["species"], "run": row["run"], "family": "Plantaceae", "C4": "1"}
-               for row in samples])
-    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in metadata_dir.iterdir()}
-    cfg = project / "override.yaml"
-    cfg.write_text(yaml.safe_dump({"run_name": "test", "inputs": {
-        "metadata": str(raw / "metadata.tsv"), "species_trait": str(raw / "traits.tsv"),
-        "busco": str(raw / "busco.tsv"), "cds_dir": str(raw / "cds"), "quant_dir": str(raw / "quant"),
-    }}))
-    root = Path(__file__).resolve().parents[1]
-    process = subprocess.run(
-        [snakemake, "--snakefile", str(root / "workflow/Snakefile"), "--configfile", str(cfg),
-         "--cores", "1", "--", "phenoradar_metadata"],
-        cwd=project, env=command_environment({"python": sys.executable}), text=True,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    log = project / "logs/test/phenoradar_metadata.log"
-    assert process.returncode == 0, process.stdout + (log.read_text() if log.exists() else "")
-    assert "select_metadata" not in process.stdout
-    assert all((path.read_bytes(), path.stat().st_mtime_ns) == previous for path, previous in before.items())
-    assert read_base(metadata_dir / "species_metadata.tsv") == [
-        {"species": row["species"], "C4": "", "contrast_pair_id": "", "family": "Plantaceae"}
-        for row in samples
-    ]
-    assert {path.name for path in metadata_dir.iterdir()} == {
-        "samples.tsv", "metadata_high_busco.tsv", "species_metadata.tsv",
-    }
-    assert not raw.exists()
-    assert not (project / "resources").exists()
-    assert not (project / "work").exists()

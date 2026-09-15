@@ -27,31 +27,12 @@ see [container setup](containers.md) for overrides.
 | --- | --- | --- |
 | `run_name` | `run001` | Simple directory name: letters, digits, underscores, dots, or hyphens; starts with a letter or digit |
 | `container_image` | `auto` | GHCR release: `auto` reads `VERSION`; or a version without `v`, e.g. `"0.1.0"`; see [containers](containers.md) |
-| `seed` | `12345` | Shared random seed for supported steps; integer from 1 to 2147483647 |
 | `inputs.metadata` | `input/metadata.tsv` | Sample metadata |
 | `inputs.busco` | `input/busco/summary.tsv` | BUSCO summary for species selection |
 | `inputs.cds_dir` | `input/cds` | Per-species CDS directory |
 | `inputs.quant_dir` | `input/quant` | Per-species/per-run abundance directory |
 | `inputs.species_trait` | `input/species_trait.tsv` | Species trait table |
 | `selection.busco_threshold` | `0.5` | Minimum complete BUSCO fraction |
-| `selection.species_list` | `null` | Candidate species file (one ID per line); `null` considers all species. BUSCO filtering follows; see [species selection](inputs.md#species-selection) |
-| `translation.table` | `1` | Genetic code for CDS translation |
-
-## Reproducibility
-
-Top-level `seed` controls VeryFastTree, ASTRAL-IV, representative selection, and
-contrast-pair selection, including recomputation by `filter_species`. Each job
-initializes its own random generator with this value. The resolved seed is
-recorded with the configuration in `run.json` and in the affected steps' reports
-or commands. Changing it invalidates affected jobs and their downstream outputs;
-unchanged completed jobs remain reusable.
-
-For reproducible results, retain the same inputs, reference snapshots (including
-the TimeTree cache), tool versions, actual per-job thread counts, and execution
-environment. Seed alone does not ensure identical results across environments.
-Logs and reports containing timestamps or temporary paths can differ even when
-the scientific results match. Tools without an exposed seed keep their existing
-behavior; KofamScan's HMMER uses its fixed default seed.
 
 ## OrthoDB settings
 
@@ -62,7 +43,6 @@ The default `3193` is Embryophyta (land plants). See
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `odb.node` | `3193` | NCBI Taxonomy ID of a supported OrthoDB v12 mapping level; Embryophyta by default |
-| `odb.existing_results` | `null` | Verified import snapshot of earlier annotations; see [importing ODB results](migration.md#importing-odb-results) |
 
 CPU and memory defaults live in the rules. Use Snakemake's standard options for
 [resource budgets and per-rule overrides](running.md#resource-budgets).
@@ -88,5 +68,4 @@ Branch-specific settings are documented with their methods and outputs:
 The [PhenoRadar input collector](phenoradar_inputs.md) automatically collects
 available completed results and needs no configuration section.
 
-See [targets](running.md#targets) for enabling and requesting analyses, and
-[migration](migration.md) for rejected settings in older overrides.
+See [targets](running.md#targets) for enabling and requesting analyses.

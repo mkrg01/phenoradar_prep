@@ -15,7 +15,6 @@ selection:
 translation:
   table: 1  # Seqkit genetic code ID; 1: Standard.
 odb:  # Work files are retained for reuse.
-  existing_results: null  # Existing ODB snapshot; null: run mapping. See docs/migration.md.
   node: 3193  # OrthoDB v12 mapping taxid; 3193: Embryophyta. See docs/references.md.
 tpm:
   multimap: error  # Ambiguous genes: error rejects; drop omits; split divides TPM equally.

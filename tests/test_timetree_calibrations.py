@@ -245,12 +245,9 @@ def test_all_clades_are_reported_with_citations_and_reused_responses(tmp_path):
     # A rerun preserves the original cache timestamps and all result data.
     results = {p: p.read_bytes() for p in out.iterdir() if p.name != "provenance.json"}
     cached = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in cache.iterdir()}
-    for name in ["representatives.txt", "representatives.nwk"]:
-        (out / name).write_text("obsolete selection")
     prepare(tree, metadata, database, out, cache)
     assert all(p.read_bytes() == content for p, content in results.items())
     assert all((p.read_bytes(), p.stat().st_mtime_ns) == old for p, old in cached.items())
-    assert not list(out.glob("representatives.*"))
 
 
 def test_more_than_64_species_and_32_queries_include_small_clades(tmp_path, monkeypatch):

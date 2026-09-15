@@ -18,8 +18,7 @@ After preparing metadata and running any desired analyses:
 ```
 
 Collection needs `metadata/samples.tsv` and `metadata/species_metadata.tsv`,
-normally created during preparation; see
-[backfilling older results](migration.md#backfilling-phenoradar-metadata).
+created by the normal workflow.
 Expression results are optional. Rerun the target after more analyses finish;
 it discovers new outputs and removes links to results that are no longer present.
 The collection log lists ready, absent, and incomplete sections.
@@ -66,8 +65,7 @@ unchanged, so pair IDs from different analyses are never combined.
 
 Existing `orthogroup_annotations.tsv[.gz]` files at the run root, in
 `orthogroups/`, or in `orthogroups/mapping/` are also collected. These are
-headerless OG/taxid/description tables; arbitrary external annotation paths are
-no longer configured here. Descriptions are not downloaded by collection.
+headerless OG/taxid/description tables. Descriptions are not downloaded by collection.
 
 ## Data checks and downstream use
 
