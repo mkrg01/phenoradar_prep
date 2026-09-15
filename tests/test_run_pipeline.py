@@ -174,8 +174,9 @@ def test_launcher_runs_dag_locally_without_submitting_jobs(batch_workspace, tmp_
         shutil.copytree(ROOT / "workflow", checkout / "workflow", dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copytree(ROOT / "config", checkout / "config")
+        (checkout / "VERSION").write_text("0.7.3\n")
     else:
-        (checkout / "workflow/Snakefile").write_text('rule all:\n    input: "a.txt", "b.txt"\n')
+        (checkout / "workflow/Snakefile").write_text('CONTAINER_IMAGE = None\n\nrule all:\n    input: "a.txt", "b.txt"\n')
     with (checkout / "workflow/Snakefile").open("a") as handle:
         handle.write('''
 
@@ -187,7 +188,7 @@ rule task:
     params:
         methods=",".join(sorted(method.name for method in workflow.deployment_settings.deployment_method)),
         container_args=workflow.deployment_settings.apptainer_args,
-        image=str(config.get("container_image"))
+        image=str(CONTAINER_IMAGE)
     shell: "printf '%s\\n' {threads} {params.methods:q} {params.container_args:q} {params.image:q} > {output:q}"
 ''')
     if mode.startswith("batch"):
@@ -212,7 +213,7 @@ rule task:
     if mode.endswith("_equals"):
         arguments = [f"--singularity-args={custom_container_args}", *arguments]
     if mode.endswith("_path"):
-        arguments += ["--config", "container_image=0.1.0", "--", "a.txt", "b.txt"]
+        arguments += ["--", "a.txt", "b.txt"]
     result = subprocess.run([str(script), *arguments], cwd=cwd, env=env,
                             capture_output=True, text=True, timeout=90)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -222,7 +223,7 @@ rule task:
         assert cores == expected_cores
         assert methods == expected_methods
         if mode.endswith("_path"):
-            assert image == "docker://ghcr.io/mkrg01/phenoradar_prep:v0.1.0"
+            assert image == "docker://ghcr.io/mkrg01/phenoradar_prep:v0.7.3"
         if mode.endswith("_equals"):
             assert container_args == custom_container_args
         else:
@@ -233,8 +234,8 @@ rule task:
 
 
 @pytest.mark.parametrize("mode", ["batch", "direct"])
-@pytest.mark.parametrize("deployment", ["auto", "missing_image", "configured_version", "native",
-                                       "native_version", "sif", "uri", "bad_version"])
+@pytest.mark.parametrize("deployment", ["version", "missing_version", "invalid_version", "native",
+                                       "configfile_override", "cli_override"])
 def test_real_workflow_container_setup(batch_workspace, mode, deployment):
     checkout, script, env = batch_workspace
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
@@ -249,27 +250,29 @@ def test_real_workflow_container_setup(batch_workspace, mode, deployment):
         env = {key: value for key, value in env.items() if not key.startswith("SLURM_")}
         script = checkout / "run_pipeline.sh"
     arguments = ["--cores", "2", "--list-rules"]
-    invalid_images = {"missing_image": "null", "sif": "/images/release.sif",
-                      "uri": "docker://ghcr.io/mkrg01/phenoradar_prep:v0.1.0",
-                      "bad_version": "v0.1.0"}
-    if deployment in invalid_images:
-        (checkout / "config/image.yaml").write_text(f"container_image: {invalid_images[deployment]}\n")
-        arguments += ["--configfile", "config/image.yaml"]
-    elif deployment == "configured_version":
-        # Listing rules checks the real config overlays without downloading an image.
+    expected_error = None
+    if deployment == "missing_version":
+        (checkout / "VERSION").unlink()
+        expected_error = "complete workflow checkout or release archive"
+    elif deployment == "invalid_version":
+        (checkout / "VERSION").write_text("not-a-version\n")
+        expected_error = "VERSION must contain"
+    elif deployment == "configfile_override":
         (checkout / "config/image.yaml").write_text('container_image: "0.1.0"\n')
-        (checkout / "config/run.yaml").write_text("run_name: pilot\n")
-        arguments += ["--configfile", "config/image.yaml", "config/run.yaml"]
-    elif deployment in {"native", "native_version"}:
+        arguments += ["--configfile", "config/image.yaml"]
+        expected_error = "unknown configuration settings: container_image"
+    elif deployment == "cli_override":
+        arguments += ["--config", "container_image=0.1.0"]
+        expected_error = "unknown configuration settings: container_image"
+    elif deployment == "native":
         arguments += ["--software-deployment-method=conda"]
-        if deployment == "native_version":
-            arguments += ["--config", "container_image=0.1.0"]
+        (checkout / "VERSION").unlink()
     result = subprocess.run([str(script), *arguments], cwd=checkout, env=env,
                             capture_output=True, text=True, timeout=90)
     output = result.stdout + result.stderr
-    if deployment in invalid_images:
+    if expected_error:
         assert result.returncode != 0
-        assert "container_image must be auto or" in output
+        assert expected_error in output
     else:
         assert result.returncode == 0, output
         rules = set(result.stdout.splitlines())

@@ -4,10 +4,9 @@
 
 ## Directory layout
 
-The configured `run_name` selects `results/<run_name>/`, `work/<run_name>/`,
-and `logs/<run_name>/`. Reusable references live in `resources/`.
-Slurm writes standard output to `pipeline-<job_id>.out` and standard error to
-`pipeline-<job_id>.err` in the repository root.
+`run_name` selects directories under `results/`, `work/` (retained work), and
+`logs/` (per-step logs/benchmarks). Shared [references](references.md) live in
+`resources/`.
 
 ## Result files
 
@@ -25,50 +24,41 @@ results/<run_name>/
       tpm_sum_wide.tsv
       tpm_wide.tsv
       mapping_qc.tsv
-    alignments/                     # Optional all-copy OG alignments
-  kegg/                             # Optional KO annotations/expression
+    alignments/                     # Optional OG alignments
+  kegg/                             # Optional KO results
   phylogeny/{all,phenotyped,representatives}/
   filtered/                         # Curated species subset
-  phenoradar_inputs/                 # Automatically collected downstream inputs/candidates
+  phenoradar_inputs/                 # Downstream collection
 ```
 
-Selection results include `metadata_all.tsv`, `metadata_high_busco.tsv`,
-`samples.tsv`, `species_high_busco.txt`, `selection.json`, and
-`busco_completeness.svg`. `species_metadata.tsv` provides PhenoRadar metadata.
-Per-step logs/benchmarks are under `logs/<run_name>/`; temporary files are under
-`work/<run_name>/`. Reference locations are listed in [references](references.md).
-
-See branch guides for [KO expression](kegg.md#outputs),
-[alignments](alignments.md#outputs-and-phenoradar), [phylogeny](phylogeny.md#outputs),
-[dating](dating.md#outputs), [taxonomy review](taxonomy_check.md#outputs-and-figures),
-[contrast pairs](contrast_pairs.md#outputs), [filtered data](species_filter.md#exported-dataset),
-and [PhenoRadar inputs](phenoradar_inputs.md#published-files).
+Start with `metadata/selection.json`, `samples.tsv`, and
+`busco_completeness.svg` for selection QC; `species_metadata.tsv` is base
+PhenoRadar metadata. Optional outputs are described in their
+[analysis guides](index.md#choose-an-analysis).
 
 ## TPM interpretation
 
-Long tables contain `species`, `run`, `orthogroup`, and either `tpm_sum` or `tpm`.
-Wide tables contain one row per run, identified by `species` and `run`, with one
-column per orthogroup. Missing run/orthogroup combinations are filled with zero.
-Multiple runs from a species are not pooled or averaged.
+Long tables have `species`, `run`, `orthogroup`, and `tpm_sum` or `tpm`.
+Wide tables have one row per run and one column per OG; missing combinations
+are zero. Multiple runs per species are kept separately.
 
-- `tpm_sum` sums the original input TPM values assigned to each orthogroup,
-  without rescaling. Unmapped genes are excluded.
-- `tpm` rescales retained orthogroup values to sum to one million within each run.
-  It therefore describes relative expression within the retained OG set.
+- `tpm_sum`: original TPM summed by OG; unmapped genes excluded.
+- `tpm`: retained OG values rescaled to one million per run, describing relative
+  expression within the retained OG set.
 
-Duplicate gene/OG pairs are removed before aggregation. If a gene maps to multiple
-orthogroups, `tpm.multimap` controls its treatment:
+Duplicate gene/OG pairs count once. `tpm.multimap` controls genes mapped to
+multiple OGs:
 
 | Policy | Behavior |
 | --- | --- |
-| `error` (default) | Stop and report the ambiguous genes |
-| `drop` | Exclude genes assigned to multiple OGs |
-| `split` | Divide each gene's TPM equally among its assigned OGs |
+| `error` (default) | Stop and report ambiguous genes |
+| `drop` | Exclude multi-OG genes |
+| `split` | Divide TPM equally among assigned OGs |
 
-`mapping_qc.tsv` reports the fraction of input TPM mapped to OGs, ambiguous target
-counts, the retained TPM fraction, and other mapping statistics. Aggregation
-rejects duplicate target IDs, negative or nonfinite TPM values, and runs with no
-positive TPM retained after mapping and ambiguity handling.
+Review `mapping_qc.tsv` for mapped/retained TPM fractions and ambiguous targets.
+Duplicate target IDs, negative/nonfinite TPM, or no positive retained TPM stop
+aggregation. [KO expression](kegg.md#outputs) has different normalization and
+missing-value rules.
 
 ## Provenance
 

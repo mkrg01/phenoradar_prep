@@ -4,65 +4,48 @@
 
 ## Installation
 
-Install the [requirements](../README.md#requirements) on Linux with Bash and make
-`snakemake` and `singularity` available on `PATH`, including compute nodes.
-`SNAKEMAKE_BIN` can select another Snakemake executable. No dedicated host Conda
-environment is required.
-
-Use a published release checkout, edit [config/config.yaml](../config/config.yaml)
-for your [inputs](inputs.md), and leave `container_image: auto` for automatic
-image selection. The examples below use this configuration file automatically.
-See [container setup](containers.md)
-for version selection, external bind mounts, or native execution. First use needs network
-access for the image and missing [references](references.md).
+Use a published release checkout with the [requirements](../README.md#requirements)
+on Linux/Bash, and edit [config/config.yaml](../config/config.yaml).
+See [container setup](containers.md) for compute-node tools, images, and bind mounts.
+First use needs network for the image and missing [references](references.md).
+`SNAKEMAKE_BIN` can select another Snakemake executable.
 
 ## Slurm
 
-Adjust the `#SBATCH` lines in `run_pipeline.sh` for your cluster, especially
-partition, account, CPUs, memory, and time. Submit from the repository root:
+Adjust the `#SBATCH` lines in `run_pipeline.sh` for your cluster (partition,
+account, CPUs, memory, time), then submit from the repository root:
 
 ```bash
 sbatch run_pipeline.sh
 ```
 
-The workflow automatically uses the allocated CPUs and memory, so there is no
-need to pass `--cores` or `--resources`. Omit the target to run `all`, including
-preparation and enabled analyses.
-
-All jobs run inside one node/task allocation. The script defaults to 16 CPUs,
-192 GiB, and 21 days on `debug`. Override these with `sbatch` options before the
-script name; workflow options go after it:
+Jobs share one node/task allocation and automatically use its CPUs/memory.
+Override Slurm settings before the script name:
 
 ```bash
-sbatch --cpus-per-task=32 --mem=256G --time=7-00:00:00 \
-  run_pipeline.sh
+sbatch --cpus-per-task=32 --mem=256G --time=7-00:00:00 run_pipeline.sh
 ```
 
-Slurm writes standard output to `pipeline-<job_id>.out` and standard error to
-`pipeline-<job_id>.err` in the repository root. Per-step logs are written under
-`logs/<run_name>/`, which Snakemake creates automatically.
-
-Monitor with `squeue -u "$USER"` and the job's `.out` and `.err` files; stop with
-`scancel JOB_ID`. Resubmit the same command to resume. Avoid concurrent jobs
-writing the same results.
+Workflow options go after the script name. Monitor `pipeline-<job_id>.out` / `.err`
+in the repository root and per-step logs in `logs/<run_name>/`.
+Avoid concurrent jobs writing the same results.
 
 ## Direct execution
 
-Run from the repository root with a CPU and memory budget:
+From the repository root, supply a CPU and memory budget:
 
 ```bash
 ./run_pipeline.sh --cores 16 --resources mem_gb=192
 ```
 
-Put all options before `--` and targets after it. Omit the target to run `all`.
-For a separate configuration file, see [configuration](configuration.md#loading-settings-and-paths).
+Put options before `--` and targets after it. Omitting the target runs `all`.
+`config/config.yaml` loads automatically; use `--configfile` for
+[overrides](configuration.md#loading-settings-and-paths).
 
 ## Pilot run
 
-Create `input/pilot_species.txt` with a few candidate species IDs, one per line;
-see [species selection](inputs.md#species-selection) for the ID format.
-The workflow applies BUSCO filtering to these candidates automatically. Then
-use the supplied pilot override:
+List a few candidate species IDs in `input/pilot_species.txt`, one per line.
+[BUSCO filtering](inputs.md#species-selection) still applies. Then run:
 
 ```bash
 sbatch --cpus-per-task=8 --mem=80G \
@@ -70,13 +53,9 @@ sbatch --cpus-per-task=8 --mem=80G \
   --set-threads odb_map=8 --set-resources odb_map:mem_mb=64000
 ```
 
-[config/pilot.yaml](../config/pilot.yaml) overrides the species list and run name
-in `config/config.yaml`: it uses `input/pilot_species.txt` and writes
-to `results/pilot/`. Other settings come from `config/config.yaml`.
-Review the species list and check mapping
-quality, runtime, disk use, and peak memory before a full run.
-Selection reports (`selection.json`, `samples.tsv`, and `busco_completeness.svg`)
-are in `results/pilot/metadata/`.
+[config/pilot.yaml](../config/pilot.yaml) overrides only species selection and
+run name. Check selection/mapping QC in `results/pilot/`, runtime, disk use,
+and peak memory before a full run.
 
 ## Targets
 
@@ -85,77 +64,63 @@ schedule missing prerequisites automatically.
 
 | Target | Work requested |
 | --- | --- |
-| `all` (default) | OG expression/QC and branches enabled by `alignment`, `kegg`, `phylogeny`, and `contrast` |
-| `references` | OrthoDB snapshot only |
-| `kegg_references` | KOfam/KEGG snapshot only; no assemblies required |
-| `proteins` | CDS translation for selected species |
+| `all` (default) | OG expression/QC and enabled alignment, KEGG, phylogeny, and contrast branches |
+| `references`, `kegg_references` | [OrthoDB or KOfam/KEGG snapshots](references.md) |
+| `proteins` | CDS translation |
 | `mapping` | ODB mapping and merged gene-to-OG index |
-| `alignments` | [All-copy OG alignments](alignments.md), including mapping |
-| `kegg` | [KO annotation and original-TPM sums](kegg.md), independent of ODB |
-| `phylogeny_prepare` | BUSCO input audit, outgroup resolution, and marker plan |
-| `phylogeny` | [BUSCO species-tree inference](phylogeny.md); also dating/taxonomy checks when their flags are enabled |
-| `phylogeny_calibrations` | Species-tree inference and [TimeTree calibration retrieval](dating.md#timetree-calibrations), without dating |
-| `timetree` | Species-tree inference and [LSD2 dating](dating.md) using the selected calibration source |
-| `taxonomy_check` | [MonoPhy review](taxonomy_check.md) of full/phenotyped species trees |
-| `contrast_pairs` | [Representative selection, inference, and trait pairs](contrast_pairs.md#representative-analysis) |
-| `phylogeny_contrast_pairs` | [Trait pairs from full/phenotyped trees](contrast_pairs.md#pairs-from-full-or-phenotyped-trees); with exclusions, requires completed results and uses the filtered export |
-| `filter_species` | [Export completed results after exclusions](species_filter.md); does not start producer analyses |
-| `phenoradar_inputs` | [Automatically collect available completed results](phenoradar_inputs.md); no collection settings or producer analyses |
+| `alignments` | [All-copy OG alignments](alignments.md) |
+| `kegg` | [KO annotation and original-TPM sums](kegg.md) |
+| `phylogeny_prepare` | BUSCO input audit, outgroup, and marker plan |
+| `phylogeny` | [Species trees](phylogeny.md), plus enabled dating/taxonomy checks |
+| `phylogeny_calibrations` | Trees and [TimeTree calibrations](dating.md#timetree-calibrations), without dating |
+| `timetree` | Trees and [LSD2 dating](dating.md) |
+| `taxonomy_check` | [MonoPhy review](taxonomy_check.md) |
+| `contrast_pairs` | [Representative selection, inference, and pairs](contrast_pairs.md#representative-analysis) |
+| `phylogeny_contrast_pairs` | [Pairs from full/phenotyped trees](contrast_pairs.md#pairs-from-full-or-phenotyped-trees); with exclusions, uses completed filtered results |
+| `filter_species` | [Export completed results after exclusions](species_filter.md) |
+| `phenoradar_inputs` | [Collect available completed results](phenoradar_inputs.md) |
 
-The full/phenotyped phylogeny targets follow `phylogeny.species_sets`.
-`contrast.enabled` adds only the separate representative analysis to `all`.
-Filtering and PhenoRadar collection are always manual targets.
+Full/phenotyped targets follow `phylogeny.species_sets`. Filtering and collection
+are manual targets that never start producer analyses.
 
 ## Resource budgets
 
-CPU and memory defaults live in the rules. Workflow configuration files contain
-no CPU or memory settings. Rule resources apply to one job; the launcher budget
-limits concurrent jobs.
-A default ODB chunk requests 16 CPUs and 192 GB. Two concurrent chunks therefore
-need 32 CPUs and 384 GB. Fit the largest step and check estimates with a pilot.
+Rule resources apply to one job; the launcher budget limits concurrent jobs.
+Defaults live in the rules, not configuration files.
 
-| Rule | Job unit | Default threads | Default memory (GB) |
+| Rule | Job unit | Threads | Memory (GB) |
 | --- | --- | --- | --- |
-| `odb_map` | Mapping chunk | 16 | 192 |
+| `odb_map` | Mapping chunk (up to 100 species) | 16 | 192 |
 | `align_orthogroup` | OG | 4 | 8 |
 | `annotate_kofam` | Species | 4 | 8 |
 | `check_taxonomy` | Species set | 1 | 8 |
 
 See [phylogeny resources](phylogeny.md#resources) for tree-inference defaults.
-For an individual rule, use Snakemake's standard overrides:
+Two default ODB jobs need 32 CPUs and 384 GB. To reduce per-job requests:
 
 ```bash
 ./run_pipeline.sh --cores 16 --resources mem_gb=192 \
   --set-threads odb_map=8 --set-resources odb_map:mem_mb=64000 -- mapping
 ```
 
-This requests 8 threads and 64 GB per ODB chunk within a total budget of 16 CPUs
-and 192 GB. Chunks contain up to 100 species, defined by `make_manifests` in
-`workflow/rules/odb.smk`. Internal batch size is four times the actual ODB thread
-count (32 in this example), including any CPU cap applied by Snakemake.
-Rule overrides use `mem_mb` (64000 MB = 64 GB). The launcher's total-budget option
-`--resources mem_gb=...` uses positive whole decimal GB.
-Slurm `--mem` uses GiB; the launcher converts units and reserves 4 GB for overhead.
-Inside a Slurm allocation, its CPU/memory limits override direct launcher budgets.
-Request one node, one task, and finite memory. For direct execution, leave
-physical memory for Snakemake and other processes beyond the scheduling budget.
+This allocates 8 threads and 64 GB per chunk within a 16-CPU/192-GB budget.
+
+Rule overrides use `mem_mb`; the launcher uses positive whole decimal
+`mem_gb`. Slurm `--mem` uses GiB; the launcher converts it and reserves 4 GB.
+Inside Slurm, allocation limits override direct budgets; request one node, one
+task, and finite memory. For direct runs, leave memory outside the budget for
+Snakemake and other processes.
 
 ## Re-running and recovery
 
-Rerun the same command after interruption. Snakemake reuses completed jobs when
-their inputs, settings, and code are unchanged;
+Rerun the same command after interruption. Unchanged completed jobs are reused;
 abundance-only changes recalculate expression without remapping proteins.
-
-ODB work remains under `work/<run_name>/orthogroups/mapping/` after success or
-failure. Matching inputs, settings, software, and code reuse the same directory,
-allowing ODB to resume its internal steps. Changed inputs use separate work.
-Native results and logs are also published under `results/<run_name>/`.
-After replacing ODB software in place, explicitly rerun it with `--forcerun odb_map`.
 Use a new `run_name` for fresh work.
 
-KofamScan also retains work files under `work/<run_name>/kegg/`. Valid completed
-species annotations are reused; failed annotations restart while retaining
-their previous attempts. Other completed workflow steps follow Snakemake's
-usual reuse rules.
+ODB retains resumable work in `work/<run_name>/orthogroups/mapping/`;
+changed inputs use separate work. Native results/logs also appear in `results/`.
+After replacing ODB software in place, use `--forcerun odb_map`.
 
+KofamScan retains work in `work/<run_name>/kegg/`: completed species annotations
+are reused, while failed annotations restart with prior attempts retained.
 See [reference updates](references.md) when changing snapshots.

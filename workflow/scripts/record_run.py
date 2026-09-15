@@ -9,7 +9,7 @@ from pathlib import Path
 from common import file_record, now, write_json
 
 
-def record(config_json, selection, workflow_dir, output):
+def record(config_json, selection, workflow_dir, output, container_image=None):
     root = Path(workflow_dir)
     packages = {}
     for name in ["pandas", "ete4", "matplotlib"]:
@@ -22,7 +22,7 @@ def record(config_json, selection, workflow_dir, output):
     image_manifest = Path("/opt/phenoradar/container.json")
     image = json.loads(image_manifest.read_text()) if image_manifest.is_file() else None
     write_json(output, {"created_at": now(), "config": json.loads(config_json),
-                        "container": image,
+                        "container": image, "container_image": container_image,
                         "python": platform.python_version(), "packages": packages,
                         "selection": file_record(selection), "workflow_files": [file_record(p) for p in code]})
 
@@ -31,4 +31,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ["config-json", "selection", "workflow-dir", "output"]:
         parser.add_argument(f"--{flag}", required=True)
+    parser.add_argument("--container-image", help="resolved workflow image for provenance")
     record(**vars(parser.parse_args()))

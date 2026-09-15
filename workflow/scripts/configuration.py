@@ -1,9 +1,7 @@
 """Accepted configuration keys; defaults live in config/config.yaml."""
-from versioning import validate_container_image
-
 KEYS = {
     "": "run_name inputs selection translation odb tpm alignment kegg phylogeny "
-        "contrast taxonomy_check exclude_species container_image seed",
+        "contrast taxonomy_check exclude_species seed",
     "inputs": "metadata species_trait busco cds_dir quant_dir",
     "selection": "busco_threshold species_list missing_taxonomy",
     "translation": "table",
@@ -32,8 +30,6 @@ def validate_keys(config):
         if unknown:
             paths = [f"{section}.{key}" if section else str(key) for key in unknown]
             raise ValueError("unknown configuration settings: " + ", ".join(paths))
-    if "container_image" in config:
-        validate_container_image(config["container_image"])
     # Use the positive signed 32-bit range supported by all seeded tools.
     if "seed" in config and (type(config["seed"]) is not int or not 1 <= config["seed"] <= 2147483647):
         raise ValueError("seed must be an integer between 1 and 2147483647")

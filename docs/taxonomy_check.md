@@ -2,9 +2,9 @@
 
 [Documentation](index.md) · [Species exclusion](species_filter.md)
 
-`taxonomy_check` compares rooted BUSCO species trees with NCBI taxonomy using
-MonoPhy. It reports non-monophyletic groups and intruder/outlier tips, linked to
-sample run IDs. Flags support review and do not automatically exclude species.
+`taxonomy_check` compares rooted BUSCO trees with NCBI taxonomy using MonoPhy.
+It reports non-monophyletic groups and intruder/outlier tips linked to sample
+runs. Flags support review; they never exclude species automatically.
 
 ## Configuration and execution
 
@@ -22,67 +22,52 @@ taxonomy_check:
 ./run_pipeline.sh --cores 1 --resources mem_gb=8 -- taxonomy_check
 ```
 
-The target follows `phylogeny.species_sets` and can schedule missing tree inference;
-check `--dry-run` and increase resources if needed. Set `enabled: true` to attach
-reports to `phylogeny`. Representative trees are not checked.
+The target follows `phylogeny.species_sets` and can schedule missing inference:
+check `--dry-run` and increase resources as needed. Set
+`taxonomy_check.enabled: true` to attach reports to `phylogeny`.
+Representative trees are not checked.
 
-The `check_taxonomy` rule defaults to 1 thread and 8 GB per species set;
-see [resource overrides](running.md#resource-budgets).
-
-Choose one or more NCBI `ranks`, without duplicates:
-
-```text
-superkingdom, kingdom, subkingdom, superphylum, phylum, subphylum,
-superclass, class, subclass, infraclass, superorder, order, suborder, infraorder,
-parvorder, superfamily, family, subfamily, tribe, subtribe, genus, subgenus,
-section, subsection, series, subseries, species, subspecies, varietas, forma
-```
-
-`outlierlevel` is the required focal-group fraction
-within a candidate core clade, in `(0, 1]`; it is not confidence.
-`collapse_monophyletic` changes figures only. The container supplies MonoPhy;
-for offline native installation, `MONOPHY_SOURCE_ARCHIVE` can supply its pinned
-archive from [monophy.yaml](../workflow/envs/monophy.yaml)'s installer.
-
-For archived results, [taxonomy_check.py](../workflow/scripts/taxonomy_check.py)
-also accepts tree, QC, sample-manifest, and taxonomy paths directly (`--help`).
-Tree tips and the manifest must agree, including the recorded root/outgroup.
+Choose unique NCBI `ranks`. `outlierlevel` is the required focal-group fraction
+inside a candidate core clade, in `(0, 1]`; it is not confidence.
+`collapse_monophyletic` affects figures only.
 
 ## Interpretation
 
-An **outlier** is a focal group's member outside its selected core clade; an
-**intruder** belongs to another group but lies inside that core. A tip can have
-both roles for different focal groups. `focal_taxon` is the assessed group,
-not a corrected identity. Some non-monophyletic groups yield no selected outlier.
+An **outlier** belongs to the focal group but falls outside its selected core
+clade; an **intruder** belongs to another group but falls inside. A tip can have
+both roles for different groups. `focal_taxon` names the assessed group, not a
+corrected identity.
 
-Missing ranks are omitted separately for each assessment. A one-tip group cannot
-be assessed for its own monophyly, but its tip can intrude into another group.
-There is no branch-support filter or calibrated probability of mislabeling.
+Missing ranks are omitted per assessment. Single-tip groups cannot be assessed
+for their own monophyly, and some non-monophyletic groups yield no outliers.
+There is no branch-support filter or probability of mislabeling.
 
-Neither monophyly nor absence of flags verifies identity. Sampling, taxonomy,
-paralogy, and tree errors can produce conflicts. Species-level results cannot
-identify which RNA-seq run is responsible without further sequence analysis.
+Flags or their absence do not verify identity: sampling, taxonomy, paralogy,
+and tree error can explain conflicts. Species-level results cannot identify a
+responsible RNA-seq run without further sequence analysis.
 
 ## Outputs and figures
 
-Reports are in `results/<run_name>/phylogeny/<set>/taxonomy_check/`.
+Under `results/<run_name>/phylogeny/<set>/taxonomy_check/`:
 
-| File | Contents |
+| File | Use |
 | --- | --- |
-| `taxon_results.tsv` | Monophyly and intruder/outlier counts for every rank/group; start here |
-| `candidates.tsv` | Tip events by focal group and role, linked to runs |
-| `samples.tsv`, `rank_status.tsv` | Run-level review status and species/rank roles |
-| `taxonomy.tsv`, `group_members.tsv` | Registered taxonomy and assessed group membership |
-| `ranks/<rank>/assessment_tree.nwk`, `monophy.rds` | Exact assessed tree and native MonoPhy result |
-| `ranks/<rank>/tree.pdf`, `tree.svg` | Figures; `plot_members.tsv` records displayed membership |
+| `taxon_results.tsv` | Start here: monophyly and intruder/outlier counts by rank/group |
+| `candidates.tsv` | Tip events by focal group/role, linked to runs |
+| `samples.tsv`, `rank_status.tsv` | Run-level review and species/rank roles |
+| `taxonomy.tsv`, `group_members.tsv` | Registered taxonomy and assessed membership |
+| `ranks/<rank>/` | Assessment tree, native MonoPhy result, PDF/SVG figures, and displayed membership |
 | `summary.json`, `engine.json`, `R_session.txt` | Settings and provenance |
 
-Colors denote registered groups; triangles mark intruders, squares outliers, and
-diamonds both. Unflagged monophyletic groups may be folded for display. Missing-rank
-tips remain gray. Use source/assessment trees for branch lengths and support.
+Figure colors denote registered groups: triangles mark intruders, squares
+outliers, diamonds both, and gray tips missing ranks. Unflagged monophyletic
+groups may be collapsed; use source/assessment trees for lengths and supports.
+
+For archived results, [taxonomy_check.py](../workflow/scripts/taxonomy_check.py)
+accepts source paths directly; see `--help`.
 
 ## References
 
-- [MonoPhy paper](https://doi.org/10.7717/peerj-cs.56)
-- [CRAN package](https://CRAN.R-project.org/package=MonoPhy)
-- [Source](https://github.com/oschwery/MonoPhy)
+[MonoPhy paper](https://doi.org/10.7717/peerj-cs.56) ·
+[CRAN package](https://CRAN.R-project.org/package=MonoPhy) ·
+[Source](https://github.com/oschwery/MonoPhy)

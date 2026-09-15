@@ -1,4 +1,5 @@
 """Configuration shape validation, including partial command-line overrides."""
+import json
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,7 @@ def test_config_keys_match_documented_defaults():
 
 @pytest.mark.parametrize("config,path", [
     ({"unknown": {}}, "unknown"),
+    ({"container_image": "auto"}, "container_image"),
     ({"inputs": {"metdata": "input/metadata.tsv"}}, "inputs.metdata"),
     ({"odb": {"existing_results": "/data/snapshot"}}, "odb.existing_results"),
     ({"phylogeny": {"enable": True}}, "phylogeny.enable"),
@@ -57,44 +59,27 @@ def test_global_seed_rejects_unsupported_values(seed):
         validate_keys({"seed": seed})
 
 
-@pytest.mark.parametrize("image", [
-    None, False, 12, 0.1, [], {}, "", "  ", "latest", "v0.1.0", "0.1", "01.2.3",
-    "1.2.3-rc1", "1.2.3+build", " 0.1.0", "0.1.0\n", "1.2.3\n2.0.0",
-    "/data/custom image.sif", "images/release.sif",
-    "docker://ghcr.io/mkrg01/phenoradar_prep:v0.1.0",
-    "docker://ghcr.io/mkrg01/phenoradar_prep@sha256:" + "a" * 64,
-    "docker://example/image:v1",
-])
-def test_invalid_container_images(image, tmp_path):
-    with pytest.raises(ValueError, match="container_image must be auto or"):
-        validate_keys({"container_image": image})
-    for enabled in (True, False):
-        with pytest.raises(ValueError, match="container_image must be auto or"):
-            resolve_container_image(image, tmp_path, enabled=enabled)
-
-
-def test_auto_image_follows_version_without_git(tmp_path):
+def test_image_follows_version_file(tmp_path):
     (tmp_path / "VERSION").write_text("0.2.0\n")
-    assert resolve_container_image("auto", tmp_path, enabled=True) == f"docker://{IMAGE_REPOSITORY}:v0.2.0"
+    assert resolve_container_image(tmp_path) == f"docker://{IMAGE_REPOSITORY}:v0.2.0"
     (tmp_path / "VERSION").write_text("1.0.1\n")
-    assert resolve_container_image("auto", tmp_path, enabled=True).endswith(":v1.0.1")
-    assert not (tmp_path / ".git").exists()
+    assert resolve_container_image(tmp_path) == f"docker://{IMAGE_REPOSITORY}:v1.0.1"
 
 
-@pytest.mark.parametrize("version", ["0.1.0", "1.2.3", "10.20.30"])
-def test_explicit_version_does_not_need_version_file(tmp_path, version):
-    validate_keys(yaml.safe_load(f'container_image: "{version}"'))
-    assert resolve_container_image(version, tmp_path, enabled=True) == f"docker://{IMAGE_REPOSITORY}:v{version}"
-
-
-def test_explicit_version_overrides_checkout_version(tmp_path):
+def test_run_record_keeps_resolved_image_separate_from_configuration(tmp_path):
+    from record_run import record
     (tmp_path / "VERSION").write_text("0.2.0\n")
-    assert resolve_container_image("0.1.0", tmp_path, enabled=True) == f"docker://{IMAGE_REPOSITORY}:v0.1.0"
-
-
-@pytest.mark.parametrize("image", ["auto", "0.1.0"])
-def test_native_execution_does_not_need_a_container_or_version_file(tmp_path, image):
-    assert resolve_container_image(image, tmp_path, enabled=False) is None
+    workflow = tmp_path / "workflow"
+    workflow.mkdir()
+    selection = tmp_path / "selection.json"
+    selection.write_text("{}\n")
+    output = tmp_path / "run.json"
+    image = resolve_container_image(tmp_path)
+    record('{"run_name": "test"}', selection, workflow, output, container_image=image)
+    report = json.loads(output.read_text())
+    assert report["container_image"] == image
+    assert report["config"] == {"run_name": "test"}
+    validate_keys(report["config"])
 
 
 @pytest.mark.parametrize("version", ["", "v0.2.0", "0.2", "01.2.3", "1.2.3-rc1", "1.2.3\n2.0.0"])
@@ -106,4 +91,4 @@ def test_invalid_release_versions_fail_clearly(tmp_path, version):
 
 def test_missing_version_has_archive_instructions(tmp_path):
     with pytest.raises(ValueError, match="complete workflow checkout or release archive"):
-        resolve_container_image("auto", tmp_path, enabled=True)
+        resolve_container_image(tmp_path)

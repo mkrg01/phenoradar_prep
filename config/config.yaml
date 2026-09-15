@@ -1,6 +1,5 @@
 # Paths are relative to the project root (run Snakemake there).
 run_name: run001  # Output subdirectory under results/, work/, logs/.
-container_image: auto  # GHCR: auto reads VERSION; or a version without v, e.g. "0.1.0".
 seed: 12345  # Random seed for supported steps.
 inputs:
   metadata: input/metadata.tsv

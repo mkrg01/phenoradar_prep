@@ -2,38 +2,25 @@
 
 [Documentation](index.md) · [Dating](dating.md)
 
-The `phylogeny` target infers a rooted species tree from existing BUSCO full
-tables and original CDS, independently of ODB/KEGG analyses.
+The `phylogeny` target infers rooted species trees from existing BUSCO full tables
+and original CDS, independently of ODB/KEGG:
 
 ```text
-BUSCO markers -> cdskit CDS preparation -> FAMSA -> trimAl -> alignment QC
-  -> VeryFastTree gene trees -> ASTRAL-IV with CASTLES-II -> species_tree.nwk
+BUSCO markers -> cdskit -> FAMSA -> trimAl/QC -> VeryFastTree -> ASTRAL-IV/CASTLES-II
 ```
 
-The species tree has branch lengths in substitutions per site. Absolute ages
-require the optional [dating stage](dating.md).
+Branch lengths are substitutions/site; absolute ages require [dating](dating.md).
 
 ## Inputs
 
-Use the ordinary [sample metadata and BUSCO summary](inputs.md), plus full
-BUSCO tables in `phylogeny.busco_full_dir` (default `input/busco/full`).
-Selected samples still need valid CDS and abundance paths during metadata
-preparation, even when only tree inference is requested.
+Alongside ordinary [inputs](inputs.md), provide one full table per species in
+`phylogeny.busco_full_dir` (default `input/busco/full`). Use one lineage
+dataset/version; `phylogeny.lineage` defaults to `embryophyta_odb12`.
 
-Full tables must have `Busco id`, `Status`, `Sequence`, `Score`, and `Length`
-columns, a lineage header, and the same complete marker-ID set. Use one lineage
-dataset/version throughout. A counts-only summary is insufficient; genome-mode
-tables are unsupported because they do not provide enough information to
-reconstruct spliced proteins.
-
-| Setting under `phylogeny` | Default | Meaning |
-| --- | --- | --- |
-| `busco_full_dir` | `input/busco/full` | Full-table directory; filenames detected from species IDs |
-| `lineage` | `embryophyta_odb12` | Expected BUSCO lineage |
-
-Full tables are detected at these paths under `busco_full_dir`; each also accepts
-a `.gz` extension. Species IDs must match exactly. Missing or multiple matching
-files stop the workflow, so keep one full table per species.
+Full tables need `Busco id`, `Status`, `Sequence`, `Score`, and `Length` columns,
+a lineage header, and the same complete marker-ID set. Counts-only summaries and
+genome-mode tables are unsupported. Supported paths below also accept `.gz`;
+missing or multiple matches are errors:
 
 ```text
 {species}.busco.full.tsv
@@ -42,16 +29,10 @@ files stop the workflow, so keep one full table per species.
 {species}/run_{lineage}/full_table.tsv
 ```
 
-CDS paths come from `metadata/samples.tsv`, using
-`inputs.cds_dir/{species}_longestCDS.fa.gz`. No sequence-mode, directory, or suffix
-settings are needed under `phylogeny`. Supply the original, oriented, in-frame
-coding sequences corresponding to the BUSCO hits.
-
-BUSCO/MetaEuk IDs such as `Species_g123:60-698` map to `Species_g123` in the
-original FASTA. The full CDS is translated; coordinates are not used to slice
-it because the full table lacks the complete exon/strand model. This reuses the
-ortholog assignment but does not reconstruct the exact BUSCO-predicted peptide.
-Missing or ambiguous original IDs fail extraction.
+Supply original, oriented, in-frame CDS matching BUSCO hits through `inputs.cds_dir`.
+IDs such as `Species_g123:60-698` resolve to `Species_g123`; the full CDS is
+translated, without reconstructing BUSCO-predicted peptides. Missing or ambiguous
+original IDs fail extraction.
 
 ## Species sets
 
@@ -63,144 +44,107 @@ phylogeny:
 
 | Set | Species | Output under `results/<run_name>/` |
 | --- | --- | --- |
-| `all` (default) | All species passing BUSCO and optional species-list selection | `phylogeny/all/` |
+| `all` (default) | All species passing input selection | `phylogeny/all/` |
 | `phenotyped` | Selected species with a nonmissing `phylogeny.trait` | `phylogeny/phenotyped/` |
 
-Traits come from `inputs.species_trait`. Both zero and one are observed; a
-single-state or continuous trait can also define the phenotyped subset. Each
-inference set needs at least `min_taxa` species (default four). The `all` tree
-requires no trait file.
+Each set needs `min_taxa` species and gets independent markers, alignments,
+trees, and roots. The `all` set needs no trait file; see [traits](inputs.md#traits)
+for defining the phenotyped subset.
 
-Each set has independent markers, alignments, trees, and roots. All phylogeny,
-dating, taxonomy checks, and molecular-pair targets follow `species_sets`. The separate
-`contrast_pairs` target infers a representative tree. Use a new `run_name` to
-retain alternative traits or settings.
+Dating, taxonomy checks, and `phylogeny_contrast_pairs` also follow `species_sets`.
+[Representative analysis](contrast_pairs.md#representative-analysis) is separate.
 
 ## Setup and execution
 
-Analysis tools are bundled in the container. Native execution uses
-[phylogeny.yaml](../workflow/envs/phylogeny.yaml) and
-[timetree.yaml](../workflow/envs/timetree.yaml); ASTRAL-IV is prepared automatically.
-
 ```bash
-# Select markers and resolve the outgroup.
+# Optional input audit, marker plan, and outgroup check.
 ./run_pipeline.sh --cores 4 --resources mem_gb=16 -- phylogeny_prepare
 
 # Infer gene trees and species trees.
 ./run_pipeline.sh --cores 32 --resources mem_gb=128 -- phylogeny
 ```
 
-Set `phylogeny.enabled: true` to include trees in `all`. For offline native ASTRAL
-setup, run `python workflow/scripts/prepare_phylogeny_tools.py --archives /path/to/archives`
-with the verified `aster.tar.gz`, Python 3.12+, and GNU C++. The helper builds the
-pinned 128-bit ASTRAL-IV executable required for datasets above 5,000 species.
+Set `phylogeny.enabled: true` to include trees in `all`. Tools are bundled in the
+container; see [native execution](containers.md#native-execution) for Conda setup.
 
 ## Rooting
 
-`phylogeny.outgroup` accepts `auto` or one exact species ID present in every
-requested set. Automatic selection uses the local NCBI guide, with nwkit's APG IV
-order tree as a fallback for angiosperms. It chooses within each set and adds no
-species. If no unambiguous outgroup is found, supply one explicitly.
+`phylogeny.outgroup` accepts `auto` or an exact species ID in every requested set.
+Automatic selection uses NCBI taxonomy, with nwkit's APG IV order tree as an
+angiosperm fallback. It chooses within each set; supply an outgroup if it fails.
 
-Review `rooting/outgroup.json` for the choice and supporting guide. The outgroup
-is supplied before CASTLES-II length estimation; molecular topology is not
-constrained to the guide.
+Review `rooting/outgroup.json`. The outgroup is supplied before CASTLES-II
+length estimation; the taxonomy guide does not constrain molecular topology.
 
 ## Marker and sequence selection
 
-Only unambiguous single-copy `Complete` BUSCO hits are eligible. Duplicated,
-fragmented, missing, multiply reported complete hits, and original genes assigned
-to multiple markers are omitted. Coverage counts distinct selected species,
-so replicate expression runs do not increase a species' weight.
+Only unambiguous single-copy `Complete` hits are eligible. Duplicated, fragmented,
+missing, multiply reported hits, and genes assigned to multiple markers are
+omitted. Coverage counts species, not expression runs.
 
 | Setting under `phylogeny` | Default | Use |
 | --- | --- | --- |
-| `max_markers` | `500` | Cap after ranking eligible markers by coverage descending, then BUSCO ID ascending |
-| `min_taxa` | `4` | Minimum species at marker selection and after QC; must be at least four |
-| `min_protein_length` | `100` | Known amino acids required per extracted and trimmed sequence |
+| `max_markers` | `500` | Highest coverage first, then BUSCO ID ascending |
+| `min_taxa` | `4` | Minimum species per marker before and after QC; at least four |
+| `min_protein_length` | `100` | Known amino acids per extracted/trimmed sequence |
 | `max_unknown_fraction` | `0.05` | Maximum unknown fraction in prepared proteins |
 | `trimal_mode` | `gappyout` | `gappyout` or `automated1` |
 
-Coverage is ranked before sequence/alignment QC; loci lost later are not replaced.
-There is no minimum coverage fraction or order-specific condition.
-
-CDS preparation uses cdskit `pad`, `mask`, and `translate` with `translation.table`.
-Padding can change the reading frame; stops and unresolved codons become X.
-Inspect changes and masking in `species/*.json`:
-single-copy status and QC do not establish a correct ORF or exclude hidden paralogy.
+Markers lost during QC are not replaced. cdskit `pad`, `mask`, and `translate`
+use `translation.table`; stops/unresolved codons become X. Review `species/*.json`:
+padding can change reading frames, and QC cannot verify ORFs or exclude paralogy.
 
 ## Alignment and tree inference
 
-FAMSA saves raw alignments, then trimAl selects columns (`gappyout` by default;
-`automated1` is available). X is treated as a gap for column selection, then the
-selected columns are recovered from the original alignment, preserving X.
-Final-to-raw column indices in `alignments/*.columns.tsv` are 1-based.
+FAMSA aligns proteins; trimAl selects columns with X treated as gaps, then restores
+X in retained columns. After trimming, sequences need `min_protein_length` known
+residues; columns without known residues are removed. Each locus needs `min_taxa`
+species and a variable amino-acid site. Changing trimAl mode reuses raw alignments.
 
-After trimming, sequences need `min_protein_length` known residues. Columns with
-no known residues are removed. Each locus needs `min_taxa` species and at least
-one variable amino-acid site; parsimony-informative sites are diagnostic only.
-Changing trimAl mode reuses raw FAMSA alignments.
+VeryFastTree uses double precision and `-lg -gamma` (LG+CAT search, Gamma20 length
+rescaling), with SH-like local supports and no bootstrap or support filtering.
+ASTRAL-IV combines gene trees, reporting local posterior probabilities and
+CASTLES-II substitution lengths. Both use the top-level `seed`.
 
-VeryFastTree uses double precision and `-lg -gamma`: LG+CAT topology search with
-Gamma20 length rescaling. SH-like local supports are saved without bootstrap
-replicates or support filtering.
-
-VeryFastTree and ASTRAL-IV use the top-level [`seed`](../config/config.yaml),
-shared with representative and contrast-pair selection.
-
-ASTRAL-IV combines gene trees and estimates local posterior probabilities and
-CASTLES-II branch lengths in substitutions/site. Every selected species must
-occur in at least one retained gene tree; inspect `species_coverage.tsv` for
-uneven coverage. No supermatrix is constructed. Missing data, gene-tree error,
-paralogy, and model assumptions can affect topology and lengths.
+Every species must occur in a retained gene tree; review `species_coverage.tsv`.
+Missing data, gene-tree error, paralogy, and model assumptions affect estimates.
 
 ## Resources
 
-The rules define these per-job defaults; memory is the total across all threads:
+Per-job memory totals all threads; see [overrides](running.md#resource-budgets).
 
 | Rule | Job unit | Threads | Memory (GB) |
 | --- | --- | --- | --- |
-| `plan_phylogeny` | Species set | 1 | 4 |
-| `extract_busco_proteins` | Species | 1 | 4 |
-| `collect_busco_markers`, `merge_busco_gene_trees` | Species set | 1 | 4 |
-| `align_busco_marker` | BUSCO marker | 4 | 8 |
-| `trim_busco_marker` | BUSCO marker | 1 | 4 |
-| `infer_busco_gene_tree` | BUSCO marker | 4 | 8 |
+| `align_busco_marker`, `infer_busco_gene_tree` | Marker | 4 | 8 |
 | `infer_busco_species_tree` | Species set | 32 | 64 |
-| `prepare_timetree_calibrations`, `date_busco_species_tree` | Species set | 1 | 4 |
 
-See [resource budgets](running.md#resource-budgets) for allocation sizing and
-Snakemake's per-rule overrides.
+Preparation, extraction, collection, trimming, merging, calibration retrieval,
+and dating each default to 1 thread and 4 GB per job.
 
 ## Outputs
 
-Each `results/<run_name>/phylogeny/<set>/` directory contains:
+Under `results/<run_name>/phylogeny/<set>/`:
 
 | Output | Contents |
 | --- | --- |
-| `selection/` (phenotyped only) | Selected sample manifest and trait/source record |
-| `rooting/` | Guide tree where applicable, outgroup, and selection evidence |
-| `plan/marker_stats.tsv`, `markers.tsv` | Candidate statistics/ranks and selected marker order |
-| `plan/species.tsv`, `provenance.json` | Source paths, full-table hashes, lineage, and settings |
-| `species/*.faa`, `*.json` | Prepared proteins, sequence QC, cdskit hashes and changes |
-| `markers/`, `alignments/raw/` | Per-marker inputs and reusable raw alignments |
-| `alignments/*.faa`, `*.json`, `*.columns.tsv` | Trimmed alignments, QC, and final-to-raw columns |
-| `gene_trees/`, `gene_trees.nwk`, `gene_trees.json` | Per-marker trees, merged trees, and coverage diagnostics |
-| `species_coverage.tsv` | Retained locus counts and representation flags per species |
-| `species_tree.nwk`, `species_tree.json` | Rooted tree in substitutions/site and inference provenance |
+| `selection/`, `rooting/` | Phenotyped selection, outgroup, and supporting records |
+| `plan/` | Marker ranks/selection, source paths, lineage, and provenance |
+| `species/*.faa`, `*.json` | Prepared proteins and sequence QC |
+| `markers/`, `alignments/raw/` | Marker inputs and raw alignments |
+| `alignments/*.faa`, `*.json`, `*.columns.tsv` | Trimmed alignments, QC, and 1-based final-to-raw columns |
+| `gene_trees/`, `gene_trees.nwk`, `gene_trees.json` | Individual/merged gene trees and diagnostics |
+| `species_coverage.tsv` | Retained locus counts per species |
+| `species_tree.nwk`, `species_tree.json` | Rooted species tree and inference provenance |
 
-Logs and resource benchmarks follow the same branch under
-`logs/<run_name>/phylogeny/`. Optional [dating](dating.md),
-[taxonomic review](taxonomy_check.md), and [contrast-pair](contrast_pairs.md)
-outputs live beside their source tree.
+Logs/benchmarks are under `logs/<run_name>/phylogeny/`. Optional dating, taxonomy
+review, and contrast-pair outputs live beside their source tree.
 
 ## Methods and source documentation
 
-- [GeneGalleon species-tree workflow](https://github.com/kfuku52/genegalleon/blob/main/workflow/core/gg_genome_evolution_core.sh)
-- [BUSCO output formats](https://busco.ezlab.org/busco_userguide.html)
-- [FAMSA](https://github.com/refresh-bio/FAMSA)
-- [cdskit preparation source](https://github.com/kfuku52/cdskit/tree/0.27.0/cdskit)
-- [trimAl v1.5.1 source](https://github.com/inab/trimal/tree/d637091abe33595775f40480970d1a18d87a7bcb/source)
-- [VeryFastTree](https://github.com/citiususc/veryfasttree)
-- [FastTree models, support and Gamma20 scaling](https://morgannprice.github.io/fasttree/)
-- [ASTRAL-IV and CASTLES-II, including the >5,000-species build requirement](https://github.com/chaoszhang/ASTER/blob/master/tutorial/astral4.md)
+[BUSCO formats](https://busco.ezlab.org/busco_userguide.html) ·
+[cdskit](https://github.com/kfuku52/cdskit/tree/0.27.0/cdskit) ·
+[FAMSA](https://github.com/refresh-bio/FAMSA) ·
+[trimAl](https://github.com/inab/trimal) ·
+[VeryFastTree](https://github.com/citiususc/veryfasttree) ·
+[FastTree models/support](https://morgannprice.github.io/fasttree/) ·
+[ASTRAL-IV/CASTLES-II](https://github.com/chaoszhang/ASTER/blob/master/tutorial/astral4.md)

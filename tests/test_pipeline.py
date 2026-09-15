@@ -371,7 +371,9 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     assert not any("<TBD>" in line for line in plan.splitlines() if "input:" in line)
     execute()
     out = tmp_path / "results/test"
-    assert (out / "run.json").is_file()
+    run = json.loads((out / "run.json").read_text())
+    assert run["container_image"] is None
+    assert "container_image" not in run["config"]
     assert len(read_tsv(out / "metadata/species_metadata.tsv")) == 2
     assert (out / "orthogroups/mapping/manifests/chunks.json").is_file()
     assert len(read_tsv(out / "orthogroups/expression/tpm_wide.tsv")) == 3

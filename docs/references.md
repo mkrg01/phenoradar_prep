@@ -3,44 +3,34 @@
 [Documentation](index.md)
 
 Missing references are prepared automatically under `resources/`. Completed
-snapshots are reused without automatic updates; keep them with analysis records.
-
-| Stage | Reference |
-| --- | --- |
-| Metadata preparation | NCBI taxonomy |
-| `references`, ODB mapping | OrthoDB v12 at `odb.node` |
-| `kegg_references`, KEGG analysis | KOfam/KEGG |
-| TimeTree retrieval | [Cached API responses](dating.md#timetree-calibrations) |
+snapshots are reused without updates across run names; keep them with analysis
+records. TimeTree uses a separate [response cache](dating.md#timetree-calibrations).
 
 ## Taxonomy reference
 
-No configuration is needed. If `resources/taxonomy/taxa.sqlite` is missing, the
-workflow downloads NCBI taxonomy and builds an ETE4-compatible SQLite snapshot.
-Later runs reuse it without downloading or updating, including runs with a
-different `run_name`. The `.json` sidecar records provenance and checksum.
-
-To refresh taxonomy, archive `resources/taxonomy/` and rerun with a new `run_name`.
+Metadata preparation builds `resources/taxonomy/taxa.sqlite` from NCBI taxonomy
+when absent. Its JSON sidecar records provenance/checksum. To refresh, archive
+`resources/taxonomy/` and rerun with a new `run_name`.
 
 ## OrthoDB reference
 
 ### Choosing an OrthoDB node
 
-`odb.node` is the NCBI Taxonomy ID of an OrthoDB v12 mapping level. Choose a
-supported clade containing all species in the dataset; a narrower level defines
-finer OGs. The default `3193` covers land plants. It is independent of the BUSCO
-`phylogeny.lineage` setting.
+`odb.node` is an NCBI Taxonomy ID supported as an OrthoDB v12 mapping level.
+Choose a clade containing all dataset species; narrower levels define finer OGs.
+It is independent of BUSCO's `phylogeny.lineage`.
 
 | `odb.node` | Clade |
 | --- | --- |
-| `33090` | Viridiplantae (green plants) |
-| `3193` | Embryophyta (land plants) |
-| `4447` | Liliopsida (monocots) |
+| `33090` | Viridiplantae |
+| `3193` (default) | Embryophyta |
+| `4447` | Liliopsida |
 | `38820` | Poales |
 | `71240` | Eudicots |
 
-Look up clades in [NCBI Taxonomy](https://www.ncbi.nlm.nih.gov/taxonomy) and the
-[OrthoDB v12 tree](https://data.orthodb.org/v12/tree). Not every NCBI ID has a
-mapping reference. Confirm supported nodes in an [ODB-mapper environment](../workflow/envs/odb.yaml):
+Not every NCBI ID is supported. Check the
+[OrthoDB tree](https://data.orthodb.org/v12/tree), or list nodes inside an
+[ODB-mapper environment](../workflow/envs/odb.yaml):
 
 ```bash
 (
@@ -51,64 +41,55 @@ mapping reference. Confirm supported nodes in an [ODB-mapper environment](../wor
 )
 ```
 
-`'?'` lists nodes without downloading sequences; `'?plants'` restricts the list.
-Keep the quotes. See the [OrthoDB v12 guide](https://www.ezlab.org/orthodb_v12_userguide.html)
-for OG definitions. Changing `odb.node` requires new mapping/expression results;
-use a new `run_name` to retain the previous analysis.
+Keep the quotes: `'?'` lists nodes without sequence downloads; `'?plants'`
+restricts the list. Changing nodes requires new mapping/expression results;
+use a new `run_name` to preserve earlier analyses.
 
 ### Preparing and verifying the reference
 
-Snapshots live in `resources/orthodb/v12_<node>/`. To prepare one separately,
-after adjusting your [Slurm settings](running.md#slurm):
+Snapshots live in `resources/orthodb/v12_<node>/`. To prepare separately:
 
 ```bash
-sbatch --cpus-per-task=1 --mem=40G \
-  run_pipeline.sh -- references
+sbatch --cpus-per-task=1 --mem=40G run_pipeline.sh -- references
 ```
 
-ODB-mapper requires network access during mapping too. Choose storage and disk
-capacity for your dataset and concurrent jobs.
-
-To verify every reference checksum, replace `3193` with your node:
+Mapping also needs network access. Verify checksums with your node:
 
 ```bash
 python workflow/scripts/verify_odb_reference.py \
   --reference resources/orthodb/v12_3193/reference.json
 ```
 
-For a deliberate refresh, archive the node's snapshot and use a new `run_name`.
+To refresh, archive the node's snapshot and use a new `run_name`.
 
 ## KOfam and KEGG reference
 
-Initial setup downloads profiles and `ko_list` from
-[KOfam](https://www.genome.jp/ftp/db/kofam/) plus KO-to-MODULE/PATHWAY maps from
-KEGG REST. To prepare without assemblies or annotation:
+Setup downloads [KOfam](https://www.genome.jp/ftp/db/kofam/) profiles/`ko_list`
+and KEGG REST KO-to-MODULE/PATHWAY maps. Prepare without assemblies:
 
 ```bash
 ./run_pipeline.sh --cores 1 --resources mem_gb=4 -- kegg_references
 ```
 
-The snapshot is `resources/kegg/snapshot_v1/`; verified downloads are cached in
-`resources/kegg/downloads/`. Retries reuse completed downloads. Existing snapshots
-need no network access and must not be modified in place.
+The snapshot is `resources/kegg/snapshot_v1/`; retries reuse downloads in
+`resources/kegg/downloads/`. Snapshots need no network and must not be edited.
 
-For local profiles and a matching `ko_list`, with the destination absent:
+For local profiles and matching `ko_list`, with the destination absent:
 
 ```bash
 python workflow/scripts/prepare_kegg_reference.py \
   --profiles-dir /path/to/kofam/profiles --ko-list /path/to/kofam/ko_list \
-  --reference-dir resources/kegg/snapshot_v1 \
-  --release YOUR_KOFAM_RELEASE_OR_DOWNLOAD_DATE
+  --reference-dir resources/kegg/snapshot_v1 --release YOUR_RELEASE_OR_DATE
 ```
 
-For fully offline setup, also supply `--module-links` and `--pathway-links` with
-headerless two-column responses from `https://rest.kegg.jp/link/module/ko` and
-`https://rest.kegg.jp/link/pathway/ko`. Otherwise the helper retrieves those maps.
+For offline setup, also pass `--module-links` and `--pathway-links` as headerless
+two-column responses from `https://rest.kegg.jp/link/module/ko` and
+`https://rest.kegg.jp/link/pathway/ko`; otherwise those maps are retrieved.
 
 ```bash
 python workflow/scripts/verify_kegg_reference.py \
   --reference resources/kegg/snapshot_v1/reference.json
 ```
 
-To refresh, archive all of `resources/kegg/`, including the download cache, and
-rerun with a new `run_name`. Keeping the cache reuses the old downloaded data.
+To refresh, archive all of `resources/kegg/`, including the download cache,
+and rerun with a new `run_name`. Keeping the cache reuses old data.

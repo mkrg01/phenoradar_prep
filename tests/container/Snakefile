@@ -7,7 +7,7 @@ sys.path.insert(0, str(ROOT / "workflow/scripts"))
 from versioning import resolve_container_image
 
 ENVIRONMENTS = sorted((ROOT / "workflow/envs").glob("*.yaml"))
-containerized: resolve_container_image(config.get("container_image", "auto"), ROOT, enabled=True)
+containerized: resolve_container_image(ROOT)
 
 rule all:
     input: [f"smoke/{path.stem}.done" for path in ENVIRONMENTS]

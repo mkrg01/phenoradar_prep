@@ -86,10 +86,11 @@ rule record_run:
     output: f"{OUT}/run.json"
     params:
         resolved=json.dumps(config, sort_keys=True),
+        image=["--container-image", CONTAINER_IMAGE] if CONTAINER_IMAGE else [],
         workflow_dir=workflow.basedir
     log: f"{LOG}/provenance.log"
     conda: "../envs/analysis.yaml"
     resources: mem_mb=1000
     shell:
         "{PYTHON:q} {input.code:q} --config-json {params.resolved:q} --selection {input.selection:q} "
-        "--workflow-dir {params.workflow_dir:q} --output {output:q} > {log:q} 2>&1"
+        "--workflow-dir {params.workflow_dir:q} {params.image:q} --output {output:q} > {log:q} 2>&1"
