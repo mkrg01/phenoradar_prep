@@ -45,7 +45,7 @@ checkpoint select_contrast_representatives:
     input:
         samples=f"{META}/samples.tsv",
         metadata=f"{META}/metadata_high_busco.tsv",
-        traits=config["inputs"]["species_trait"],
+        traits=INPUTS["species_trait"],
         tree=f"{ROOTING}/ncbi_tree.nwk",
         code=f"{SCRIPTS}/contrast_pairs.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/phylogeny_root.py"]
@@ -120,7 +120,7 @@ rule identify_phylogeny_contrast_pairs:
         tree_qc=f"{PHYLO_RUN}/species_tree.json",
         samples=lambda wc: f"{PHENOTYPED}/selection/samples.tsv" if wc.phylo_branch == PHYLO_BRANCHES["phenotyped"] else f"{META}/samples.tsv",
         metadata=f"{META}/metadata_high_busco.tsv",
-        traits=config["inputs"]["species_trait"],
+        traits=INPUTS["species_trait"],
         code=f"{SCRIPTS}/contrast_pairs.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/phylogeny_root.py"]
     output:

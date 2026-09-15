@@ -2,7 +2,7 @@ def filter_snapshot():
     # Absolute input paths intentionally describe an already completed snapshot.
     # They do not request producers under results/<run_name>/, so this explicit
     # export cannot trigger old selection, mapping or inference checkpoints.
-    return discover_filter_inputs(OUT, config["inputs"].get("species_trait"))
+    return discover_filter_inputs(OUT, INPUTS["species_trait"])
 
 
 rule filter_species:
@@ -17,7 +17,7 @@ rule filter_species:
     params:
         source=str(Path(OUT).resolve()),
         excluded=json.dumps(EXCLUDE_SPECIES),
-        traits=config["inputs"].get("species_trait") or "",
+        traits=INPUTS["species_trait"],
         trait=config["contrast"]["trait"], seed=config["seed"],
         inventory=lambda wc: json.dumps(filter_snapshot()["sections"], sort_keys=True)
     conda: "../envs/timetree.yaml"

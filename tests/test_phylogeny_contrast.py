@@ -194,12 +194,13 @@ def test_full_snakefile_exclusions_never_request_inference(molecular_snapshot, w
     shutil.copytree(source, target)
     before = state(target)
     cfg = project / "override.yaml"
+    (project / "input").mkdir()
+    shutil.copyfile(traits, project / "input/species_trait.tsv")
     environment = command_environment({"python": sys.executable})
     argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(cfg), "--cores", "1", "--"]
     def run(excluded, target_name="phylogeny_contrast_pairs"):
         cfg.write_text(yaml.safe_dump({"run_name": "test", "exclude_species": excluded,
-                                      "phylogeny": {"species_sets": ["all", "phenotyped"]},
-                                      "inputs": {"species_trait": str(traits)}}))
+                                      "phylogeny": {"species_sets": ["all", "phenotyped"]}}))
         process = subprocess.run(argv + [target_name], cwd=project, env=environment, text=True,
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         assert process.returncode == 0, process.stdout + "\n" + "\n".join(p.read_text() for p in (project / "logs").rglob("*.log"))

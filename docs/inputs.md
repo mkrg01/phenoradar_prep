@@ -2,9 +2,9 @@
 
 [Documentation](index.md) · [Configuration](configuration.md)
 
-The workflow takes existing CDS assemblies, expression estimates, and BUSCO
-results. Use external paths or symlinks to avoid copying large files; external
-locations need [container bind mounts](containers.md#external-files).
+Place existing CDS assemblies, expression estimates, and BUSCO results in the
+repository's `input/` directory. Keep the actual files there: symlinks to external
+locations would require additional container mounts.
 
 ## Upstream data preparation
 
@@ -15,7 +15,7 @@ provides longest CDS, expression estimates, and BUSCO results.
 
 ## File formats
 
-Default paths are below; change `inputs.*` in the configuration as needed.
+Use this layout; no input-path configuration is needed.
 
 | Path under `input/` | Format |
 | --- | --- |
@@ -24,10 +24,10 @@ Default paths are below; change `inputs.*` in the configuration as needed.
 | `cds/{species}_longestCDS.fa.gz` | Gzip FASTA, one per species |
 | `quant/{species}/{run}/{run}_abundance.tsv` | TSV: `target_id`, `tpm`, one per run |
 | `species_trait.tsv` | TSV: `species` and chosen trait column; required for trait-based analyses |
+| `species_list.txt` | Optional candidate species IDs, one per line; enabled by `selection.species_list: true` |
 
-[Phylogeny](phylogeny.md#inputs) additionally needs per-species BUSCO full tables,
-by default `busco/full/{species}.busco.full.tsv`.
-[Manual dating](dating.md#manual-calibrations) needs a calibration TSV.
+[Phylogeny](phylogeny.md#inputs) additionally needs full tables under `busco/full/`.
+[Manual dating](dating.md#manual-calibrations) reads `calibrations.tsv`.
 
 ## Identifiers
 
@@ -42,9 +42,9 @@ by default `busco/full/{species}.busco.full.tsv`.
 
 ## Species selection
 
-`selection.species_list: null` considers all species. To limit candidates, supply
-a text file with one exact ID per line, e.g. `Arabidopsis_thaliana`; unknown IDs
-are errors. Candidates then need a complete BUSCO fraction
+`selection.species_list: false` considers all species. To limit candidates, set
+it to `true` and put exact IDs in `input/species_list.txt`, one per line,
+e.g. `Arabidopsis_thaliana`. Unknown IDs are errors. Candidates need a complete BUSCO fraction
 `(single + duplicated) / total >= selection.busco_threshold` (default `0.5`).
 Missing BUSCO data or scores below the threshold exclude species; an empty
 selection is an error.
@@ -61,7 +61,7 @@ Results in `metadata/` include `selection.json` (exclusion reasons),
 
 ## Traits
 
-`inputs.species_trait` supplies traits; sample metadata trait columns are ignored.
+`input/species_trait.tsv` supplies traits; sample metadata trait columns are ignored.
 
 ```tsv
 species	C4

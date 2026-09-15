@@ -7,10 +7,12 @@ when resuming an analysis; see [running the workflow](running.md) for execution.
 
 ## Loading settings and paths
 
-Run from the repository root; configured paths are relative to it.
+Run from the repository root. Dataset paths are fixed under `input/`;
+see the [file layout](inputs.md#file-formats).
 `config/config.yaml` loads automatically. Supply an override with
 `--configfile path/to/override.yaml`; unspecified settings retain their defaults
-from the main file. See the [pilot example](running.md#pilot-run).
+from the main file. [Optional treePL overrides](dating.md#optional-overrides) use
+the workflow's internal defaults when omitted. See the [pilot example](running.md#pilot-run).
 
 `run_name` selects subdirectories under `results/`, `work/`, and `logs/`.
 Use a new name to retain an earlier analysis. The container image matches
@@ -21,12 +23,11 @@ Use a new name to retain an earlier analysis. The container image matches
 | Setting | Default | Use |
 | --- | --- | --- |
 | `run_name` | `run001` | Directory name: letters, digits, underscores, dots, hyphens; starts with a letter/digit |
-| `inputs.*` | Paths under `input/` | [Input files and identifiers](inputs.md#file-formats) |
 | `selection.busco_threshold` | `0.5` | Minimum complete BUSCO fraction |
-| `selection.species_list` | `null` | Optional candidate list; [selection rules](inputs.md#species-selection) |
+| `selection.species_list` | `false` | Use `input/species_list.txt` when true; [selection rules](inputs.md#species-selection) |
 | `translation.table` | `1` | Genetic code for CDS translation |
 | `tpm.multimap` | `error` | Ambiguous gene assignments; [TPM policies](outputs.md#tpm-interpretation) |
-| `seed` | `12345` | Tree inference, representative selection, and contrast pairs |
+| `seed` | `12345` | Tree inference, dating, representative selection, and contrast pairs |
 
 ## OrthoDB settings
 
@@ -41,7 +42,7 @@ CPU/memory settings use [launcher and rule overrides](running.md#resource-budget
 | `alignment` | [All-copy OG alignments](alignments.md) |
 | `kegg` | [KO annotation and expression](kegg.md) |
 | `phylogeny` | [BUSCO species trees](phylogeny.md) |
-| `phylogeny.dating` | [Calibrations and LSD2 dating](dating.md) |
+| `phylogeny.dating` | [Calibrations and treePL dating](dating.md) |
 | `contrast` | [Trait contrast pairs](contrast_pairs.md) |
 | `taxonomy_check` | [MonoPhy review](taxonomy_check.md) |
 | `exclude_species` | [Manual species exclusion](species_filter.md) |

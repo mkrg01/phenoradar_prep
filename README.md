@@ -18,8 +18,9 @@ Before running the workflow, make sure the following software is installed:
 
 ## Quick start
 
-Edit [config/config.yaml](config/config.yaml) directly using the
-[input guide](docs/inputs.md) and [configuration guide](docs/configuration.md).
+Place prepared files in `input/` following the [input guide](docs/inputs.md),
+then edit [config/config.yaml](config/config.yaml) using the
+[configuration guide](docs/configuration.md).
 For Slurm, adjust the `#SBATCH` settings in `run_pipeline.sh` for your cluster,
 then submit from the repository root:
 

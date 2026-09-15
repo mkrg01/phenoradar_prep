@@ -6,14 +6,17 @@ import pytest
 import yaml
 
 from configuration import KEYS, validate_keys
+from date_phylogeny import validate_settings as validate_treepl_settings
 from versioning import IMAGE_REPOSITORY, read_version, resolve_container_image
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_config_keys_match_documented_defaults():
+def test_config_and_optional_tool_defaults_cover_supported_keys():
     config = yaml.safe_load((ROOT / "config/config.yaml").read_text())
     validate_keys(config)
+    assert "treepl" not in config["phylogeny"]["dating"]
+    config["phylogeny"]["dating"]["treepl"] = validate_treepl_settings({})
     for section, keys in KEYS.items():
         values = config
         for part in section.split(".") if section else []:
@@ -27,7 +30,9 @@ def test_config_keys_match_documented_defaults():
 @pytest.mark.parametrize("config,path", [
     ({"unknown": {}}, "unknown"),
     ({"container_image": "auto"}, "container_image"),
-    ({"inputs": {"metdata": "input/metadata.tsv"}}, "inputs.metdata"),
+    ({"inputs": {"metadata": "elsewhere/metadata.tsv"}}, "inputs"),
+    ({"phylogeny": {"busco_full_dir": "elsewhere/busco"}}, "phylogeny.busco_full_dir"),
+    ({"phylogeny": {"dating": {"calibrations": "elsewhere/ages.tsv"}}}, "phylogeny.dating.calibrations"),
     ({"odb": {"existing_results": "/data/snapshot"}}, "odb.existing_results"),
     ({"phylogeny": {"enable": True}}, "phylogeny.enable"),
     ({"phylogeny": {"dating": {"enable": True}}}, "phylogeny.dating.enable"),
@@ -46,6 +51,17 @@ def test_unknown_settings_name_the_full_path(config, path):
 def test_sections_require_mappings(config, section):
     with pytest.raises(ValueError, match=f"{section} must be a mapping"):
         validate_keys(config)
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_species_list_is_an_explicit_opt_in(value):
+    validate_keys({"selection": {"species_list": value}})
+
+
+@pytest.mark.parametrize("value", [None, "input/species_list.txt", "false", 0, 1, [], {}])
+def test_species_list_rejects_paths_and_nonbooleans(value):
+    with pytest.raises(ValueError, match="selection.species_list must be true or false"):
+        validate_keys({"selection": {"species_list": value}})
 
 
 @pytest.mark.parametrize("seed", [1, 12345, 2147483647])

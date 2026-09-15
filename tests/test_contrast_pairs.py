@@ -187,13 +187,12 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
         for i in range(1, len(species)):
             parent, track = (3, "3,2,1") if i == 1 else (4, "4,3,2,1")
             db.execute("UPDATE species SET parent=?, track=? WHERE taxid=?", (parent, f"{42+i},{track}",42+i))
-    traits = source / "traits.tsv"
+    traits = source / "species_trait.tsv"
     seed_taxonomy(source / "taxa.sqlite")
     write_tsv(traits, ["species", "C4"], [{"species": n.replace("_", " "), "C4": "" if i == 0 else i % 2}
                                          for i, n in enumerate(species)])
-    cfg = {"run_name": "test", "seed": 19, "inputs": {"metadata": str(source / "metadata.tsv"), "species_trait": str(traits),
-           "busco": str(source / "busco.tsv"), "cds_dir": str(source / "cds"), "quant_dir": str(source / "quant")},
-           "phylogeny": {"busco_full_dir": str(source / "busco"), "outgroup": "auto", "max_markers": 3}}
+    cfg = {"run_name": "test", "seed": 19,
+           "phylogeny": {"outgroup": "auto", "max_markers": 3}}
     config = tmp_path / "config.yaml"
     config.write_text(yaml.safe_dump(cfg))
     env = command_environment({"python": sys.executable, "famsa": famsa, "trimal": trimal_binary(), "VeryFastTree": vft})

@@ -327,11 +327,12 @@ def test_full_snakefile_exports_frozen_results_without_upstream_inputs(snapshot,
     # Mapping/phylogeny planning would fail if export requested any producer.
     original = state(target)
     cfg = project / "override.yaml"
+    (project / "input").mkdir()
+    shutil.copyfile(traits, project / "input/species_trait.tsv")
     environment = command_environment({"python": sys.executable})
     argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(cfg), "--cores", "1", "--", "filter_species"]
     def run(excluded):
-        cfg.write_text(yaml.safe_dump({"run_name": "test", "seed": 19, "exclude_species": excluded,
-                                      "inputs": {"species_trait": str(traits)}}))
+        cfg.write_text(yaml.safe_dump({"run_name": "test", "seed": 19, "exclude_species": excluded}))
         process = subprocess.run(argv, cwd=project, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         assert process.returncode == 0, process.stdout + "\n" + "\n".join(p.read_text() for p in (project / "logs").rglob("*.log"))
         return process.stdout

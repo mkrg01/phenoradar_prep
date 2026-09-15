@@ -48,11 +48,11 @@ def command_environment(tmp_path):
 
 @pytest.fixture
 def tiny_inputs(tmp_path):
-    root = tmp_path / "inputs"
+    root = tmp_path / "input"
     root.mkdir()
-    cds = root / "assembly" / "longest_cds"
+    cds = root / "cds"
     cds.mkdir(parents=True)
-    quant = root / "assembly" / "quant"
+    quant = root / "quant"
     names = [("Alpha plant", "Alpha_plant", 42, 8), ("Beta sp-X", "Beta_sp-X", 43, 6),
              ("Gamma plant", "Gamma_plant", 44, 4)]
     meta, bus = [], []
@@ -70,7 +70,7 @@ def tiny_inputs(tmp_path):
         bus.append({"Species": name, "busco_cds_single": complete - 1, "busco_cds_duplicated": 1,
                     "busco_cds_fragmented": 0, "busco_cds_missing": 10 - complete, "busco_cds_total": 10})
     write_tsv(root / "metadata.tsv", list(meta[0]), meta)
-    write_tsv(root / "busco.tsv", list(bus[0]), bus)
+    write_tsv(root / "busco/summary.tsv", list(bus[0]), bus)
     taxonomy = root / "taxa.sqlite"
     with sqlite3.connect(taxonomy) as db:
         db.executescript("""
@@ -83,7 +83,7 @@ def tiny_inputs(tmp_path):
         """)
         db.executemany("INSERT INTO species VALUES (?,2,?,'','species',?)",
                        [(tid, name, f"{tid},2,1") for name, _, tid, _ in names])
-    return {"metadata": str(root / "metadata.tsv"), "busco": str(root / "busco.tsv"),
+    return {"metadata": str(root / "metadata.tsv"), "busco": str(root / "busco/summary.tsv"),
             "cds_dir": str(cds), "quant_dir": str(quant), "taxonomy_db": str(taxonomy)}
 
 

@@ -25,9 +25,7 @@ def phylogeny_input_rows(wc):
 
 
 def phylogeny_tables(wc):
-    if not PHY["busco_full_dir"]:
-        raise WorkflowError("set phylogeny.busco_full_dir to per-species BUSCO full tables; see docs/phylogeny.md")
-    return [str(busco_full_path(PHY["busco_full_dir"], species, PHY["lineage"]))
+    return [str(busco_full_path(BUSCO_FULL, species, PHY["lineage"]))
             for species in sorted({r["species"] for r in phylogeny_input_rows(wc)})]
 
 
@@ -51,15 +49,13 @@ def phylogeny_marker_files(wc, suffix):
 def dating_calibrations(wc):
     if PHY["dating"]["calibration_source"] == "timetree":
         return f"{OUT}/{wc.phylo_branch}/timetree/calibrations.tsv"
-    if not PHY["dating"]["calibrations"]:
-        raise WorkflowError("absolute dating requires phylogeny.dating.calibrations; no arbitrary root age is used")
-    return PHY["dating"]["calibrations"]
+    return CALIBRATIONS
 
 
 checkpoint select_phenotyped_species:
     input:
         samples=f"{META}/samples.tsv",
-        traits=config["inputs"]["species_trait"],
+        traits=INPUTS["species_trait"],
         code=f"{SCRIPTS}/species_traits.py",
         common=f"{SCRIPTS}/common.py"
     output:
@@ -316,15 +312,19 @@ rule date_busco_species_tree:
         provenance=f"{PHYLO_RUN}/dating/provenance.json",
         ages=f"{PHYLO_RUN}/dating/node_ages.tsv",
         calibrations=f"{PHYLO_RUN}/dating/calibrations.resolved.tsv",
-        raw=f"{PHYLO_RUN}/dating/lsd2.dated.date.nexus",
-        fitted=f"{PHYLO_RUN}/dating/lsd2.fitted.nwk",
-        report=f"{PHYLO_RUN}/dating/lsd2.report.txt",
-        dates=f"{PHYLO_RUN}/dating/lsd2.dates.txt",
-        command=f"{PHYLO_RUN}/dating/lsd2.command.json",
-        input_tree=f"{PHYLO_RUN}/dating/lsd2.input.nwk",
-        adjustments=f"{PHYLO_RUN}/dating/rounding_adjustments.tsv"
-        # Keep lsd2_runs undeclared so native diagnostics survive a failed job.
-    params: outdir=f"{PHYLO_RUN}/dating", command="lsd2"
+        raw=f"{PHYLO_RUN}/dating/treepl.dated.nwk",
+        report=f"{PHYLO_RUN}/dating/treepl.log",
+        config=f"{PHYLO_RUN}/dating/treepl.config.txt",
+        prime_config=f"{PHYLO_RUN}/dating/treepl.prime.config.txt",
+        prime_log=f"{PHYLO_RUN}/dating/treepl.prime.log",
+        input_tree=f"{PHYLO_RUN}/dating/treepl.input.nwk",
+        cv=f"{PHYLO_RUN}/dating/cross_validation.tsv",
+        native_cv=f"{PHYLO_RUN}/dating/treepl.cv.out",
+        floors=f"{PHYLO_RUN}/dating/branch_length_adjustments.tsv"
+        # Keep treepl_runs undeclared so native diagnostics survive a failed job.
+    params:
+        outdir=f"{PHYLO_RUN}/dating", command="treePL", seed=config["seed"],
+        settings=json.dumps(PHY["dating"]["treepl"], sort_keys=True)
     conda: "../envs/dating.yaml"
     threads: 1
     resources: mem_mb=4000
@@ -333,4 +333,4 @@ rule date_busco_species_tree:
     shell:
         "{PYTHON:q} {input.code:q} --tree {input.tree:q} --provenance {input.provenance:q} "
         "--calibrations {input.calibrations:q} --outdir {params.outdir:q} --command {params.command:q} "
-        "--threads {threads} > {log:q} 2>&1"
+        "--threads {threads} --seed {params.seed} --settings {params.settings:q} > {log:q} 2>&1"

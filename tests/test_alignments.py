@@ -267,7 +267,7 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     reference.symlink_to(frozen_reference, target_is_directory=True)
     seed_taxonomy(tiny_inputs["taxonomy_db"])
     config = {
-        "run_name": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
+        "run_name": "test",
         "alignment": {"enabled": False},
     }
     configfile = tmp_path / "override.yaml"
@@ -345,9 +345,9 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     assert "Nothing to be done" in execute(targets=())
 
     # Species changes remove no-longer-observed OGs and preserve parseable IDs.
-    subset = tmp_path / "subset.txt"
+    subset = workflow_project / "input/species_list.txt"
     subset.write_text("Alpha_plant\n")
-    config["selection"] = {"species_list": str(subset)}
+    config["selection"] = {"species_list": True}
     configfile.write_text(yaml.safe_dump(config))
     execute()
     assert {p.name for p in out.glob("*.faa")} == {"OG1.faa", "OG2.faa"}

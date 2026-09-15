@@ -3,7 +3,7 @@
 [Documentation](index.md) · [BUSCO phylogeny](phylogeny.md)
 
 Pairs use nwkit's homogeneous-clade grouping and contrastive-clade selection.
-`contrast.trait` (default `C4`) selects a column in `inputs.species_trait`;
+`contrast.trait` (default `C4`) selects a column in `input/species_trait.tsv`;
 missing traits stay unknown and expression replicates do not add species weight.
 
 ## Pairs from full or phenotyped trees

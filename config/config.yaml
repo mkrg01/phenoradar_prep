@@ -1,14 +1,8 @@
-# Paths are relative to the project root (run Snakemake there).
+# Run from the project root; place dataset files in input/ (see docs/inputs.md).
 run_name: run001  # Output subdirectory under results/, work/, logs/.
 seed: 12345  # Random seed for supported steps.
-inputs:
-  metadata: input/metadata.tsv
-  species_trait: input/species_trait.tsv
-  busco: input/busco/summary.tsv
-  cds_dir: input/cds
-  quant_dir: input/quant
 selection:
-  species_list: null  # Candidate file (one species ID/line); null: all species.
+  species_list: false  # true: use input/species_list.txt; false: consider all species.
   busco_threshold: 0.5  # Minimum complete BUSCO fraction, applied after species_list.
   missing_taxonomy: error  # Unresolved taxids: error stops; allow keeps species with blank taxonomy.
 translation:
@@ -22,11 +16,10 @@ alignment:  # All mapped OGs and copies, without trimming.
 kegg:  # Missing references download on first use.
   enabled: false  # Include in all; explicit kegg target also works when false.
   ambiguity: duplicate  # Multi-KO genes: duplicate gives full TPM to each KO; drop omits; error rejects.
-phylogeny:  # Reuse CDS from inputs.cds_dir.
+phylogeny:  # Reuse CDS from input/cds and BUSCO full tables from input/busco/full.
   enabled: false  # Include in all; explicit phylogeny/timetree targets also work when false.
   species_sets: [all]  # all: selected species; phenotyped: known trait only; either or both.
-  trait: C4  # Column in inputs.species_trait for the phenotyped set.
-  busco_full_dir: input/busco/full  # Full tables; detect filenames from species IDs.
+  trait: C4  # Column in input/species_trait.tsv for the phenotyped set.
   lineage: embryophyta_odb12
   outgroup: auto  # auto: NCBI/APG IV per species set; or a species ID.
   max_markers: 500  # Highest BUSCO coverage first; ties: BUSCO ID ascending.
@@ -36,11 +29,10 @@ phylogeny:  # Reuse CDS from inputs.cds_dir.
   trimal_mode: gappyout  # gappyout | automated1
   dating:
     enabled: false
-    calibration_source: timetree  # timetree: fetch calibrations; file: use local TSV.
-    calibrations: input/calibrations.tsv  # For file only: taxa, min_age_ma, max_age_ma, source.
+    calibration_source: timetree  # timetree: fetch calibrations; file: use input/calibrations.tsv.
 contrast:
   enabled: false  # Include representative pairs in all; explicit contrast_pairs also works when false.
-  trait: C4  # Column in inputs.species_trait.
+  trait: C4  # Column in input/species_trait.tsv.
 taxonomy_check:
   enabled: false  # Attach reports to phylogeny; explicit taxonomy_check also works when false.
   ranks: [family, subfamily, tribe, subtribe, genus]  # Unique NCBI ranks; see docs/taxonomy_check.md.

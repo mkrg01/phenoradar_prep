@@ -331,9 +331,10 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     import yaml
     taxonomy = seed_taxonomy(tiny_inputs["taxonomy_db"])
     taxonomy_before = file_record(taxonomy), taxonomy.stat().st_mtime_ns
-    config = {
-        "run_name": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
-    }
+    config = {"run_name": "test"}
+    # A pilot list must not silently filter normal runs while the flag is false.
+    subset = workflow_project / "input/species_list.txt"
+    subset.write_text("Beta_sp-X\n")
     configfile = tmp_path / "config.yaml"
     reference = workflow_project / "resources/orthodb/v12_3193"
     reference.parent.mkdir(parents=True)
@@ -398,9 +399,8 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     execute()
     assert len(events.read_text().splitlines()) == 1
     # Shrinking selection must rebuild the checkpoint DAG and omit stale runs/chunks.
-    subset = tmp_path / "subset.txt"
     subset.write_text("Beta_sp-X\nGamma_plant\n")  # Gamma remains below the BUSCO threshold.
-    config["selection"] = {"species_list": str(subset)}
+    config["selection"] = {"species_list": True}
     configfile.write_text(yaml.safe_dump(config))
     execute()
     assert [r["run"] for r in read_tsv(out / "orthogroups/expression/tpm_wide.tsv")] == ["B1"]

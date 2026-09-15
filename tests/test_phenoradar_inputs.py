@@ -447,7 +447,7 @@ def test_collects_all_tree_variants_and_future_inputs(snapshot, tmp_path):
                                   ("rooting", "outgroup.json"), ("taxonomy_check", "summary.json")]:
             write_json(snapshot / base / directory / marker, {"completed": True})
         # Native solver work and stale loci are not completed downstream results.
-        work = snapshot / base / "dating/lsd2_runs/attempt/input.nwk"
+        work = snapshot / base / "dating/treepl_runs/attempt/input.nwk"
         work.parent.mkdir(parents=True)
         work.write_text(newick)
         (snapshot / base / "alignments/stale.faa").write_text(">Unknown_species\nAA\n")
@@ -474,7 +474,7 @@ def test_collects_all_tree_variants_and_future_inputs(snapshot, tmp_path):
     for relative in expected:
         assert (out / relative).is_symlink(), relative
         assert (out / relative).resolve() == snapshot / relative
-    assert not list(out.rglob("lsd2_runs"))
+    assert not list(out.rglob("treepl_runs"))
     assert not list(out.rglob("stale.faa"))
     assert not (out / "proteins/Stale_protein.fa").exists()
     assert not (out / "species_tree.nwk").exists()  # No arbitrary choice among tree types.

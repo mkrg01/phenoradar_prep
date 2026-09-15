@@ -295,7 +295,7 @@ def prepare(tree, metadata, taxonomy_db, outdir, cache_dir):
         "eligible_nodes": queries, "queries": queries,
         "node_eligibility": "internal node with resolved species on every child lineage",
         "query_taxa": "all resolved descendant species", "query_order": "canonical preorder by first tip label",
-        "calibration_type": "TimeTree secondary bounds interpreted as hard LSD2 bounds",
+        "calibration_type": "TimeTree secondary bounds interpreted as hard treePL bounds",
         "topology_check": "sampled child-lineage coverage and distinct MRCA IDs; not proof of full topological concordance",
         "outputs": {name: file_record(out / name) for name in
                     ["calibrations.tsv", "candidates.tsv", "candidates.json", "taxa.tsv", "nodes.nwk", "studies.tsv"]},

@@ -12,6 +12,7 @@ ROOT = str(Path(workflow.basedir).parent)
 SCRIPTS = str(Path(workflow.basedir) / "scripts")
 sys.path.insert(0, SCRIPTS)
 from configuration import validate_keys
+from layout import INPUTS, BUSCO_FULL, SPECIES_LIST, CALIBRATIONS
 from versioning import resolve_container_image
 USE_CONTAINER = DeploymentMethod.APPTAINER in workflow.deployment_settings.deployment_method
 try:
@@ -44,9 +45,10 @@ for section in ["alignment", "kegg", "contrast", "phylogeny"]:
         raise WorkflowError(f"{section}.enabled must be true or false")
 if config["kegg"]["ambiguity"] not in {"duplicate", "drop", "error"}:
     raise WorkflowError("kegg.ambiguity must be duplicate, drop, or error")
-PHY = dict(config["phylogeny"], translation_table=config["translation"]["table"])
+PHY = dict(config["phylogeny"], busco_full_dir=BUSCO_FULL,
+           translation_table=config["translation"]["table"])
 if not isinstance(config["contrast"]["trait"], str) or not config["contrast"]["trait"].strip():
-    raise WorkflowError("contrast.trait must name a column in inputs.species_trait")
+    raise WorkflowError("contrast.trait must name a column in input/species_trait.tsv")
 if config["contrast"]["trait"] in {"species", "role", "group", "representative", "is_representative", "n_species_in_group", "contrast_pair_id"}:
     raise WorkflowError("contrast.trait conflicts with a reserved output column")
 if (not isinstance(PHY["species_sets"], list) or not PHY["species_sets"]
@@ -54,7 +56,7 @@ if (not isinstance(PHY["species_sets"], list) or not PHY["species_sets"]
         or len(set(PHY["species_sets"])) != len(PHY["species_sets"])):
     raise WorkflowError("phylogeny.species_sets must be a nonempty list of all and/or phenotyped, without duplicates")
 if not isinstance(PHY["trait"], str) or not PHY["trait"].strip() or PHY["trait"] == "species":
-    raise WorkflowError("phylogeny.trait must name a phenotype column in inputs.species_trait")
+    raise WorkflowError("phylogeny.trait must name a phenotype column in input/species_trait.tsv")
 for key in ["max_markers", "min_protein_length", "min_taxa"]:
     if type(PHY[key]) is not int or PHY[key] <= 0:
         raise WorkflowError(f"phylogeny.{key} must be a positive integer")
@@ -64,19 +66,19 @@ if PHY["trimal_mode"] not in {"gappyout", "automated1"}:
     raise WorkflowError("phylogeny.trimal_mode must be gappyout or automated1")
 if PHY["min_taxa"] < 4:
     raise WorkflowError("phylogeny requires min_taxa >= 4")
-if PHY["busco_full_dir"] is not None and (not isinstance(PHY["busco_full_dir"], str) or not PHY["busco_full_dir"].strip()):
-    raise WorkflowError("phylogeny.busco_full_dir must be null or a nonempty string")
 if not isinstance(PHY["outgroup"], str) or not PHY["outgroup"].strip():
     raise WorkflowError("phylogeny.outgroup must be auto or an exact inference species label; use auto instead of null")
 if not isinstance(PHY["lineage"], str) or not PHY["lineage"].strip():
     raise WorkflowError("phylogeny.lineage must be a nonempty string")
 if type(PHY["dating"]["enabled"]) is not bool:
     raise WorkflowError("phylogeny.dating.enabled must be true or false")
-value = PHY["dating"]["calibrations"]
-if value is not None and (not isinstance(value, str) or not value.strip()):
-    raise WorkflowError("phylogeny.dating.calibrations must be null or a nonempty path")
 if PHY["dating"]["calibration_source"] not in {"file", "timetree"}:
     raise WorkflowError("phylogeny.dating.calibration_source must be file or timetree")
+from date_phylogeny import validate_settings as validate_treepl_settings
+try:
+    PHY["dating"]["treepl"] = validate_treepl_settings(PHY["dating"].get("treepl", {}))
+except ValueError as error:
+    raise WorkflowError(str(error))
 
 ASTRAL = str(Path(ROOT) / "resources/phylogeny_tools/bin/astral4_int128")
 from layout import (
@@ -140,7 +142,7 @@ def phylogeny_targets(names):
 
 def phylogeny_contrast_targets(wc):
     if EXCLUDE_SPECIES:
-        snapshot = discover_filter_inputs(OUT, config["inputs"].get("species_trait"))
+        snapshot = discover_filter_inputs(OUT, INPUTS["species_trait"])
         for species_set in PHY["species_sets"]:
             branch = PHYLO_BRANCHES[species_set]
             section = snapshot["sections"][f"{branch}_contrast"]
@@ -157,24 +159,6 @@ if TAXONOMY_CHECK["enabled"]:
 PHYLO_DATED = phylogeny_targets(["dating/species_tree.dated.nwk", "dating/provenance.json"])
 if PHY["dating"]["enabled"]:
     PHYLO_FINAL += PHYLO_DATED
-
-# Refuse output roots inside either user-provided input tree.
-for destination in [OUT, WORK, LOG, REFERENCE, KEGG_REFERENCE, TAXONOMY_DB, TIMETREE_CACHE]:
-    dest = Path(destination).resolve()
-    for source in [Path(config["inputs"]["metadata"]).resolve().parent,
-                   Path(config["inputs"]["cds_dir"]).resolve().parent]:
-        if dest == source or source in dest.parents:
-            raise WorkflowError(f"output path overlaps input directory: {dest}")
-
-for destination in [OUT, WORK, LOG]:
-    dest, ref = Path(destination).resolve(), Path(KEGG_REFERENCE).resolve()
-    if dest == ref or ref in dest.parents or dest in ref.parents:
-        raise WorkflowError("KEGG reference storage must not overlap results, work, or log directories")
-    if PHY["busco_full_dir"]:
-        src = Path(PHY["busco_full_dir"]).resolve()
-        if dest == src or src in dest.parents or dest in src.parents:
-            raise WorkflowError("phylogeny input directories must not overlap output roots")
-
 
 def sample_rows(wildcards):
     path = checkpoints.select_metadata.get().output.samples

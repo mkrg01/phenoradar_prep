@@ -23,8 +23,7 @@ def test_hundred_species_chunks_and_cpu_dependent_batches(
     if not snakemake:
         pytest.skip("Snakemake required")
     seed_taxonomy(tiny_inputs["taxonomy_db"])
-    source = tmp_path / "many_inputs"
-    (source / "cds").mkdir(parents=True)
+    source = workflow_project / "input"
     metadata, busco = [], []
     species = [f"Species_{i:03d}" for i in range(101)]
     for i, name in enumerate(species):
@@ -38,11 +37,9 @@ def test_hundred_species_chunks_and_cpu_dependent_batches(
                       "busco_cds_duplicated": 0, "busco_cds_fragmented": 0,
                       "busco_cds_missing": 0, "busco_cds_total": 1})
     write_tsv(source / "metadata.tsv", list(metadata[0]), list(reversed(metadata)))
-    write_tsv(source / "busco.tsv", list(busco[0]), busco)
+    write_tsv(source / "busco/summary.tsv", list(busco[0]), busco)
     override = tmp_path / "override.yaml"
-    override.write_text(yaml.safe_dump({"run_name": "test", "inputs": {
-        "metadata": str(source / "metadata.tsv"), "busco": str(source / "busco.tsv"),
-        "cds_dir": str(source / "cds"), "quant_dir": str(source / "quant")}}))
+    override.write_text(yaml.safe_dump({"run_name": "test"}))
     reference = workflow_project / "resources/orthodb/v12_3193"
     reference.parent.mkdir(parents=True)
     reference.symlink_to(frozen_reference, target_is_directory=True)

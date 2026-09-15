@@ -19,10 +19,10 @@ if not Path(TAXONOMY_DB).exists():
 
 checkpoint select_metadata:
     input:
-        metadata=config["inputs"]["metadata"],
-        busco=config["inputs"]["busco"],
+        metadata=INPUTS["metadata"],
+        busco=INPUTS["busco"],
         taxonomy=TAXONOMY_DB,
-        subset=[config["selection"]["species_list"]] if config["selection"]["species_list"] else [],
+        subset=[SPECIES_LIST] if config["selection"]["species_list"] else [],
         code=f"{SCRIPTS}/prepare_metadata.py",
         common=f"{SCRIPTS}/common.py"
     output:
@@ -34,8 +34,8 @@ checkpoint select_metadata:
         plot=f"{META}/busco_completeness.svg"
     params:
         outdir=META,
-        cds=config["inputs"]["cds_dir"],
-        quant=config["inputs"]["quant_dir"],
+        cds=INPUTS["cds_dir"],
+        quant=INPUTS["quant_dir"],
         threshold=config["selection"]["busco_threshold"],
         missing_taxonomy=config["selection"]["missing_taxonomy"],
         subset_flag="--species-list" if config["selection"]["species_list"] else ""
@@ -49,11 +49,8 @@ checkpoint select_metadata:
         "{params.subset_flag} {input.subset:q} > {log:q} 2>&1"
 
 
-# Phenotypes are optional for base metadata. A configured file that has not been
-# supplied yet leaves blank traits; adding it later creates an input dependency.
-PHENORADAR_TRAITS = config["inputs"].get("species_trait")
-if not PHENORADAR_TRAITS or not Path(PHENORADAR_TRAITS).is_file():
-    PHENORADAR_TRAITS = ""
+# Missing optional traits leave base metadata blank; adding the file creates a dependency.
+PHENORADAR_TRAITS = INPUTS["species_trait"] if Path(INPUTS["species_trait"]).is_file() else ""
 
 
 rule prepare_phenoradar_metadata:

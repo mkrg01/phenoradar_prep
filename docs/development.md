@@ -37,7 +37,7 @@ SNAKEMAKE_BIN=/path/to/snakemake SEQKIT_BIN=/path/to/seqkit \
 | Tests | Additional tools |
 | --- | --- |
 | Core and KEGG integration | Snakemake, seqkit; ODB/KofamScan are test substitutes |
-| Alignments, phylogeny, dating | FAMSA, trimAl, VeryFastTree, ASTRAL, LSD2; override with `FAMSA_BIN`, `TRIMAL_BIN`, `VERYFASTTREE_BIN`, `ASTRAL_BIN`, `LSD2_BIN` |
+| Alignments, phylogeny, dating | FAMSA, trimAl, VeryFastTree, ASTRAL, treePL; override with `FAMSA_BIN`, `TRIMAL_BIN`, `VERYFASTTREE_BIN`, `ASTRAL_BIN`, `TREEPL_BIN` |
 | Taxonomy check | R/MonoPhy from `workflow/envs/monophy.yaml` |
 | TimeTree client | Pinned nwkit from `workflow/envs/timetree.yaml` |
 

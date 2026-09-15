@@ -6,7 +6,8 @@
 
 Use a published release checkout with the [requirements](../README.md#requirements)
 on Linux/Bash, and edit [config/config.yaml](../config/config.yaml).
-See [container setup](containers.md) for compute-node tools, images, and bind mounts.
+Place [input files](inputs.md#file-formats) in `input/`.
+See [container setup](containers.md) for compute-node tools and images.
 First use needs network for the image and missing [references](references.md).
 `SNAKEMAKE_BIN` can select another Snakemake executable.
 
@@ -19,14 +20,7 @@ account, CPUs, memory, time), then submit from the repository root:
 sbatch run_pipeline.sh
 ```
 
-Jobs share one node/task allocation and automatically use its CPUs/memory.
-Override Slurm settings before the script name:
-
-```bash
-sbatch --cpus-per-task=32 --mem=256G --time=7-00:00:00 run_pipeline.sh
-```
-
-Workflow options go after the script name. Monitor `pipeline-<job_id>.out` / `.err`
+Monitor `pipeline-<job_id>.out` / `.err`
 in the repository root and per-step logs in `logs/<run_name>/`.
 Avoid concurrent jobs writing the same results.
 
@@ -44,7 +38,7 @@ Put options before `--` and targets after it. Omitting the target runs `all`.
 
 ## Pilot run
 
-List a few candidate species IDs in `input/pilot_species.txt`, one per line.
+List a few candidate species IDs in `input/species_list.txt`, one per line.
 [BUSCO filtering](inputs.md#species-selection) still applies. Then run:
 
 ```bash
@@ -53,9 +47,9 @@ sbatch --cpus-per-task=8 --mem=80G \
   --set-threads odb_map=8 --set-resources odb_map:mem_mb=64000
 ```
 
-[config/pilot.yaml](../config/pilot.yaml) overrides only species selection and
-run name. Check selection/mapping QC in `results/pilot/`, runtime, disk use,
-and peak memory before a full run.
+[config/pilot.yaml](../config/pilot.yaml) enables that list and sets `run_name: pilot`.
+Check selection/mapping QC in `results/pilot/`, runtime, disk use,
+and peak memory before a full run. The main configuration leaves the list disabled.
 
 ## Targets
 
@@ -73,7 +67,7 @@ schedule missing prerequisites automatically.
 | `phylogeny_prepare` | BUSCO input audit, outgroup, and marker plan |
 | `phylogeny` | [Species trees](phylogeny.md), plus enabled dating/taxonomy checks |
 | `phylogeny_calibrations` | Trees and [TimeTree calibrations](dating.md#timetree-calibrations), without dating |
-| `timetree` | Trees and [LSD2 dating](dating.md) |
+| `timetree` | [treePL dating](dating.md), with TimeTree or manual age calibrations |
 | `taxonomy_check` | [MonoPhy review](taxonomy_check.md) |
 | `contrast_pairs` | [Representative selection, inference, and pairs](contrast_pairs.md#representative-analysis) |
 | `phylogeny_contrast_pairs` | [Pairs from full/phenotyped trees](contrast_pairs.md#pairs-from-full-or-phenotyped-trees); with exclusions, uses completed filtered results |
@@ -96,6 +90,7 @@ Defaults live in the rules, not configuration files.
 | `check_taxonomy` | Species set | 1 | 8 |
 
 See [phylogeny resources](phylogeny.md#resources) for tree-inference defaults.
+The [dating rule](dating.md#resources) requires one thread; its memory can be overridden.
 Two default ODB jobs need 32 CPUs and 384 GB. To reduce per-job requests:
 
 ```bash

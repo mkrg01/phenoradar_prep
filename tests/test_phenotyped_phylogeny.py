@@ -73,10 +73,10 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
     vft = os.environ.get("VERYFASTTREE_BIN") or shutil.which("VeryFastTree")
     if not all([snakemake, famsa, vft]) or not (ROOT / "resources/phylogeny_tools/bin/astral4_int128").exists():
         pytest.skip("real inference tools required")
-    lsd2 = os.environ.get("LSD2_BIN") or shutil.which("lsd2")
+    treepl = os.environ.get("TREEPL_BIN") or shutil.which("treePL")
     commands = {"python": sys.executable, "famsa": famsa, "trimal": trimal_binary(), "VeryFastTree": vft}
-    if lsd2:
-        commands["lsd2"] = lsd2
+    if treepl:
+        commands["treePL"] = treepl
     env = command_environment(commands)
     source, species = phylogeny_inputs(tmp_path)
     # Removing the unobserved basal species must select a different outgroup.
@@ -86,15 +86,13 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
         for i in range(1, len(species)):
             parent, track = (3, "3,2,1") if i == 1 else (4, "4,3,2,1")
             db.execute("UPDATE species SET parent=?, track=? WHERE taxid=?", (parent, f"{42+i},{track}", 42+i))
-    traits = source / "traits.tsv"
+    traits = source / "species_trait.tsv"
     trait_rows = [{"species": n, "C4": "" if i == 0 else "0"} for i, n in enumerate(species)]
     write_tsv(traits, ["species", "C4"], trait_rows)
     seed_taxonomy(source / "taxa.sqlite")
-    cfg = {"run_name": "test", "inputs": {
-        "metadata": str(source / "metadata.tsv"), "species_trait": str(traits),
-        "busco": str(source / "busco.tsv"), "cds_dir": str(source / "cds"), "quant_dir": str(source / "quant")},
+    cfg = {"run_name": "test",
         "contrast": {"trait": "unrelated"},
-        "phylogeny": {"busco_full_dir": str(source / "busco"), "outgroup": "auto", "max_markers": 3}}
+        "phylogeny": {"outgroup": "auto", "max_markers": 3}}
     config = tmp_path / "override.yaml"
     argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(config),
             "--cores", "2", "--resources", "mem_mb=8000",
@@ -162,7 +160,7 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
     assert {r["species"] for r in read_tsv(full / "timetree/taxa.tsv")} == set(species)
     assert {r["species"] for r in read_tsv(observed / "timetree/taxa.tsv")} == set(species[1:])
 
-    if lsd2:
+    if treepl:
         run(["phenotyped"], "timetree")
         read_tree(observed / "dating/species_tree.dated.nwk", species[1:])
         assert not (full / "dating").exists()

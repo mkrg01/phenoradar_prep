@@ -320,30 +320,32 @@ def test_renamed_binary_cannot_pass_int128_check(tmp_path):
         astral("unused", "unused", manifest, "unused", "unused", str(binary), "s0", 1, 1)
 
 
-def test_real_lsd2_outputs_time_units_and_honors_calibration(tmp_path):
-    lsd2 = os.environ.get("LSD2_BIN") or shutil.which("lsd2")
-    if not lsd2:
-        pytest.skip("set LSD2_BIN for real dating integration")
+def test_real_treepl_outputs_time_units_and_honors_calibration(tmp_path):
+    treepl = os.environ.get("TREEPL_BIN") or shutil.which("treePL")
+    if not treepl:
+        pytest.skip("set TREEPL_BIN for real dating integration")
     tree, provenance = tmp_path / "input.nwk", tmp_path / "input.json"
     tree.write_text("(A:0.1,(B:0.08,(C:0.04,D:0.04):0.04):0.02);\n")
     write_json(provenance, {"branch_length_unit": "substitutions_per_site", "outgroup": "A", "mean_gene_length": 250, "total_gene_sites": 750})
     calibrations = tmp_path / "calibrations.tsv"
     write_tsv(calibrations, ["taxa", "min_age_ma", "max_age_ma", "source"],
               [{"taxa": "A,B", "min_age_ma": 100, "max_age_ma": 100, "source": "synthetic test only"}])
-    date(tree, provenance, calibrations, tmp_path / "dated", lsd2)
+    date(tree, provenance, calibrations, tmp_path / "dated", treepl, seed=2147483647)
     dated = read_tree(tmp_path / "dated/species_tree.dated.nwk")
     assert dated.get_distance("A", "B") == pytest.approx(200)
     assert dated.get_distance("C", "D") == pytest.approx(80, rel=0.01)
     report = json.loads((tmp_path / "dated/provenance.json").read_text())
     assert report["root_age_ma"] == pytest.approx(100)
     assert report["concatenation_used"] is False
+    seeds = [command["seed"] for command in report["commands"]]
+    assert seeds == [2147483647, 2147483647]
 
 
 def phylogeny_inputs(tmp_path):
     source = tmp_path / "input"
     source.mkdir()
-    cds, busco = source / "cds", source / "busco"
-    cds.mkdir(); busco.mkdir()
+    cds, busco = source / "cds", source / "busco/full"
+    cds.mkdir(); busco.mkdir(parents=True)
     rng = random.Random(73)
     amino = "ACDEFGHIKLMNPQRSTVWY"
     codons = ["GCT", "TGT", "GAT", "GAA", "TTT", "GGT", "CAT", "ATT", "AAA", "CTT",
@@ -367,7 +369,7 @@ def phylogeny_inputs(tmp_path):
         write_tsv(source / "quant" / name / f"R{i}" / f"R{i}_abundance.tsv", ["target_id", "tpm"],
                   [{"target_id": f"{name}_g1", "tpm": 100}])
     write_tsv(source / "metadata.tsv", list(metadata[0]), metadata)
-    write_tsv(source / "busco.tsv", list(summaries[0]), summaries)
+    write_tsv(source / "busco/summary.tsv", list(summaries[0]), summaries)
     with sqlite3.connect(taxonomy) as db:
         db.executescript("""CREATE TABLE species (taxid INTEGER PRIMARY KEY, parent INTEGER, spname TEXT, common TEXT, rank TEXT, track TEXT);
             CREATE TABLE merged (taxid_old INTEGER, taxid_new INTEGER); CREATE TABLE stats (version INTEGER);
@@ -386,10 +388,10 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
     if not all([snakemake, famsa, vft]) or not astral4.is_file():
         pytest.skip("set phylogeny tool paths and run prepare_phylogeny_tools.py for workflow integration")
     trimal = trimal_binary()
-    lsd2 = os.environ.get("LSD2_BIN") or shutil.which("lsd2")
+    treepl = os.environ.get("TREEPL_BIN") or shutil.which("treePL")
     commands = {"python": sys.executable, "famsa": famsa, "trimal": trimal, "VeryFastTree": vft}
-    if lsd2:
-        commands["lsd2"] = lsd2
+    if treepl:
+        commands["treePL"] = treepl
     env = command_environment(commands)
     source, species = phylogeny_inputs(tmp_path)
     # Real inference accepts mixed standard layouts and compression without overrides.
@@ -397,8 +399,8 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
         "{species}.busco.full.tsv.gz", "{species}.tsv", "{species}.tsv.gz",
         "{species}/full_table.tsv", "{species}/run_embryophyta_odb12/full_table.tsv.gz",
     ]):
-        original = source / "busco" / f"{name}.busco.full.tsv"
-        target = source / "busco" / relative.format(species=name)
+        original = source / "busco/full" / f"{name}.busco.full.tsv"
+        target = source / "busco/full" / relative.format(species=name)
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.suffix == ".gz":
             with gzip.open(target, "wt") as handle:
@@ -407,10 +409,8 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
         else:
             original.rename(target)
     seed_taxonomy(source / "taxa.sqlite")
-    cfg = {"run_name": "test", "seed": 17, "inputs": {"metadata": str(source / "metadata.tsv"), "busco": str(source / "busco.tsv"),
-           "cds_dir": str(source / "cds"), "quant_dir": str(source / "quant")},
-           "phylogeny": {"busco_full_dir": str(source / "busco"), "outgroup": species[0],
-               "max_markers": 3}}
+    cfg = {"run_name": "test", "seed": 17,
+           "phylogeny": {"outgroup": species[0], "max_markers": 3}}
     conda_prefix = os.environ.get("PHYLOGENY_CONDA_PREFIX")
     config = tmp_path / "config.yaml"
     config.write_text(yaml.safe_dump(cfg))
@@ -430,7 +430,7 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
     out = tmp_path / "results/test/phylogeny/all"
     for row in read_tsv(out / "plan/species.tsv"):
         assert Path(row["sequences"]) == source / "cds" / f'{row["species"]}_longestCDS.fa.gz'
-        assert Path(row["busco_table"]) == busco_full_path(source / "busco", row["species"], "embryophyta_odb12")
+        assert Path(row["busco_table"]) == busco_full_path(source / "busco/full", row["species"], "embryophyta_odb12")
     read_tree(out / "species_tree.nwk", species)
     assert all(int(r["gene_trees"]) >= 1 for r in read_tsv(out / "species_coverage.tsv"))
     report = json.loads((out / "species_tree.json").read_text())
@@ -475,12 +475,12 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
     timestamp = (out / "species_tree.nwk").stat().st_mtime_ns
     assert "Nothing to be done" in run()
     # The dating target reuses the inferred species tree and does not restart loci.
-    if lsd2:
-        calibrations = tmp_path / "calibrations.tsv"
+    if treepl:
+        calibrations = source / "calibrations.tsv"
         write_tsv(calibrations, ["taxa", "min_age_ma", "max_age_ma", "source"],
                   [{"taxa": ",".join(species[:2]), "min_age_ma": 100, "max_age_ma": 100,
                     "source": "synthetic workflow test only"}])
-        cfg["phylogeny"]["dating"] = {"calibration_source": "file", "calibrations": str(calibrations)}
+        cfg["phylogeny"]["dating"] = {"calibration_source": "file"}
         config.write_text(yaml.safe_dump(cfg))
         argv[-1] = "timetree"
         run()
@@ -496,9 +496,23 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
         assert all(p.stat().st_mtime_ns == stamp for p, stamp in retained.items())
         dating_report = json.loads((out / "dating/provenance.json").read_text())
         tree_report = json.loads((out / "species_tree.json").read_text())
-        assert dating_report["settings"] == {"variance": 1, "variance_parameter": None, "numsites": None}
+        assert dating_report["method"] == "treePL penalized likelihood"
         assert dating_report["numsites"] == tree_report["total_gene_sites"]
         assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
+        # Changing only smoothing reruns dating and bypasses CV, preserving inference.
+        dated_timestamp = (out / "dating/species_tree.dated.nwk").stat().st_mtime_ns
+        cfg["phylogeny"]["dating"]["treepl"] = {"smooth": 0.5}
+        config.write_text(yaml.safe_dump(cfg))
+        run()
+        assert (out / "dating/species_tree.dated.nwk").stat().st_mtime_ns != dated_timestamp
+        assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
+        assert all(p.stat().st_mtime_ns == stamp for p, stamp in retained.items())
+        dating_report = json.loads((out / "dating/provenance.json").read_text())
+        assert dating_report["cv_method"] == "fixed smoothing" and dating_report["smoothing"] == 0.5
+        assert not read_tsv(out / "dating/cross_validation.tsv")
+        assert "\ncv\n" not in (out / "dating/treepl.config.txt").read_text()
+        assert len(dating_report["commands"]) == 2
+        assert "Nothing to be done" in run()
         # Removing the override selects the default automatic TimeTree branch. Exercise
         # the full rule graph offline with a recorded synthetic API response.
         from timetree_calibrations import cached_response

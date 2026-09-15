@@ -31,15 +31,17 @@ def dating(work):
         {"taxa": "A,D", "min_age_ma": 100, "max_age_ma": 100, "source": "smoke root"},
         {"taxa": "C,D", "min_age_ma": 50, "max_age_ma": 60, "source": "smoke internal"}])
     output = work / "dating"
-    date(tree, provenance, bounds, output, "lsd2")
+    date(tree, provenance, bounds, output, "treePL",
+         {"cvstart": 10.0, "cvstop": 1.0})
     result = read_tree(output / "species_tree.dated.nwk", {"A", "B", "C", "D"})
-    assert all(math.isclose(result.get_distance(result, leaf), 100, abs_tol=1e-8)
+    assert all(math.isclose(result.get_distance(result, leaf), 100, abs_tol=2e-6)
                for leaf in result.leaves())
     age = 100 - result.get_distance(result, result.common_ancestor(["C", "D"]))
-    assert 50 - 1e-8 <= age <= 60 + 1e-8
+    assert 50 - 2e-6 <= age <= 60 + 2e-6
     report = json.loads((output / "provenance.json").read_text())
     assert report["topology_preserved"] and report["build"]["source_patch_applied"] is False
-    assert report["settings"]["variance"] == 1 and report["numsites"] == 32000
+    assert report["cv_method"] == "native leave-one-out" and report["numsites"] == 32000
+    assert report["native_time_branch_lengths_preserved"] and len(report["commands"]) == 2
 
 
 def monophy(work):
@@ -106,7 +108,7 @@ def check_environment(name):
     commands = {"alignment": ["famsa"], "kofam": ["exec_annotation", "hmmsearch"],
                 "odb": ["ODB-mapper"], "seqkit": ["seqkit"],
                 "phylogeny": ["famsa", "trimal", "VeryFastTree"],
-                "dating": ["lsd2"], "monophy": ["Rscript"]}
+                "dating": ["treePL"], "monophy": ["Rscript"]}
     for module in imports.get(name, []):
         importlib.import_module(module)
     for command in commands.get(name, []):

@@ -9,12 +9,13 @@ and original CDS, independently of ODB/KEGG:
 BUSCO markers -> cdskit -> FAMSA -> trimAl/QC -> VeryFastTree -> ASTRAL-IV/CASTLES-II
 ```
 
-Branch lengths are substitutions/site; absolute ages require [dating](dating.md).
+Branch lengths are substitutions/site; absolute ages require [treePL dating](dating.md).
+TimeTree provides age calibrations for that step by default.
 
 ## Inputs
 
 Alongside ordinary [inputs](inputs.md), provide one full table per species in
-`phylogeny.busco_full_dir` (default `input/busco/full`). Use one lineage
+`input/busco/full/`. Use one lineage
 dataset/version; `phylogeny.lineage` defaults to `embryophyta_odb12`.
 
 Full tables need `Busco id`, `Status`, `Sequence`, `Score`, and `Length` columns,
@@ -29,7 +30,7 @@ missing or multiple matches are errors:
 {species}/run_{lineage}/full_table.tsv
 ```
 
-Supply original, oriented, in-frame CDS matching BUSCO hits through `inputs.cds_dir`.
+Supply original, oriented, in-frame CDS matching BUSCO hits in `input/cds/`.
 IDs such as `Species_g123:60-698` resolve to `Species_g123`; the full CDS is
 translated, without reconstructing BUSCO-predicted peptides. Missing or ambiguous
 original IDs fail extraction.
@@ -118,8 +119,9 @@ Per-job memory totals all threads; see [overrides](running.md#resource-budgets).
 | `align_busco_marker`, `infer_busco_gene_tree` | Marker | 4 | 8 |
 | `infer_busco_species_tree` | Species set | 32 | 64 |
 
-Preparation, extraction, collection, trimming, merging, calibration retrieval,
-and dating each default to 1 thread and 4 GB per job.
+Preparation, extraction, collection, trimming, merging, and calibration retrieval
+each default to 1 thread and 4 GB per job.
+[Dating](dating.md#resources) also requests 4 GB and requires 1 thread.
 
 ## Outputs
 

@@ -81,8 +81,8 @@ while (($#)); do
     workflow_args+=("$arg")
 done
 
-# Quote the bind path for Snakemake's shell command. User deployment flags can
-# override these defaults; the local executor and allocation limits apply last.
+# Mount the repository, including input/ and resources/. The local executor and
+# allocation limits apply after user options.
 printf -v container_root '%q' "$root"
 exec "$snakemake_bin" --printshellcmds --rerun-incomplete \
     --snakefile workflow/Snakefile \

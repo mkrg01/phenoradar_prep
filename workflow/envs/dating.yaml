@@ -6,6 +6,6 @@ dependencies:
   - python=3.12
   - biopython=1.85
   - ete4=4.3.0
-  # The adjacent Snakemake post-deploy script builds unmodified upstream LSD2.
+  # The adjacent Snakemake post-deploy script builds unmodified upstream treePL and its vendored libraries.
   - gxx_linux-64=13
   - make=4.4.1

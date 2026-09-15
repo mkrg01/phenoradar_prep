@@ -9,7 +9,6 @@ import tarfile
 from pathlib import Path
 
 import pytest
-import yaml
 
 import prepare_taxonomy
 from common import file_record
@@ -126,13 +125,10 @@ def test_workflow_reuses_snapshot_across_run_names(tmp_path, tiny_inputs, seed_t
         pytest.skip("Snakemake is not available")
     destination = seed_taxonomy(tiny_inputs["taxonomy_db"])
     before = file_record(destination), destination.stat().st_mtime_ns
-    config = tmp_path / "override.yaml"
-    config.write_text(yaml.safe_dump({"inputs": {key: tiny_inputs[key]
-                     for key in ("metadata", "busco", "cds_dir", "quant_dir")}}))
     for run_name in ("run001", "second_run"):
         result = subprocess.run([
             snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"),
-            "--cores", "1", "--configfile", str(config), "--config", f"run_name={run_name}",
+            "--cores", "1", "--config", f"run_name={run_name}",
             "--dry-run", "--", f"results/{run_name}/run.json",
         ], cwd=workflow_project, env={**os.environ, "XDG_CACHE_HOME": str(tmp_path / "cache")},
             capture_output=True, text=True, timeout=60)

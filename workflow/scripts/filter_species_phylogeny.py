@@ -151,7 +151,7 @@ def export_phylogeny(job):
         "dated_tree_note": "Source time-tree path lengths retained; calibrations and node ages were not refitted",
         "gene_trees": details,
         "limitations": ["Original inference can still reflect excluded sequences.",
-                        "Pruned trees are not new ASTRAL/CASTLES-II/LSD2 estimates.",
+                        "Pruned trees are not new ASTRAL/CASTLES-II/treePL estimates.",
                         "Trees with fewer than four tips are not suitable ASTRAL inputs.",
                         "No old calibration, support, node-age, or inference-QC tables are relabeled as filtered results."]})
     job.counts["phylogeny"] = dict(before=len(job.species), after=len(job.keep), gene_trees=used)

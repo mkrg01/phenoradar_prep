@@ -1,4 +1,15 @@
-"""Canonical result paths shared by producers and completed-result consumers."""
+"""Canonical input and result paths shared by workflow stages."""
+
+INPUTS = {
+    "metadata": "input/metadata.tsv",
+    "species_trait": "input/species_trait.tsv",
+    "busco": "input/busco/summary.tsv",
+    "cds_dir": "input/cds",
+    "quant_dir": "input/quant",
+}
+BUSCO_FULL = "input/busco/full"
+SPECIES_LIST = "input/species_list.txt"
+CALIBRATIONS = "input/calibrations.tsv"
 
 ORTHOGROUP_MAPPING = "orthogroups/mapping"
 ORTHOGROUP_EXPRESSION = "orthogroups/expression"

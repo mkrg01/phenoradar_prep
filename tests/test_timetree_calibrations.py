@@ -317,7 +317,7 @@ def test_conflict_preserves_bounds_and_sources_and_prevents_dating(tmp_path):
                                      "total_gene_sites": 750}))
     # Dating must stop before resolving or launching an executable.
     with pytest.raises(ValueError, match="at least one explicit calibration"):
-        date(tree, provenance, out / "calibrations.tsv", tmp_path / "dated", "must-not-run-lsd2")
+        date(tree, provenance, out / "calibrations.tsv", tmp_path / "dated", "must-not-run-treepl")
     assert not (tmp_path / "dated").exists()
 
 
@@ -343,7 +343,7 @@ def test_interrupted_retrieval_resumes_with_the_completed_response(tmp_path, mon
     assert len(read_tsv(out / "calibrations.tsv")) == 3
 
 
-def test_preparation_and_real_lsd2_keep_topology_and_substitution_tree(tmp_path):
+def test_preparation_and_real_treepl_keep_topology_and_substitution_tree(tmp_path):
     tree, metadata, database = inputs(tmp_path)
     original = tree.read_bytes()
     cache = tmp_path / "cache"
@@ -353,18 +353,18 @@ def test_preparation_and_real_lsd2_keep_topology_and_substitution_tree(tmp_path)
     prepare(tree, metadata, database, out, cache)
     assert json.loads((out / "provenance.json").read_text())["status"] == "ready"
     assert len(read_tsv(out / "calibrations.tsv")) == 1
-    lsd2 = os.environ.get("LSD2_BIN")
-    if lsd2:
+    treepl = os.environ.get("TREEPL_BIN")
+    if treepl:
         provenance = tmp_path / "tree.json"
         provenance.write_text(json.dumps({"branch_length_unit": "substitutions_per_site", "outgroup": "A", "mean_gene_length": 250, "total_gene_sites": 750}))
-        date(tree, provenance, out / "calibrations.tsv", tmp_path / "dated", lsd2)
+        date(tree, provenance, out / "calibrations.tsv", tmp_path / "dated", treepl)
         dated = read_tree(tmp_path / "dated/species_tree.dated.nwk", "ABCD")
         assert 90 - 1e-3 <= dated.get_distance("A", "B") / 2 <= 110 + 1e-3
         result = json.loads((tmp_path / "dated/provenance.json").read_text())
-        assert result["native_report"]["unique_scale"] is False
-        assert result["native_report"]["rate_substitutions_per_site_per_ma"] is None
-        assert result["native_report"]["root_date_interval"] == [-110, -90]
+        assert result["method"] == "treePL penalized likelihood"
         assert result["confidence_intervals"] is False
-        assert result["review_status"] == "needs_review"
-        assert "midpoint" in result["scale_selection"]
+        assert 90 - 2e-6 <= result["root_age_ma"] <= 110 + 2e-6
+        applied = read_tsv(tmp_path / "dated/calibrations.resolved.tsv")
+        assert float(applied[0]["min_age_ma"]) == 90
+        assert float(applied[0]["max_age_ma"]) == 110
     assert tree.read_bytes() == original

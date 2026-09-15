@@ -94,7 +94,7 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     command = fake_kofam_command(tmp_path)
     seed_taxonomy(tiny_inputs["taxonomy_db"])
     config = {
-        "run_name": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
+        "run_name": "test",
         "kegg": {"enabled": False},
     }
     configfile = tmp_path / "config.yaml"
@@ -164,9 +164,9 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
         assert len(events.read_text().splitlines()) == 2
         assert all(p.stat().st_mtime_ns == timestamp for p, timestamp in annotation_times.items())
 
-    subset = tmp_path / "subset.txt"
+    subset = workflow_project / "input/species_list.txt"
     subset.write_text("Beta_sp-X\n")
-    config["selection"] = {"species_list": str(subset)}
+    config["selection"] = {"species_list": True}
     configfile.write_text(yaml.safe_dump(config))
     execute()
     assert [r["run"] for r in read_tsv(out / "ko_tpm_sum.tsv")] == ["B1"] * 3
