@@ -133,7 +133,7 @@ def test_workflow_reuses_snapshot_across_run_names(tmp_path, tiny_inputs, seed_t
         result = subprocess.run([
             snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"),
             "--cores", "1", "--configfile", str(config), "--config", f"run_name={run_name}",
-            "--dry-run", "--", "prepare",
+            "--dry-run", "--", f"results/{run_name}/run.json",
         ], cwd=workflow_project, env={**os.environ, "XDG_CACHE_HOME": str(tmp_path / "cache")},
             capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, result.stdout + result.stderr

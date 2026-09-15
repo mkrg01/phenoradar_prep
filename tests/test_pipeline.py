@@ -409,7 +409,8 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
             logs = "\n".join(f"{p}:\n{p.read_text()}" for p in (tmp_path / "logs").rglob("*.log"))
             pytest.fail(result.stdout + "\n" + logs)
         return result.stdout
-    execute(["--", "prepare"])
+    # Resolve the selection checkpoint so the resource plan can be inspected.
+    execute(["--", "results/test/metadata/samples.tsv"])
     if not reuse:
         defaults = subprocess.run(base[:base.index("--cores")] + [
             "--cores", "64", "--resources", "mem_mb=384000", "--dry-run", "--printshellcmds"],
@@ -428,6 +429,9 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     assert not any("<TBD>" in line for line in plan.splitlines() if "input:" in line)
     execute()
     out = tmp_path / "results/test"
+    assert (out / "run.json").is_file()
+    assert len(read_tsv(out / "metadata/species_metadata.tsv")) == 2
+    assert (out / "orthogroups/mapping/manifests/chunks.json").is_file()
     assert len(read_tsv(out / "orthogroups/expression/tpm_wide.tsv")) == 3
     events = tmp_path / "events.txt"
     assert (len(events.read_text().splitlines()) if events.exists() else 0) == (0 if reuse else 1)

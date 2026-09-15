@@ -53,7 +53,7 @@ def test_launcher_arguments_and_exit_status(batch_workspace, tmp_path, mode, exi
     arguments = ["--configfile", "config/data with spaces.yaml", "config/pilot.yaml",
                  "--config", "mem_gb=99",
                  "--set-threads", "odb_map=1", "--set-resources", "odb_map:mem_mb=3000",
-                 "--", "prepare", "proteins"]
+                 "--", "references", "proteins"]
     cwd = checkout
     if mode == "direct":
         env = {k: v for k, v in env.items() if not k.startswith("SLURM_")}
@@ -69,7 +69,7 @@ def test_launcher_arguments_and_exit_status(batch_workspace, tmp_path, mode, exi
     argv = observed["argv"]
     assert argv[argv.index("--configfile") + 1:argv.index("--configfile") + 3] == [
         "config/data with spaces.yaml", "config/pilot.yaml"]
-    assert argv[-3:] == ["--", "prepare", "proteins"]
+    assert argv[-3:] == ["--", "references", "proteins"]
     assert argv[argv.index("--executor") + 1] == "local"
     deployment_index = argv.index("--software-deployment-method")
     assert argv[deployment_index + 1:deployment_index + 3] == ["conda", "apptainer"]
@@ -272,6 +272,8 @@ def test_real_workflow_container_setup(batch_workspace, mode, deployment):
         assert "container_image must be auto or" in output
     else:
         assert result.returncode == 0, output
-        assert "prepare" in result.stdout
+        rules = set(result.stdout.splitlines())
+        assert {"all", "references", "proteins"} <= rules
+        assert "prepare" not in rules
     for directory in ("results", "resources", "work"):
         assert not (checkout / directory).exists()

@@ -34,8 +34,8 @@ All jobs run inside one node/task allocation. The script defaults to 16 CPUs,
 script name; workflow options go after it:
 
 ```bash
-sbatch --cpus-per-task=2 --mem=16G --time=01:00:00 \
-  run_pipeline.sh -- prepare
+sbatch --cpus-per-task=32 --mem=256G --time=7-00:00:00 \
+  run_pipeline.sh
 ```
 
 Slurm writes standard output to `pipeline-<job_id>.out` and standard error to
@@ -57,24 +57,14 @@ Run from the repository root with a CPU and memory budget:
 Put all options before `--` and targets after it. Omit the target to run `all`.
 For a separate configuration file, see [configuration](configuration.md#loading-settings-and-paths).
 
-## Prepare and inspect
-
-To inspect species selection and manifests before the full analysis, run `prepare`:
-
-```bash
-./run_pipeline.sh --cores 2 --resources mem_gb=16 -- prepare
-```
-
-Review `selection.json`, `samples.tsv`, and `busco_completeness.svg` in
-`results/<run_name>/metadata/`. Then inspect downstream work with `--dry-run`.
-Selection is a checkpoint, so a dry-run before preparation can be incomplete.
-
 ## Pilot run
 
-Choose a few eligible species, then use the supplied pilot override:
+Create `input/pilot_species.txt` with a few candidate species IDs, one per line;
+see [species selection](inputs.md#species-selection) for the ID format.
+The workflow applies BUSCO filtering to these candidates automatically. Then
+use the supplied pilot override:
 
 ```bash
-head -n 3 results/run001/metadata/species_high_busco.txt > input/pilot_species.txt
 sbatch --cpus-per-task=8 --mem=80G \
   run_pipeline.sh --configfile config/pilot.yaml \
   --set-threads odb_map=8 --set-resources odb_map:mem_mb=64000
@@ -85,6 +75,8 @@ in `config/config.yaml`: it uses `input/pilot_species.txt` and writes
 to `results/pilot/`. Other settings come from `config/config.yaml`.
 Review the species list and check mapping
 quality, runtime, disk use, and peak memory before a full run.
+Selection reports (`selection.json`, `samples.tsv`, and `busco_completeness.svg`)
+are in `results/pilot/metadata/`.
 
 ## Targets
 
@@ -94,7 +86,6 @@ schedule missing prerequisites automatically.
 | Target | Work requested |
 | --- | --- |
 | `all` (default) | OG expression/QC and branches enabled by `alignment`, `kegg`, `phylogeny`, and `contrast` |
-| `prepare` | Metadata selection, PhenoRadar species metadata, run record, sample/chunk manifests |
 | `references` | OrthoDB snapshot only |
 | `kegg_references` | KOfam/KEGG snapshot only; no assemblies required |
 | `proteins` | CDS translation for selected species |

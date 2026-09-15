@@ -60,7 +60,7 @@ def test_hundred_species_chunks_and_cpu_dependent_batches(
             p.read_text()[-3000:] for p in (tmp_path / "logs").rglob("*.log"))
         return result.stdout + result.stderr
 
-    execute(["prepare"])
+    execute(["results/test/orthogroups/mapping/manifests"])
     mapping = tmp_path / "results/test/orthogroups/mapping"
     chunks = json.loads((mapping / "manifests/chunks.json").read_text())
     assert [len(row["species"]) for row in chunks] == [100, 1]

@@ -35,8 +35,7 @@ execution, individual targets, and resource settings.
 
 Main expression tables are in `results/<run_name>/orthogroups/expression/`,
 with `run_name: run001` by default.
-Slurm writes standard output to `pipeline-<job_id>.out` and standard error to
-`pipeline-<job_id>.err` in the repository root. Per-step logs and temporary work
+Per-step logs and temporary work
 are stored in `logs/<run_name>/` and `work/<run_name>/`.
 
 [Documentation](docs/index.md) covers configuration, optional analyses, output

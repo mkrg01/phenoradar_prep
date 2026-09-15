@@ -3,8 +3,7 @@
 [Documentation](index.md) · [Input formats](inputs.md)
 
 Edit [config/config.yaml](../config/config.yaml) directly and adjust the settings
-as needed. The workflow reads this file automatically. Keep your existing
-settings when resuming an analysis.
+as needed. Keep your existing settings when resuming an analysis.
 
 ## Loading settings and paths
 
@@ -15,20 +14,7 @@ sbatch run_pipeline.sh
 ```
 
 CPU and memory are taken automatically from the Slurm allocation requested by the
-script's `#SBATCH` settings. Adjust those settings for your cluster; no `--cores`
-or `--resources` arguments are needed for Slurm submission.
-
-With no target specified, the workflow runs `all`, including preparation and
-enabled analyses. To run only species selection, metadata generation, and
-sample/chunk manifest preparation, append `-- prepare`. See
-[running the workflow](running.md) for targets and direct execution.
-
-Put options before `--` and targets after it. Paths are relative to the repository
-root unless absolute; submit Slurm jobs there or use `sbatch --chdir`.
-
-If you need a separate configuration file, pass `--configfile config/mydata.yaml`.
-Its settings override those in `config/config.yaml`. Command-line `--config`
-values take precedence. Unknown keys are rejected.
+script's `#SBATCH` settings. Adjust those settings for your cluster.
 
 `run_name` selects directories under `results/`, `work/`, and `logs/`.
 Use a new name to retain an earlier analysis. It does not change species selection
@@ -49,9 +35,7 @@ see [container setup](containers.md) for overrides.
 | `inputs.species_trait` | `input/species_trait.tsv` | Species trait table |
 | `selection.busco_threshold` | `0.5` | Minimum complete BUSCO fraction |
 | `selection.species_list` | `null` | Candidate species file (one ID per line); `null` considers all species. BUSCO filtering follows; see [species selection](inputs.md#species-selection) |
-| `selection.missing_taxonomy` | `error` | `error` or `allow` for unresolved taxids |
 | `translation.table` | `1` | Genetic code for CDS translation |
-| `tpm.multimap` | `error` | `error`, `drop`, or `split` for genes assigned to multiple OGs; see [TPM interpretation](outputs.md#tpm-interpretation) |
 
 ## Reproducibility
 

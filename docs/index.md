@@ -4,7 +4,7 @@
 
 1. Check the [input formats and species selection](inputs.md).
 2. Create a [configuration](configuration.md); the matching [container image](containers.md) is selected automatically.
-3. Run [preparation and a pilot](running.md#prepare-and-inspect) before the full dataset.
+3. [Run the workflow](running.md); optionally start with a [pilot](running.md#pilot-run).
 4. Inspect the [expression tables and QC](outputs.md#tpm-interpretation).
 
 [Workflow targets](running.md#targets) · [Reference data](references.md) ·

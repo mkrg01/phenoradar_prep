@@ -243,16 +243,6 @@ rule all:
         CONTRAST_FINAL if config["contrast"]["enabled"] else []
 
 
-rule prepare:
-    input:
-        f"{OUT}/run.json",
-        f"{META}/samples.tsv",
-        f"{META}/species_metadata.tsv",
-        f"{META}/selection.json",
-        f"{META}/busco_completeness.svg",
-        MANIFESTS
-
-
 rule references:
     input:
         f"{REFERENCE}/reference.json",

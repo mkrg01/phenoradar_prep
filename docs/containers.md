@@ -24,8 +24,8 @@ compatible with your checkout.
 External input/reference directories, including symlink targets, need bind mounts:
 
 ```bash
-./run_pipeline.sh --cores 4 --resources mem_gb=16 \
-  --singularity-args "--cleanenv --bind '$PWD' --bind /data" -- prepare
+./run_pipeline.sh --cores 16 --resources mem_gb=192 \
+  --singularity-args "--cleanenv --bind '$PWD' --bind /data"
 ```
 
 Custom arguments replace the defaults: keep `--cleanenv` and the repository bind.
@@ -38,7 +38,7 @@ To create and use the workflow environments with host Conda:
 
 ```bash
 ./run_pipeline.sh --software-deployment-method conda \
-  --cores 4 --resources mem_gb=16 -- prepare
+  --cores 16 --resources mem_gb=192
 ```
 
 To use tools already on `PATH`, invoke Snakemake directly without deployment flags.
