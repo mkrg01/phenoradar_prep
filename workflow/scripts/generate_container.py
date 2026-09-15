@@ -73,7 +73,7 @@ def generate(root=ROOT, snakemake="snakemake"):
                  "ENV MPLBACKEND=Agg\n"
                  f"RUN printf '%s\\n' {shlex.quote(json.dumps(manifest, sort_keys=True))} "
                  "> /opt/phenoradar/container.json\n"
-                 "RUN command -v findmnt && command -v tar && command -v bash")
+                 "RUN command -v tar && command -v bash")
     return "\n\n".join(parts).rstrip() + "\n"
 
 

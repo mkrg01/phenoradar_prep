@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "workflow" / "scripts"))
 
 from common import file_record, write_json, write_tsv
+from snapshot_taxonomy import snapshot
 
 
 @pytest.fixture
@@ -20,6 +21,16 @@ def workflow_project(tmp_path):
     (tmp_path / "config").mkdir()
     shutil.copyfile(ROOT / "config/config.yaml", tmp_path / "config/config.yaml")
     return tmp_path
+
+
+@pytest.fixture
+def seed_taxonomy(workflow_project):
+    """Preload a synthetic snapshot at the shared path for offline workflows."""
+    def seed(source):
+        destination = workflow_project / "resources/taxonomy/taxa.sqlite"
+        snapshot(source, destination)
+        return destination
+    return seed
 
 
 @pytest.fixture
@@ -94,6 +105,8 @@ if action == 'SETUP':
         keys = ['SCHEDULER_LABEL','OP_NJOBMAX_BATCH','OP_NJOBMAX_LOCAL','OP_SAVE_JOBLOG','SKIP_REMAKE_CHECK','STEP_SLEEP','TMP_DIR_BASE']
         steps = ['PREPROC','MASKER','SELECT','STATS','FORMATDB','ALIGNMENT','MAKEBRH','MAKEINPAR','MAKEINPARSEL']
         conf.write_text(''.join(k + '=0\\n' for k in keys) + ''.join('OP_STEP_NPARALLEL[' + s + ']=1\\n' for s in steps))
+elif action == 'DOWNLOAD':
+    (root / 'data/tiny.db').write_bytes(b'x' * 1024**2)
 elif action == 'CONFIG':
     print(str(project) if len(sys.argv) > 2 and sys.argv[2] == 'project' else 'v12')
 elif action == 'MAP':

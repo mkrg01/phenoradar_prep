@@ -13,7 +13,7 @@ import sys
 import pytest
 import yaml
 
-from busco_phylogeny import busco_table, extract, fasta_records, plan, prepare_cds
+from busco_phylogeny import busco_full_path, busco_table, extract, fasta_records, plan, prepare_cds
 from common import read_tsv, write_json, write_tsv
 from date_phylogeny import date, calibration_rows
 from infer_phylogeny import alignment_qc, astral, merge, read_tree, trim
@@ -160,17 +160,14 @@ def test_cdskit_preparation_matches_real_cli(tmp_path, sequence, code, expected,
     assert list(fasta_records(current)) == [("gene", protein)]
 
 
-def test_protein_input_requires_known_residues_and_does_not_reframe(tmp_path):
+def test_extract_requires_cds_input(tmp_path):
     full, proteins, markers = tmp_path / "busco.tsv", tmp_path / "input.fa", tmp_path / "markers.tsv"
-    table(full, ["1at1\tComplete\tg1\t100\t3", "2at1\tComplete\tg2\t100\t3",
-                 "3at1\tComplete\tg3\t100\t3"])
-    proteins.write_text(">g1\nMX*KG\n>g2\nMAXX\n>g3\nMKG*\n")
-    write_tsv(markers, ["marker"], [{"marker": f"{i}at1"} for i in range(1,4)])
+    table(full, ["1at1\tComplete\tg1\t100\t3"])
+    proteins.write_text(">g1\nMKG*\n")
+    write_tsv(markers, ["marker"], [{"marker": "1at1"}])
     out, qc = tmp_path / "out.fa", tmp_path / "qc"
-    extract("plant", full, proteins, markers, out, qc,
-            settings(sequence_mode="protein", min_protein_length=3, max_unknown_fraction=0.5))
-    assert list(fasta_records(out)) == [("3at1", "MKG")]
-    assert json.loads(qc.read_text())["rejected"] == {"internal_stop": 1, "short_protein": 1}
+    with pytest.raises(ValueError, match="invalid CDS alphabet"):
+        extract("plant", full, proteins, markers, out, qc, settings())
 
 
 def trimal_binary():
@@ -333,7 +330,7 @@ def test_real_lsd2_outputs_time_units_and_honors_calibration(tmp_path):
     calibrations = tmp_path / "calibrations.tsv"
     write_tsv(calibrations, ["taxa", "min_age_ma", "max_age_ma", "source"],
               [{"taxa": "A,B", "min_age_ma": 100, "max_age_ma": 100, "source": "synthetic test only"}])
-    date(tree, provenance, calibrations, tmp_path / "dated", lsd2, settings={"variance": 1})
+    date(tree, provenance, calibrations, tmp_path / "dated", lsd2)
     dated = read_tree(tmp_path / "dated/species_tree.dated.nwk")
     assert dated.get_distance("A", "B") == pytest.approx(200)
     assert dated.get_distance("C", "D") == pytest.approx(80, rel=0.01)
@@ -381,7 +378,7 @@ def phylogeny_inputs(tmp_path):
     return source, species
 
 
-def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environment, workflow_project):
+def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environment, workflow_project, seed_taxonomy):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     famsa = os.environ.get("FAMSA_BIN") or shutil.which("famsa")
     vft = os.environ.get("VERYFASTTREE_BIN") or shutil.which("VeryFastTree")
@@ -395,17 +392,32 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
         commands["lsd2"] = lsd2
     env = command_environment(commands)
     source, species = phylogeny_inputs(tmp_path)
-    cfg = {"run_name": "test", "inputs": {"metadata": str(source / "metadata.tsv"), "busco": str(source / "busco.tsv"),
+    # Real inference accepts mixed standard layouts and compression without overrides.
+    for name, relative in zip(species[1:], [
+        "{species}.busco.full.tsv.gz", "{species}.tsv", "{species}.tsv.gz",
+        "{species}/full_table.tsv", "{species}/run_embryophyta_odb12/full_table.tsv.gz",
+    ]):
+        original = source / "busco" / f"{name}.busco.full.tsv"
+        target = source / "busco" / relative.format(species=name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.suffix == ".gz":
+            with gzip.open(target, "wt") as handle:
+                handle.write(original.read_text())
+            original.unlink()
+        else:
+            original.rename(target)
+    seed_taxonomy(source / "taxa.sqlite")
+    cfg = {"run_name": "test", "seed": 17, "inputs": {"metadata": str(source / "metadata.tsv"), "busco": str(source / "busco.tsv"),
            "cds_dir": str(source / "cds"), "quant_dir": str(source / "quant")},
-           "taxonomy": {"source": str(source / "taxa.sqlite")},
            "phylogeny": {"busco_full_dir": str(source / "busco"), "outgroup": species[0],
-               "max_markers": 3,
-               "align_threads": 1, "tree_threads": 1, "astral_threads": 2, "astral_mem_gb": 4}}
+               "max_markers": 3}}
     conda_prefix = os.environ.get("PHYLOGENY_CONDA_PREFIX")
     config = tmp_path / "config.yaml"
     config.write_text(yaml.safe_dump(cfg))
     argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(config),
-            "--cores", "2", "--resources", "mem_mb=8000", "--", "phylogeny"]
+            "--cores", "2", "--resources", "mem_mb=8000",
+            "--set-threads", "align_busco_marker=1", "infer_busco_gene_tree=1", "infer_busco_species_tree=2",
+            "--set-resources", "infer_busco_species_tree:mem_mb=4000", "--", "phylogeny"]
     if conda_prefix:
         argv[1:1] = ["--use-conda", "--conda-prefix", conda_prefix]
     def run():
@@ -416,6 +428,9 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
         return result.stdout
     run()
     out = tmp_path / "results/test/phylogeny/all"
+    for row in read_tsv(out / "plan/species.tsv"):
+        assert Path(row["sequences"]) == source / "cds" / f'{row["species"]}_longestCDS.fa.gz'
+        assert Path(row["busco_table"]) == busco_full_path(source / "busco", row["species"], "embryophyta_odb12")
     read_tree(out / "species_tree.nwk", species)
     assert all(int(r["gene_trees"]) >= 1 for r in read_tsv(out / "species_coverage.tsv"))
     report = json.loads((out / "species_tree.json").read_text())
@@ -426,6 +441,30 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
     assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
     assert not (tmp_path / "results/test/orthogroups/mapping").exists()
     assert not (tmp_path / "results/test/orthogroups/expression").exists()
+    # A changed global seed reruns inference, retaining deterministic upstream
+    # work. Returning to the original seed must reproduce the trees, not reuse
+    # them: the intermediate run has replaced their outputs and job metadata.
+    tree_files = [out / "species_tree.nwk", out / "gene_trees.nwk", *(out / "gene_trees").glob("*.nwk")]
+    trees = {p: p.read_bytes() for p in tree_files}
+    retained = {p: p.stat().st_mtime_ns for folder in [out / "species", out / "alignments"]
+                for p in folder.rglob("*") if p.is_file()}
+    reports = [out / "species_tree.json", *(out / "gene_trees").glob("*.json")]
+    def assert_seed(seed):
+        for path in reports:
+            command = json.loads(path.read_text())["command"]
+            flag = "--seed" if path.name == "species_tree.json" else "-seed"
+            assert command[command.index(flag) + 1] == str(seed)
+    assert_seed(17)
+    for seed in [19, 17]:
+        stamps = {p: p.stat().st_mtime_ns for p in tree_files}
+        cfg["seed"] = seed
+        config.write_text(yaml.safe_dump(cfg))
+        run()
+        assert_seed(seed)
+        assert all(p.stat().st_mtime_ns != stamp for p, stamp in stamps.items())
+        assert all(p.stat().st_mtime_ns == stamp for p, stamp in retained.items())
+    assert all(p.read_bytes() == content for p, content in trees.items())
+    assert "Nothing to be done" in run()
     upstream = {p: p.stat().st_mtime_ns for folder in [out / "species", out / "alignments/raw"]
                 for p in folder.iterdir()}
     cfg["phylogeny"]["trimal_mode"] = "automated1"
@@ -441,8 +480,7 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
         write_tsv(calibrations, ["taxa", "min_age_ma", "max_age_ma", "source"],
                   [{"taxa": ",".join(species[:2]), "min_age_ma": 100, "max_age_ma": 100,
                     "source": "synthetic workflow test only"}])
-        cfg["phylogeny"]["dating"] = {"calibrations": str(calibrations), "mem_gb": 4,
-                                        "lsd2": {"variance": 1}}
+        cfg["phylogeny"]["dating"] = {"calibration_source": "file", "calibrations": str(calibrations)}
         config.write_text(yaml.safe_dump(cfg))
         argv[-1] = "timetree"
         run()
@@ -456,21 +494,20 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
         (out / "dating/species_tree.dated.nwk").unlink()
         run()
         assert all(p.stat().st_mtime_ns == stamp for p, stamp in retained.items())
-        cfg["phylogeny"]["dating"]["lsd2"]["variance"] = 0
-        config.write_text(yaml.safe_dump(cfg))
-        run()
-        assert json.loads((out / "dating/provenance.json").read_text())["settings"]["variance"] == 0
+        dating_report = json.loads((out / "dating/provenance.json").read_text())
+        tree_report = json.loads((out / "species_tree.json").read_text())
+        assert dating_report["settings"] == {"variance": 1, "variance_parameter": None, "numsites": None}
+        assert dating_report["numsites"] == tree_report["total_gene_sites"]
         assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
-        # Switch from manual bounds to the automatic TimeTree branch. Exercise
+        # Removing the override selects the default automatic TimeTree branch. Exercise
         # the full rule graph offline with a recorded synthetic API response.
         from timetree_calibrations import cached_response
-        from test_timetree_calibrations import fake_fetch, payload
+        from test_timetree_calibrations import cache_missing_estimates, fake_fetch, payload
         cache = workflow_project / "resources/timetree_cache"
         cached_response(range(42, 48), cache, delay=0,
                         backend=(fake_fetch(payload(range(42, 48))), {"synthetic": True}))
-        cfg["phylogeny"]["dating"].update(calibration_source="timetree", timetree={
-            "max_representatives": 6, "max_queries": 1,
-            "offline": True})
+        cache_missing_estimates(out / "species_tree.nwk", dict(zip(species, range(42, 48))), cache)
+        del cfg["phylogeny"]["dating"]["calibration_source"]
         config.write_text(yaml.safe_dump(cfg))
         run()
         assert json.loads((out / "timetree/provenance.json").read_text())["status"] == "ready"

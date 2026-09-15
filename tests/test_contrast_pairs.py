@@ -162,14 +162,17 @@ def test_empty_contrastive_result_and_deterministic_ties(tmp_path):
     from ete4 import Tree
     rows = [{"leaf_name": n, "trait": "0", "busco_percent": 90} for n in "ABCD"]
     _, a = skim(Tree("((A,B),(C,D));", parser=9), rows, tmp_path / "a", 13, topology_only=True)
+    # An intervening job with another seed must not consume a shared RNG stream.
+    _, other = skim(Tree("((A,B),(C,D));", parser=9), rows, tmp_path / "other", 17, topology_only=True)
     _, b = skim(Tree("((A,B),(C,D));", parser=9), rows[::-1], tmp_path / "b", 13, topology_only=True)
     assert a == b
+    assert a != other
     _, c = skim(Tree("((A,B),(C,D));", parser=9), rows, tmp_path / "c", 13, contrastive=True)
     assert not c and (tmp_path / "c.nwk").read_text() == ""
     assert read_tsv(tmp_path / "c.sampled.tsv") == []
 
 
-def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_environment, workflow_project):
+def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_environment, workflow_project, seed_taxonomy):
     from test_phylogeny import phylogeny_inputs, trimal_binary
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     famsa = os.environ.get("FAMSA_BIN") or shutil.which("famsa")
@@ -185,18 +188,19 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
             parent, track = (3, "3,2,1") if i == 1 else (4, "4,3,2,1")
             db.execute("UPDATE species SET parent=?, track=? WHERE taxid=?", (parent, f"{42+i},{track}",42+i))
     traits = source / "traits.tsv"
+    seed_taxonomy(source / "taxa.sqlite")
     write_tsv(traits, ["species", "C4"], [{"species": n.replace("_", " "), "C4": "" if i == 0 else i % 2}
                                          for i, n in enumerate(species)])
-    cfg = {"run_name": "test", "inputs": {"metadata": str(source / "metadata.tsv"), "species_trait": str(traits),
+    cfg = {"run_name": "test", "seed": 19, "inputs": {"metadata": str(source / "metadata.tsv"), "species_trait": str(traits),
            "busco": str(source / "busco.tsv"), "cds_dir": str(source / "cds"), "quant_dir": str(source / "quant")},
-           "taxonomy": {"source": str(source / "taxa.sqlite")},
-           "phylogeny": {"busco_full_dir": str(source / "busco"), "outgroup": "auto", "max_markers": 3,
-                         "align_threads": 1, "tree_threads": 1, "astral_threads": 2, "astral_mem_gb": 4}}
+           "phylogeny": {"busco_full_dir": str(source / "busco"), "outgroup": "auto", "max_markers": 3}}
     config = tmp_path / "config.yaml"
     config.write_text(yaml.safe_dump(cfg))
     env = command_environment({"python": sys.executable, "famsa": famsa, "trimal": trimal_binary(), "VeryFastTree": vft})
     argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(config),
-            "--cores", "2", "--resources", "mem_mb=8000"]
+            "--cores", "2", "--resources", "mem_mb=8000",
+            "--set-threads", "align_busco_marker=1", "infer_busco_gene_tree=1", "infer_busco_species_tree=2",
+            "--set-resources", "infer_busco_species_tree:mem_mb=4000"]
     conda_prefix = os.environ.get("PHYLOGENY_CONDA_PREFIX")
     if conda_prefix:
         argv += ["--use-conda", "--conda-prefix", conda_prefix]
@@ -214,6 +218,8 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     assert (result / "phylogeny/representatives/rooting/outgroup.txt").read_text().strip() == species[1]
     assert json.loads((result / "phylogeny/representatives/species_tree.json").read_text())["outgroup"] == species[1]
     selected = {r["species"] for r in read_tsv(result / "phylogeny/representatives/selection/samples.tsv")}
+    for path in ["phylogeny/representatives/selection/selection.json", "phylogeny/representatives/contrast/summary.json"]:
+        assert json.loads((result / path).read_text())["seed"] == 19
     assert selected == {r["leaf_name"] for r in read_tsv(result / "phylogeny/representatives/selection/ncbi_skim.sampled.tsv")}
     assert species[0] not in selected and species[1] in selected
     assert "Nothing to be done" in run(["contrast_pairs"])
@@ -230,6 +236,7 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     full_pairs = result / "phylogeny/all/contrast/contrast_pairs.tsv"
     full_pair_mtime = full_pairs.stat().st_mtime_ns
     assert {r["species"] for r in read_tsv(full_pairs.parent / "species_metadata.tsv")} == set(species)
+    assert json.loads((full_pairs.parent / "summary.json").read_text())["seed"] == 19
     assert "Nothing to be done" in run(["phylogeny_contrast_pairs"])
     cfg["phylogeny"]["species_sets"] = ["phenotyped"]
     config.write_text(yaml.safe_dump(cfg))

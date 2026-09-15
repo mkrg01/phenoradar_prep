@@ -30,21 +30,21 @@ def dating(work):
     write_tsv(bounds, ["taxa", "min_age_ma", "max_age_ma", "source"], [
         {"taxa": "A,D", "min_age_ma": 100, "max_age_ma": 100, "source": "smoke root"},
         {"taxa": "C,D", "min_age_ma": 50, "max_age_ma": 60, "source": "smoke internal"}])
-    for variance in (0, 1, 2):
-        output = work / f"dating-{variance}"
-        date(tree, provenance, bounds, output, "lsd2", {"variance": variance})
-        result = read_tree(output / "species_tree.dated.nwk", {"A", "B", "C", "D"})
-        assert all(math.isclose(result.get_distance(result, leaf), 100, abs_tol=1e-8)
-                   for leaf in result.leaves())
-        age = 100 - result.get_distance(result, result.common_ancestor(["C", "D"]))
-        assert 50 - 1e-8 <= age <= 60 + 1e-8
-        report = json.loads((output / "provenance.json").read_text())
-        assert report["topology_preserved"] and report["build"]["source_patch_applied"] is False
+    output = work / "dating"
+    date(tree, provenance, bounds, output, "lsd2")
+    result = read_tree(output / "species_tree.dated.nwk", {"A", "B", "C", "D"})
+    assert all(math.isclose(result.get_distance(result, leaf), 100, abs_tol=1e-8)
+               for leaf in result.leaves())
+    age = 100 - result.get_distance(result, result.common_ancestor(["C", "D"]))
+    assert 50 - 1e-8 <= age <= 60 + 1e-8
+    report = json.loads((output / "provenance.json").read_text())
+    assert report["topology_preserved"] and report["build"]["source_patch_applied"] is False
+    assert report["settings"]["variance"] == 1 and report["numsites"] == 32000
 
 
 def monophy(work):
     from common import read_tsv, write_json, write_tsv
-    from taxonomy_audit import audit
+    from taxonomy_check import check
     names = ["A_one", "A_query", "A_three", "A_two", "B_five", "B_four",
              "B_one", "B_three", "B_two", "Outgroup"]
     taxonomy = work / "taxa.sqlite"
@@ -70,8 +70,8 @@ def monophy(work):
                     "((B_one:1,A_query:1):1,((B_two:1,B_three:1):1,(B_four:1,B_five:1):1):1):1):1);\n")
     qc = work / "tree.json"
     write_json(qc, {"outgroup": "Outgroup", "species": len(names)})
-    output = work / "audit"
-    result = audit(tree, qc, samples, taxonomy, output, {"ranks": ["family"]})
+    output = work / "check"
+    result = check(tree, qc, samples, taxonomy, output, {"ranks": ["family"]})
     assert result["method"] == "MonoPhy" and result["engine"]["version"] == "1.3.2"
     assert {(r["species"], r["role"], r["focal_taxon"]) for r in read_tsv(output / "candidates.tsv")} == {
         ("A_query", "outlier", "FamilyA"), ("A_query", "intruder", "FamilyB")}
@@ -104,7 +104,7 @@ def check_environment(name):
                "monophy": ["ete4"], "phylogeny": ["Bio", "ete4", "numpy", "cdskit"],
                "timetree": ["Bio", "nwkit"]}
     commands = {"alignment": ["famsa"], "kofam": ["exec_annotation", "hmmsearch"],
-                "odb": ["ODB-mapper", "findmnt"], "seqkit": ["seqkit"],
+                "odb": ["ODB-mapper"], "seqkit": ["seqkit"],
                 "phylogeny": ["famsa", "trimal", "VeryFastTree"],
                 "dating": ["lsd2"], "monophy": ["Rscript"]}
     for module in imports.get(name, []):

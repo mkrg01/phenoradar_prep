@@ -79,7 +79,7 @@ def test_publish_preserves_frozen_reference(tmp_path):
     assert verify(reference / "reference.json")["reference_id"] == original
 
 
-def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, frozen_reference, tmp_path, command_environment, workflow_project):
+def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, frozen_reference, tmp_path, command_environment, workflow_project, seed_taxonomy):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     seqkit = os.environ.get("SEQKIT_BIN") or shutil.which("seqkit")
     if not snakemake or not seqkit:
@@ -92,12 +92,10 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     odb_reference.parent.mkdir(parents=True)
     odb_reference.symlink_to(frozen_reference, target_is_directory=True)
     command = fake_kofam_command(tmp_path)
+    seed_taxonomy(tiny_inputs["taxonomy_db"])
     config = {
         "run_name": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
-        "taxonomy": {"source": tiny_inputs["taxonomy_db"]},
-        "odb": {"chunk_size": 1, "threads": 1, "batch_size": 1,
-                "mem_gb": 3, "min_free_gb": 0, "allow_nonlocal": True},
-        "kegg": {"enabled": False, "threads": 1, "mem_gb": 2},
+        "kegg": {"enabled": False},
     }
     configfile = tmp_path / "config.yaml"
     configfile.write_text(yaml.safe_dump(config))
@@ -107,7 +105,9 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
                                  "ODB-mapper": fake_odb, "exec_annotation": command}),
            "FAKE_KOFAM_LOG": str(events), "FAKE_ODB_LOG": str(odb_events)}
     base = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(configfile),
-            "--cores", "2", "--resources", "mem_mb=16000"]
+            "--cores", "2", "--resources", "mem_mb=16000",
+            "--set-threads", "odb_map=1", "annotate_kofam=1",
+            "--set-resources", "odb_map:mem_mb=3000", "annotate_kofam:mem_mb=2000"]
 
     def execute(options=(), targets=("kegg",)):
         result = subprocess.run(base + list(options) + ["--"] + list(targets), cwd=workflow_project, env=env,
@@ -183,8 +183,8 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
 
 @pytest.mark.parametrize("settings,message", [
     ({"enabled": "yes"}, "kegg.enabled must be true or false"),
-    ({"threads": 0}, "kegg.threads must be a positive integer"),
-    ({"mem_gb": True}, "kegg.mem_gb must be a positive integer"),
+    ({"threads": 0}, "unknown configuration settings: kegg.threads"),
+    ({"mem_gb": True}, "unknown configuration settings: kegg.mem_gb"),
     ({"ambiguity": "split"}, "kegg.ambiguity must be duplicate, drop, or error"),
     ({"command": ""}, "unknown configuration settings: kegg.command"),
 ])

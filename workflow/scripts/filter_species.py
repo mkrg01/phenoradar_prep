@@ -194,7 +194,7 @@ class Export:
         self.inventory, self.records, self.stats, self.counts = inventory, {}, {}, {}
         self.allowed_inputs = set(inventory["files"])
         self.ignored = [f"{PHENOTYPED_PHYLOGENY} inference outputs (contrast pairs are recomputed)",
-                        REPRESENTATIVES, "taxonomy_audit", f"{ALL_PHYLOGENY}/taxonomy_audit",
+                        REPRESENTATIVES, "taxonomy_check", f"{ALL_PHYLOGENY}/taxonomy_check",
                         "raw logs, chunk results, and per-run computation caches"]
 
     def input(self, path, expected_hash=None):

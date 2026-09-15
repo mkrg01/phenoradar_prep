@@ -307,13 +307,12 @@ def run(protein, species, reference, output_dir, work_dir, command="exec_annotat
             write_json(result / "provenance.json", record)
             _publish(result, out)
             write_json(status_path, {"state": "success", "completed_at": now(),
-                                     "fingerprint": fingerprint, "reused": False})
+                                     "fingerprint": fingerprint, "work": str(work), "reused": False})
         except BaseException as error:
             write_json(status_path, {"state": "failed", "time": now(), "fingerprint": fingerprint,
                                      "work": str(work), "error": str(error)})
             raise
         else:
-            shutil.rmtree(work)
             return record
 
 

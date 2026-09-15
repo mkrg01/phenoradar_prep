@@ -1,14 +1,7 @@
-# Dataset, analysis, and resource settings. Commands and storage layout are fixed.
 # Paths are relative to the project root (run Snakemake there).
-# Free-form run name, e.g. run001, run002, or pilot; not an execution mode.
-# Sets output directories: results/<run_name>/, work/<run_name>/, logs/<run_name>/.
-# Changing only this name does not change species selection or enabled analyses.
-# Use letters/digits, underscores, dots, or hyphens; start with a letter/digit.
-run_name: run001
-# auto selects the image matching the repository's VERSION file.
-# Override with a docker:// URI or absolute SIF path; see docs/containers.md.
-# Native Conda execution (--software-deployment-method conda) ignores auto.
-container_image: auto
+run_name: run001  # Output subdirectory under results/, work/, logs/.
+container_image: auto  # GHCR: auto reads VERSION; or a version without v, e.g. "0.1.0".
+seed: 12345  # Random seed for supported steps.
 inputs:
   metadata: input/metadata.tsv
   species_trait: input/species_trait.tsv
@@ -16,134 +9,43 @@ inputs:
   cds_dir: input/cds
   quant_dir: input/quant
 selection:
-  busco_threshold: 0.5
-  species_list: null
-  # error: stop for unresolved taxids; allow: keep species with empty taxonomy fields.
-  missing_taxonomy: error
-taxonomy:
-  # Optional local SQLite source for resources/taxonomy/taxa.sqlite.
-  # null downloads NCBI taxonomy and builds with ETE4 when the snapshot is missing.
-  source: null
+  species_list: null  # Candidate file (one species ID/line); null: all species.
+  busco_threshold: 0.5  # Minimum complete BUSCO fraction, applied after species_list.
+  missing_taxonomy: error  # Unresolved taxids: error stops; allow keeps species with blank taxonomy.
 translation:
-  # Genetic code IDs supported by seqkit 2.10.0:
-  # 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 16, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31.
-  # 1 = Standard; 11 = Bacterial, Archaeal and Plant Plastid.
-  # List all code names with: seqkit translate --list-transl-table 0
-  table: 1
-odb:
-  # Optional local snapshot of existing annotations and original protein checksums.
-  existing_results: null
-  # NCBI Taxonomy ID of an OrthoDB v12 mapping level. Plant examples (not exhaustive):
-  # 3193 = Embryophyta (land plants); 33090 = Viridiplantae (green plants).
-  # 4447 = Liliopsida (monocots); 38820 = Poales; 71240 = eudicotyledons (eudicots).
-  # Choose a supported node covering your species; see docs/references.md#choosing-an-orthodb-node.
-  node: 3193
-  # Per chunk; concurrency follows the workflow's total CPU and memory budgets.
-  chunk_size: 50
-  threads: 16
-  batch_size: 64
-  mem_gb: 192
-  min_free_gb: 750
-  reference_min_free_gb: 200
-  allow_nonlocal: false
-  keep_work: false
+  table: 1  # Seqkit genetic code ID; 1: Standard.
+odb:  # Work files are retained for reuse.
+  existing_results: null  # Existing ODB snapshot; null: run mapping. See docs/migration.md.
+  node: 3193  # OrthoDB v12 mapping taxid; 3193: Embryophyta. See docs/references.md.
 tpm:
-  # error: reject ambiguous genes; drop: omit them; split: divide TPM equally.
-  multimap: error
-alignment:
-  # All mapped OGs and all copies, without trimming or selection.
-  # The explicit `alignments` target also runs this branch when disabled here.
-  enabled: false
-  threads: 4
-  mem_gb: 8
-kegg:
-  # Opt in for the full workflow; the explicit `kegg` target also runs this branch.
-  enabled: false
-  # Missing references are downloaded automatically on first use.
-  threads: 4
-  mem_gb: 8
-  # duplicate: add full TPM to every accepted KO; drop: omit multi-KO genes; error: reject them.
-  ambiguity: duplicate
-phylogeny:
-  # The explicit phylogeny/timetree targets also work without enabling rule all.
-  enabled: false
-  # Choices: [all] | [phenotyped] | [all, phenotyped]; separate outputs for each set.
-  # all: all selected species; phenotyped: species with a nonmissing trait value.
-  species_sets: [all]
-  trait: C4  # nonmissing column in inputs.species_trait for the phenotyped set
-  busco_full_dir: input/busco/full  # required only for BUSCO phylogeny targets
-  busco_full_suffix: .busco.full.tsv
+  multimap: error  # Ambiguous genes: error rejects; drop omits; split divides TPM equally.
+alignment:  # All mapped OGs and copies, without trimming.
+  enabled: false  # Include in all; explicit alignments target also works when false.
+kegg:  # Missing references download on first use.
+  enabled: false  # Include in all; explicit kegg target also works when false.
+  ambiguity: duplicate  # Multi-KO genes: duplicate gives full TPM to each KO; drop omits; error rejects.
+phylogeny:  # Reuse CDS from inputs.cds_dir.
+  enabled: false  # Include in all; explicit phylogeny/timetree targets also work when false.
+  species_sets: [all]  # all: selected species; phenotyped: known trait only; either or both.
+  trait: C4  # Column in inputs.species_trait for the phenotyped set.
+  busco_full_dir: input/busco/full  # Full tables; detect filenames from species IDs.
   lineage: embryophyta_odb12
-  # Original oriented, in-frame CDS, or original protein FASTA used by BUSCO.
-  # cds: translate CDS; protein: use protein FASTA (requires sequence_dir).
-  sequence_mode: cds
-  sequence_dir: null  # null reuses selected samples' CDS paths (CDS mode only)
-  sequence_suffix: _longestCDS.fa.gz
-  outgroup: auto  # choose within each inference species set using NCBI/APG IV; or specify a species label
-  max_markers: 500  # highest overall BUSCO coverage first; ties by BUSCO ID ascending
-  min_protein_length: 100  # known amino acids, excluding X and gaps
+  outgroup: auto  # auto: NCBI/APG IV per species set; or a species ID.
+  max_markers: 500  # Highest BUSCO coverage first; ties: BUSCO ID ascending.
+  min_protein_length: 100  # Known amino acids, excluding X and gaps.
   max_unknown_fraction: 0.05
   min_taxa: 4
-  trimal_mode: gappyout  # gappyout | automated1 (the latter computes all sequence pairs)
-  align_threads: 4
-  tree_threads: 4
-  astral_threads: 32
-  preparation_mem_gb: 4
-  alignment_mem_gb: 8
-  trimming_mem_gb: 4
-  tree_mem_gb: 8
-  astral_mem_gb: 64
-  seed: 12345
+  trimal_mode: gappyout  # gappyout | automated1
   dating:
     enabled: false
-    # file: use the calibrations TSV below; timetree: retrieve TimeTree calibrations.
-    calibration_source: file
-    calibrations: input/calibrations.tsv  # optional TSV: taxa, min_age_ma, max_age_ma, source
-    mem_gb: 4
-    lsd2:
-      variance: 1  # 0: unweighted; 1: input lengths; 2: reweight after initial fit
-      variance_parameter: null  # null uses LSD2's automatic variance offset
-      numsites: null  # default: sum of retained trimmed gene lengths; affects variance offset
-    timetree:
-      representatives: null  # optional exact tree labels, one per line
-      max_representatives: 64
-      max_queries: 32
-      min_studies: 5
-      offline: false
+    calibration_source: timetree  # timetree: fetch calibrations; file: use local TSV.
+    calibrations: input/calibrations.tsv  # For file only: taxa, min_age_ma, max_age_ma, source.
 contrast:
-  # The explicit contrast_pairs target also works while disabled here.
-  # phylogeny_contrast_pairs uses full/phenotyped trees independently of this flag.
-  # filter_species recomputes molecular-tree pairs after exclusions, without inference.
-  enabled: false
-  trait: C4  # column in inputs.species_trait; metadata is never a trait source
-taxonomy_audit:
-  # Report only; explicit taxonomy_audit target follows phylogeny.species_sets.
-  # When enabled, reports accompany requested full/phenotyped phylogenies, never contrast.
-  enabled: false
-  # Choose one or more ranks, without duplicates, from:
-  # superkingdom, kingdom, subkingdom, superphylum, phylum, subphylum,
-  # superclass, class, subclass, infraclass, superorder, order, suborder, infraorder,
-  # parvorder, superfamily, family, subfamily, tribe, subtribe, genus, subgenus,
-  # section, subsection, series, subseries, species, subspecies, varietas, forma.
-  ranks: [family, subfamily, tribe, subtribe, genus]
-  outlierlevel: 0.5  # MonoPhy core-clade threshold: fraction of tips, not confidence
-  collapse_monophyletic: true  # display only; retain all flagged tips
-  mem_gb: 8
-# Manual postprocessing only; exact species IDs from metadata/samples.tsv.
-# Run the explicit filter_species target to export results/<run_name>/filtered/.
-exclude_species: []
-# Collect completed outputs only: this target never starts missing analyses.
-phenoradar:
-  # Choices for orthogroups, kegg, and alignments:
-  # auto: include when complete; true: require; false: omit.
-  orthogroups: auto
-  kegg: auto
-  alignments: auto
-  # Choices: [] | [module] | [pathway] | [module, pathway].
-  # [] exports KO expression only; other choices also include KO membership maps.
-  kegg_groups: [module]
-  orthogroup_annotations: null  # existing headerless OG/taxid/description TSV[.gz]
-  # Choices: null (omit pairs), phylogeny/all/contrast, phylogeny/phenotyped/contrast,
-  # or phylogeny/representatives/contrast; paths are relative to results/<run_name>/.
-  contrast: null
-  tree: null  # explicit Newick file with the same species as the selected dataset
+  enabled: false  # Include representative pairs in all; explicit contrast_pairs also works when false.
+  trait: C4  # Column in inputs.species_trait.
+taxonomy_check:
+  enabled: false  # Attach reports to phylogeny; explicit taxonomy_check also works when false.
+  ranks: [family, subfamily, tribe, subtribe, genus]  # Unique NCBI ranks; see docs/taxonomy_check.md.
+  outlierlevel: 0.5  # MonoPhy core-clade fraction of tips, not confidence.
+  collapse_monophyletic: true  # Display only; retain all flagged tips.
+exclude_species: []  # Species IDs from metadata/samples.tsv; apply with the filter_species target.

@@ -1,7 +1,7 @@
 def phenoradar_snapshot():
     # Consume a completed snapshot. Absolute paths deliberately avoid scheduling
     # upstream producers, including optional KEGG, alignment and tree workflows.
-    return discover_phenoradar_inputs(OUT, PHENORADAR, EXCLUDE_SPECIES)
+    return discover_phenoradar_inputs(OUT, EXCLUDE_SPECIES)
 
 
 rule phenoradar_inputs:
@@ -16,7 +16,6 @@ rule phenoradar_inputs:
     params:
         bundle=f"{OUT}/phenoradar_inputs",
         source=str(Path(OUT).resolve()),
-        settings=json.dumps(PHENORADAR, sort_keys=True),
         excluded=json.dumps(EXCLUDE_SPECIES),
         trait=config["contrast"]["trait"],
         inventory=lambda wc: json.dumps(phenoradar_snapshot()["sections"], sort_keys=True)
@@ -25,5 +24,5 @@ rule phenoradar_inputs:
     log: f"{LOG}/phenoradar_inputs.log"
     shell:
         "{PYTHON:q} {input.code:q} --source {params.source:q} --outdir {params.bundle:q} "
-        "--settings {params.settings:q} --exclude-species {params.excluded:q} "
+        "--exclude-species {params.excluded:q} "
         "--trait {params.trait:q} > {log:q} 2>&1"

@@ -63,7 +63,7 @@ def test_invalid_species_sets_fail_at_configuration(tmp_path, workflow_project, 
     assert result.returncode != 0 and "phylogeny.species_sets must be a nonempty list" in result.stdout
 
 
-def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow_project, command_environment):
+def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow_project, command_environment, seed_taxonomy):
     from test_phylogeny import phylogeny_inputs, trimal_binary
     nwkit = pytest.importorskip("nwkit")
     if nwkit.__version__ != "0.27.0":
@@ -89,16 +89,17 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
     traits = source / "traits.tsv"
     trait_rows = [{"species": n, "C4": "" if i == 0 else "0"} for i, n in enumerate(species)]
     write_tsv(traits, ["species", "C4"], trait_rows)
+    seed_taxonomy(source / "taxa.sqlite")
     cfg = {"run_name": "test", "inputs": {
         "metadata": str(source / "metadata.tsv"), "species_trait": str(traits),
         "busco": str(source / "busco.tsv"), "cds_dir": str(source / "cds"), "quant_dir": str(source / "quant")},
-        "taxonomy": {"source": str(source / "taxa.sqlite")},
         "contrast": {"trait": "unrelated"},
-        "phylogeny": {"busco_full_dir": str(source / "busco"), "outgroup": "auto", "max_markers": 3,
-                      "align_threads": 1, "tree_threads": 1, "astral_threads": 2, "astral_mem_gb": 4}}
+        "phylogeny": {"busco_full_dir": str(source / "busco"), "outgroup": "auto", "max_markers": 3}}
     config = tmp_path / "override.yaml"
     argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(config),
-            "--cores", "2", "--resources", "mem_mb=8000"]
+            "--cores", "2", "--resources", "mem_mb=8000",
+            "--set-threads", "align_busco_marker=1", "infer_busco_gene_tree=1", "infer_busco_species_tree=2",
+            "--set-resources", "infer_busco_species_tree:mem_mb=4000"]
     if os.environ.get("PHYLOGENY_CONDA_PREFIX"):
         argv += ["--use-conda", "--conda-prefix", os.environ["PHYLOGENY_CONDA_PREFIX"]]
 
@@ -144,12 +145,14 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
 
     # Retrieve separate calibrations from recorded responses, without HTTP.
     from timetree_calibrations import cached_response
-    from test_timetree_calibrations import fake_fetch, payload
+    from test_timetree_calibrations import cache_missing_estimates, fake_fetch, payload
+    cache = workflow_project / "resources/timetree_cache"
     for ids in [range(42, 48), range(43, 48)]:
-        cached_response(ids, workflow_project / "resources/timetree_cache", delay=0,
-                        backend=(fake_fetch(payload(ids)), {"synthetic": True}))
-    cfg["phylogeny"]["dating"] = {"calibration_source": "timetree", "timetree": {
-        "max_representatives": 6, "max_queries": 1, "offline": True}}
+        cached_response(ids, cache, delay=0,
+                        backend=(fake_fetch(payload(ids, mrca=str(list(ids)))), {"synthetic": True}))
+    for branch in [full, observed]:
+        cache_missing_estimates(branch / "species_tree.nwk", dict(zip(species, range(42, 48))), cache)
+    cfg["phylogeny"]["dating"] = {"calibration_source": "timetree"}
     run(["phenotyped"], "phylogeny_calibrations")
     assert not (full / "timetree").exists()
     assert json.loads((observed / "timetree/provenance.json").read_text())["status"] == "ready"

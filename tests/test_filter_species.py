@@ -86,7 +86,7 @@ def snapshot(tmp_path):
     (folder / "alignments/marker1.columns.tsv").write_text("trimmed_column_1based\tfamsa_column_1based\n1\t7\n")
     (folder / "dating").mkdir()
     (folder / "dating/species_tree.dated.nwk").write_text("(Plant_A:4,(Plant_B-x:3,(Plant_C:2,(Plant_D:1,Plant_E:1):1):1):1);\n")
-    for relative in ["phylogeny/phenotyped", "phylogeny/representatives", "phylogeny/all/taxonomy_audit"]:
+    for relative in ["phylogeny/phenotyped", "phylogeny/representatives", "phylogeny/all/taxonomy_check"]:
         path = source / relative
         path.mkdir(parents=True)
         (path / "original.txt").write_text("Plant_A must stay in this historical result\n")
@@ -110,13 +110,11 @@ def test_filtered_metadata_and_alignments_feed_phenoradar(snapshot, tmp_path):
     assert {r["species"] for r in metadata} == set(SPECIES[1:])
     assert all(r["family"] == "Plantaceae" and r["contrast_pair_id"] == "" for r in metadata)
     out = tmp_path / "phenoradar_inputs"
-    collect_inputs(source, out, exclusions=["Plant_A"],
-                   settings=dict(orthogroups=True, kegg=False, alignments=True,
-                                 tree=str(filtered / "phylogeny/all/species_tree.pruned.nwk")))
+    collect_inputs(source, out, exclusions=["Plant_A"])
     assert (out / "tpm.tsv").resolve() == filtered / "orthogroups/expression/tpm.tsv"
     assert (out / "alignments/OGshared.faa").is_symlink()
     assert not (out / "alignments/OGempty.faa").exists()
-    assert (out / "species_tree.nwk").is_symlink()
+    assert (out / "phylogeny/all/species_tree.pruned.nwk").is_symlink()
 
 
 @pytest.mark.parametrize("value", [None, "Plant_A", {"species": "Plant_A"}, [1], ["Plant A"], ["../Plant_A"], ["Plant_A", "Plant_A"]])
@@ -165,7 +163,7 @@ def test_export_all_outputs_preserves_values_and_sources(snapshot, tmp_path):
     assert not (out / "phylogeny/all/dating/node_ages.tsv").exists()
     assert sha256(out / "phylogeny/all/alignments/marker1.columns.tsv") == sha256(source / "phylogeny/all/alignments/marker1.columns.tsv")
     assert all(len(seq) == 6 for header, seq in fasta_records(out / "phylogeny/all/alignments/marker1.faa"))
-    for branch in ["phylogeny/phenotyped", "phylogeny/representatives", "phylogeny/all/taxonomy_audit"]:
+    for branch in ["phylogeny/phenotyped", "phylogeny/representatives", "phylogeny/all/taxonomy_check"]:
         assert not (out / branch).exists()
     assert all(sha256(out / record["path"]) == record["sha256"] for record in summary["outputs"])
 
@@ -332,13 +330,14 @@ def test_full_snakefile_exports_frozen_results_without_upstream_inputs(snapshot,
     environment = command_environment({"python": sys.executable})
     argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(cfg), "--cores", "1", "--", "filter_species"]
     def run(excluded):
-        cfg.write_text(yaml.safe_dump({"run_name": "test", "exclude_species": excluded,
+        cfg.write_text(yaml.safe_dump({"run_name": "test", "seed": 19, "exclude_species": excluded,
                                       "inputs": {"species_trait": str(traits)}}))
         process = subprocess.run(argv, cwd=project, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         assert process.returncode == 0, process.stdout + "\n" + "\n".join(p.read_text() for p in (project / "logs").rglob("*.log"))
         return process.stdout
     run(["Plant_A"])
     out = target / "filtered"
+    assert json.loads((out / "manifest.json").read_text())["contrast"]["seed"] == 19
     assert {r["species"] for r in read_tsv(out / "metadata/samples.tsv")} == set(SPECIES[1:])
     assert "Nothing to be done" in run(["Plant_A"])
     run(["Plant_C"])

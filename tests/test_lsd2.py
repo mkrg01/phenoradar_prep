@@ -8,19 +8,8 @@ import pytest
 
 from common import read_tsv, write_json, write_tsv
 from date_phylogeny import (date, lsd_dates, newick_text, parse_lsd_report,
-                           read_lsd_dates, validate_dated, validate_settings)
+                           read_lsd_dates, validate_dated)
 from infer_phylogeny import read_tree
-
-
-@pytest.mark.parametrize("settings", [
-    {"variance": True}, {"variance": 3}, {"variance": 1.0},
-    {"variance_parameter": float("nan")}, {"variance_parameter": 0},
-    {"variance": 0, "variance_parameter": 1}, {"numsites": True},
-    {"numsites": 2**31}, {"smoothing": 10}, [],
-])
-def test_invalid_lsd2_settings(settings):
-    with pytest.raises(ValueError):
-        validate_settings(settings)
 
 
 def source_tree(tmp_path):
@@ -105,15 +94,15 @@ def test_missing_site_count_or_empty_process_cannot_publish(tmp_path):
     write_json(provenance, {"branch_length_unit": "substitutions_per_site", "outgroup": "A", "mean_gene_length": 250})
     with pytest.raises(ValueError, match="total_gene_sites"):
         date(tree, provenance, calibration, tmp_path / "out", "/bin/true")
+    write_json(provenance, {"branch_length_unit": "substitutions_per_site", "outgroup": "A", "total_gene_sites": 750})
     with pytest.raises(FileNotFoundError):
-        date(tree, provenance, calibration, tmp_path / "out", "/bin/true", {"numsites": 750})
+        date(tree, provenance, calibration, tmp_path / "out", "/bin/true")
     assert not (tmp_path / "out/species_tree.dated.nwk").exists()
     assert not (tmp_path / "out/provenance.json").exists()
     assert list((tmp_path / "out/lsd2_runs").glob("*/run.log"))
 
 
-@pytest.mark.parametrize("variance", [0, 1, 2])
-def test_real_lsd2_preserves_topology_zero_branches_and_calibrations(tmp_path, variance):
+def test_real_lsd2_preserves_topology_zero_branches_and_calibrations(tmp_path):
     lsd2 = os.environ.get("LSD2_BIN") or shutil.which("lsd2")
     if not lsd2:
         pytest.skip("set LSD2_BIN for real dating integration")
@@ -133,8 +122,15 @@ def test_real_lsd2_preserves_topology_zero_branches_and_calibrations(tmp_path, v
         {"taxa": "T00,T31", "min_age_ma": 100, "max_age_ma": 100, "source": "synthetic root"},
         {"taxa": "T16,T31", "min_age_ma": 50, "max_age_ma": 60, "source": "synthetic internal"}])
     out = tmp_path / "dated tree"
-    date(tree, provenance, calibration, out, lsd2, {"variance": variance})
+    date(tree, provenance, calibration, out, lsd2)
     report = json.loads((out / "provenance.json").read_text())
+    command = report["commands"][0]["argv"]
+    assert command[command.index("-v") + 1] == "1"
+    assert "-b" not in command
+    assert command[command.index("-s") + 1] == "32000"
+    assert report["settings"] == {"variance": 1, "variance_parameter": None, "numsites": None}
+    assert report["numsites"] == 32000
+    assert report["numsites_source"] == "sum of retained trimmed gene sites"
     assert report["method"] == "LSD2 least-squares dating"
     assert report["confidence_intervals"] is False
     assert report["topology_preserved"] is True

@@ -11,7 +11,7 @@ environment is required.
 
 Use a published release checkout, configure your [inputs](inputs.md), and leave
 `container_image: auto` for automatic image selection. See [container setup](containers.md)
-for external bind mounts, local SIFs, or native execution. First use needs network
+for version selection, external bind mounts, or native execution. First use needs network
 access for the image and missing [references](references.md).
 
 ## Direct execution
@@ -68,11 +68,12 @@ Choose a few eligible species, then use the supplied pilot override:
 ```bash
 head -n 3 results/run001/metadata/species_high_busco.txt > input/pilot_species.txt
 sbatch --cpus-per-task=8 --mem=80G \
-  run_pipeline.sh --configfile config/mydata.yaml config/pilot.yaml
+  run_pipeline.sh --configfile config/mydata.yaml config/pilot.yaml \
+  --set-threads odb_map=8 --set-resources odb_map:mem_mb=64000
 ```
 
-[config/pilot.yaml](../config/pilot.yaml) uses two-species ODB chunks, keeps work
-files, and writes to `results/pilot/`. Review the species list and check mapping
+[config/pilot.yaml](../config/pilot.yaml) uses `input/pilot_species.txt` and writes
+to `results/pilot/`. Review the species list and check mapping
 quality, runtime, disk use, and peak memory before a full run.
 
 ## Targets
@@ -91,15 +92,15 @@ schedule missing prerequisites automatically.
 | `alignments` | [All-copy OG alignments](alignments.md), including mapping |
 | `kegg` | [KO annotation and original-TPM sums](kegg.md), independent of ODB |
 | `phylogeny_prepare` | BUSCO input audit, outgroup resolution, and marker plan |
-| `phylogeny` | [BUSCO species-tree inference](phylogeny.md); also dating/audit when their flags are enabled |
+| `phylogeny` | [BUSCO species-tree inference](phylogeny.md); also dating/taxonomy checks when their flags are enabled |
 | `phylogeny_calibrations` | Species-tree inference and [TimeTree calibration retrieval](dating.md#timetree-calibrations), without dating |
 | `timetree` | Species-tree inference and [LSD2 dating](dating.md) using the selected calibration source |
-| `taxonomy_audit` | [MonoPhy review](taxonomy_audit.md) of full/phenotyped species trees |
+| `taxonomy_check` | [MonoPhy review](taxonomy_check.md) of full/phenotyped species trees |
 | `contrast_pairs` | [Representative selection, inference, and trait pairs](contrast_pairs.md#representative-analysis) |
 | `phylogeny_contrast_pairs` | [Trait pairs from full/phenotyped trees](contrast_pairs.md#pairs-from-full-or-phenotyped-trees); with exclusions, requires completed results and uses the filtered export |
 | `phenoradar_metadata` | Minimal species metadata, useful for backfilling older results |
 | `filter_species` | [Export completed results after exclusions](species_filter.md); does not start producer analyses |
-| `phenoradar_inputs` | [Validate and collect completed inputs](phenoradar_inputs.md); does not start producer analyses |
+| `phenoradar_inputs` | [Automatically collect available completed results](phenoradar_inputs.md); no collection settings or producer analyses |
 
 The full/phenotyped phylogeny targets follow `phylogeny.species_sets`.
 `contrast.enabled` adds only the separate representative analysis to `all`.
@@ -107,11 +108,34 @@ Filtering and PhenoRadar collection are always manual targets.
 
 ## Resource budgets
 
-Rule resources apply to one job; the launcher budget limits concurrent jobs.
+CPU and memory defaults live in the rules. Workflow configuration files contain
+no CPU or memory settings. Rule resources apply to one job; the launcher budget
+limits concurrent jobs.
 A default ODB chunk requests 16 CPUs and 192 GB. Two concurrent chunks therefore
 need 32 CPUs and 384 GB. Fit the largest step and check estimates with a pilot.
 
-Configuration and direct `mem_gb` values use positive whole decimal GB.
+| Rule | Job unit | Default threads | Default memory (GB) |
+| --- | --- | --- | --- |
+| `odb_map` | Mapping chunk | 16 | 192 |
+| `align_orthogroup` | OG | 4 | 8 |
+| `annotate_kofam` | Species | 4 | 8 |
+| `check_taxonomy` | Species set | 1 | 8 |
+
+See [phylogeny resources](phylogeny.md#resources) for tree-inference defaults.
+For an individual rule, use Snakemake's standard overrides:
+
+```bash
+./run_pipeline.sh --configfile config/mydata.yaml \
+  --cores 16 --resources mem_gb=192 \
+  --set-threads odb_map=8 --set-resources odb_map:mem_mb=64000 -- mapping
+```
+
+This requests 8 threads and 64 GB per ODB chunk within a total budget of 16 CPUs
+and 192 GB. Chunks contain up to 100 species, defined by `make_manifests` in
+`workflow/rules/odb.smk`. Internal batch size is four times the actual ODB thread
+count (32 in this example), including any CPU cap applied by Snakemake.
+Rule overrides use `mem_mb` (64000 MB = 64 GB). The launcher's total-budget option
+`--resources mem_gb=...` uses positive whole decimal GB.
 Slurm `--mem` uses GiB; the launcher converts units and reserves 4 GB for overhead.
 Inside a Slurm allocation, its CPU/memory limits override direct launcher budgets.
 Request one node, one task, and finite memory. For direct execution, leave
@@ -119,13 +143,21 @@ physical memory for Snakemake and other processes beyond the scheduling budget.
 
 ## Re-running and recovery
 
-Rerun the same command after interruption. Completed, unchanged jobs are reused;
+Rerun the same command after interruption. Snakemake reuses completed jobs when
+their inputs, settings, and code are unchanged;
 abundance-only changes recalculate expression without remapping proteins.
 
-Interrupted ODB work remains under `work/<run_name>/orthogroups/mapping/` and
-resumes when inputs and mapping settings match. Successful work is removed
-unless `odb.keep_work: true`; native results and logs remain in the output tree.
+ODB work remains under `work/<run_name>/orthogroups/mapping/` after success or
+failure. Matching inputs, settings, software, and code reuse the same directory,
+allowing ODB to resume its internal steps. Changed inputs use separate work.
+Native results and logs are also published under `results/<run_name>/`.
 After replacing ODB software in place, explicitly rerun it with `--forcerun odb_map`.
+Use a new `run_name` for fresh work.
+
+KofamScan also retains work files under `work/<run_name>/kegg/`. Valid completed
+species annotations are reused; failed annotations restart while retaining
+their previous attempts. Other completed workflow steps follow Snakemake's
+usual reuse rules.
 
 See [reference updates](references.md) and [migration](migration.md) when changing
 snapshots or reusing older results.

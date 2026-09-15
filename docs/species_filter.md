@@ -12,7 +12,7 @@ exclude_species:
   - Cleistogenes_squarrosa
 ```
 
-These are format examples. The default is `[]`; taxonomy-audit flags never set
+These are format examples. The default is `[]`; taxonomy check flags never set
 exclusions automatically. Unknown/duplicate IDs and removal of all species fail.
 
 ## Execute after the source analysis
@@ -59,11 +59,11 @@ Only available, completed sections are exported:
 | `manifest.json` | Available/skipped sections, exclusions, identities, and checksums |
 
 OG alignments require a completed inventory and valid [gene IDs](alignments.md#outputs-and-phenoradar).
-The representative analysis, phenotyped inference files, and taxonomy-audit reports
+The representative analysis, phenotyped inference files, and taxonomy check reports
 stay in the source analysis. Completed phenotyped trees can still supply new pairs.
 Missing pair inputs are recorded, without triggering inference.
 
-Pair assignment uses `contrast.trait` and `phylogeny.seed` (standalone options
+Pair assignment uses `contrast.trait` and top-level `seed` (standalone options
 `--contrast-trait` and `--seed`). Exclusions can change clades and pair IDs;
 zero/one-state subsets produce zero pairs. See [contrast pairs](contrast_pairs.md).
 

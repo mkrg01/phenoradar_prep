@@ -46,6 +46,8 @@ input/
 | Species traits | TSV: `species` and the chosen trait column; required for trait-based analyses |
 
 Per-species BUSCO full tables are needed only for [phylogeny](phylogeny.md#inputs).
+Standard filenames and their gzip versions are detected automatically; the
+phylogeny guide lists supported layouts. Sequence input uses the same CDS files.
 Manual calibration tables are described in [dating](dating.md#manual-calibrations).
 
 ## Identifiers
@@ -60,14 +62,18 @@ Manual calibration tables are described in [dating](dating.md#manual-calibration
 
 ## Species selection
 
-The complete BUSCO fraction `(single + duplicated) / total` must meet
-`selection.busco_threshold` (default `0.5`). An optional `selection.species_list`
-contains one exact species ID per line; every listed species must pass selection.
+`selection.species_list` limits the candidate species: `null` considers all species;
+a text file path (e.g. `input/pilot_species.txt`) lists one ID per line
+(e.g. `Arabidopsis_thaliana`). Unknown IDs are errors.
+Candidates then need a complete BUSCO fraction `(single + duplicated) / total`
+of at least `selection.busco_threshold` (default `0.5`). Listed species below
+the threshold are excluded. An empty selection is an error.
 Species without BUSCO summary data are excluded and recorded in `selection.json`.
 
 Selected samples need valid CDS and abundance files, including for phylogeny-only
-runs. Invalid counts and duplicate identities stop preparation. Unresolved taxids
-fail by default; `selection.missing_taxonomy: allow` permits them. Missing
+runs. Taxonomy is looked up for selected species. Invalid counts and duplicate
+identities stop preparation. Unresolved taxids fail by default;
+`selection.missing_taxonomy: allow` permits them. Missing
 individual ranks are allowed. Metadata columns such as `exclusion` do not filter
 species; use [manual exclusion](species_filter.md) after analysis.
 

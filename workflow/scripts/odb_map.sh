@@ -36,7 +36,7 @@ set_scalar() {
 set_scalar SCHEDULER_LABEL NONE
 set_scalar OP_NJOBMAX_BATCH "$batch"
 set_scalar OP_NJOBMAX_LOCAL "$jobs"
-set_scalar OP_SAVE_JOBLOG 0
+set_scalar OP_SAVE_JOBLOG 1
 set_scalar SKIP_REMAKE_CHECK 0
 set_scalar STEP_SLEEP 0
 set_scalar TMP_DIR_BASE "\"$work/tmp\""

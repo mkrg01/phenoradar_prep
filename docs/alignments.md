@@ -18,11 +18,13 @@ branch in `all`:
 ```yaml
 alignment:
   enabled: true
-  threads: 4
-  mem_gb: 8
 ```
 
-Resources apply per job. The explicit target also works when disabled.
+Each `align_orthogroup` job aligns one OG across species, retaining all copies,
+with a default of 4 threads and 8 GB total memory. Sequence collection and
+finalization each use 1 thread and 8 GB. See
+[resource budgets](running.md#resource-budgets) for concurrency and per-rule overrides.
+The explicit target also works when disabled.
 
 ## Preserved information
 

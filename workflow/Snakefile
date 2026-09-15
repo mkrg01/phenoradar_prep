@@ -23,12 +23,6 @@ except ValueError as error:
     raise WorkflowError(str(error))
 
 if USE_CONTAINER:
-    if not config.get("container_image"):
-        raise WorkflowError(
-            "Set container_image in your dataset config to auto, a release image URI or an "
-            "absolute SIF path (see docs/containers.md). For native Conda execution, "
-            "pass --software-deployment-method conda."
-        )
     # Snakemake 9's local executor otherwise probes Conda on the host, even for
     # containerized jobs. The Miniforge image supplies its own Conda installation.
     if workflow.deployment_settings.conda_base_path is None:
@@ -46,23 +40,13 @@ if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", str(config["run_name"])):
 EXISTING_ODB = config["odb"]["existing_results"]
 if EXISTING_ODB is not None and (not isinstance(EXISTING_ODB, str) or not EXISTING_ODB.strip()):
     raise WorkflowError("odb.existing_results must be null or a snapshot directory")
-if config["odb"]["chunk_size"] < 1 or config["odb"]["threads"] < 1:
-    raise WorkflowError("ODB chunk_size and threads must be positive")
 if type(config["odb"]["node"]) is not int or config["odb"]["node"] < 1:
     raise WorkflowError("odb.node must be a positive integer")
-if config["odb"]["batch_size"] < config["odb"]["threads"]:
-    raise WorkflowError("ODB batch_size must be >= threads")
-if type(config["odb"]["mem_gb"]) is not int or config["odb"]["mem_gb"] <= 0:
-    raise WorkflowError("odb.mem_gb must be a positive integer in GB (1 GB = 1000 MB)")
 if config["tpm"]["multimap"] not in {"error", "drop", "split"}:
     raise WorkflowError("tpm.multimap must be error, drop, or split")
 for section in ["alignment", "kegg", "contrast", "phylogeny"]:
     if type(config[section]["enabled"]) is not bool:
         raise WorkflowError(f"{section}.enabled must be true or false")
-for section in ["alignment", "kegg"]:
-    for key in ["threads", "mem_gb"]:
-        if type(config[section][key]) is not int or config[section][key] <= 0:
-            raise WorkflowError(f"{section}.{key} must be a positive integer")
 if config["kegg"]["ambiguity"] not in {"duplicate", "drop", "error"}:
     raise WorkflowError("kegg.ambiguity must be duplicate, drop, or error")
 PHY = dict(config["phylogeny"], translation_table=config["translation"]["table"])
@@ -76,9 +60,7 @@ if (not isinstance(PHY["species_sets"], list) or not PHY["species_sets"]
     raise WorkflowError("phylogeny.species_sets must be a nonempty list of all and/or phenotyped, without duplicates")
 if not isinstance(PHY["trait"], str) or not PHY["trait"].strip() or PHY["trait"] == "species":
     raise WorkflowError("phylogeny.trait must name a phenotype column in inputs.species_trait")
-for key in ["max_markers", "min_protein_length",
-            "min_taxa", "align_threads", "tree_threads", "astral_threads",
-            "preparation_mem_gb", "alignment_mem_gb", "trimming_mem_gb", "tree_mem_gb", "astral_mem_gb", "seed"]:
+for key in ["max_markers", "min_protein_length", "min_taxa"]:
     if type(PHY[key]) is not int or PHY[key] <= 0:
         raise WorkflowError(f"phylogeny.{key} must be a positive integer")
 if type(PHY["max_unknown_fraction"]) not in {int, float} or not 0 <= PHY["max_unknown_fraction"] <= 1:
@@ -87,35 +69,19 @@ if PHY["trimal_mode"] not in {"gappyout", "automated1"}:
     raise WorkflowError("phylogeny.trimal_mode must be gappyout or automated1")
 if PHY["min_taxa"] < 4:
     raise WorkflowError("phylogeny requires min_taxa >= 4")
-if PHY["sequence_mode"] not in {"cds", "protein"} or (PHY["sequence_mode"] == "protein" and not PHY["sequence_dir"]):
-    raise WorkflowError("phylogeny.sequence_mode must be cds or protein; protein mode requires sequence_dir")
-for key in ["busco_full_dir", "sequence_dir"]:
-    if PHY[key] is not None and (not isinstance(PHY[key], str) or not PHY[key].strip()):
-        raise WorkflowError(f"phylogeny.{key} must be null or a nonempty string")
+if PHY["busco_full_dir"] is not None and (not isinstance(PHY["busco_full_dir"], str) or not PHY["busco_full_dir"].strip()):
+    raise WorkflowError("phylogeny.busco_full_dir must be null or a nonempty string")
 if not isinstance(PHY["outgroup"], str) or not PHY["outgroup"].strip():
     raise WorkflowError("phylogeny.outgroup must be auto or an exact inference species label; use auto instead of null")
-for key in ["busco_full_suffix", "sequence_suffix"]:
-    if not isinstance(PHY[key], str) or not PHY[key] or "/" in PHY[key] or "\\" in PHY[key]:
-        raise WorkflowError(f"phylogeny.{key} must be a nonempty filename suffix")
 if not isinstance(PHY["lineage"], str) or not PHY["lineage"].strip():
     raise WorkflowError("phylogeny.lineage must be a nonempty string")
 if type(PHY["dating"]["enabled"]) is not bool:
     raise WorkflowError("phylogeny.dating.enabled must be true or false")
-if type(PHY["dating"]["mem_gb"]) is not int or PHY["dating"]["mem_gb"] <= 0:
-    raise WorkflowError("phylogeny.dating.mem_gb must be a positive integer")
 value = PHY["dating"]["calibrations"]
 if value is not None and (not isinstance(value, str) or not value.strip()):
     raise WorkflowError("phylogeny.dating.calibrations must be null or a nonempty path")
 if PHY["dating"]["calibration_source"] not in {"file", "timetree"}:
     raise WorkflowError("phylogeny.dating.calibration_source must be file or timetree")
-TT = PHY["dating"]["timetree"]
-for key in ["max_representatives", "max_queries", "min_studies"]:
-    if type(TT[key]) is not int or TT[key] < 1:
-        raise WorkflowError(f"phylogeny.dating.timetree.{key} must be a positive integer")
-if TT["max_representatives"] < 2 or type(TT["offline"]) is not bool:
-    raise WorkflowError("TimeTree requires max_representatives >= 2 and boolean offline")
-if TT["representatives"] is not None and (not isinstance(TT["representatives"], str) or not TT["representatives"].strip()):
-    raise WorkflowError("TimeTree representatives must be null or a nonempty file path")
 
 ASTRAL = str(Path(ROOT) / "resources/phylogeny_tools/bin/astral4_int128")
 from layout import (
@@ -124,14 +90,11 @@ from layout import (
     ROOTING as ROOTING_REL, CONTRAST_BRANCHES,
 )
 from make_manifests import chunk_plan
-from date_phylogeny import validate_settings as validate_lsd2_settings
-validate_lsd2_settings(PHY["dating"]["lsd2"])
-from taxonomy_audit import validate_settings as validate_audit_settings
+from taxonomy_check import validate_settings as validate_taxonomy_check_settings
 from filter_species import validate_exclusions, discover as discover_filter_inputs
-from phenoradar_inputs import validate_settings as validate_phenoradar_settings, discover as discover_phenoradar_inputs
+from phenoradar_inputs import discover as discover_phenoradar_inputs
 try:
-    AUDIT = validate_audit_settings(config["taxonomy_audit"])
-    PHENORADAR = validate_phenoradar_settings(config["phenoradar"])
+    TAXONOMY_CHECK = validate_taxonomy_check_settings(config["taxonomy_check"])
     EXCLUDE_SPECIES = validate_exclusions(config["exclude_species"])
 except ValueError as error:
     raise WorkflowError(str(error))
@@ -193,9 +156,9 @@ def phylogeny_contrast_targets(wc):
 
 
 PHYLO_FINAL = phylogeny_targets(["species_tree.nwk", "species_tree.json", "species_coverage.tsv"])
-AUDIT_FINAL = phylogeny_targets(["taxonomy_audit"])
-if AUDIT["enabled"]:
-    PHYLO_FINAL += AUDIT_FINAL
+TAXONOMY_CHECK_FINAL = phylogeny_targets(["taxonomy_check"])
+if TAXONOMY_CHECK["enabled"]:
+    PHYLO_FINAL += TAXONOMY_CHECK_FINAL
 PHYLO_DATED = phylogeny_targets(["dating/species_tree.dated.nwk", "dating/provenance.json"])
 if PHY["dating"]["enabled"]:
     PHYLO_FINAL += PHYLO_DATED
@@ -212,11 +175,10 @@ for destination in [OUT, WORK, LOG]:
     dest, ref = Path(destination).resolve(), Path(KEGG_REFERENCE).resolve()
     if dest == ref or ref in dest.parents or dest in ref.parents:
         raise WorkflowError("KEGG reference storage must not overlap results, work, or log directories")
-    for source in [PHY["busco_full_dir"], PHY["sequence_dir"]]:
-        if source:
-            src = Path(source).resolve()
-            if dest == src or src in dest.parents or dest in src.parents:
-                raise WorkflowError("phylogeny input directories must not overlap output roots")
+    if PHY["busco_full_dir"]:
+        src = Path(PHY["busco_full_dir"]).resolve()
+        if dest == src or src in dest.parents or dest in src.parents:
+            raise WorkflowError("phylogeny input directories must not overlap output roots")
 
 
 def sample_rows(wildcards):
@@ -240,7 +202,7 @@ def run_row(wildcards):
 
 
 def chunk_rows(wildcards):
-    return chunk_plan(sample_rows(wildcards), PROTEINS, config["odb"]["chunk_size"])
+    return chunk_plan(sample_rows(wildcards), PROTEINS, rules.make_manifests.params.chunk_size)
 
 
 def chunk_row(wildcards):
@@ -341,8 +303,8 @@ rule phylogeny_prepare:
         phylogeny_targets(["plan/markers.tsv", "plan/species.tsv", "plan/marker_stats.tsv", "plan/provenance.json"])
 
 
-rule taxonomy_audit:
-    input: AUDIT_FINAL
+rule taxonomy_check:
+    input: TAXONOMY_CHECK_FINAL
 
 
 rule contrast_pairs:
@@ -375,6 +337,6 @@ include: "rules/alignments.smk"
 include: "rules/kegg.smk"
 include: "rules/phylogeny.smk"
 include: "rules/contrast.smk"
-include: "rules/taxonomy_audit.smk"
+include: "rules/taxonomy_check.smk"
 include: "rules/filter_species.smk"
 include: "rules/phenoradar.smk"

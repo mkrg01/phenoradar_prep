@@ -9,6 +9,7 @@ import tarfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 import prepare_taxonomy
 from common import file_record
@@ -69,33 +70,23 @@ def test_download_builds_queryable_frozen_snapshot(tiny_taxdump, tmp_path, monke
     assert not list(destination.parent.glob(".taxa.sqlite.preparing-*"))
 
 
-def test_local_source_is_offline_and_existing_database_is_preserved(tiny_inputs, tmp_path, monkeypatch):
+def test_existing_database_without_provenance_is_preserved(tiny_inputs, seed_taxonomy, monkeypatch):
     def no_download(*args, **kwargs):
-        pytest.fail("a local or existing database must not trigger a download")
+        pytest.fail("an existing database must not trigger a download")
 
     monkeypatch.setattr(prepare_taxonomy, "urlopen", no_download)
-    source = Path(tiny_inputs["taxonomy_db"])
-    original = file_record(source)
-    destination = tmp_path / "taxonomy" / "taxa.sqlite"
-    prepare_taxonomy.prepare(destination, source)
-    assert file_record(source) == original
-    with sqlite3.connect(source) as src, sqlite3.connect(destination) as dst:
-        assert list(src.iterdump()) == list(dst.iterdump())
+    destination = seed_taxonomy(tiny_inputs["taxonomy_db"])
     record_path = Path(str(destination) + ".json")
-    record = json.loads(record_path.read_text())
-    assert record["source"] == str(source)
-    assert record["method"] == "sqlite_backup"
-    assert record["snapshot"] == file_record(destination)
     before = (destination.read_bytes(), destination.stat().st_mtime_ns)
     record_path.unlink()  # Externally supplied databases need not have a sidecar.
-    source.unlink()
-    prepare_taxonomy.prepare(destination, source)
+    Path(tiny_inputs["taxonomy_db"]).unlink()
+    prepare_taxonomy.prepare(destination)
     assert before == (destination.read_bytes(), destination.stat().st_mtime_ns)
     assert not record_path.exists()
 
 
 @pytest.mark.parametrize("failure", ["download", "invalid_archive"])
-def test_failed_bootstrap_leaves_no_database_and_can_be_retried(tiny_inputs, tmp_path, monkeypatch, failure):
+def test_failed_bootstrap_leaves_no_database_and_can_be_retried(tiny_taxdump, tmp_path, monkeypatch, failure):
     def broken_download(url, timeout):
         if failure == "download":
             raise OSError("download interrupted")
@@ -108,8 +99,10 @@ def test_failed_bootstrap_leaves_no_database_and_can_be_retried(tiny_inputs, tmp
     assert not destination.exists()
     assert not Path(str(destination) + ".json").exists()
     assert not list(destination.parent.glob(".taxa.sqlite.preparing-*"))
-    prepare_taxonomy.prepare(destination, tiny_inputs["taxonomy_db"])
+    monkeypatch.setattr(prepare_taxonomy, "urlopen", lambda url, timeout: io.BytesIO(tiny_taxdump))
+    prepare_taxonomy.prepare(destination)
     assert destination.is_file()
+    assert json.loads(Path(str(destination) + ".json").read_text())["method"] == "ncbi_download"
 
 
 def test_missing_database_is_scheduled_without_downloading(tmp_path, workflow_project):
@@ -125,3 +118,26 @@ def test_missing_database_is_scheduled_without_downloading(tmp_path, workflow_pr
     assert result.returncode == 0, result.stdout + result.stderr
     assert "rule prepare_taxonomy:" in result.stdout
     assert not destination.exists()
+
+
+def test_workflow_reuses_snapshot_across_run_names(tmp_path, tiny_inputs, seed_taxonomy, workflow_project):
+    snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
+    if not snakemake:
+        pytest.skip("Snakemake is not available")
+    destination = seed_taxonomy(tiny_inputs["taxonomy_db"])
+    before = file_record(destination), destination.stat().st_mtime_ns
+    config = tmp_path / "override.yaml"
+    config.write_text(yaml.safe_dump({"inputs": {key: tiny_inputs[key]
+                     for key in ("metadata", "busco", "cds_dir", "quant_dir")}}))
+    for run_name in ("run001", "second_run"):
+        result = subprocess.run([
+            snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"),
+            "--cores", "1", "--configfile", str(config), "--config", f"run_name={run_name}",
+            "--dry-run", "--", "prepare",
+        ], cwd=workflow_project, env={**os.environ, "XDG_CACHE_HOME": str(tmp_path / "cache")},
+            capture_output=True, text=True, timeout=60)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "checkpoint select_metadata:" in result.stdout
+        assert f"results/{run_name}/metadata/samples.tsv" in result.stdout
+        assert "rule prepare_taxonomy:" not in result.stdout + result.stderr
+    assert (file_record(destination), destination.stat().st_mtime_ns) == before

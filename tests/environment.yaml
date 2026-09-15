@@ -1,0 +1,18 @@
+# Python test suite and Snakemake; real-tool smoke tests use the container.
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.12
+  - snakemake-minimal=9.8.0
+  - pytest=8.4.1
+  - biopython=1.85
+  - cdskit=0.27.0
+  - ete4=4.4.0  # Required by nwkit in this shared test environment.
+  - matplotlib-base=3.10.6
+  - numpy
+  - nwkit=0.27.0
+  - pandas=2.2.3
+  - pyyaml
+  - requests

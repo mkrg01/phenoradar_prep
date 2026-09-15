@@ -10,8 +10,6 @@ input TPM by KEGG Orthology (KO), independently of ODB mapping.
 ```yaml
 kegg:
   enabled: true
-  threads: 4
-  mem_gb: 8
   ambiguity: duplicate
 ```
 
@@ -24,6 +22,10 @@ The explicit target works without `enabled`; enabling it adds KEGG to `all`.
 The container supplies KofamScan, and missing [references](references.md#kofam-and-kegg-reference)
 are prepared automatically. Annotation runs once per species. Abundance or
 ambiguity-policy changes reuse annotations and repeat aggregation.
+
+Each `annotate_kofam` job annotates one species with a default of 4 threads and
+8 GB total memory. Two concurrent jobs request 8 threads and 16 GB. See
+[resource budgets](running.md#resource-budgets) for concurrency and per-rule overrides.
 
 ## Assignment and quantification
 
@@ -80,9 +82,9 @@ completeness. Review support and QC before interpreting missing values.
 
 ## Passing KO features to PhenoRadar
 
-The [input collector](phenoradar_inputs.md) links expression and requested
-module/pathway maps. It requires one run per species; the guide gives the
-PhenoRadar KO column settings.
+The [input collector](phenoradar_inputs.md) automatically links completed
+expression, annotations, and available module/pathway maps. Runs are preserved
+separately; the guide gives the PhenoRadar KO column settings.
 
 ## References
 

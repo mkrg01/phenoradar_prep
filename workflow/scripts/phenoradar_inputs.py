@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish only PhenoRadar inputs from completed analysis outputs."""
+"""Collect completed outputs for present and future PhenoRadar analyses."""
 import argparse
 import csv
 import gzip
@@ -8,43 +8,15 @@ import math
 from pathlib import Path
 import tempfile
 
-from common import sha256, species_from_gene_id, write_tsv
+from common import read_tsv, sha256, species_from_gene_id
 from filter_species import fasta_records, manifest, safe_name, table, validate_exclusions
 from phenoradar_metadata import read_base, with_pairs
-from layout import ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS, CONTRAST_BRANCHES
+from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
+                    PHYLOGENY_BRANCHES, REPRESENTATIVES)
 
 
-DEFAULTS = dict(orthogroups="auto", kegg="auto", alignments="auto",
-                kegg_groups=["module"], orthogroup_annotations=None, contrast=None, tree=None)
-CONTRASTS = CONTRAST_BRANCHES
-
-
-def validate_settings(settings=None):
-    if settings is not None and not isinstance(settings, dict):
-        raise ValueError("phenoradar must be a configuration mapping")
-    settings = settings or {}
-    if set(settings) - set(DEFAULTS):
-        raise ValueError(f"unknown phenoradar settings: {sorted(set(settings) - set(DEFAULTS))}")
-    result = {**DEFAULTS, **settings}
-    for key in ["orthogroups", "kegg", "alignments"]:
-        if type(result[key]) is not bool and result[key] != "auto":
-            raise ValueError(f"phenoradar.{key} must be true, false, or auto")
-    groups = result["kegg_groups"]
-    if (not isinstance(groups, list) or any(not isinstance(g, str) or g not in {"module", "pathway"} for g in groups)
-            or len(set(groups)) != len(groups)):
-        raise ValueError("phenoradar.kegg_groups must list module and/or pathway, without duplicates")
-    if result["contrast"] is not None and (not isinstance(result["contrast"], str) or result["contrast"] not in CONTRASTS):
-        raise ValueError("phenoradar.contrast must be null or one of " + ", ".join(sorted(CONTRASTS)))
-    for key in ["orthogroup_annotations", "tree"]:
-        value = result[key]
-        if value is not None and (not isinstance(value, str) or not value.strip()):
-            raise ValueError(f"phenoradar.{key} must be null or a file path")
-    return result
-
-
-def discover(source, settings=None, exclusions=()):
+def discover(source, exclusions=()):
     """Freeze existing files as absolute inputs, without requesting producers."""
-    settings = validate_settings(settings)
     exclusions = validate_exclusions(list(exclusions))
     original = Path(source).resolve()
     _, original_samples, original_species, _ = manifest(original / "metadata/samples.tsv")
@@ -72,32 +44,53 @@ def discover(source, settings=None, exclusions=()):
             raise ValueError(f"missing {path}; run phenoradar_metadata (then filter_species if excluding species)")
         files.add(path)
 
-    sections, links, alignment_hashes = {}, {}, {}
+    sections, links, hashes, trees, contrasts = {}, {}, {}, {}, []
 
-    def branch(name, required, published):
-        mode = settings[name]
-        if mode is False:
-            sections[name] = "disabled"
-            return False
-        missing = [p for p in required if not (source / p).is_file()]
-        present = any((source / p).exists() for p in required)
-        status = "ready" if not missing else "incomplete" if present else "absent"
+    def publish(relative, destination=None):
+        path = source / relative
+        if path.is_file():
+            files.add(path)
+            links[destination or relative] = path
+
+    def folder(relative, recursive=False):
+        root = source / relative
+        for path in sorted(root.rglob("*") if recursive else root.glob("*")):
+            if path.is_file() and not any(p.startswith(".") for p in path.relative_to(root).parts):
+                publish(str(path.relative_to(source)))
+
+    def branch(name, required):
+        present = [p for p in required if (source / p).is_file()]
+        status = "ready" if len(present) == len(required) else "incomplete" if present else "absent"
         sections[name] = status
-        files.update(source / p for p in required if (source / p).is_file())
-        if missing:
-            if mode is True:
-                raise ValueError(f"required {name} inputs are {status}: {', '.join(missing)}")
-            return False
-        links.update({dest: source / relative for dest, relative in published.items()})
-        return True
+        files.update(source / p for p in present)
+        return status == "ready"
 
-    branch("orthogroups", [f"{ORTHOGROUP_EXPRESSION}/tpm.tsv", f"{ORTHOGROUP_EXPRESSION}/mapping_qc.tsv"], {"tpm.tsv": f"{ORTHOGROUP_EXPRESSION}/tpm.tsv"})
-    maps = {f"kegg/ko_{group}s.tsv": f"kegg/ko_{group}s.tsv" for group in settings["kegg_groups"]}
-    branch("kegg", ["kegg/ko_tpm_sum.tsv", "kegg/mapping_qc.tsv", "kegg/ko_support.tsv",
-                    "kegg/reference_qc.json", *maps],
-           {"kegg/ko_tpm_sum.tsv": "kegg/ko_tpm_sum.tsv", **maps})
+    folder("metadata")
+    publish("run.json")
+    publish("metadata/species_metadata.tsv", "species_metadata.tsv")
+    if branch("orthogroups", [f"{ORTHOGROUP_EXPRESSION}/tpm.tsv", f"{ORTHOGROUP_EXPRESSION}/mapping_qc.tsv"]):
+        folder(ORTHOGROUP_EXPRESSION)
+        publish(f"{ORTHOGROUP_EXPRESSION}/tpm.tsv", "tpm.tsv")
+    if branch("mapping", [f"{ORTHOGROUP_MAPPING}/{name}" for name in
+                          ["gene_orthogroups.tsv", "mappings.sqlite", "merge_qc.json"]]):
+        folder(ORTHOGROUP_MAPPING)
+    if branch("kegg", ["kegg/ko_tpm_sum.tsv", "kegg/mapping_qc.tsv", "kegg/ko_support.tsv"]):
+        for name in ["ko_tpm_sum.tsv", "ko_tpm_sum_wide.tsv", "ko_support.tsv", "mapping_qc.tsv",
+                     "genes.tsv", "gene_kos.tsv"]:
+            publish("kegg/" + name)
+    for group in ["module", "pathway"]:
+        relative = f"kegg/ko_{group}s.tsv"
+        if branch(f"kegg_{group}s", [relative, "kegg/reference_qc.json"]):
+            publish(relative)
+            publish("kegg/reference_qc.json")
+            record = json.loads((source / "kegg/reference_qc.json").read_text())
+            maps = {Path(r["path"]).name: r["sha256"] for r in record.get("results", [])}
+            if Path(relative).name not in maps:
+                raise ValueError("KO membership is not recorded in KEGG reference completion: " + relative)
+            hashes[str(source / relative)] = maps[Path(relative).name]
+
     completion = f"{ORTHOGROUP_ALIGNMENTS}/filter_qc.json" if filtered else f"{ORTHOGROUP_ALIGNMENTS}/provenance.json"
-    if branch("alignments", [completion], {}):
+    if branch("alignments", [completion]):
         report = json.loads((source / completion).read_text())
         seen = set()
         for record in report["alignments"]:
@@ -111,55 +104,118 @@ def discover(source, settings=None, exclusions=()):
             path = source / relative
             if not path.is_file():
                 raise ValueError("completed alignment is missing: " + str(path))
-            links[f"alignments/{og}.faa"] = path
-            files.add(path)
+            publish(relative)
+            publish(relative, f"alignments/{og}.faa")
             if not filtered:
-                alignment_hashes[str(path)] = record["alignment"]["sha256"]
-    elif sections["alignments"] == "absent" and any((source / ORTHOGROUP_ALIGNMENTS).glob("*.faa")):
+                hashes[str(path)] = record["alignment"]["sha256"]
+        for path in (source / ORTHOGROUP_ALIGNMENTS).glob("*"):
+            if path.suffix != ".faa":
+                publish(str(path.relative_to(source)))
+    elif any((source / ORTHOGROUP_ALIGNMENTS).glob("*.faa")):
         sections["alignments"] = "incomplete"
 
-    if not ({"tpm.tsv", "kegg/ko_tpm_sum.tsv"} & links.keys()):
-        raise ValueError("no completed expression input selected; run the OG TPM or kegg step first")
-    pairs = None
-    if settings["contrast"]:
-        pairs = source / settings["contrast"] / "species_metadata.tsv"
-        for path in [pairs, pairs.with_name("summary.json")]:
-            if not path.is_file():
-                raise ValueError("selected contrast output is incomplete: " + str(path))
-            files.add(path)
-    for key, destination in [("tree", "species_tree.nwk"),
-                             ("orthogroup_annotations", "orthogroup_annotations.tsv")]:
-        if settings[key]:
-            path = Path(settings[key]).resolve()
-            if not path.is_file():
-                raise ValueError(f"selected {key} is missing: {path}")
-            if key == "orthogroup_annotations" and path.suffix == ".gz":
-                destination += ".gz"
-            links[destination] = path
-            files.add(path)
+    # Species/run identity comes from the selected manifest, never stale files.
+    _, samples, _, _ = manifest(source / "metadata/samples.tsv")
+    for name in sorted({r["odb_species"] for r in samples}):
+        protein = f"proteins/{name}_protein.fa"
+        report = f"proteins/{name}_protein.json"
+        if branch(f"proteins/{name}", [protein] if filtered else [protein, report]):
+            publish(protein)
+            publish(report)
+            if not filtered:
+                hashes[str(source / protein)] = json.loads((source / report).read_text())["protein"]["sha256"]
+        relative = f"kegg/species/{name}"
+        if branch(relative, [f"{relative}/{n}" for n in ["genes.tsv", "gene_kos.tsv", "detail.tsv", "provenance.json"]]):
+            folder(relative)
+
+    for relative in [*PHYLOGENY_BRANCHES.values(), REPRESENTATIVES]:
+        if filtered and branch(relative, [f"{relative}/pruning.json"]):
+            folder(relative, recursive=True)
+            tree = source / relative / "species_tree.pruned.nwk"
+            if tree.is_file():
+                trees[str(tree)] = False
+            dated = source / relative / "dating/species_tree.dated.pruned.nwk"
+            if dated.is_file():
+                trees[str(dated)] = False
+        else:
+            for name, marker in [("species_tree.nwk", "species_tree.json"),
+                                 ("gene_trees.nwk", "gene_trees.json")]:
+                if branch(f"{relative}/{name}", [f"{relative}/{name}", f"{relative}/{marker}"]):
+                    publish(f"{relative}/{name}")
+                    publish(f"{relative}/{marker}")
+                    publish(f"{relative}/species_coverage.tsv")
+                    if name == "species_tree.nwk":
+                        trees[str(source / relative / name)] = relative != PHYLOGENY_BRANCHES["all"]
+                    else:
+                        record = json.loads((source / relative / marker).read_text())
+                        for locus in record.get("retained", []):
+                            og = safe_name(locus["marker"])
+                            for directory in ["markers", "alignments", "alignments/raw", "gene_trees"]:
+                                for suffix in [".faa", ".nwk", ".json", ".columns.tsv"]:
+                                    publish(f"{relative}/{directory}/{og}{suffix}")
+            for directory, marker in [("selection", "selection.json"), ("plan", "provenance.json"),
+                                      ("rooting", "outgroup.json"), ("timetree", "provenance.json"),
+                                      ("dating", "provenance.json"), ("taxonomy_check", "summary.json")]:
+                required = [f"{relative}/{directory}/{marker}"]
+                if directory == "dating":
+                    required.append(f"{relative}/dating/species_tree.dated.nwk")
+                if branch(f"{relative}/{directory}", required):
+                    folder(f"{relative}/{directory}", recursive=directory == "taxonomy_check")
+                    if directory == "dating":
+                        trees[str(source / relative / "dating/species_tree.dated.nwk")] = relative != PHYLOGENY_BRANCHES["all"]
+            # Completed sequence/alignment steps are useful even before tree inference.
+            if (source / relative / "plan/provenance.json").is_file():
+                for directory, field, plan, suffix in [
+                    ("species", "species", "species", ".faa"),
+                    ("alignments/raw", "marker", "markers", ".faa"),
+                    ("alignments", "marker", "markers", ".faa"),
+                    ("gene_trees", "marker", "markers", ".nwk"),
+                ]:
+                    plan_path = source / relative / "plan" / f"{plan}.tsv"
+                    if not plan_path.is_file():
+                        continue
+                    for row in read_tsv(plan_path):
+                        stem = f"{relative}/{directory}/{safe_name(row[field])}"
+                        if all((source / (stem + ext)).is_file() for ext in [suffix, ".json"]):
+                            for ext in [suffix, ".json", ".columns.tsv"]:
+                                publish(stem + ext)
+                if (source / relative / "markers/.snakemake_timestamp").is_file():
+                    files.add(source / relative / "markers/.snakemake_timestamp")
+                    plan_path = source / relative / "plan/markers.tsv"
+                    if plan_path.is_file():
+                        for row in read_tsv(plan_path):
+                            publish(f"{relative}/markers/{safe_name(row['marker'])}.faa")
+        contrast = f"{relative}/contrast"
+        if branch(contrast, [f"{contrast}/species_metadata.tsv", f"{contrast}/summary.json"]):
+            folder(contrast)
+            contrasts.append(source / contrast / "species_metadata.tsv")
+
+    for directory in ["", "orthogroups", ORTHOGROUP_MAPPING]:
+        for suffix in [".tsv", ".tsv.gz"]:
+            publish(str(Path(directory) / ("orthogroup_annotations" + suffix)))
     return dict(source=str(source), files=sorted(str(p) for p in files), links=links,
-                sections=sections, filtered=filtered, pairs=pairs, alignment_hashes=alignment_hashes,
+                sections=sections, filtered=filtered, contrasts=contrasts, hashes=hashes, trees=trees,
                 original_runs={r["run"]: r["species"] for r in original_samples if r["species"] not in exclusions})
 
 
-def validate_expression(path, species_runs, feature, value):
-    """Check producer long tables using memory bounded by one species' features."""
+def validate_expression(path, runs, feature, value):
+    """Validate run-level values without choosing or combining biological replicates."""
     reader = table(path, ["species", "run", feature, value])
     next(reader)
-    species_seen, features, current_features = set(), set(), set()
+    seen, features, current_features = set(), set(), set()
     current = None
     for row in reader:
-        species = row["species"]
-        if species_runs.get(species) != row["run"]:
-            raise ValueError(f"expression run/species differs from samples: {path}: {species}/{row['run']}")
-        if species != current:
-            if species in species_seen:
-                raise ValueError(f"duplicate/discontiguous species block in expression: {path}: {species}")
-            species_seen.add(species)
-            current, current_features = species, set()
+        run = row["run"]
+        if runs.get(run) != row["species"]:
+            raise ValueError(f"expression run/species differs from samples: {path}: {row['species']}/{run}")
+        if run != current:
+            if run in seen:
+                raise ValueError(f"duplicate/discontiguous run block in expression: {path}: {run}")
+            seen.add(run)
+            current, current_features = run, set()
         name = safe_name(row[feature])
         if name in current_features:
-            raise ValueError(f"duplicate species/feature coordinate: {path}: {species}/{name}")
+            raise ValueError(f"duplicate run/feature coordinate: {path}: {run}/{name}")
         current_features.add(name)
         features.add(name)
         try:
@@ -168,22 +224,22 @@ def validate_expression(path, species_runs, feature, value):
             raise ValueError(f"invalid numeric expression: {path}: {row[value]!r}") from error
         if not math.isfinite(number) or number < 0:
             raise ValueError(f"expression must be finite and nonnegative: {path}")
-    if species_seen != set(species_runs):
-        raise ValueError(f"expression lacks selected species: {path}: {sorted(set(species_runs) - species_seen)}")
+    if seen != set(runs):
+        raise ValueError(f"expression lacks selected runs: {path}: {sorted(set(runs) - seen)}")
     return features
 
 
-def validate_qc(path, species_runs):
+def validate_qc(path, runs):
     reader = table(path, ["species", "run"])
     next(reader)
     seen = set()
     for row in reader:
-        species = row["species"]
-        if species in seen or species_runs.get(species) != row["run"]:
+        run = row["run"]
+        if run in seen or runs.get(run) != row["species"]:
             raise ValueError("expression QC run/species differs from samples: " + str(path))
-        seen.add(species)
-    if seen != set(species_runs):
-        raise ValueError("expression QC lacks selected species: " + str(path))
+        seen.add(run)
+    if seen != set(runs):
+        raise ValueError("expression QC lacks selected runs: " + str(path))
 
 
 def validate_groups(path, group):
@@ -211,14 +267,15 @@ def validate_alignment(path, species):
         raise ValueError("empty alignment: " + str(path))
 
 
-def validate_tree(path, species):
+def validate_tree(path, species, subset=False):
     from ete4 import Tree
     text = path.read_text().strip()
     if text.count(";") != 1:
         raise ValueError("expected one Newick species tree")
     tree = Tree(text, parser=1)
     names = list(tree.leaf_names())
-    if len(names) != len(set(names)) or set(names) != species:
+    if (len(names) != len(set(names)) or not names or not set(names) <= species
+            or (not subset and set(names) != species)):
         raise ValueError("tree species differ from selected metadata; use the matching full/pruned tree")
     for node in tree.traverse():
         if node.dist is not None and (not math.isfinite(node.dist) or node.dist < 0):
@@ -226,8 +283,6 @@ def validate_tree(path, species):
 
 
 def validate_annotations(path, orthogroups):
-    if not orthogroups:
-        raise ValueError("OG annotations require an OG expression input")
     matched = set()
     opener = gzip.open if path.suffix == ".gz" else open
     with opener(path, "rt", newline="") as handle:
@@ -238,7 +293,7 @@ def validate_annotations(path, orthogroups):
                 if row[0] in matched:
                     raise ValueError("duplicate annotation for selected OG: " + row[0])
                 matched.add(row[0])
-    if not matched:
+    if orthogroups and not matched:
         raise ValueError("OG annotations do not match expression IDs; check the OrthoDB reference version")
     print(f"OG descriptions: {len(matched)}/{len(orthogroups)} expressed OGs", flush=True)
 
@@ -247,26 +302,29 @@ def check_destination(out):
     if out.is_symlink():
         raise ValueError("phenoradar_inputs output directory must not be a symlink")
     allowed = {"species_metadata.tsv", "tpm.tsv", "species_tree.nwk", "orthogroup_annotations.tsv",
-               "orthogroup_annotations.tsv.gz", ".snakemake_timestamp"}
+               "orthogroup_annotations.tsv.gz", "run.json", ".snakemake_timestamp"}
+    directories = {"metadata", "proteins", "orthogroups", "phylogeny", "alignments", "kegg"}
     if out.exists():
         for path in out.iterdir():
-            if path.name in allowed and (path.is_file() or path.is_symlink()):
+            if path.name in allowed and (path.is_symlink() or
+                    (path.name in {"species_metadata.tsv", ".snakemake_timestamp"} and path.is_file())):
                 continue
-            if path.name in {"alignments", "kegg"} and path.is_dir() and not path.is_symlink():
-                for child in path.iterdir():
-                    valid = (child.suffix == ".faa" if path.name == "alignments" else
-                             child.name in {"ko_tpm_sum.tsv", "ko_modules.tsv", "ko_pathways.tsv"})
-                    if not valid or not child.is_symlink():
-                        raise ValueError("unrecognized file in output directory: " + str(child))
+            if path.name in directories and path.is_dir() and not path.is_symlink():
+                for child in path.rglob("*"):
+                    if child.is_symlink() and not child.is_dir():
+                        continue
+                    if child.is_dir() and not child.is_symlink():
+                        continue
+                    raise ValueError("unrecognized file in output directory: " + str(child))
                 continue
             raise ValueError("refusing to replace unrecognized output contents: " + str(path))
 
 
-def export(source, outdir=None, settings=None, exclusions=(), trait="C4"):
+def export(source, outdir=None, exclusions=(), trait="C4"):
     out = Path(outdir) if outdir else Path(source) / "phenoradar_inputs"
     check_destination(out)
     out = out.resolve()
-    inventory = discover(source, settings, exclusions)
+    inventory = discover(source, exclusions)
     source = Path(inventory["source"])
     paths = [Path(p) for p in inventory["files"]]
     if out == source or any(out == p.resolve() or out in p.resolve().parents for p in paths):
@@ -275,16 +333,7 @@ def export(source, outdir=None, settings=None, exclusions=(), trait="C4"):
     print("PhenoRadar source: " + str(source), flush=True)
     for name, status in inventory["sections"].items():
         print(f"{name}: {status}", flush=True)
-    expected_hashes = dict(inventory["alignment_hashes"])
-    if inventory["sections"]["kegg"] == "ready":
-        reference = json.loads((source / "kegg/reference_qc.json").read_text())
-        results = reference.get("results", [])
-        maps = {Path(r["path"]).name: r["sha256"] for r in results}
-        for dest, path in inventory["links"].items():
-            if dest in {"kegg/ko_modules.tsv", "kegg/ko_pathways.tsv"}:
-                if path.name not in maps:
-                    raise ValueError("KO membership is not recorded in KEGG reference completion: " + str(path))
-                expected_hashes[str(path)] = maps[path.name]
+    expected_hashes = dict(inventory["hashes"])
     filtered = inventory["filtered"]
     if filtered:
         recorded = {r["path"]: r["sha256"] for r in filtered["outputs"]}
@@ -299,12 +348,7 @@ def export(source, outdir=None, settings=None, exclusions=(), trait="C4"):
     for path, expected in expected_hashes.items():
         if sha256(path) != expected:
             raise ValueError("completed input checksum mismatch: " + path)
-    _, samples, by_species, _ = manifest(source / "metadata/samples.tsv")
-    species_runs = {}
-    for row in samples:
-        if row["species"] in species_runs:
-            raise ValueError("PhenoRadar requires one run per species; explicitly select runs before export: " + row["species"])
-        species_runs[row["species"]] = row["run"]
+    _, samples, by_species, runs = manifest(source / "metadata/samples.tsv")
     species = set(by_species)
     if filtered and species != set(filtered["retained_species"]):
         raise ValueError("filtered samples differ from recorded retained species")
@@ -313,15 +357,15 @@ def export(source, outdir=None, settings=None, exclusions=(), trait="C4"):
     metadata = read_base(source / "metadata/species_metadata.tsv", trait)
     if {r["species"] for r in metadata} != species:
         raise ValueError("PhenoRadar metadata species differ from samples")
-    if inventory["pairs"]:
-        metadata = with_pairs(metadata, inventory["pairs"], trait)
+    for pairs in inventory["contrasts"]:
+        with_pairs(metadata, pairs, trait)
     links, orthogroups = inventory["links"], set()
     for dest, feature, value, qc in [("tpm.tsv", "orthogroup", "tpm", f"{ORTHOGROUP_EXPRESSION}/mapping_qc.tsv"),
                                     ("kegg/ko_tpm_sum.tsv", "ko", "tpm_sum", "kegg/mapping_qc.tsv")]:
         if dest in links:
             print("Checking expression: " + str(links[dest]), flush=True)
-            features = validate_expression(links[dest], species_runs, feature, value)
-            validate_qc(source / qc, species_runs)
+            features = validate_expression(links[dest], runs, feature, value)
+            validate_qc(source / qc, runs)
             if feature == "orthogroup":
                 orthogroups = features
     for dest, path in links.items():
@@ -329,18 +373,14 @@ def export(source, outdir=None, settings=None, exclusions=(), trait="C4"):
             validate_alignment(path, species)
         elif dest in {"kegg/ko_modules.tsv", "kegg/ko_pathways.tsv"}:
             validate_groups(path, "module" if "modules" in dest else "pathway")
-        elif dest == "species_tree.nwk":
-            validate_tree(path, species)
-        elif dest.startswith("orthogroup_annotations."):
+        elif str(path) in inventory["trees"]:
+            validate_tree(path, species, subset=inventory["trees"][str(path)])
+        elif path.name.startswith("orthogroup_annotations."):
             validate_annotations(path, orthogroups)
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".phenoradar-inputs-", dir=out.parent) as tmp:
         stage = Path(tmp) / "inputs"
         stage.mkdir()
-        if inventory["pairs"]:
-            write_tsv(stage / "species_metadata.tsv", ["species", trait, "contrast_pair_id", "family"], metadata)
-        else:
-            (stage / "species_metadata.tsv").symlink_to(source / "metadata/species_metadata.tsv")
         for dest, path in links.items():
             target = stage / dest
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -367,10 +407,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True)
     parser.add_argument("--outdir")
-    parser.add_argument("--settings", default="{}", help="JSON phenoradar settings")
     parser.add_argument("--exclude-species", default="[]", help="JSON exact species IDs")
     parser.add_argument("--trait", default="C4")
     args = vars(parser.parse_args())
-    args["settings"] = json.loads(args["settings"])
     args["exclusions"] = json.loads(args.pop("exclude_species"))
     export(**args)

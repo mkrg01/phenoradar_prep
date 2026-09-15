@@ -57,7 +57,7 @@ checkpoint select_contrast_representatives:
         sampled=f"{REPRESENTATIVES}/selection/ncbi_skim.sampled.tsv",
         qc=f"{REPRESENTATIVES}/selection/selection.json"
     params:
-        outdir=f"{REPRESENTATIVES}/selection", trait=config["contrast"]["trait"], seed=PHY["seed"]
+        outdir=f"{REPRESENTATIVES}/selection", trait=config["contrast"]["trait"], seed=config["seed"]
     conda: "../envs/timetree.yaml"
     resources: mem_mb=4000
     log: f"{LOG}/{REPRESENTATIVES_REL}/selection.log"
@@ -85,7 +85,7 @@ rule identify_contrast_pairs:
         metadata=f"{CONTRAST}/species_metadata.tsv",
         qc=f"{CONTRAST}/summary.json"
     params:
-        selection=f"{REPRESENTATIVES}/selection", outdir=CONTRAST, seed=PHY["seed"]
+        selection=f"{REPRESENTATIVES}/selection", outdir=CONTRAST, seed=config["seed"]
     conda: "../envs/timetree.yaml"
     resources: mem_mb=4000
     log: f"{LOG}/{REPRESENTATIVES_REL}/contrast/pairs.log"
@@ -134,7 +134,7 @@ rule identify_phylogeny_contrast_pairs:
         pairs=f"{PHYLO_RUN}/contrast/contrast_pairs.tsv",
         metadata=f"{PHYLO_RUN}/contrast/species_metadata.tsv",
         qc=f"{PHYLO_RUN}/contrast/summary.json"
-    params: outdir=f"{PHYLO_RUN}/contrast", trait=config["contrast"]["trait"], seed=PHY["seed"]
+    params: outdir=f"{PHYLO_RUN}/contrast", trait=config["contrast"]["trait"], seed=config["seed"]
     conda: "../envs/timetree.yaml"
     resources: mem_mb=4000
     log: f"{LOG}/{{phylo_branch}}/contrast/pairs.log"

@@ -9,11 +9,10 @@ import re
 import shutil
 import subprocess
 import tempfile
-import uuid
 from pathlib import Path
 
 from common import atomic_writer, file_record, now, sha256, write_json
-from odb_environment import check_storage, command_path, odb_environment, software_records
+from odb_environment import command_path, odb_environment, software_records
 
 
 def publish_tree(source, destination):
@@ -35,8 +34,7 @@ def publish_tree(source, destination):
 
 
 def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper_v12", prefix="",
-        version="v12", node=3193, jobs=16, batch_size=64, min_free_gb=750,
-        allow_nonlocal=False, keep_work=False):
+        version="v12", node=3193, jobs=16, *, batch_size):
     if not re.fullmatch(r"chunk_[0-9]+", label) or jobs < 1 or batch_size < jobs:
         raise ValueError("invalid chunk label or concurrency settings")
     if jobs > int(os.environ.get("SLURM_CPUS_PER_TASK", jobs)):
@@ -71,14 +69,13 @@ def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper_v1
                                    ["run_odb_chunk.py", "odb_map.sh", "odb_environment.py", "common.py"]]}
     fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     base = Path(work_dir).resolve() / label
-    check_storage(base, min_free_gb, allow_nonlocal)
+    base.mkdir(parents=True, exist_ok=True)
     with open(base / ".lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         work = base / fingerprint
-        # Only failed/incomplete work is reusable. A forced rerun after success is fresh.
-        if (work / "completed.json").exists():
-            work.rename(base / f"{fingerprint}.completed.{uuid.uuid4().hex[:8]}")
+        # Keep matching work so ODB can reuse its completed internal steps.
         work.mkdir(parents=True, exist_ok=True)
+        (work / "completed.json").unlink(missing_ok=True)
         write_json(work / "identity.json", identity)
         status = base / "status.json"
         write_json(status, {"state": "running", "started_at": now(), "fingerprint": fingerprint, "work": str(work)})
@@ -98,7 +95,7 @@ def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper_v1
             for path in required + [project / "orthologer_conf.sh", work / "report.txt", work / "odbmapper_config.txt"]:
                 with open(path, "rb") as src, atomic_writer(out / path.name, "wb") as dst:
                     shutil.copyfileobj(src, dst)
-            # Retain the other native outputs and logs before removing successful work.
+            # Publish native outputs and logs while keeping the resumable work.
             publish_tree(project / "Results", out / "native_results")
             if (project / "RunLogs").exists():
                 publish_tree(project / "RunLogs", out / "RunLogs")
@@ -106,11 +103,8 @@ def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper_v1
                       "results": [file_record(out / p.name) for p in required]}
             write_json(out / "provenance.json", record)
             write_json(work / "completed.json", record)
-            write_json(status, {"state": "success", "completed_at": now(), "fingerprint": fingerprint})
-            if not keep_work:
-                # The only removed directory is our just-validated fingerprint work.
-                assert work.parent == base and work.name == fingerprint
-                shutil.rmtree(work)
+            write_json(status, {"state": "success", "completed_at": now(),
+                                "fingerprint": fingerprint, "work": str(work)})
         except BaseException:
             write_json(status, {"state": "failed", "time": now(), "fingerprint": fingerprint, "work": str(work)})
             raise
@@ -125,8 +119,5 @@ if __name__ == "__main__":
     parser.add_argument("--version", default="v12")
     parser.add_argument("--node", type=int, default=3193)
     parser.add_argument("--jobs", type=int, default=16)
-    parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--min-free-gb", type=float, default=750)
-    parser.add_argument("--allow-nonlocal", action="store_true")
-    parser.add_argument("--keep-work", action="store_true")
+    parser.add_argument("--batch-size", type=int, required=True)
     run(**vars(parser.parse_args()))

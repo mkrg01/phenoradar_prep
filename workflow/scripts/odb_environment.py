@@ -1,7 +1,6 @@
 """ODB subprocess and reference helpers shared by setup and mapping."""
 import os
 import shutil
-import subprocess
 from pathlib import Path
 
 from common import file_record
@@ -43,16 +42,3 @@ def software_records(command, prefix):
             paths.extend(p for p in (root / directory).rglob("*") if p.is_file())
         records.extend(file_record(p) for p in sorted(set(paths)))
     return records
-
-
-def check_storage(path, min_free_gb, allow_nonlocal=False):
-    path = Path(path)
-    path.mkdir(parents=True, exist_ok=True)
-    if min_free_gb < 0:
-        raise ValueError("minimum free space cannot be negative")
-    kind = subprocess.check_output(["findmnt", "-n", "-o", "FSTYPE", "-T", str(path)], text=True).strip()
-    if not allow_nonlocal and kind not in {"ext2", "ext3", "ext4", "xfs", "btrfs"}:
-        raise ValueError(f"ODB work is on {kind}; configure local storage or explicitly allow nonlocal filesystems")
-    free = shutil.disk_usage(path).free
-    if free < min_free_gb * 1024**3:
-        raise ValueError(f"ODB needs at least {min_free_gb} GiB free at {path}; available {free / 1024**3:.1f} GiB")

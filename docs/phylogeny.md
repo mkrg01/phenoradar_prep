@@ -3,7 +3,7 @@
 [Documentation](index.md) · [Dating](dating.md)
 
 The `phylogeny` target infers a rooted species tree from existing BUSCO full
-tables and original CDS or proteins, independently of ODB/KEGG analyses.
+tables and original CDS, independently of ODB/KEGG analyses.
 
 ```text
 BUSCO markers -> cdskit CDS preparation -> FAMSA -> trimAl -> alignment QC
@@ -28,16 +28,24 @@ reconstruct spliced proteins.
 
 | Setting under `phylogeny` | Default | Meaning |
 | --- | --- | --- |
-| `busco_full_dir` | `input/busco/full` | Full-table directory |
-| `busco_full_suffix` | `.busco.full.tsv` | Suffix after exact species ID; a configured `.tsv.gz` suffix is supported |
+| `busco_full_dir` | `input/busco/full` | Full-table directory; filenames detected from species IDs |
 | `lineage` | `embryophyta_odb12` | Expected BUSCO lineage |
-| `sequence_mode` | `cds` | `cds` or `protein` |
-| `sequence_dir` | `null` | Reuse CDS paths in `samples.tsv`; required in protein mode |
-| `sequence_suffix` | `_longestCDS.fa.gz` | Suffix when using `sequence_dir` |
 
-Use the original sequences from each BUSCO run. CDS must be oriented, in-frame
-coding sequences rather than unprocessed transcripts or genomes. Protein mode
-uses the corresponding protein FASTA and bypasses CDS preparation.
+Full tables are detected at these paths under `busco_full_dir`; each also accepts
+a `.gz` extension. Species IDs must match exactly. Missing or multiple matching
+files stop the workflow, so keep one full table per species.
+
+```text
+{species}.busco.full.tsv
+{species}.tsv
+{species}/full_table.tsv
+{species}/run_{lineage}/full_table.tsv
+```
+
+CDS paths come from `metadata/samples.tsv`, using
+`inputs.cds_dir/{species}_longestCDS.fa.gz`. No sequence-mode, directory, or suffix
+settings are needed under `phylogeny`. Supply the original, oriented, in-frame
+coding sequences corresponding to the BUSCO hits.
 
 BUSCO/MetaEuk IDs such as `Species_g123:60-698` map to `Species_g123` in the
 original FASTA. The full CDS is translated; coordinates are not used to slice
@@ -64,7 +72,7 @@ inference set needs at least `min_taxa` species (default four). The `all` tree
 requires no trait file.
 
 Each set has independent markers, alignments, trees, and roots. All phylogeny,
-dating, audit, and molecular-pair targets follow `species_sets`. The separate
+dating, taxonomy checks, and molecular-pair targets follow `species_sets`. The separate
 `contrast_pairs` target infers a representative tree. Use a new `run_name` to
 retain alternative traits or settings.
 
@@ -114,15 +122,13 @@ so replicate expression runs do not increase a species' weight.
 | `min_protein_length` | `100` | Known amino acids required per extracted and trimmed sequence |
 | `max_unknown_fraction` | `0.05` | Maximum unknown fraction in prepared proteins |
 | `trimal_mode` | `gappyout` | `gappyout` or `automated1` |
-| `seed` | `12345` | Seed for inference and representative selection |
 
 Coverage is ranked before sequence/alignment QC; loci lost later are not replaced.
 There is no minimum coverage fraction or order-specific condition.
 
 CDS preparation uses cdskit `pad`, `mask`, and `translate` with `translation.table`.
 Padding can change the reading frame; stops and unresolved codons become X.
-Supplied proteins have one terminal stop removed, reject internal stops, and
-normalize nonstandard residues to X. Inspect changes and masking in `species/*.json`:
+Inspect changes and masking in `species/*.json`:
 single-copy status and QC do not establish a correct ORF or exclude hidden paralogy.
 
 ## Alignment and tree inference
@@ -141,6 +147,9 @@ VeryFastTree uses double precision and `-lg -gamma`: LG+CAT topology search with
 Gamma20 length rescaling. SH-like local supports are saved without bootstrap
 replicates or support filtering.
 
+VeryFastTree and ASTRAL-IV use the top-level [`seed`](configuration.md#reproducibility),
+shared with representative and contrast-pair selection.
+
 ASTRAL-IV combines gene trees and estimates local posterior probabilities and
 CASTLES-II branch lengths in substitutions/site. Every selected species must
 occur in at least one retained gene tree; inspect `species_coverage.tsv` for
@@ -149,18 +158,21 @@ paralogy, and model assumptions can affect topology and lengths.
 
 ## Resources
 
-Threads and decimal-GB memory below are per-job scheduling reservations:
+The rules define these per-job defaults; memory is the total across all threads:
 
-| Stage | Thread setting (default) | Memory setting (default GB) |
-| --- | --- | --- |
-| Preparation | 1 | `preparation_mem_gb: 4` |
-| FAMSA | `align_threads: 4` | `alignment_mem_gb: 8` |
-| trimAl/QC | 1 | `trimming_mem_gb: 4` |
-| VeryFastTree | `tree_threads: 4` | `tree_mem_gb: 8` |
-| ASTRAL-IV | `astral_threads: 32` | `astral_mem_gb: 64` |
+| Rule | Job unit | Threads | Memory (GB) |
+| --- | --- | --- | --- |
+| `plan_phylogeny` | Species set | 1 | 4 |
+| `extract_busco_proteins` | Species | 1 | 4 |
+| `collect_busco_markers`, `merge_busco_gene_trees` | Species set | 1 | 4 |
+| `align_busco_marker` | BUSCO marker | 4 | 8 |
+| `trim_busco_marker` | BUSCO marker | 1 | 4 |
+| `infer_busco_gene_tree` | BUSCO marker | 4 | 8 |
+| `infer_busco_species_tree` | Species set | 32 | 64 |
+| `prepare_timetree_calibrations`, `date_busco_species_tree` | Species set | 1 | 4 |
 
-All settings belong under `phylogeny`; see [resource budgets](running.md#resource-budgets)
-for concurrency and allocation sizing.
+See [resource budgets](running.md#resource-budgets) for allocation sizing and
+Snakemake's per-rule overrides.
 
 ## Outputs
 
@@ -181,7 +193,7 @@ Each `results/<run_name>/phylogeny/<set>/` directory contains:
 
 Logs and resource benchmarks follow the same branch under
 `logs/<run_name>/phylogeny/`. Optional [dating](dating.md),
-[taxonomic review](taxonomy_audit.md), and [contrast-pair](contrast_pairs.md)
+[taxonomic review](taxonomy_check.md), and [contrast-pair](contrast_pairs.md)
 outputs live beside their source tree.
 
 ## Methods and source documentation

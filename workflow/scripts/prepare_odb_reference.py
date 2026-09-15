@@ -8,11 +8,10 @@ import subprocess
 from pathlib import Path
 
 from common import atomic_writer, file_record, now, write_json
-from odb_environment import check_storage, command_path, odb_environment, software_records
+from odb_environment import command_path, odb_environment, software_records
 
 
-def prepare(reference_dir, command="ODB-mapper_v12", prefix="", version="v12", node=3193,
-            min_free_gb=200, allow_nonlocal=False):
+def prepare(reference_dir, command="ODB-mapper_v12", prefix="", version="v12", node=3193):
     root = Path(reference_dir).resolve()
     if version != "v12" or node < 1:
         raise ValueError("this workflow supports ODB v12 with a positive node ID")
@@ -30,7 +29,6 @@ def prepare(reference_dir, command="ODB-mapper_v12", prefix="", version="v12", n
                 raise ValueError("reference marker exists but its data directory is missing")
             print(f"Keeping existing reference snapshot: {marker}")
             return
-        check_storage(root, min_free_gb, allow_nonlocal)
         env = odb_environment(prefix, version)
         command = command_path(command, env)
         settings = {"node": node, "version": version, "command": command}
@@ -64,6 +62,4 @@ if __name__ == "__main__":
     parser.add_argument("--prefix", default="")
     parser.add_argument("--version", default="v12")
     parser.add_argument("--node", type=int, default=3193)
-    parser.add_argument("--min-free-gb", type=float, default=200)
-    parser.add_argument("--allow-nonlocal", action="store_true")
     prepare(**vars(parser.parse_args()))

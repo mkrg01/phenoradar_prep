@@ -1,8 +1,8 @@
-# Taxonomic review with MonoPhy
+# Taxonomy check with MonoPhy
 
 [Documentation](index.md) · [Species exclusion](species_filter.md)
 
-`taxonomy_audit` compares rooted BUSCO species trees with NCBI taxonomy using
+`taxonomy_check` compares rooted BUSCO species trees with NCBI taxonomy using
 MonoPhy. It reports non-monophyletic groups and intruder/outlier tips, linked to
 sample run IDs. Flags support review and do not automatically exclude species.
 
@@ -11,30 +11,41 @@ sample run IDs. Flags support review and do not automatically exclude species.
 ```yaml
 phylogeny:
   species_sets: [all]
-taxonomy_audit:
+taxonomy_check:
   enabled: false
   ranks: [family, subfamily, tribe, subtribe, genus]
   outlierlevel: 0.5
   collapse_monophyletic: true
-  mem_gb: 8
 ```
 
 ```bash
 ./run_pipeline.sh --configfile config/mydata.yaml \
-  --cores 1 --resources mem_gb=8 -- taxonomy_audit
+  --cores 1 --resources mem_gb=8 -- taxonomy_check
 ```
 
 The target follows `phylogeny.species_sets` and can schedule missing tree inference;
 check `--dry-run` and increase resources if needed. Set `enabled: true` to attach
-reports to `phylogeny`. Representative trees are not audited.
+reports to `phylogeny`. Representative trees are not checked.
 
-Choose named NCBI `ranks`. `outlierlevel` is the required focal-group fraction
+The `check_taxonomy` rule defaults to 1 thread and 8 GB per species set;
+see [resource overrides](running.md#resource-budgets).
+
+Choose one or more NCBI `ranks`, without duplicates:
+
+```text
+superkingdom, kingdom, subkingdom, superphylum, phylum, subphylum,
+superclass, class, subclass, infraclass, superorder, order, suborder, infraorder,
+parvorder, superfamily, family, subfamily, tribe, subtribe, genus, subgenus,
+section, subsection, series, subseries, species, subspecies, varietas, forma
+```
+
+`outlierlevel` is the required focal-group fraction
 within a candidate core clade, in `(0, 1]`; it is not confidence.
 `collapse_monophyletic` changes figures only. The container supplies MonoPhy;
 for offline native installation, `MONOPHY_SOURCE_ARCHIVE` can supply its pinned
 archive from [monophy.yaml](../workflow/envs/monophy.yaml)'s installer.
 
-For archived results, [taxonomy_audit.py](../workflow/scripts/taxonomy_audit.py)
+For archived results, [taxonomy_check.py](../workflow/scripts/taxonomy_check.py)
 also accepts tree, QC, sample-manifest, and taxonomy paths directly (`--help`).
 Tree tips and the manifest must agree, including the recorded root/outgroup.
 
@@ -55,7 +66,7 @@ identify which RNA-seq run is responsible without further sequence analysis.
 
 ## Outputs and figures
 
-Reports are in `results/<run_name>/phylogeny/<set>/taxonomy_audit/`.
+Reports are in `results/<run_name>/phylogeny/<set>/taxonomy_check/`.
 
 | File | Contents |
 | --- | --- |

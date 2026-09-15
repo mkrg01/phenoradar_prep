@@ -1,11 +1,3 @@
-# Generic pilot settings. Create your own species list after running prepare.
-run_name: pilot
+run_name: pilot  # Output subdirectory under results/, work/, logs/.
 selection:
-  # This user-provided file is intentionally not distributed with the workflow.
-  species_list: input/pilot_species.txt
-odb:
-  chunk_size: 2
-  threads: 8
-  batch_size: 32
-  mem_gb: 64
-  keep_work: true
+  species_list: input/pilot_species.txt  # Create this file with one candidate species ID per line.

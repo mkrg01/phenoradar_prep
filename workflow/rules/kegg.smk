@@ -61,8 +61,8 @@ rule annotate_kofam:
         outdir=lambda wc: f"{KEGG_SPECIES}/{wc.species}",
         workdir=lambda wc: f"{WORK}/kegg/{wc.species}",
         command="exec_annotation"
-    threads: config["kegg"]["threads"]
-    resources: mem_mb=config["kegg"]["mem_gb"] * 1000
+    threads: 4
+    resources: mem_mb=8000
     log: f"{LOG}/kegg/species/{{species}}.log"
     benchmark: f"{LOG}/kegg/benchmarks/{{species}}.tsv"
     conda: "../envs/kofam.yaml"

@@ -13,27 +13,6 @@ import tempfile
 from common import atomic_writer, file_record, now, read_tsv, write_json, write_tsv
 from infer_phylogeny import executable, read_tree
 
-DEFAULT_SETTINGS = {"variance": 1, "variance_parameter": None, "numsites": None}
-
-
-def validate_settings(settings):
-    if not isinstance(settings, dict):
-        raise ValueError("LSD2 settings must be a mapping")
-    unknown = set(settings) - set(DEFAULT_SETTINGS)
-    if unknown:
-        raise ValueError(f"unknown LSD2 settings: {sorted(unknown)}")
-    cfg = {**DEFAULT_SETTINGS, **settings}
-    if type(cfg["variance"]) is not int or cfg["variance"] not in {0, 1, 2}:
-        raise ValueError("LSD2 variance must be 0, 1, or 2")
-    value = cfg["variance_parameter"]
-    if value is not None and (type(value) not in {int, float} or not math.isfinite(value) or value <= 0):
-        raise ValueError("LSD2 variance_parameter must be null or finite and positive")
-    if cfg["variance"] == 0 and value is not None:
-        raise ValueError("LSD2 variance_parameter requires variance 1 or 2")
-    if cfg["numsites"] is not None and (type(cfg["numsites"]) is not int or not 0 < cfg["numsites"] < 2**31):
-        raise ValueError("LSD2 numsites must be null or a positive 32-bit integer")
-    return cfg
-
 
 def calibration_rows(tree, path):
     names = set(tree.leaf_names())
@@ -119,13 +98,12 @@ def lsd_dates(tree, constraints):
     return str(len(lines)) + "\n" + "\n".join(lines) + "\n"
 
 
-def parse_lsd_report(path, variance=1):
+def parse_lsd_report(path):
     text = Path(path).read_text()
     rows = re.findall(r"^\s*rate\s+([^,\s]+)\s*,\s*tMRCA\s+([^,\s]+)\s*,\s*objective function\s+(\S+)\s*$",
                       text, flags=re.MULTILINE)
-    expected = 2 if variance == 2 else 1
-    if len(rows) != expected or (variance == 2 and "Results of the second run" not in text):
-        raise ValueError("LSD2 did not report the expected completed single-rate fit(s)")
+    if len(rows) != 1:
+        raise ValueError("LSD2 did not report one completed single-rate fit")
     def interval(token):
         values = list(map(float, token.split(":")))
         if len(values) == 1:
@@ -222,8 +200,7 @@ def read_lsd_dates(path, original, constraints):
     return dated, ages, raw, adjustments
 
 
-def date(tree, provenance, calibrations, outdir, command, settings=None, threads=1):
-    cfg = validate_settings({} if settings is None else settings)
+def date(tree, provenance, calibrations, outdir, command, threads=1):
     if type(threads) is not int or threads != 1:
         raise ValueError("standalone LSD2 requires threads=1")
     source_tree, tree = tree, read_tree(tree)
@@ -232,9 +209,9 @@ def date(tree, provenance, calibrations, outdir, command, settings=None, threads
         raise ValueError("dating requires a rooted tree with substitution-per-site branch lengths")
     if source_qc["outgroup"] not in set(tree.leaf_names()):
         raise ValueError("dating outgroup is absent from the species tree")
-    numsites = cfg["numsites"] if cfg["numsites"] is not None else source_qc.get("total_gene_sites")
+    numsites = source_qc.get("total_gene_sites")
     if type(numsites) is not int or not 0 < numsites < 2**31:
-        raise ValueError("LSD2 requires total_gene_sites in species-tree provenance (or explicit lsd2.numsites)")
+        raise ValueError("LSD2 requires total_gene_sites as a positive 32-bit integer in species-tree provenance")
     if len(tree.children) != 2:
         raise ValueError("LSD2 requires an explicitly rooted species tree")
     if not any(n.dist > 0 for n in tree.traverse() if not n.is_root):
@@ -257,17 +234,16 @@ def date(tree, provenance, calibrations, outdir, command, settings=None, threads
     input_text = newick_text(tree)
     (work / "input.nwk").write_text(input_text)
     (work / "dates.txt").write_text(lsd_dates(tree, constraints))
+    # Input-length weighting; omitting -b uses LSD2's automatic variance offset.
     argv = [command, "-i", "input.nwk", "-d", "dates.txt", "-o", "dated",
-            "-s", str(numsites), "-l", "-1", "-u", "0", "-U", "0", "-v", str(cfg["variance"])]
-    if cfg["variance_parameter"] is not None:
-        argv += ["-b", f"{cfg['variance_parameter']:.17g}"]
+            "-s", str(numsites), "-l", "-1", "-u", "0", "-U", "0", "-v", "1"]
     invocation = {"argv": argv, "cwd": str(work)}
     write_json(work / "command.json", invocation)
     print(f"LSD2: {work}", flush=True)
     with (work / "run.log").open("w") as log:
         subprocess.run(argv, cwd=work, stdout=log, stderr=subprocess.STDOUT, check=True,
                        env={**os.environ, "OMP_NUM_THREADS": "1"})
-    report = parse_lsd_report(work / "dated", cfg["variance"])
+    report = parse_lsd_report(work / "dated")
     dated, ages, raw, adjustments = read_lsd_dates(work / "dated.date.nexus", tree, constraints)
     root_low, root_high = report["root_date_interval"]
     root_tolerance = 2 * max(rounding_tolerance(root_low), rounding_tolerance(root_high))
@@ -305,8 +281,8 @@ def date(tree, provenance, calibrations, outdir, command, settings=None, threads
         "tree": file_record(source_tree), "source_provenance": file_record(provenance),
         "calibrations": file_record(calibrations), "branch_length_unit": "million_years",
         "method": "LSD2 least-squares dating", "rate_model": "single estimated substitution rate",
-        "settings": cfg, "numsites": numsites,
-        "numsites_source": "explicit override" if cfg["numsites"] is not None else "sum of retained trimmed gene sites",
+        "settings": {"variance": 1, "variance_parameter": None, "numsites": None}, "numsites": numsites,
+        "numsites_source": "sum of retained trimmed gene sites",
         "numsites_is_effective_sample_size": False, "confidence_intervals": False,
         "root_preserved": True, "topology_preserved": True, "tip_age_ma": 0,
         "native_report": report, "root_age_ma": ages[tree.name], "concatenation_used": False,
@@ -325,8 +301,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ["tree", "provenance", "calibrations", "outdir", "command"]:
         parser.add_argument("--" + name, required=True)
-    parser.add_argument("--settings", default="{}")
     parser.add_argument("--threads", type=int, default=1)
-    args = vars(parser.parse_args())
-    args["settings"] = json.loads(args["settings"])
-    date(**args)
+    date(**vars(parser.parse_args()))

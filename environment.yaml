@@ -1,4 +1,4 @@
-# Optional pinned environment for CI and container generation.
+# Minimal environment for container generation; tests use tests/environment.yaml.
 # Workflow users may install Snakemake by any supported method.
 channels:
   - conda-forge

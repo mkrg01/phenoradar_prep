@@ -15,7 +15,7 @@ import tempfile
 from common import file_record, now, read_tsv, write_json, write_tsv
 
 DEFAULTS = {"enabled": False, "ranks": ["family", "subfamily", "tribe", "subtribe", "genus"],
-            "outlierlevel": 0.5, "collapse_monophyletic": True, "mem_gb": 8}
+            "outlierlevel": 0.5, "collapse_monophyletic": True}
 RANKS = set("superkingdom kingdom subkingdom superphylum phylum subphylum superclass class subclass "
             "infraclass superorder order suborder infraorder parvorder superfamily family subfamily "
             "tribe subtribe genus subgenus section subsection series subseries species subspecies "
@@ -25,23 +25,21 @@ MONOPHY_VERSION = "1.3.2"
 
 def validate_settings(settings):
     if not isinstance(settings, dict):
-        raise ValueError("taxonomy_audit must be a mapping")
+        raise ValueError("taxonomy_check must be a mapping")
     unknown = set(settings) - set(DEFAULTS)
     if unknown:
-        raise ValueError("unknown taxonomy_audit settings: " + ", ".join(sorted(unknown)))
+        raise ValueError("unknown taxonomy_check settings: " + ", ".join(sorted(unknown)))
     result = {**DEFAULTS, **settings}
     ranks = result["ranks"]
     if (not isinstance(ranks, list) or not ranks or
             any(not isinstance(r, str) or r not in RANKS for r in ranks) or len(set(ranks)) != len(ranks)):
-        raise ValueError("taxonomy_audit.ranks must be a nonempty list of unique named NCBI ranks")
+        raise ValueError("taxonomy_check.ranks must be a nonempty list of unique named NCBI ranks")
     for key in ["enabled", "collapse_monophyletic"]:
         if type(result[key]) is not bool:
-            raise ValueError(f"taxonomy_audit.{key} must be true or false")
+            raise ValueError(f"taxonomy_check.{key} must be true or false")
     threshold = result["outlierlevel"]
     if type(threshold) not in (int, float) or not math.isfinite(threshold) or not 0 < threshold <= 1:
-        raise ValueError("taxonomy_audit.outlierlevel must be a number in (0, 1]")
-    if type(result["mem_gb"]) is not int or result["mem_gb"] < 1:
-        raise ValueError("taxonomy_audit.mem_gb must be an integer >= 1")
+        raise ValueError("taxonomy_check.outlierlevel must be a number in (0, 1]")
     return result
 
 
@@ -123,19 +121,19 @@ EVENT_FIELDS = ["candidate_id", "species", "scientific_name", "run_ids", "rank",
                 "registered_taxid", "registered_taxon", "focal_taxid", "focal_taxon", "plot"]
 
 
-def audit(tree, tree_qc, samples, taxonomy, outdir, settings=None):
+def check(tree, tree_qc, samples, taxonomy, outdir, settings=None):
     settings = validate_settings({} if settings is None else settings)
     inputs = {k: Path(v).resolve() for k, v in dict(tree=tree, tree_qc=tree_qc, samples=samples,
                taxonomy=taxonomy).items()}
     if Path(outdir).is_symlink():
-        raise ValueError("audit output directory must not be a symlink")
+        raise ValueError("check output directory must not be a symlink")
     out = Path(outdir).resolve()
     if any(out == p or out in p.parents for p in inputs.values()):
-        raise ValueError("audit output directory overlaps its inputs")
+        raise ValueError("check output directory overlaps its inputs")
     if out.exists() and any(out.iterdir()):
         marker = out / "summary.json"
-        if not marker.is_file() or json.loads(marker.read_text()).get("report_type") != "taxonomy_audit":
-            raise ValueError("refusing to replace a directory not owned by taxonomy_audit")
+        if not marker.is_file() or json.loads(marker.read_text()).get("report_type") != "taxonomy_check":
+            raise ValueError("refusing to replace a directory not owned by taxonomy_check")
     rows, species = load_samples(samples)
     names = list(species)
     source = parse_tree(inputs["tree"].read_text(), names, exact=True)
@@ -171,7 +169,7 @@ def audit(tree, tree_qc, samples, taxonomy, outdir, settings=None):
     for row in rows:
         runs[row["species"]].append(row["run"])
     out.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".taxonomy-audit-", dir=out.parent) as tmp:
+    with tempfile.TemporaryDirectory(prefix=".taxonomy-check-", dir=out.parent) as tmp:
         stage = Path(tmp) / "report"
         stage.mkdir()
         write_tsv(stage / "taxonomy.tsv", ["tip", *ranks], taxonomy_rows)
@@ -210,7 +208,7 @@ def audit(tree, tree_qc, samples, taxonomy, outdir, settings=None):
             sample_report.append({**row, "status": status, "candidate_ids": ";".join(by_species[name])})
         write_tsv(stage / "samples.tsv", list(sample_report[0]), sample_report)
         engine = json.loads((stage / "engine.json").read_text())
-        summary = dict(report_type="taxonomy_audit", schema_version=2, method="MonoPhy", created_at=now(),
+        summary = dict(report_type="taxonomy_check", schema_version=2, method="MonoPhy", created_at=now(),
             report_only=True, settings=settings, species=len(names), runs=len(rows),
             outgroup=outgroup, candidate_species=len({c["species"] for c in candidates}), candidate_events=len(candidates),
             rank_status_counts=dict(Counter(r["status"] for r in rank_rows)), engine=engine, inputs=records,
@@ -245,10 +243,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ["tree", "tree-qc", "samples", "taxonomy", "outdir"]:
         parser.add_argument("--" + name, required=True)
-    parser.add_argument("--settings", default="{}", help="JSON; see taxonomy_audit in config/config.yaml")
+    parser.add_argument("--settings", default="{}", help="JSON; see taxonomy_check in config/config.yaml")
     args = vars(parser.parse_args())
     args["settings"] = json.loads(args["settings"])
-    audit(**args)
+    check(**args)
 
 
 if __name__ == "__main__":

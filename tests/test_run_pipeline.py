@@ -52,6 +52,7 @@ def test_launcher_arguments_and_exit_status(batch_workspace, tmp_path, mode, exi
         env["SLURM_MEM_PER_CPU"] = "4096"
     arguments = ["--configfile", "config/data with spaces.yaml", "config/pilot.yaml",
                  "--config", "mem_gb=99",
+                 "--set-threads", "odb_map=1", "--set-resources", "odb_map:mem_mb=3000",
                  "--", "prepare", "proteins"]
     cwd = checkout
     if mode == "direct":
@@ -75,6 +76,8 @@ def test_launcher_arguments_and_exit_status(batch_workspace, tmp_path, mode, exi
     assert shlex.split(argv[argv.index("--apptainer-args") + 1]) == [
         "--cleanenv", "--bind", str(checkout)]
     assert argv[argv.index("--config") + 1] == "mem_gb=99"
+    assert argv[argv.index("--set-threads") + 1] == "odb_map=1"
+    assert argv[argv.index("--set-resources") + 1] == "odb_map:mem_mb=3000"
     assert argv[argv.index("--cores") + 1] == ("3" if mode == "direct" else "2")
     assert ("mem_mb=7000" if mode == "direct" else "mem_mb=4589") in argv
     if mode == "direct":
@@ -183,8 +186,9 @@ rule task:
     resources: mem_mb=3000
     params:
         methods=",".join(sorted(method.name for method in workflow.deployment_settings.deployment_method)),
-        container_args=workflow.deployment_settings.apptainer_args
-    shell: "printf '%s\\n' {threads} {params.methods:q} {params.container_args:q} > {output:q}"
+        container_args=workflow.deployment_settings.apptainer_args,
+        image=str(config.get("container_image"))
+    shell: "printf '%s\\n' {threads} {params.methods:q} {params.container_args:q} {params.image:q} > {output:q}"
 ''')
     if mode.startswith("batch"):
         # Allocation settings must win over accidentally supplied larger budgets.
@@ -208,15 +212,17 @@ rule task:
     if mode.endswith("_equals"):
         arguments = [f"--singularity-args={custom_container_args}", *arguments]
     if mode.endswith("_path"):
-        arguments += ["--config", "container_image=/images/release.sif", "--", "a.txt", "b.txt"]
+        arguments += ["--config", "container_image=0.1.0", "--", "a.txt", "b.txt"]
     result = subprocess.run([str(script), *arguments], cwd=cwd, env=env,
                             capture_output=True, text=True, timeout=90)
     assert result.returncode == 0, result.stdout + result.stderr
     assert not marker.exists()
     for name in ("a.txt", "b.txt"):
-        cores, methods, container_args = (checkout / name).read_text().splitlines()
+        cores, methods, container_args, image = (checkout / name).read_text().splitlines()
         assert cores == expected_cores
         assert methods == expected_methods
+        if mode.endswith("_path"):
+            assert image == "docker://ghcr.io/mkrg01/phenoradar_prep:v0.1.0"
         if mode.endswith("_equals"):
             assert container_args == custom_container_args
         else:
@@ -227,7 +233,8 @@ rule task:
 
 
 @pytest.mark.parametrize("mode", ["batch", "direct"])
-@pytest.mark.parametrize("deployment", ["auto", "missing_image", "configured_image", "native"])
+@pytest.mark.parametrize("deployment", ["auto", "missing_image", "configured_version", "native",
+                                       "native_version", "sif", "uri", "bad_version"])
 def test_real_workflow_container_setup(batch_workspace, mode, deployment):
     checkout, script, env = batch_workspace
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
@@ -242,23 +249,27 @@ def test_real_workflow_container_setup(batch_workspace, mode, deployment):
         env = {key: value for key, value in env.items() if not key.startswith("SLURM_")}
         script = checkout / "run_pipeline.sh"
     arguments = ["--cores", "2", "--list-rules"]
-    if deployment == "missing_image":
-        (checkout / "config/image.yaml").write_text("container_image: null\n")
+    invalid_images = {"missing_image": "null", "sif": "/images/release.sif",
+                      "uri": "docker://ghcr.io/mkrg01/phenoradar_prep:v0.1.0",
+                      "bad_version": "v0.1.0"}
+    if deployment in invalid_images:
+        (checkout / "config/image.yaml").write_text(f"container_image: {invalid_images[deployment]}\n")
         arguments += ["--configfile", "config/image.yaml"]
-    elif deployment == "configured_image":
+    elif deployment == "configured_version":
         # Listing rules checks the real config overlays without downloading an image.
-        (checkout / "config/image.yaml").write_text("container_image: /images/release.sif\n")
+        (checkout / "config/image.yaml").write_text('container_image: "0.1.0"\n')
         (checkout / "config/run.yaml").write_text("run_name: pilot\n")
         arguments += ["--configfile", "config/image.yaml", "config/run.yaml"]
-    elif deployment == "native":
+    elif deployment in {"native", "native_version"}:
         arguments += ["--software-deployment-method=conda"]
+        if deployment == "native_version":
+            arguments += ["--config", "container_image=0.1.0"]
     result = subprocess.run([str(script), *arguments], cwd=checkout, env=env,
                             capture_output=True, text=True, timeout=90)
     output = result.stdout + result.stderr
-    if deployment == "missing_image":
+    if deployment in invalid_images:
         assert result.returncode != 0
-        assert "Set container_image in your dataset config" in output
-        assert "--software-deployment-method conda" in output
+        assert "container_image must be auto or" in output
     else:
         assert result.returncode == 0, output
         assert "prepare" in result.stdout

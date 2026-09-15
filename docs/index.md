@@ -18,7 +18,7 @@
 | Align every mapped orthogroup, keeping all gene copies | [OG protein alignments](alignments.md) |
 | Infer species trees from existing BUSCO results | [BUSCO phylogeny](phylogeny.md) |
 | Date a species tree with manual or TimeTree calibrations | [Dating](dating.md) |
-| Review tree placements against registered taxonomy | [Taxonomic review](taxonomy_audit.md) |
+| Review tree placements against registered taxonomy | [Taxonomic review](taxonomy_check.md) |
 | Select trait contrast pairs from molecular trees or an inferred representative tree | [Contrast pairs](contrast_pairs.md) |
 
 ## Prepare downstream inputs

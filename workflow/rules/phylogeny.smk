@@ -1,3 +1,6 @@
+from busco_phylogeny import busco_full_path
+
+
 def phylogeny_samples(wc):
     if wc.phylo_branch == REPRESENTATIVES_REL:
         return checkpoints.select_contrast_representatives.get().output.samples
@@ -24,7 +27,8 @@ def phylogeny_input_rows(wc):
 def phylogeny_tables(wc):
     if not PHY["busco_full_dir"]:
         raise WorkflowError("set phylogeny.busco_full_dir to per-species BUSCO full tables; see docs/phylogeny.md")
-    return sorted({str(Path(PHY["busco_full_dir"]) / (r["species"] + PHY["busco_full_suffix"])) for r in phylogeny_input_rows(wc)})
+    return [str(busco_full_path(PHY["busco_full_dir"], species, PHY["lineage"]))
+            for species in sorted({r["species"] for r in phylogeny_input_rows(wc)})]
 
 
 def phylogeny_plan_rows(wc, table):
@@ -85,11 +89,11 @@ checkpoint plan_phylogeny:
         provenance=f"{PHYLO_RUN}/plan/provenance.json"
     params:
         outdir=f"{PHYLO_RUN}/plan",
-        settings=json.dumps({k: PHY[k] for k in ["outgroup", "busco_full_dir", "busco_full_suffix", "lineage",
-            "sequence_dir", "sequence_suffix", "min_taxa", "max_markers"]}, sort_keys=True)
+        settings=json.dumps({k: PHY[k] for k in ["outgroup", "busco_full_dir", "lineage",
+            "min_taxa", "max_markers"]}, sort_keys=True)
     log: f"{LOG}/{{phylo_branch}}/plan.log"
     conda: "../envs/phylogeny.yaml"
-    resources: mem_mb=PHY["preparation_mem_gb"] * 1000
+    resources: mem_mb=4000
     shell:
         "{PYTHON:q} {input.code:q} plan --samples {input.samples:q} "
         "--outgroup-file {input.outgroup:q} --outdir {params.outdir:q} --settings {params.settings:q} > {log:q} 2>&1"
@@ -106,10 +110,10 @@ rule extract_busco_proteins:
         proteins=f"{PHYLO_RUN}/species/{{species}}.faa",
         qc=f"{PHYLO_RUN}/species/{{species}}.json"
     params:
-        settings=json.dumps({k: PHY[k] for k in ["lineage", "sequence_mode", "translation_table",
+        settings=json.dumps({k: PHY[k] for k in ["lineage", "translation_table",
             "min_protein_length", "max_unknown_fraction"]}, sort_keys=True)
     conda: "../envs/phylogeny.yaml"
-    resources: mem_mb=PHY["preparation_mem_gb"] * 1000
+    resources: mem_mb=4000
     log: f"{LOG}/{{phylo_branch}}/extract/{{species}}.log"
     shell:
         "{PYTHON:q} {input.code:q} extract --species {wildcards.species:q} --table {input.table:q} "
@@ -128,7 +132,7 @@ rule collect_busco_markers:
     output: fasta=directory(f"{PHYLO_RUN}/markers")
     params: species_dir=f"{PHYLO_RUN}/species"
     conda: "../envs/phylogeny.yaml"
-    resources: mem_mb=PHY["preparation_mem_gb"] * 1000
+    resources: mem_mb=4000
     log: f"{LOG}/{{phylo_branch}}/collect.log"
     shell:
         "{PYTHON:q} {input.code:q} collect --manifest {input.manifest:q} --markers {input.markers:q} "
@@ -148,8 +152,8 @@ rule align_busco_marker:
         fasta=lambda wc: f"{OUT}/{wc.phylo_branch}/markers/{wc.marker}.faa",
         command="famsa",
         settings=json.dumps({"min_taxa": PHY["min_taxa"]}, sort_keys=True)
-    threads: PHY["align_threads"]
-    resources: mem_mb=PHY["alignment_mem_gb"] * 1000
+    threads: 4
+    resources: mem_mb=8000
     conda: "../envs/phylogeny.yaml"
     log: f"{LOG}/{{phylo_branch}}/align/{{marker}}.log"
     benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/align.{{marker}}.tsv"
@@ -174,7 +178,7 @@ rule trim_busco_marker:
         command="trimal", mode=PHY["trimal_mode"],
         settings=json.dumps({k: PHY[k] for k in ["min_taxa", "min_protein_length"]}, sort_keys=True)
     threads: 1
-    resources: mem_mb=PHY["trimming_mem_gb"] * 1000
+    resources: mem_mb=4000
     conda: "../envs/phylogeny.yaml"
     log: f"{LOG}/{{phylo_branch}}/trim/{{marker}}.log"
     benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/trim.{{marker}}.tsv"
@@ -193,9 +197,9 @@ rule infer_busco_gene_tree:
     output:
         tree=f"{PHYLO_RUN}/gene_trees/{{marker}}.nwk",
         qc=f"{PHYLO_RUN}/gene_trees/{{marker}}.json"
-    params: command="VeryFastTree", seed=PHY["seed"]
-    threads: PHY["tree_threads"]
-    resources: mem_mb=PHY["tree_mem_gb"] * 1000
+    params: command="VeryFastTree", seed=config["seed"]
+    threads: 4
+    resources: mem_mb=8000
     conda: "../envs/phylogeny.yaml"
     log: f"{LOG}/{{phylo_branch}}/tree/{{marker}}.log"
     benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/tree.{{marker}}.tsv"
@@ -220,7 +224,7 @@ rule merge_busco_gene_trees:
     params:
         tree_dir=f"{PHYLO_RUN}/gene_trees"
     conda: "../envs/phylogeny.yaml"
-    resources: mem_mb=PHY["preparation_mem_gb"] * 1000
+    resources: mem_mb=4000
     log: f"{LOG}/{{phylo_branch}}/merge.log"
     shell:
         "{PYTHON:q} {input.code:q} merge --manifest {input.manifest:q} --markers {input.markers:q} "
@@ -258,9 +262,9 @@ rule infer_busco_species_tree:
         binary=ASTRAL,
         outgroup=f"{PHYLO_RUN}/rooting/outgroup.txt"
     output: tree=f"{PHYLO_RUN}/species_tree.nwk", qc=f"{PHYLO_RUN}/species_tree.json"
-    params: command=ASTRAL, seed=PHY["seed"]
-    threads: PHY["astral_threads"]
-    resources: mem_mb=PHY["astral_mem_gb"] * 1000
+    params: command=ASTRAL, seed=config["seed"]
+    threads: 32
+    resources: mem_mb=64000
     conda: "../envs/phylogeny.yaml"
     log: f"{LOG}/{{phylo_branch}}/astral.log"
     benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/astral.tsv"
@@ -277,8 +281,6 @@ rule prepare_timetree_calibrations:
         tree=f"{PHYLO_RUN}/species_tree.nwk",
         metadata=f"{META}/metadata_high_busco.tsv",
         taxonomy=TAXONOMY_DB,
-        coverage=f"{PHYLO_RUN}/species_coverage.tsv",
-        representatives=[PHY["dating"]["timetree"]["representatives"]] if PHY["dating"]["timetree"]["representatives"] else [],
         code=f"{SCRIPTS}/timetree_calibrations.py",
         helpers=[f"{SCRIPTS}/date_phylogeny.py", f"{SCRIPTS}/infer_phylogeny.py", f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py"]
     output:
@@ -286,24 +288,19 @@ rule prepare_timetree_calibrations:
         candidates=f"{PHYLO_RUN}/timetree/candidates.tsv",
         details=f"{PHYLO_RUN}/timetree/candidates.json",
         provenance=f"{PHYLO_RUN}/timetree/provenance.json",
-        representatives=f"{PHYLO_RUN}/timetree/representatives.txt",
-        skeleton=f"{PHYLO_RUN}/timetree/representatives.nwk",
+        nodes=f"{PHYLO_RUN}/timetree/nodes.nwk",
+        studies=f"{PHYLO_RUN}/timetree/studies.tsv",
         taxa=f"{PHYLO_RUN}/timetree/taxa.tsv"
-    params:
-        outdir=f"{PHYLO_RUN}/timetree", cache=TIMETREE_CACHE,
-        representatives_flag="--representatives" if PHY["dating"]["timetree"]["representatives"] else "",
-        settings=json.dumps(dict({k: PHY["dating"]["timetree"][k] for k in ["max_representatives", "max_queries",
-            "min_studies", "offline"]}, request_delay_seconds=1.0), sort_keys=True)
+    params: outdir=f"{PHYLO_RUN}/timetree", cache=TIMETREE_CACHE
     threads: 1
     conda: "../envs/timetree.yaml"
-    resources: mem_mb=PHY["dating"]["mem_gb"] * 1000
+    resources: mem_mb=4000
     log: f"{LOG}/{{phylo_branch}}/timetree.log"
     benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/timetree.tsv"
     shell:
         "{PYTHON:q} {input.code:q} --tree {input.tree:q} --metadata {input.metadata:q} "
-        "--taxonomy-db {input.taxonomy:q} --coverage {input.coverage:q} --outdir {params.outdir:q} "
-        "--cache-dir {params.cache:q} --settings {params.settings:q} "
-        "{params.representatives_flag} {input.representatives:q} > {log:q} 2>&1"
+        "--taxonomy-db {input.taxonomy:q} --outdir {params.outdir:q} "
+        "--cache-dir {params.cache:q} > {log:q} 2>&1"
 
 
 rule date_busco_species_tree:
@@ -327,15 +324,13 @@ rule date_busco_species_tree:
         input_tree=f"{PHYLO_RUN}/dating/lsd2.input.nwk",
         adjustments=f"{PHYLO_RUN}/dating/rounding_adjustments.tsv"
         # Keep lsd2_runs undeclared so native diagnostics survive a failed job.
-    params:
-        outdir=f"{PHYLO_RUN}/dating", command="lsd2",
-        settings=json.dumps(PHY["dating"]["lsd2"])
+    params: outdir=f"{PHYLO_RUN}/dating", command="lsd2"
     conda: "../envs/dating.yaml"
     threads: 1
-    resources: mem_mb=PHY["dating"]["mem_gb"] * 1000
+    resources: mem_mb=4000
     log: f"{LOG}/{{phylo_branch}}/dating.log"
     benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/dating.tsv"
     shell:
         "{PYTHON:q} {input.code:q} --tree {input.tree:q} --provenance {input.provenance:q} "
         "--calibrations {input.calibrations:q} --outdir {params.outdir:q} --command {params.command:q} "
-        "--settings {params.settings:q} --threads {threads} > {log:q} 2>&1"
+        "--threads {threads} > {log:q} 2>&1"

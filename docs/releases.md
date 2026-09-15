@@ -4,6 +4,11 @@
 
 ## Maintainer steps
 
+Every branch push and pull request runs **Actions → Tests** with the full Python
+test suite. For the same local checks, install the
+[test dependencies](development.md#running-tests) first. Real-tool container
+smoke checks also run during release, and must pass before publication.
+
 1. If environment definitions or install scripts changed, regenerate and commit
    the [Dockerfile](containers.md#build-and-publish-with-github-actions).
 2. Update [VERSION](../VERSION) to an unused, higher `major.minor.patch` value

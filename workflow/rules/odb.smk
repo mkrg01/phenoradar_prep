@@ -25,7 +25,7 @@ rule make_manifests:
         code=f"{SCRIPTS}/make_manifests.py",
         common=f"{SCRIPTS}/common.py"
     output: directory(MANIFESTS)
-    params: proteins=PROTEINS, chunk_size=config["odb"]["chunk_size"]
+    params: proteins=PROTEINS, chunk_size=100  # Species per chunk; also used by DAG planning.
     log: f"{LOG}/{ORTHOGROUP_MAPPING}/manifests.log"
     conda: "../envs/analysis.yaml"
     resources: mem_mb=1000
@@ -48,17 +48,14 @@ rule prepare_odb_reference:
         command="ODB-mapper",
         prefix="",
         version=ODB_VERSION,
-        node=config["odb"]["node"],
-        free=config["odb"]["reference_min_free_gb"],
-        storage="--allow-nonlocal" if config["odb"]["allow_nonlocal"] else ""
+        node=config["odb"]["node"]
     log: f"{LOG}/{ORTHOGROUP_MAPPING}/reference.log"
     conda: "../envs/odb.yaml"
     threads: 1
     resources: mem_mb=32000
     shell:
         "{PYTHON:q} {input.code:q} --reference-dir {params.root:q} --command {params.command:q} "
-        "--prefix={params.prefix:q} --version {params.version:q} --node {params.node} "
-        "--min-free-gb {params.free} {params.storage} > {log:q} 2>&1"
+        "--prefix={params.prefix:q} --version {params.version:q} --node {params.node} > {log:q} 2>&1"
 
 
 rule odb_map:
@@ -82,12 +79,9 @@ rule odb_map:
         prefix="",
         version=ODB_VERSION,
         node=config["odb"]["node"],
-        batch=config["odb"]["batch_size"],
-        free=config["odb"]["min_free_gb"],
-        storage="--allow-nonlocal" if config["odb"]["allow_nonlocal"] else "",
-        keep="--keep-work" if config["odb"]["keep_work"] else ""
-    threads: config["odb"]["threads"]
-    resources: mem_mb=config["odb"]["mem_gb"] * 1000
+        batch=lambda wildcards, threads: 4 * threads  # Internal jobs per batch.
+    threads: 16
+    resources: mem_mb=192000
     log: f"{LOG}/{ORTHOGROUP_MAPPING}/chunks/{{chunk}}.log"
     benchmark: f"{LOG}/{ORTHOGROUP_MAPPING}/benchmarks/{{chunk}}.tsv"
     conda: "../envs/odb.yaml"
@@ -95,8 +89,7 @@ rule odb_map:
         "{PYTHON:q} {input.code:q} --manifest {params.manifest:q} --reference {input.reference:q} "
         "--output-dir {params.out:q} --work-dir {params.work:q} --label {wildcards.chunk:q} "
         "--command {params.command:q} --prefix={params.prefix:q} --version {params.version:q} "
-        "--node {params.node} --jobs {threads} --batch-size {params.batch} --min-free-gb {params.free} "
-        "{params.storage} {params.keep} > {log:q} 2>&1"
+        "--node {params.node} --jobs {threads} --batch-size {params.batch} > {log:q} 2>&1"
 
 
 rule merge_odb:

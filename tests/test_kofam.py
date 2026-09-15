@@ -153,7 +153,12 @@ def test_protein_validation_is_explicit(tmp_path, content, error):
 def test_resume_verifies_outputs_and_input_tool_options(kofam_job):
     args = kofam_job["args"]
     first = run(**args)
+    work = Path(json.loads((args["work_dir"] / "status.json").read_text())["work"])
+    retained = {p: p.stat().st_mtime_ns for p in work.rglob("*") if p.is_file()}
+    assert (work / "protein.faa").is_file()
+    assert (work / "result/detail.tsv").is_file()
     assert run(**args)["fingerprint"] == first["fingerprint"]
+    assert all(p.stat().st_mtime_ns == stamp for p, stamp in retained.items())
     assert len(kofam_job["events"].read_text().splitlines()) == 1
     assert json.loads((args["work_dir"] / "status.json").read_text())["reused"]
     # Even a same-size corruption must force annotation again.

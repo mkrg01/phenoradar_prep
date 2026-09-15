@@ -247,7 +247,7 @@ def test_real_famsa_preserves_residues_and_finish_prunes_removed_ogs(collected_i
 
 
 def test_real_alignment_workflow_resume_updates_and_opt_in(
-    tiny_inputs, fake_odb, frozen_reference, tmp_path, command_environment, workflow_project,
+    tiny_inputs, fake_odb, frozen_reference, tmp_path, command_environment, workflow_project, seed_taxonomy,
 ):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     seqkit = os.environ.get("SEQKIT_BIN") or shutil.which("seqkit")
@@ -265,12 +265,10 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     reference = workflow_project / "resources/orthodb/v12_3193"
     reference.parent.mkdir(parents=True)
     reference.symlink_to(frozen_reference, target_is_directory=True)
+    seed_taxonomy(tiny_inputs["taxonomy_db"])
     config = {
         "run_name": "test", "inputs": {k: tiny_inputs[k] for k in ["metadata", "busco", "cds_dir", "quant_dir"]},
-        "taxonomy": {"source": tiny_inputs["taxonomy_db"]},
-        "odb": {"chunk_size": 1, "threads": 1, "batch_size": 1,
-                "mem_gb": 3, "min_free_gb": 0, "allow_nonlocal": True},
-        "alignment": {"enabled": False, "threads": 1, "mem_gb": 2},
+        "alignment": {"enabled": False},
     }
     configfile = tmp_path / "override.yaml"
     configfile.write_text(yaml.safe_dump(config))
@@ -289,7 +287,10 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
                                  "ODB-mapper": fake_odb, "famsa": wrapper}),
            "FAMSA_EVENTS": str(events), "FAMSA_FAIL_ONCE": str(fail_once), "FAKE_ODB_LOG": str(odb_events)}
     base = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(configfile),
-            "--cores", "2", "--resources", "mem_mb=16000"]
+            "--cores", "2", "--resources", "mem_mb=16000",
+            "--set-threads", "odb_map=1", "align_orthogroup=1",
+            "--set-resources", "odb_map:mem_mb=3000", "align_orthogroup:mem_mb=2000",
+            "collect_orthogroup_proteins:mem_mb=2000", "finish_alignments:mem_mb=2000"]
 
     def execute(options=(), targets=("alignments",), fail=False):
         result = subprocess.run(base + list(options) + ["--"] + list(targets), cwd=workflow_project, env=env,
@@ -310,7 +311,7 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     assert len(alignment_members(out)) == 7
     assert not (out / "members.tsv").exists()
     assert sorted(events.read_text().splitlines()) == ["OG1", "OG2"]
-    assert len(odb_events.read_text().splitlines()) == 2
+    assert len(odb_events.read_text().splitlines()) == 1
     assert not (out.parent / "expression").exists()
     assert not (out.parents[1] / "phylogeny").exists()
     times = {p.name: p.stat().st_mtime_ns for p in out.glob("*.faa")}
@@ -358,8 +359,8 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
 
 @pytest.mark.parametrize("settings,message", [
     ({"enabled": "yes"}, "alignment.enabled must be true or false"),
-    ({"threads": 0}, "alignment.threads must be a positive integer"),
-    ({"mem_gb": True}, "alignment.mem_gb must be a positive integer"),
+    ({"threads": 0}, "unknown configuration settings: alignment.threads"),
+    ({"mem_gb": True}, "unknown configuration settings: alignment.mem_gb"),
     ({"command": "custom"}, "unknown configuration settings: alignment.command"),
 ])
 def test_invalid_alignment_config(tmp_path, workflow_project, settings, message):

@@ -8,17 +8,26 @@ code, and environments live in `workflow/rules/`, `workflow/scripts/`, and
 
 ## Running tests
 
-Run from the repository root with `pytest`, `pandas`, `ete4`, `matplotlib`,
-`PyYAML`, `numpy`, `biopython`, and the pinned cdskit from
-[phylogeny.yaml](../workflow/envs/phylogeny.yaml):
+Create the [test environment](../tests/environment.yaml) once. Run from the
+repository root:
 
 ```bash
-python -m pytest -q tests
+conda env create -n phenoradar-workflow -f tests/environment.yaml
+conda activate phenoradar-workflow
+python -m pytest -q -ra tests
 ```
 
-[environment.yaml](../environment.yaml) provides Snakemake 9.8.0 and pytest for
-CI/container generation; it does not include all test dependencies. Tool-dependent
-tests skip when executables are unavailable. Override their paths as needed:
+If `phenoradar-workflow` already exists, update it first:
+
+```bash
+conda env update -n phenoradar-workflow -f tests/environment.yaml
+```
+
+[environment.yaml](../environment.yaml) is a minimal environment for Snakemake
+and container generation. The full suite and CI use `tests/environment.yaml`,
+which also provides ETE, plotting libraries, cdskit, and nwkit.
+Tool-dependent tests skip when executables are unavailable; `-ra` lists the
+reasons. Override their paths as needed:
 
 ```bash
 SNAKEMAKE_BIN=/path/to/snakemake SEQKIT_BIN=/path/to/seqkit \
@@ -29,11 +38,13 @@ SNAKEMAKE_BIN=/path/to/snakemake SEQKIT_BIN=/path/to/seqkit \
 | --- | --- |
 | Core and KEGG integration | Snakemake, seqkit; ODB/KofamScan are test substitutes |
 | Alignments, phylogeny, dating | FAMSA, trimAl, VeryFastTree, ASTRAL, LSD2; override with `FAMSA_BIN`, `TRIMAL_BIN`, `VERYFASTTREE_BIN`, `ASTRAL_BIN`, `LSD2_BIN` |
-| Taxonomy audit | R/MonoPhy from `workflow/envs/monophy.yaml` |
+| Taxonomy check | R/MonoPhy from `workflow/envs/monophy.yaml` |
 | TimeTree client | Pinned nwkit from `workflow/envs/timetree.yaml` |
 
 `PHYLOGENY_CONDA_PREFIX` enables tests with actual stage environments.
-[Container CI](containers.md#build-and-publish-with-github-actions) runs
+[GitHub Actions](../.github/workflows/container.yml) runs the same Python suite
+and checks the generated Dockerfile on every branch push and pull request.
+Manual runs and releases also build the container and run
 [smoke checks](../tests/container_smoke.py) with real tools;
 [tests/container/Snakefile](../tests/container/Snakefile) checks Apptainer activation.
 

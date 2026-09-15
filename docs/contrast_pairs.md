@@ -45,7 +45,7 @@ observed states, and at least four representatives. Set `contrast.enabled: true`
 to include it in `all`; outputs go to `phylogeny/representatives/`.
 
 1. Skim homogeneous clades on the local NCBI guide, choosing representatives by
-   complete BUSCO fraction; `phylogeny.seed` controls randomized ties.
+   complete BUSCO fraction; top-level `seed` controls randomized ties.
 2. Resolve the outgroup within that subset and infer its BUSCO tree independently.
 3. Skim the molecular tree and pair minimal mixed clades with two opposite-state
    representatives. Multiway cases remain unresolved.

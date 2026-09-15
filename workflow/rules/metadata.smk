@@ -1,23 +1,20 @@
-# Existing snapshots are external inputs, even if code or source settings change.
+# Existing snapshots are shared external inputs, even if code or run_name changes.
 # Only register a producer when the fixed snapshot is missing.
 if not Path(TAXONOMY_DB).exists():
     rule prepare_taxonomy:
         input:
-            source=[config["taxonomy"]["source"]] if config["taxonomy"].get("source") else [],
             code=f"{SCRIPTS}/prepare_taxonomy.py",
             helpers=[f"{SCRIPTS}/snapshot_taxonomy.py", f"{SCRIPTS}/common.py"]
         output:
             database=TAXONOMY_DB,
             provenance=f"{TAXONOMY_DB}.json"
-        params:
-            source_flag="--source" if config["taxonomy"].get("source") else ""
         log: f"{LOG}/taxonomy_reference.log"
         conda: "../envs/analysis.yaml"
         threads: 1
         resources: mem_mb=8000
         shell:
             "{PYTHON:q} {input.code:q} --destination {output.database:q} "
-            "{params.source_flag} {input.source:q} > {log:q} 2>&1"
+            "> {log:q} 2>&1"
 
 
 checkpoint select_metadata:

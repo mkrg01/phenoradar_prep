@@ -2,78 +2,89 @@
 
 [Documentation](index.md)
 
-`phenoradar_inputs` validates and links completed results into
-`results/<run_name>/phenoradar_inputs/` for [PhenoRadar](https://github.com/mkrg01/phenoradar).
-It does not start analyses. Keep linked source files available; failed validation
-preserves the previous collection.
+`phenoradar_inputs` automatically links available completed results into
+`results/<run_name>/phenoradar_inputs/`. No collection settings are needed.
+The collection includes candidates for future PhenoRadar inputs as well as
+currently usable tables and alignments. It does not start analyses or download
+references. Keep linked source files available; failed validation preserves the
+previous collection.
 
 ## Collecting results
 
-Complete at least one expression branch, then collect:
+After preparing metadata and running any desired analyses:
 
 ```bash
 ./run_pipeline.sh --configfile config/mydata.yaml \
   --cores 1 --resources mem_gb=4 -- phenoradar_inputs
 ```
 
-Collection needs `metadata/species_metadata.tsv`, normally created during
-preparation; see [backfilling older results](migration.md#backfilling-phenoradar-metadata).
-The collection log lists ready, absent, incomplete, and disabled branches.
-
-## Selecting optional inputs
-
-```yaml
-phenoradar:
-  orthogroups: auto
-  kegg: auto
-  alignments: auto
-  kegg_groups: [module]
-  orthogroup_annotations: null
-  contrast: null
-  tree: null
-```
-
-For the first three settings, `auto` includes completed branches, `true` requires
-them, and `false` omits them. Corrupt completed results fail validation.
-For KO-only data, set `orthogroups: false` and `alignments: false`.
-
-- `kegg_groups`: `[module]`, `[pathway]`, both, or `[]` for expression alone.
-- `orthogroup_annotations`: existing headerless OG/taxid/description TSV[.gz] from
-  the same OrthoDB release. The collector checks format and expressed-OG overlap.
-- `contrast`: one completed branch, `phylogeny/all/contrast`,
-  `phylogeny/phenotyped/contrast`, or `phylogeny/representatives/contrast`.
-  Pair IDs are joined to base metadata; unpaired species remain. Null leaves them blank.
-- `tree`: an existing Newick path whose tips exactly match metadata species.
-  Choose the molecular or dated tree explicitly. The collector does not prune trees.
+Collection needs `metadata/samples.tsv` and `metadata/species_metadata.tsv`,
+normally created during preparation; see
+[backfilling older results](migration.md#backfilling-phenoradar-metadata).
+Expression results are optional. Rerun the target after more analyses finish;
+it discovers new outputs and removes links to results that are no longer present.
+The collection log lists ready, absent, and incomplete sections.
 
 ## Published files
 
+The original result paths are preserved, with short aliases for common inputs:
+
 ```text
 results/<run_name>/phenoradar_inputs/
-  species_metadata.tsv
-  tpm.tsv                         # OG expression
-  kegg/ko_tpm_sum.tsv              # KO expression
-  kegg/ko_modules.tsv              # Requested KO grouping maps
-  kegg/ko_pathways.tsv
-  alignments/{og}.faa              # Selected completed alignments
-  orthogroup_annotations.tsv[.gz]  # Optional descriptions
-  species_tree.nwk                 # Explicitly selected tree
+  species_metadata.tsv             # Alias of metadata/species_metadata.tsv
+  tpm.tsv                          # Alias of orthogroups/expression/tpm.tsv
+  alignments/{og}.faa               # Aliases of completed OG alignments
+  metadata/                        # Selected samples, traits, taxonomy, and QC
+  proteins/                        # Completed per-species translations
+  orthogroups/
+    expression/                    # Normalized/raw TPM, long/wide tables, and QC
+    mapping/                       # Merged gene-to-OG tables and database
+    alignments/                    # Alignments, membership, and completion record
+  kegg/                            # KO expression, annotations, support, and QC
+    ko_modules.tsv                 # Both maps collected when available
+    ko_pathways.tsv
+    species/                       # Completed per-species KO annotations
+  phylogeny/
+    all/                           # Full species set
+    phenotyped/                    # Species with observed traits
+    representatives/               # Representative species
 ```
 
-Metadata columns are `species`, the `contrast.trait` column (normally `C4`),
-`contrast_pair_id`, and `family`. Traits come from `inputs.species_trait` and must
-be `0`, `1`, or blank. Producer QC/provenance stay with source results.
+Each available phylogeny branch includes completed molecular and dated trees,
+gene trees and their marker alignments, selections, rooting information,
+TimeTree calibrations, contrast pairs, and taxonomy reports. Completed BUSCO
+sequence extraction and alignment steps are collected even before tree inference.
+Native solver work
+folders and unfinished results are excluded. Completion records and QC accompany
+the data. An absent grouping map or optional analysis does not hide other
+completed results.
 
-## Expression and species checks
+Trees retain their names, such as `phylogeny/all/species_tree.nwk` and
+`phylogeny/all/dating/species_tree.dated.nwk`; collection does not select one tree
+for downstream analysis. All completed contrast branches retain their own
+`contrast/species_metadata.tsv` and pair IDs. Base `species_metadata.tsv` stays
+unchanged, so pair IDs from different analyses are never combined.
 
-Collection requires **one run per species**; select one before collection if the
-dataset contains multiple runs. Species/run identities must match the manifest,
-with no duplicate species/feature coordinates and finite nonnegative values.
-Every selected species needs expression rows. Missing KO expression is reported
-as missing, not replaced with zeros; review [KO support](kegg.md#outputs).
+Existing `orthogroup_annotations.tsv[.gz]` files at the run root, in
+`orthogroups/`, or in `orthogroups/mapping/` are also collected. These are
+headerless OG/taxid/description tables; arbitrary external annotation paths are
+no longer configured here. Descriptions are not downloaded by collection.
+
+## Data checks and downstream use
+
+Collection checks sample identities, expression coordinates and values, OG
+alignment inventories, recorded checksums, and species-tree tips. Full trees
+must cover the selected species; phenotyped and representative trees may cover
+subsets. Corrupt completed inputs stop publication.
+
+Multiple runs per species are preserved as separate expression rows. Collection
+does not select or average replicates. Choose the appropriate inputs and handle
+replicates according to the downstream analysis; collection alone does not mean
+that every file can already be read by PhenoRadar.
 
 OG `tpm.tsv` is normalized to one million per run. KO values sum original TPM and
-can overlap across KOs. For KO expression, set these options in PhenoRadar:
+can overlap across KOs; review [KO support](kegg.md#outputs). For KO expression,
+set these options in PhenoRadar:
 
 ```yaml
 data:
@@ -88,10 +99,10 @@ see [gene IDs and sequence format](alignments.md#outputs-and-phenoradar).
 
 ## Species exclusions
 
-With nonempty `exclude_species`, run `filter_species` first. Collection uses the
-matching completed `filtered/` snapshot and validates its exclusions and sources;
-it does not refresh that snapshot itself. Recomputed contrast branches can be
-selected above. Set `tree` to the matching pruned tree when needed. Clearing the
+With nonempty `exclude_species`, run `filter_species` first. Collection uses only
+the matching completed `filtered/` snapshot and verifies its recorded outputs;
+it does not refresh that snapshot or mix in unfiltered analyses. Available
+pruned trees and recomputed contrast results keep their paths. Clearing the
 exclusion list selects the original data on the next collection.
 
 For downstream setup, see PhenoRadar's

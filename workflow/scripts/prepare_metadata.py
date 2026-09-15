@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate input tables, add frozen taxonomy, and select species by BUSCO."""
+"""Validate inputs, select candidate species by BUSCO, and add frozen taxonomy."""
 import argparse
 import json
 import re
@@ -43,6 +43,14 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
             raise ValueError(f"metadata: unsafe {column} label")
     if meta[["scientific_name", "odb_species"]].drop_duplicates()["odb_species"].duplicated().any():
         raise ValueError("species names collide after space/hyphen normalization")
+    requested = None
+    if species_list:
+        requested = Path(species_list).read_text().splitlines()
+        if not requested or any(not value for value in requested) or len(set(requested)) != len(requested):
+            raise ValueError("species list must contain unique nonempty species IDs")
+        absent = set(requested) - set(meta["species"])
+        if absent:
+            raise ValueError(f"requested species absent from metadata: {sorted(absent)}")
     for column in COUNTS:
         bus[column] = pd.to_numeric(bus[column], errors="raise")
         if ((bus[column] < 0) | (bus[column] % 1 != 0)).any():
@@ -53,6 +61,11 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
     joined = meta.merge(bus.rename(columns={"Species": "scientific_name"}),
                         on="scientific_name", how="left", validate="many_to_one")
     joined["busco_percent"] = (joined[COUNTS[0]] + joined[COUNTS[1]]) / joined[COUNTS[-1]] * 100
+    joined["selected"] = True if requested is None else joined["species"].isin(requested)
+    # Missing BUSCO counts stay NaN, so even a zero threshold cannot select them.
+    joined["selected"] &= (joined[COUNTS[0]] + joined[COUNTS[1]]) / joined[COUNTS[-1]] >= threshold
+    if not joined["selected"].any():
+        raise ValueError("no species passed selection")
 
     # The workflow prepares missing databases in its own rule. Keep this step offline.
     if not Path(taxonomy_db).is_file():
@@ -61,8 +74,8 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
     ncbi = NCBITaxa(dbfile=str(Path(taxonomy_db).resolve()), update=False)
     taxonomy, unknown = [], []
     try:
-        # Species without BUSCO records are excluded; they need no taxonomy lookup.
-        for taxid in sorted(set(joined.loc[joined["busco_percent"].notna(), "taxid"]), key=int):
+        # Only species surviving both filters need taxonomy lookup.
+        for taxid in sorted(set(joined.loc[joined["selected"], "taxid"]), key=int):
             try:
                 lineage = ncbi.get_lineage(int(taxid))
             except ValueError:
@@ -83,20 +96,7 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
         raise ValueError(f"taxids absent from frozen taxonomy: {unknown}")
     joined = joined.merge(pd.DataFrame(taxonomy, columns=["taxid", *RANKS]),
                           on="taxid", how="left", validate="many_to_one")
-    # Missing BUSCO counts stay NaN, so even a zero threshold cannot select them.
-    joined["selected"] = (joined[COUNTS[0]] + joined[COUNTS[1]]) / joined[COUNTS[-1]] >= threshold
-    requested = None
-    if species_list:
-        requested = Path(species_list).read_text().splitlines()
-        if not requested or any(not value for value in requested) or len(set(requested)) != len(requested):
-            raise ValueError("species list must contain unique nonempty species IDs")
-        eligible = set(joined.loc[joined["selected"], "species"])
-        if set(requested) - eligible:
-            raise ValueError(f"requested species absent or below BUSCO threshold: {sorted(set(requested) - eligible)}")
-        joined["selected"] &= joined["species"].isin(requested)
     selected = joined.loc[joined["selected"]].sort_values(["species", "run"]).copy()
-    if selected.empty:
-        raise ValueError("no species passed selection")
     samples = []
     for row in selected.to_dict("records"):
         species, run = row["species"], row["run"]

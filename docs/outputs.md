@@ -27,7 +27,7 @@ results/<run_name>/
   kegg/                             # Optional KO annotations/expression
   phylogeny/{all,phenotyped,representatives}/
   filtered/                         # Curated species subset
-  phenoradar_inputs/                 # Collected downstream inputs
+  phenoradar_inputs/                 # Automatically collected downstream inputs/candidates
 ```
 
 Selection results include `metadata_all.tsv`, `metadata_high_busco.tsv`,
@@ -38,7 +38,7 @@ Logs/benchmarks are under `logs/<run_name>/`; temporary files are under
 
 See branch guides for [KO expression](kegg.md#outputs),
 [alignments](alignments.md#outputs-and-phenoradar), [phylogeny](phylogeny.md#outputs),
-[dating](dating.md#outputs), [taxonomy review](taxonomy_audit.md#outputs-and-figures),
+[dating](dating.md#outputs), [taxonomy review](taxonomy_check.md#outputs-and-figures),
 [contrast pairs](contrast_pairs.md#outputs), [filtered data](species_filter.md#exported-dataset),
 and [PhenoRadar inputs](phenoradar_inputs.md#published-files).
 
@@ -70,6 +70,6 @@ positive TPM retained after mapping and ambiguity handling.
 
 ## Provenance
 
-Keep `run.json`, branch QC/provenance, image digests or SIF checksums, and reference
+Keep `run.json`, branch QC/provenance, the Release's `image.json`, and reference
 snapshots with the analysis. See [migration](migration.md#relocated-results) for
 relocated results.

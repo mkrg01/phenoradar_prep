@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reuse BUSCO full tables and original CDS/proteins, with cdskit preparation."""
+"""Reuse BUSCO full tables and selected samples' CDS, with cdskit preparation."""
 import argparse
 from collections import Counter, OrderedDict, defaultdict
 from functools import lru_cache
@@ -105,6 +105,23 @@ def fasta_records(path):
             yield name, "".join(parts).upper()
 
 
+def busco_full_path(directory, species, lineage):
+    """Resolve one species' full table without guessing among multiple inputs."""
+    if not SAFE.fullmatch(species) or not SAFE.fullmatch(lineage):
+        raise ValueError("BUSCO table lookup requires safe species and lineage labels")
+    root = Path(directory)
+    names = [f"{species}.busco.full.tsv", f"{species}.tsv",
+             f"{species}/full_table.tsv", f"{species}/run_{lineage}/full_table.tsv"]
+    candidates = [root / (name + suffix) for name in names for suffix in ("", ".gz")]
+    found = [path for path in candidates if path.is_file()]
+    if not found:
+        raise ValueError(f"BUSCO full table missing for {species} in {root}; "
+                         "see docs/phylogeny.md for supported filenames")
+    if len(found) > 1:
+        raise ValueError(f"ambiguous BUSCO full tables for {species}: " + ", ".join(map(str, found)))
+    return found[0]
+
+
 def busco_table(path, expected_lineage):
     """Accept transcriptome/protein full tables; duplicated hits are never rescued."""
     hits = defaultdict(list)
@@ -172,12 +189,12 @@ def plan(samples, outdir, settings, outgroup_file=None):
     counts, lengths = Counter(), Counter()
     manifest, universe = [], None
     for name, row in species.items():
-        table = Path(settings["busco_full_dir"]) / (name + settings["busco_full_suffix"])
+        table = busco_full_path(settings["busco_full_dir"], name, settings["lineage"])
         complete, ids = busco_table(table, settings["lineage"])
         if universe is not None and ids != universe:
             raise ValueError(f"BUSCO marker set differs between species: {table}")
         universe = ids
-        sequence = (Path(settings["sequence_dir"]) / (name + settings["sequence_suffix"])) if settings["sequence_dir"] else Path(row["cds"])
+        sequence = Path(row["cds"])
         if not sequence.is_file() or sequence.stat().st_size == 0:
             raise ValueError(f"missing sequence input: {sequence}")
         for marker, hit in complete.items():
@@ -229,7 +246,7 @@ def extract(species, table, sequences, markers, output, qc, settings):
         aliases[COORDINATES.sub("", hit[1])].add(marker)
     found, proteins, rejected = set(), {}, Counter()
     records = []
-    backend = cdskit_backend()[1] if settings["sequence_mode"] == "cds" else None
+    backend = cdskit_backend()[1]
     for gene, sequence in fasta_records(sequences):
         if gene not in aliases:
             continue
@@ -237,17 +254,11 @@ def extract(species, table, sequences, markers, output, qc, settings):
             if marker in found:
                 raise ValueError(f"ambiguous or duplicated sequence ID for {species}/{marker}: {gene}")
             found.add(marker)
-            if settings["sequence_mode"] == "cds":
-                protein, preparation = prepare_cds(sequence, marker, settings["translation_table"])
-            else:
-                preparation, protein = {"source": "supplied protein"}, sequence.removesuffix("*")
-            # Apply one missing-data alphabet to proteins from either source.
+            protein, preparation = prepare_cds(sequence, marker, settings["translation_table"])
             known = sum(c in AMINO for c in protein)
             unknown_fraction = (len(protein) - known) / len(protein) if protein else 1.0
             reason = ""
-            if "*" in protein:  # no CDS context is available to repair supplied proteins
-                reason = "internal_stop"
-            elif known < settings["min_protein_length"]:
+            if known < settings["min_protein_length"]:
                 reason = "short_protein"
             elif unknown_fraction > settings["max_unknown_fraction"]:
                 reason = "ambiguous_protein"

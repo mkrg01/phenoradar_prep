@@ -23,10 +23,23 @@ def read_version(root):
     return value
 
 
+def validate_container_image(image):
+    """Accept auto or a release version, never an image URI or local path."""
+    if image == "auto":
+        return
+    try:
+        parse_version(image)
+    except ValueError:
+        raise ValueError(
+            "container_image must be auto or a major.minor.patch version without v "
+            "(e.g. '0.1.0'); image URIs and SIF paths are no longer supported"
+        ) from None
+
+
 def resolve_container_image(image, root, *, enabled):
-    """Resolve auto only for container execution; preserve explicit overrides."""
-    if image != "auto":
-        return image
+    """Resolve the selected release to GHCR only for container execution."""
+    validate_container_image(image)
     if not enabled:
         return None
-    return f"docker://{IMAGE_REPOSITORY}:v{read_version(root)}"
+    version = read_version(root) if image == "auto" else image
+    return f"docker://{IMAGE_REPOSITORY}:v{version}"

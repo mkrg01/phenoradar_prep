@@ -14,27 +14,12 @@ snapshots are reused without automatic updates; keep them with analysis records.
 
 ## Taxonomy reference
 
-If `resources/taxonomy/taxa.sqlite` is missing, the workflow downloads NCBI taxonomy
-and builds an ETE4-compatible SQLite snapshot. To bootstrap from a local database:
-
-```yaml
-taxonomy:
-  source: /path/to/existing/taxa.sqlite
-```
-
-This copies the source only when the snapshot is missing. A configured missing
-source fails. The `.json` sidecar records provenance and checksum.
-
-For manual offline preparation:
-
-```bash
-python workflow/scripts/snapshot_taxonomy.py \
-  --source /path/to/existing/taxa.sqlite \
-  --destination resources/taxonomy/taxa.sqlite
-```
+No configuration is needed. If `resources/taxonomy/taxa.sqlite` is missing, the
+workflow downloads NCBI taxonomy and builds an ETE4-compatible SQLite snapshot.
+Later runs reuse it without downloading or updating, including runs with a
+different `run_name`. The `.json` sidecar records provenance and checksum.
 
 To refresh taxonomy, archive `resources/taxonomy/` and rerun with a new `run_name`.
-Changing `taxonomy.source` alone does not replace an existing snapshot.
 
 ## OrthoDB reference
 
@@ -81,10 +66,8 @@ sbatch --cpus-per-task=1 --mem=40G \
   run_pipeline.sh --configfile config/mydata.yaml -- references
 ```
 
-ODB-mapper requires network access during mapping too. Default free-space checks
-are 200 GiB for reference preparation and 750 GiB for mapping; these configurable
-thresholds are not measured requirements. Nonlocal work storage requires
-`odb.allow_nonlocal: true`.
+ODB-mapper requires network access during mapping too. Choose storage and disk
+capacity for your dataset and concurrent jobs.
 
 To verify every reference checksum, replace `3193` with your node:
 

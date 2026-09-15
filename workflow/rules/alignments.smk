@@ -21,7 +21,7 @@ checkpoint collect_orthogroup_proteins:
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/busco_phylogeny.py"]
     output: fasta=directory(ALIGNMENT_INPUTS)
     params: proteins=PROTEINS
-    resources: mem_mb=config["alignment"]["mem_gb"] * 1000
+    resources: mem_mb=8000
     conda: "../envs/alignment.yaml"
     log: f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/collect.log"
     shell:
@@ -39,8 +39,8 @@ rule align_orthogroup:
         alignment=f"{ALIGNMENTS}/{{og}}.faa",
         provenance=f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/{{og}}.json"
     params: fasta=lambda wc: f"{ALIGNMENT_INPUTS}/{wc.og}.faa"
-    threads: config["alignment"]["threads"]
-    resources: mem_mb=config["alignment"]["mem_gb"] * 1000
+    threads: 4
+    resources: mem_mb=8000
     conda: "../envs/alignment.yaml"
     log: f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/{{og}}.log"
     benchmark: f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/benchmarks/{{og}}.tsv"
@@ -59,7 +59,7 @@ rule finish_alignments:
     output:
         provenance=f"{ALIGNMENTS}/provenance.json"
     params: outdir=ALIGNMENTS, reports=f"{LOG}/{ORTHOGROUP_ALIGNMENTS}"
-    resources: mem_mb=config["alignment"]["mem_gb"] * 1000
+    resources: mem_mb=8000
     conda: "../envs/alignment.yaml"
     log: f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/finish.log"
     shell:
