@@ -16,8 +16,7 @@ Missing traits remain unknown; multiple expression runs do not add species weigh
 Choose `phylogeny.species_sets: [all]`, `[phenotyped]`, or both:
 
 ```bash
-./run_pipeline.sh --configfile config/mydata.yaml \
-  --cores 32 --resources mem_gb=128 -- phylogeny_contrast_pairs
+./run_pipeline.sh --cores 32 --resources mem_gb=128 -- phylogeny_contrast_pairs
 ```
 
 Without exclusions, missing or outdated trees can schedule inference. Pair-only
@@ -36,8 +35,7 @@ Results are in `phylogeny/all/contrast/` or `phylogeny/phenotyped/contrast/` und
 ## Representative analysis
 
 ```bash
-./run_pipeline.sh --configfile config/mydata.yaml \
-  --cores 32 --resources mem_gb=128 -- contrast_pairs
+./run_pipeline.sh --cores 32 --resources mem_gb=128 -- contrast_pairs
 ```
 
 This requires the ordinary [phylogeny inputs](phylogeny.md#inputs), exactly two

@@ -8,8 +8,7 @@ all mapped OGs, retaining every gene copy.
 ## Running
 
 ```bash
-./run_pipeline.sh --configfile config/mydata.yaml \
-  --cores 16 --resources mem_gb=192 -- alignments
+./run_pipeline.sh --cores 16 --resources mem_gb=192 -- alignments
 ```
 
 Selection, translation, and ODB mapping are scheduled as needed. To include this

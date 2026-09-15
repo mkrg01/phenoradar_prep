@@ -110,8 +110,7 @@ If completed results lack `metadata/species_metadata.tsv`, prepare it before
 collecting downstream inputs:
 
 ```bash
-./run_pipeline.sh --configfile config/mydata.yaml \
-  --cores 1 --resources mem_gb=4 -- phenoradar_metadata
+./run_pipeline.sh --cores 1 --resources mem_gb=4 -- phenoradar_metadata
 ```
 
 This uses completed selected metadata and the trait source. See

@@ -63,7 +63,7 @@ after adjusting your [Slurm settings](running.md#slurm):
 
 ```bash
 sbatch --cpus-per-task=1 --mem=40G \
-  run_pipeline.sh --configfile config/mydata.yaml -- references
+  run_pipeline.sh -- references
 ```
 
 ODB-mapper requires network access during mapping too. Choose storage and disk

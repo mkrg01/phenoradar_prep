@@ -2,6 +2,8 @@
 /results/
 /work/
 /logs/
+/pipeline-*.out
+/pipeline-*.err
 /resources/
 *.sif
 /.snakemake/

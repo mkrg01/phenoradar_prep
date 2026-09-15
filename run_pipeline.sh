@@ -6,12 +6,12 @@
 #SBATCH --mem=192G
 #SBATCH --time=21-00:00:00
 #SBATCH --partition=debug
-#SBATCH --output=logs/pipeline-%j.log
+#SBATCH --output=pipeline-%j.out
+#SBATCH --error=pipeline-%j.err
 
 # Adjust SBATCH settings for your cluster; see docs/running.md and docs/containers.md.
-# Make snakemake and singularity available on PATH and configure container_image:
-# mkdir -p logs
-# sbatch run_pipeline.sh --configfile config/mydata.yaml
+# Make snakemake and singularity available on PATH and edit config/config.yaml:
+# sbatch run_pipeline.sh
 # Direct execution uses --cores and --resources mem_gb=...; SBATCH lines are ignored.
 set -euo pipefail
 

@@ -2,28 +2,33 @@
 
 [Documentation](index.md) · [Input formats](inputs.md)
 
-For a new dataset, copy the default file and edit its input paths and OrthoDB node:
-
-```bash
-cp config/config.yaml config/mydata.yaml
-```
-
-Keep an existing dataset configuration when resuming. `config/mydata.yaml` and
-`config/*.local.yaml` are ignored by Git. The complete defaults are in
-[config/config.yaml](../config/config.yaml).
+Edit [config/config.yaml](../config/config.yaml) directly and adjust the settings
+as needed. The workflow reads this file automatically. Keep your existing
+settings when resuming an analysis.
 
 ## Loading settings and paths
 
-Settings load in this order: `config/config.yaml`, `--configfile` files from left
-to right, then command-line `--config` values. Unknown keys are rejected.
+On Slurm, submit from the repository root:
 
 ```bash
-./run_pipeline.sh --configfile config/mydata.yaml config/pilot.yaml \
-  --cores 8 --resources mem_gb=64 -- prepare
+sbatch run_pipeline.sh
 ```
+
+CPU and memory are taken automatically from the Slurm allocation requested by the
+script's `#SBATCH` settings. Adjust those settings for your cluster; no `--cores`
+or `--resources` arguments are needed for Slurm submission.
+
+With no target specified, the workflow runs `all`, including preparation and
+enabled analyses. To run only species selection, metadata generation, and
+sample/chunk manifest preparation, append `-- prepare`. See
+[running the workflow](running.md) for targets and direct execution.
 
 Put options before `--` and targets after it. Paths are relative to the repository
 root unless absolute; submit Slurm jobs there or use `sbatch --chdir`.
+
+If you need a separate configuration file, pass `--configfile config/mydata.yaml`.
+Its settings override those in `config/config.yaml`. Command-line `--config`
+values take precedence. Unknown keys are rejected.
 
 `run_name` selects directories under `results/`, `work/`, and `logs/`.
 Use a new name to retain an earlier analysis. It does not change species selection

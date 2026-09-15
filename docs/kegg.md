@@ -14,8 +14,7 @@ kegg:
 ```
 
 ```bash
-./run_pipeline.sh --configfile config/mydata.yaml \
-  --cores 24 --resources mem_gb=128 -- kegg
+./run_pipeline.sh --cores 24 --resources mem_gb=128 -- kegg
 ```
 
 The explicit target works without `enabled`; enabling it adds KEGG to `all`.

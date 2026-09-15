@@ -19,8 +19,7 @@ taxonomy_check:
 ```
 
 ```bash
-./run_pipeline.sh --configfile config/mydata.yaml \
-  --cores 1 --resources mem_gb=8 -- taxonomy_check
+./run_pipeline.sh --cores 1 --resources mem_gb=8 -- taxonomy_check
 ```
 
 The target follows `phylogeny.species_sets` and can schedule missing tree inference;

@@ -9,21 +9,12 @@ Install the [requirements](../README.md#requirements) on Linux with Bash and mak
 `SNAKEMAKE_BIN` can select another Snakemake executable. No dedicated host Conda
 environment is required.
 
-Use a published release checkout, configure your [inputs](inputs.md), and leave
-`container_image: auto` for automatic image selection. See [container setup](containers.md)
+Use a published release checkout, edit [config/config.yaml](../config/config.yaml)
+for your [inputs](inputs.md), and leave `container_image: auto` for automatic
+image selection. The examples below use this configuration file automatically.
+See [container setup](containers.md)
 for version selection, external bind mounts, or native execution. First use needs network
 access for the image and missing [references](references.md).
-
-## Direct execution
-
-Run from the repository root with a CPU and memory budget:
-
-```bash
-./run_pipeline.sh --configfile config/mydata.yaml \
-  --cores 16 --resources mem_gb=192
-```
-
-Put all options before `--` and targets after it. Omit the target to run `all`.
 
 ## Slurm
 
@@ -31,9 +22,12 @@ Adjust the `#SBATCH` lines in `run_pipeline.sh` for your cluster, especially
 partition, account, CPUs, memory, and time. Submit from the repository root:
 
 ```bash
-mkdir -p logs
-sbatch run_pipeline.sh --configfile config/mydata.yaml
+sbatch run_pipeline.sh
 ```
+
+The workflow automatically uses the allocated CPUs and memory, so there is no
+need to pass `--cores` or `--resources`. Omit the target to run `all`, including
+preparation and enabled analyses.
 
 All jobs run inside one node/task allocation. The script defaults to 16 CPUs,
 192 GiB, and 21 days on `debug`. Override these with `sbatch` options before the
@@ -41,20 +35,34 @@ script name; workflow options go after it:
 
 ```bash
 sbatch --cpus-per-task=2 --mem=16G --time=01:00:00 \
-  run_pipeline.sh --configfile config/mydata.yaml -- prepare
+  run_pipeline.sh -- prepare
 ```
 
-Monitor with `squeue -u "$USER"` and `logs/pipeline-JOB_ID.log`; stop with
+Slurm writes standard output to `pipeline-<job_id>.out` and standard error to
+`pipeline-<job_id>.err` in the repository root. Per-step logs are written under
+`logs/<run_name>/`, which Snakemake creates automatically.
+
+Monitor with `squeue -u "$USER"` and the job's `.out` and `.err` files; stop with
 `scancel JOB_ID`. Resubmit the same command to resume. Avoid concurrent jobs
 writing the same results.
 
-## Prepare and inspect
+## Direct execution
 
-Select species and create manifests first:
+Run from the repository root with a CPU and memory budget:
 
 ```bash
-./run_pipeline.sh --configfile config/mydata.yaml \
-  --cores 2 --resources mem_gb=16 -- prepare
+./run_pipeline.sh --cores 16 --resources mem_gb=192
+```
+
+Put all options before `--` and targets after it. Omit the target to run `all`.
+For a separate configuration file, see [configuration](configuration.md#loading-settings-and-paths).
+
+## Prepare and inspect
+
+To inspect species selection and manifests before the full analysis, run `prepare`:
+
+```bash
+./run_pipeline.sh --cores 2 --resources mem_gb=16 -- prepare
 ```
 
 Review `selection.json`, `samples.tsv`, and `busco_completeness.svg` in
@@ -68,12 +76,14 @@ Choose a few eligible species, then use the supplied pilot override:
 ```bash
 head -n 3 results/run001/metadata/species_high_busco.txt > input/pilot_species.txt
 sbatch --cpus-per-task=8 --mem=80G \
-  run_pipeline.sh --configfile config/mydata.yaml config/pilot.yaml \
+  run_pipeline.sh --configfile config/pilot.yaml \
   --set-threads odb_map=8 --set-resources odb_map:mem_mb=64000
 ```
 
-[config/pilot.yaml](../config/pilot.yaml) uses `input/pilot_species.txt` and writes
-to `results/pilot/`. Review the species list and check mapping
+[config/pilot.yaml](../config/pilot.yaml) overrides the species list and run name
+in `config/config.yaml`: it uses `input/pilot_species.txt` and writes
+to `results/pilot/`. Other settings come from `config/config.yaml`.
+Review the species list and check mapping
 quality, runtime, disk use, and peak memory before a full run.
 
 ## Targets
@@ -125,8 +135,7 @@ See [phylogeny resources](phylogeny.md#resources) for tree-inference defaults.
 For an individual rule, use Snakemake's standard overrides:
 
 ```bash
-./run_pipeline.sh --configfile config/mydata.yaml \
-  --cores 16 --resources mem_gb=192 \
+./run_pipeline.sh --cores 16 --resources mem_gb=192 \
   --set-threads odb_map=8 --set-resources odb_map:mem_mb=64000 -- mapping
 ```
 

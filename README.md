@@ -18,22 +18,26 @@ Before running the workflow, make sure the following software is installed:
 
 ## Quick start
 
-From the repository root:
+Edit [config/config.yaml](config/config.yaml) directly using the
+[input guide](docs/inputs.md) and [configuration guide](docs/configuration.md).
+For Slurm, adjust the `#SBATCH` settings in `run_pipeline.sh` for your cluster,
+then submit from the repository root:
 
 ```bash
-cp config/config.yaml config/mydata.yaml
+sbatch run_pipeline.sh
 ```
 
-Edit `config/mydata.yaml` for your dataset using the [input guide](docs/inputs.md)
-and [configuration guide](docs/configuration.md).
-Follow [running the workflow](docs/running.md) for direct execution or Slurm
-submission, adjusting resource settings for your computing environment.
+The workflow reads `config/config.yaml` automatically and uses the CPUs and
+memory allocated by Slurm. See [running the workflow](docs/running.md) for direct
+execution, individual targets, and resource settings.
 
 ## Results
 
 Main expression tables are in `results/<run_name>/orthogroups/expression/`,
 with `run_name: run001` by default.
-Logs and temporary work are stored in `logs/<run_name>/` and `work/<run_name>/`.
+Slurm writes standard output to `pipeline-<job_id>.out` and standard error to
+`pipeline-<job_id>.err` in the repository root. Per-step logs and temporary work
+are stored in `logs/<run_name>/` and `work/<run_name>/`.
 
 [Documentation](docs/index.md) covers configuration, optional analyses, output
 formats, and collecting PhenoRadar inputs.

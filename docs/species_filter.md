@@ -17,11 +17,10 @@ exclusions automatically. Unknown/duplicate IDs and removal of all species fail.
 
 ## Execute after the source analysis
 
-Save exclusions in the dataset config or a local override:
+Set `exclude_species` in `config/config.yaml`, then run:
 
 ```bash
-./run_pipeline.sh --configfile config/mydata.yaml config/exclusions.local.yaml \
-  --cores 1 --resources mem_gb=8 -- filter_species
+./run_pipeline.sh --cores 1 --resources mem_gb=8 -- filter_species
 ```
 
 The target needs the original sample manifest and completed outputs, not raw

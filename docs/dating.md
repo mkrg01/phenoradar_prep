@@ -7,8 +7,7 @@ BUSCO trees with LSD2. Input branch lengths are substitutions/site; output ages 
 millions of years (Ma). The target follows `phylogeny.species_sets`.
 
 ```bash
-./run_pipeline.sh --configfile config/mydata.yaml \
-  --cores 32 --resources mem_gb=128 -- timetree
+./run_pipeline.sh --cores 32 --resources mem_gb=128 -- timetree
 ```
 
 Missing tree inference is scheduled automatically. The explicit target works
@@ -74,8 +73,7 @@ phylogeny:
 ```
 
 ```bash
-./run_pipeline.sh --configfile config/mydata.yaml \
-  --cores 32 --resources mem_gb=128 -- phylogeny_calibrations
+./run_pipeline.sh --cores 32 --resources mem_gb=128 -- phylogeny_calibrations
 ```
 
 Use this optional step to inspect retrieved candidates before dating. Review

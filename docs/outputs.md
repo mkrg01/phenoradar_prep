@@ -6,6 +6,8 @@
 
 The configured `run_name` selects `results/<run_name>/`, `work/<run_name>/`,
 and `logs/<run_name>/`. Reusable references live in `resources/`.
+Slurm writes standard output to `pipeline-<job_id>.out` and standard error to
+`pipeline-<job_id>.err` in the repository root.
 
 ## Result files
 
@@ -33,7 +35,7 @@ results/<run_name>/
 Selection results include `metadata_all.tsv`, `metadata_high_busco.tsv`,
 `samples.tsv`, `species_high_busco.txt`, `selection.json`, and
 `busco_completeness.svg`. `species_metadata.tsv` provides PhenoRadar metadata.
-Logs/benchmarks are under `logs/<run_name>/`; temporary files are under
+Per-step logs/benchmarks are under `logs/<run_name>/`; temporary files are under
 `work/<run_name>/`. Reference locations are listed in [references](references.md).
 
 See branch guides for [KO expression](kegg.md#outputs),

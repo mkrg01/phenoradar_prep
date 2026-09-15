@@ -84,12 +84,10 @@ Analysis tools are bundled in the container. Native execution uses
 
 ```bash
 # Select markers and resolve the outgroup.
-./run_pipeline.sh --configfile config/mydata.yaml \
-  --cores 4 --resources mem_gb=16 -- phylogeny_prepare
+./run_pipeline.sh --cores 4 --resources mem_gb=16 -- phylogeny_prepare
 
 # Infer gene trees and species trees.
-./run_pipeline.sh --configfile config/mydata.yaml \
-  --cores 32 --resources mem_gb=128 -- phylogeny
+./run_pipeline.sh --cores 32 --resources mem_gb=128 -- phylogeny
 ```
 
 Set `phylogeny.enabled: true` to include trees in `all`. For offline native ASTRAL
