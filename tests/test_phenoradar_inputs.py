@@ -72,8 +72,13 @@ def test_default_export_collects_available_results_and_preserves_source_values(s
     export(source, out)
     assert state(source) == original
     assert read_tsv(out / "species_metadata.tsv") == read_tsv(source / "metadata/species_metadata.tsv")
+    assert not (out / "tpm.tsv").is_symlink()
+    assert read_tsv(out / "tpm.tsv") == [
+        {key: row[key] for key in ["species", "orthogroup", "tpm"]}
+        for row in read_tsv(source / "orthogroups/expression/tpm.tsv")]
     for relative, original_path in [
-        ("tpm.tsv", "orthogroups/expression/tpm.tsv"), ("kegg/ko_tpm_sum.tsv", "kegg/ko_tpm_sum.tsv"),
+        ("orthogroups/expression/tpm.tsv", "orthogroups/expression/tpm.tsv"),
+        ("kegg/ko_tpm_sum.tsv", "kegg/ko_tpm_sum.tsv"),
         ("kegg/ko_modules.tsv", "kegg/ko_modules.tsv"), ("alignments/OG1.faa", "orthogroups/alignments/OG1.faa"),
     ]:
         assert (out / relative).is_symlink()
@@ -101,6 +106,18 @@ def test_kegg_inputs_need_no_orthogroup_or_alignment_results(snapshot, tmp_path)
     assert not (out / "tpm.tsv").exists()
     assert not (out / "alignments").exists()
     assert not (snapshot / "orthogroups/mapping").exists()
+
+
+def test_refresh_migrates_legacy_tpm_symlink_without_modifying_source(snapshot, tmp_path):
+    out = tmp_path / "inputs"
+    out.mkdir()
+    source = snapshot / "orthogroups/expression/tpm.tsv"
+    before = source.read_bytes()
+    (out / "tpm.tsv").symlink_to(source)
+    export(snapshot, out)
+    assert not (out / "tpm.tsv").is_symlink()
+    assert list(read_tsv(out / "tpm.tsv")[0]) == ["species", "orthogroup", "tpm"]
+    assert source.read_bytes() == before
 
 
 def test_missing_group_map_does_not_hide_other_maps_or_expression(snapshot, tmp_path):
@@ -184,7 +201,10 @@ def test_expression_coordinates_must_match_selected_samples(snapshot, tmp_path, 
         export(snapshot, tmp_path / "inputs")
 
 
-def test_multiple_runs_per_species_are_collected_without_aggregation(snapshot, tmp_path):
+def test_multiple_runs_per_species_reject_export_and_preserve_previous_collection(snapshot, tmp_path):
+    out = tmp_path / "inputs"
+    export(snapshot, out)
+    previous_tpm = (out / "tpm.tsv").read_bytes()
     for relative in ["metadata/samples.tsv", "orthogroups/expression/tpm.tsv",
                      "orthogroups/expression/mapping_qc.tsv", "kegg/ko_tpm_sum.tsv",
                      "kegg/mapping_qc.tsv", "kegg/ko_support.tsv"]:
@@ -192,11 +212,9 @@ def test_multiple_runs_per_species_are_collected_without_aggregation(snapshot, t
         rows = read_tsv(path)
         rows.append({**rows[0], "run": "Replicate"})
         write_tsv(path, list(rows[0]), rows)
-    out = tmp_path / "inputs"
-    export(snapshot, out)
-    assert read_tsv(out / "tpm.tsv") == read_tsv(snapshot / "orthogroups/expression/tpm.tsv")
-    assert len(read_tsv(out / "species_metadata.tsv")) == 3
-    assert len(read_tsv(out / "metadata/samples.tsv")) == 4
+    with pytest.raises(ValueError, match="multiple runs per species.*Plant_A"):
+        export(snapshot, out)
+    assert (out / "tpm.tsv").read_bytes() == previous_tpm
 
 
 def test_metadata_must_cover_selected_species_without_duplicates(snapshot, tmp_path):
@@ -314,11 +332,13 @@ def test_exclusions_select_only_matching_completed_filtered_snapshot(snapshot, t
     filtered = make_filtered(snapshot, ["Plant_C"])
     out = tmp_path / "inputs"
     export(snapshot, out, exclusions=["Plant_C"])
-    assert (out / "tpm.tsv").resolve() == (filtered / "orthogroups/expression/tpm.tsv").resolve()
+    assert (out / "orthogroups/expression/tpm.tsv").resolve() == (filtered / "orthogroups/expression/tpm.tsv").resolve()
+    assert {row["species"] for row in read_tsv(out / "tpm.tsv")} == set(SPECIES[:2])
     assert {row["species"] for row in read_tsv(out / "species_metadata.tsv")} == set(SPECIES[:2])
     # Clearing exclusions returns to the original completed dataset.
     export(snapshot, out, exclusions=[])
-    assert (out / "tpm.tsv").resolve() == (snapshot / "orthogroups/expression/tpm.tsv").resolve()
+    assert (out / "orthogroups/expression/tpm.tsv").resolve() == (snapshot / "orthogroups/expression/tpm.tsv").resolve()
+    assert {row["species"] for row in read_tsv(out / "tpm.tsv")} == set(SPECIES)
     assert {row["species"] for row in read_tsv(out / "species_metadata.tsv")} == set(SPECIES)
 
 
@@ -378,7 +398,7 @@ def test_full_snakefile_collects_frozen_results_without_upstream_inputs(snapshot
                  for path in out.rglob("*") if path.is_symlink()}
         return out.stat().st_ino, state(out), links
 
-    assert (out / "tpm.tsv").is_symlink()
+    assert (out / "tpm.tsv").is_file() and not (out / "tpm.tsv").is_symlink()
     assert (out / "kegg/ko_modules.tsv").is_file()
     # This explicit target always validates its completed inputs before refresh.
     assert "Nothing to be done" not in run()

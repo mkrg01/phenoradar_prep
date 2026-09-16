@@ -2,9 +2,10 @@
 
 [Documentation](index.md)
 
-`phenoradar_inputs` links available completed results into
+`phenoradar_inputs` collects available completed results into
 `results/<run_name>/phenoradar_inputs/`. It needs no collection settings and
-starts no analyses or downloads. Keep linked source files available.
+starts no analyses or downloads. It writes the OG TPM input in three-column
+format and links the other completed results. Keep linked source files available.
 
 ## Collecting results
 
@@ -21,12 +22,13 @@ preserves the previous collection.
 
 ## Published files
 
-Original result paths are preserved, with aliases for common inputs:
+Original result paths are preserved, with a converted TPM table and aliases for
+common inputs:
 
 | Path under `phenoradar_inputs/` | Contents |
 | --- | --- |
 | `species_metadata.tsv` | Alias of `metadata/species_metadata.tsv` |
-| `tpm.tsv` | Alias of `orthogroups/expression/tpm.tsv` |
+| `tpm.tsv` | Three-column OG input: `species`, `orthogroup`, `tpm` |
 | `alignments/{og}.faa` | Aliases of completed OG alignments |
 | `metadata/`, `proteins/` | Selection, traits, taxonomy/QC, and translations |
 | `orthogroups/` | Expression, mappings, and alignments |
@@ -52,11 +54,21 @@ Collection validates identities, expression values, alignment inventories,
 checksums, and tree tips. Full trees must cover selected species; phenotyped and
 representative trees may cover subsets. Corrupt completed inputs stop collection.
 
-Multiple expression runs remain separate; select or aggregate replicates for
-your downstream analysis. Some collected files are future input candidates;
+The OG `tpm.tsv` export requires exactly one run per species. Multiple runs
+cause an error identifying the affected species; select one run per species in
+the upstream metadata and regenerate the run tables before collecting inputs.
+No runs are automatically averaged or summed. The source run tables remain
+available under `orthogroups/expression/`. Some collected files are future input candidates;
 collection does not guarantee PhenoRadar supports every file.
 
-OG `tpm.tsv` is rescaled to one million per run. KO values sum original TPM and
+OG `tpm.tsv` preserves the source TPM values and numeric text while removing
+the `run` column; it does not renormalize or fill absent coordinates. The source
+values are already rescaled to one million per run (and hence per species).
+For OG expression, set `data.tpm_path` to
+`results/run001/phenoradar_inputs/tpm.tsv`, with `species_col: species`,
+`feature_col: orthogroup`, and `value_col: tpm`.
+
+KO expression remains run-level. KO values sum original TPM and
 can overlap across KOs; review [support and missing values](kegg.md#outputs).
 For KO expression, configure PhenoRadar as follows (replace `run001`):
 

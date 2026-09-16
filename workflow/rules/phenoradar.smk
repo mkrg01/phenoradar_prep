@@ -9,7 +9,7 @@ rule phenoradar_inputs:
         snapshot=lambda wc: phenoradar_snapshot()["files"],
         code=f"{SCRIPTS}/phenoradar_inputs.py",
         helpers=[f"{SCRIPTS}/{name}.py" for name in
-                 ["phenoradar_metadata", "species_traits", "filter_species", "layout", "common"]]
+                 ["phenoradar_metadata", "species_traits", "filter_species", "layout", "common", "export_species_tpm"]]
     # This explicit manual target always validates and refreshes its publication.
     # Do not declare directory() output: Snakemake would delete the previous
     # bundle before validation, and again on failure, bypassing atomic rollback.

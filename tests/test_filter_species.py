@@ -111,7 +111,9 @@ def test_filtered_metadata_and_alignments_feed_phenoradar(snapshot, tmp_path):
     assert all(r["family"] == "Plantaceae" and r["contrast_pair_id"] == "" for r in metadata)
     out = tmp_path / "phenoradar_inputs"
     collect_inputs(source, out, exclusions=["Plant_A"])
-    assert (out / "tpm.tsv").resolve() == filtered / "orthogroups/expression/tpm.tsv"
+    assert (out / "orthogroups/expression/tpm.tsv").resolve() == filtered / "orthogroups/expression/tpm.tsv"
+    assert {row["species"] for row in read_tsv(out / "tpm.tsv")} == set(SPECIES[1:])
+    assert list(read_tsv(out / "tpm.tsv")[0]) == ["species", "orthogroup", "tpm"]
     assert (out / "alignments/OGshared.faa").is_symlink()
     assert not (out / "alignments/OGempty.faa").exists()
     assert (out / "phylogeny/all/species_tree.pruned.nwk").is_symlink()

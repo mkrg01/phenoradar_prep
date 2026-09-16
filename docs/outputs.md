@@ -42,6 +42,21 @@ Long tables have `species`, `run`, `orthogroup`, and `tpm_sum` or `tpm`.
 Wide tables have one row per run and one column per OG; missing combinations
 are zero. Multiple runs per species are kept separately.
 
+The [PhenoRadar input collector](phenoradar_inputs.md) writes
+`phenoradar_inputs/tpm.tsv` with exactly `species`, `orthogroup`, and `tpm`
+columns, preserving the source numeric values. It rejects multiple runs per
+species instead of aggregating them automatically. The run-level tables above
+remain available for QC and other analyses.
+
+For a TPM-only conversion of completed results, without collecting other files:
+
+```bash
+python workflow/scripts/export_species_tpm.py \
+  --samples results/full/metadata/samples.tsv \
+  --input results/full/orthogroups/expression/tpm.tsv \
+  --output results/full/orthogroups/expression/tpm_species.tsv
+```
+
 - `tpm_sum`: original TPM summed by OG; unmapped genes excluded.
 - `tpm`: retained OG values rescaled to one million per run, describing relative
   expression within the retained OG set.

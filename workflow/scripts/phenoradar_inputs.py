@@ -9,6 +9,7 @@ from pathlib import Path
 import tempfile
 
 from common import read_tsv, sha256, species_from_gene_id
+from export_species_tpm import export as export_species_tpm
 from filter_species import fasta_records, manifest, safe_name, table, validate_exclusions
 from phenoradar_metadata import read_base, with_pairs
 from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
@@ -307,7 +308,7 @@ def check_destination(out):
     if out.exists():
         for path in out.iterdir():
             if path.name in allowed and (path.is_symlink() or
-                    (path.name in {"species_metadata.tsv", ".snakemake_timestamp"} and path.is_file())):
+                    (path.name in {"species_metadata.tsv", "tpm.tsv", ".snakemake_timestamp"} and path.is_file())):
                 continue
             if path.name in directories and path.is_dir() and not path.is_symlink():
                 for child in path.rglob("*"):
@@ -384,8 +385,12 @@ def export(source, outdir=None, exclusions=(), trait="C4"):
         for dest, path in links.items():
             target = stage / dest
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.symlink_to(path.resolve())
-            print(f"{dest} -> {path}", flush=True)
+            if dest == "tpm.tsv":
+                export_species_tpm(source / "metadata/samples.tsv", path, target)
+                print(f"{dest}: species/orthogroup/tpm exported from {path}", flush=True)
+            else:
+                target.symlink_to(path.resolve())
+                print(f"{dest} -> {path}", flush=True)
         for path, expected in stats.items():
             stat = path.stat()
             if (stat.st_size, stat.st_mtime_ns, stat.st_ino) != expected:
