@@ -9,6 +9,8 @@ on Linux/Bash, and edit [config/config.yaml](../config/config.yaml).
 Place [input files](inputs.md#file-formats) in `input/`.
 See [container setup](containers.md) for compute-node tools and images.
 First use needs network for the image and missing [references](references.md).
+Run `./run_pipeline.sh --prepare-container --cores 1 --resources mem_gb=4`
+once before the first container analysis or dry-run; see [container setup](containers.md).
 `SNAKEMAKE_BIN` can select another Snakemake executable.
 
 ## Slurm
@@ -53,8 +55,11 @@ and peak memory before a full run. The main configuration leaves the list disabl
 
 ## Targets
 
-Explicit analysis targets work even when their `enabled` flag is false and
-schedule missing prerequisites automatically.
+Targets schedule missing prerequisites automatically. Phylogeny targets use
+`phylogeny.trees` and require the corresponding postprocessing flag for
+`contrast_pairs`, `timetree`, `phylogeny_calibrations`, and `taxonomy_check`.
+`phylogeny` stops at tree inference; `all` also runs enabled postprocessing.
+Alignment and KEGG targets retain their explicit-target opt-in behavior.
 
 | Target | Work requested |
 | --- | --- |
@@ -65,17 +70,16 @@ schedule missing prerequisites automatically.
 | `alignments` | [All-copy OG alignments](alignments.md) |
 | `kegg` | [KO annotation and original-TPM sums](kegg.md) |
 | `phylogeny_prepare` | BUSCO input audit, outgroup, and marker plan |
-| `phylogeny` | [Species trees](phylogeny.md), plus enabled dating/taxonomy checks |
+| `phylogeny` | Infer the trees selected by `phylogeny.trees` |
 | `phylogeny_calibrations` | Trees and [TimeTree calibrations](dating.md#timetree-calibrations), without dating |
 | `timetree` | [treePL dating](dating.md), with TimeTree or manual age calibrations |
 | `taxonomy_check` | [MonoPhy review](taxonomy_check.md) |
-| `contrast_pairs` | [Representative selection, inference, and pairs](contrast_pairs.md#representative-analysis) |
-| `phylogeny_contrast_pairs` | [Pairs from full/phenotyped trees](contrast_pairs.md#pairs-from-full-or-phenotyped-trees); with exclusions, uses completed filtered results |
+| `contrast_pairs` | [Pairs on the selected trees](contrast_pairs.md); includes their missing inference steps |
 | `filter_species` | [Export completed results after exclusions](species_filter.md) |
 | `phenoradar_inputs` | [Collect available completed results](phenoradar_inputs.md) |
 
-Full/phenotyped targets follow `phylogeny.species_sets`. Filtering and collection
-are manual targets that never start producer analyses.
+All phylogeny targets follow `phylogeny.trees`; a target never changes the species
+set. Filtering and collection are manual targets that never start producer analyses.
 
 ## Resource budgets
 
@@ -115,6 +119,8 @@ Use a new `run_name` for fresh work.
 ODB retains resumable work in `work/<run_name>/orthogroups/mapping/`;
 changed inputs use separate work. Native results/logs also appear in `results/`.
 After replacing ODB software in place, use `--forcerun odb_map`.
+To import previously saved annotations, set
+[`odb.existing_results`](references.md#reusing-existing-odb-results).
 
 KofamScan retains work in `work/<run_name>/kegg/`: completed species annotations
 are reused, while failed annotations restart with prior attempts retained.

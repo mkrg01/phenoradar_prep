@@ -2,8 +2,8 @@
 #SBATCH --job-name=phenoradar_prep
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=192G
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=256G
 #SBATCH --time=21-00:00:00
 #SBATCH --partition=debug
 #SBATCH --output=pipeline-%j.out
@@ -57,12 +57,14 @@ mkdir -p "$XDG_CACHE_HOME"
 
 # Convert mem_gb only within --resources. Leave targets after -- in "$@".
 workflow_args=()
+prepare_container=false
 reading_resources=false
 while (($#)); do
     arg=$1
     shift
     case "$arg" in
         --) break ;;
+        --prepare-container) prepare_container=true; reading_resources=false; continue ;;
         --resources|--res)
             arg=--resources
             reading_resources=true ;;
@@ -81,6 +83,15 @@ while (($#)); do
     workflow_args+=("$arg")
 done
 
+# Bootstrap without Conda environment declarations: Snakemake 9.8 can query
+# Conda inside the image before its normal image-pull step.
+container_setup_args=()
+if "$prepare_container"; then
+    (($# == 0)) || die '--prepare-container does not accept analysis targets.'
+    container_setup_args=(--snakefile workflow/container.smk --software-deployment-method apptainer)
+    set -- prepare_container
+fi
+
 # Mount the repository, including input/ and resources/. The local executor and
 # allocation limits apply after user options.
 printf -v container_root '%q' "$root"
@@ -88,4 +99,4 @@ exec "$snakemake_bin" --printshellcmds --rerun-incomplete \
     --snakefile workflow/Snakefile \
     --software-deployment-method conda apptainer \
     --apptainer-args "--cleanenv --bind $container_root" "${workflow_args[@]}" \
-    --executor local "${allocation_args[@]}" -- "$@"
+    "${container_setup_args[@]}" --executor local "${allocation_args[@]}" -- "$@"

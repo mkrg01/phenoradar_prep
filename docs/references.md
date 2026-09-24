@@ -62,6 +62,35 @@ python workflow/scripts/verify_odb_reference.py \
 
 To refresh, archive the node's snapshot and use a new `run_name`.
 
+### Reusing existing ODB results
+
+Set `odb.existing_results` to a snapshot directory, relative to the repository
+root (or an absolute path). Keep it inside the repository for container runs:
+
+```yaml
+odb:
+  existing_results: resources/odb_existing/tlight
+  node: 3193
+```
+
+The directory must contain `annotations.tsv` and `snapshot.json`. Schema version 1
+records `version` (`v12`), `node`, `proteins` (one record per species with `species`,
+`odb_species`, and the input FASTA's `sha256`), and `annotations` (with
+`path: annotations.tsv` and `sha256`). Existing recorded absolute input paths are
+provenance only; the original files need not remain at those paths.
+
+Use the normal `mapping` or `all` target. Both bypass reference downloads and
+ODB-mapper when this setting is supplied. `null` selects new mapping. The explicit
+`references` target still prepares a reference and is unnecessary for imports.
+
+CDS translation still runs: every selected protein FASTA must have the same SHA256
+as its recorded original input. The import also checks the OrthoDB version/node,
+species coverage, and annotations checksum. Mismatches stop the import; they never
+silently trigger remapping. A subset of the recorded species is supported, with
+other species' annotations omitted. Output tables retain their normal formats;
+`orthogroups/mapping/merge_qc.json` records `mode: existing`, excluded rows, and
+snapshot provenance. Abundance-only changes reuse the completed mapping.
+
 ## KOfam and KEGG reference
 
 Setup downloads [KOfam](https://www.genome.jp/ftp/db/kofam/) profiles/`ko_list`

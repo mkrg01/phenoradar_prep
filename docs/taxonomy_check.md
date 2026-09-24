@@ -10,22 +10,22 @@ runs. Flags support review; they never exclude species automatically.
 
 ```yaml
 phylogeny:
-  species_sets: [all]
-taxonomy_check:
-  enabled: false
-  ranks: [family, subfamily, tribe, subtribe, genus]
-  outlierlevel: 0.5
-  collapse_monophyletic: true
+  trees: [all]
+  taxonomy_check:
+    enabled: true
+    ranks: [family, subfamily, tribe, subtribe, genus]
+    outlierlevel: 0.5
+    collapse_monophyletic: true
 ```
 
 ```bash
 ./run_pipeline.sh --cores 1 --resources mem_gb=8 -- taxonomy_check
 ```
 
-The target follows `phylogeny.species_sets` and can schedule missing inference:
+The target follows `phylogeny.trees` and can schedule missing inference:
 check `--dry-run` and increase resources as needed. Set
-`taxonomy_check.enabled: true` to attach reports to `phylogeny`.
-Representative trees are not checked.
+`phylogeny.taxonomy_check.enabled: true` to include reports in `all`. The explicit
+target also requires this flag. Representative trees are currently unsupported.
 
 Choose unique NCBI `ranks`. `outlierlevel` is the required focal-group fraction
 inside a candidate core clade, in `(0, 1]`; it is not confidence.

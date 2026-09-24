@@ -44,7 +44,7 @@ workflow's `timetree` environment.
 
 Representative analysis, phenotyped inference files, and taxonomy reports remain
 in the source analysis. Completed phenotyped trees can still supply new pairs.
-Pairs use `contrast.trait` and top-level `seed`; IDs can change after exclusion,
+Pairs use top-level `trait` and `seed`; IDs can change after exclusion,
 and zero/one-state subsets yield zero pairs.
 
 ## Numerical and phylogenetic meaning

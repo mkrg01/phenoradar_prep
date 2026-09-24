@@ -49,18 +49,18 @@ def test_selection_has_no_two_state_constraint_and_counts_species_not_runs(tmp_p
         select_phenotyped(samples, traits, tmp_path / "invalid", trait="absent")
 
 
-@pytest.mark.parametrize("sets", [[], "phenotyped", ["all", "all"], ["unknown"], [["all"]]])
-def test_invalid_species_sets_fail_at_configuration(tmp_path, workflow_project, sets):
+@pytest.mark.parametrize("sets", ["phenotyped", ["all", "all"], ["unknown"], [["all"]]])
+def test_invalid_trees_fail_at_configuration(tmp_path, workflow_project, sets):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     if not snakemake:
         pytest.skip("Snakemake required")
     config = tmp_path / "override.yaml"
-    config.write_text(yaml.safe_dump({"phylogeny": {"species_sets": sets}}))
+    config.write_text(yaml.safe_dump({"phylogeny": {"trees": sets}}))
     result = subprocess.run([snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"),
                              "--configfile", str(config), "--list-rules"],
                             cwd=workflow_project, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             env={**os.environ, "XDG_CACHE_HOME": str(tmp_path / "cache")})
-    assert result.returncode != 0 and "phylogeny.species_sets must be a nonempty list" in result.stdout
+    assert result.returncode != 0 and "phylogeny.trees must be a list" in result.stdout
 
 
 def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow_project, command_environment, seed_taxonomy):
@@ -91,7 +91,7 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
     write_tsv(traits, ["species", "C4"], trait_rows)
     seed_taxonomy(source / "taxa.sqlite")
     cfg = {"run_name": "test",
-        "contrast": {"trait": "unrelated"},
+        "trait": "C4",
         "phylogeny": {"outgroup": "auto", "max_markers": 3}}
     config = tmp_path / "override.yaml"
     argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(config),
@@ -102,7 +102,7 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
         argv += ["--use-conda", "--conda-prefix", os.environ["PHYLOGENY_CONDA_PREFIX"]]
 
     def run(sets, target="phylogeny"):
-        cfg["phylogeny"]["species_sets"] = sets
+        cfg["phylogeny"]["trees"] = sets
         config.write_text(yaml.safe_dump(cfg))
         result = subprocess.run(argv + ["--", target], cwd=workflow_project, env=env, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -150,7 +150,7 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
                         backend=(fake_fetch(payload(ids, mrca=str(list(ids)))), {"synthetic": True}))
     for branch in [full, observed]:
         cache_missing_estimates(branch / "species_tree.nwk", dict(zip(species, range(42, 48))), cache)
-    cfg["phylogeny"]["dating"] = {"calibration_source": "timetree"}
+    cfg["phylogeny"]["dating"] = {"enabled": True, "calibration_source": "timetree"}
     run(["phenotyped"], "phylogeny_calibrations")
     assert not (full / "timetree").exists()
     assert json.loads((observed / "timetree/provenance.json").read_text())["status"] == "ready"
@@ -165,8 +165,10 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
         read_tree(observed / "dating/species_tree.dated.nwk", species[1:])
         assert not (full / "dating").exists()
         dated_times = timestamps(observed / "dating")
-        cfg["phylogeny"]["dating"]["enabled"] = True
+        # The phylogeny target stops at inference even with dating enabled.
         run(["all", "phenotyped"])
+        assert not (full / "dating").exists()
+        run(["all", "phenotyped"], "timetree")
         read_tree(full / "dating/species_tree.dated.nwk", species)
         assert timestamps(observed / "dating") == dated_times
         assert "Nothing to be done" in run(["all", "phenotyped"])

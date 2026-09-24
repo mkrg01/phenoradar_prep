@@ -1,5 +1,5 @@
 rule check_taxonomy:
-    wildcard_constraints: phylo_branch=MOLECULAR_BRANCH_PATTERN
+    wildcard_constraints: phylo_branch=TAXONOMY_BRANCH_PATTERN
     input:
         tree=f"{PHYLO_RUN}/species_tree.nwk",
         tree_qc=f"{PHYLO_RUN}/species_tree.json",

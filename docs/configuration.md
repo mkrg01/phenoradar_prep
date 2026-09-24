@@ -28,11 +28,14 @@ Use a new name to retain an earlier analysis. The container image matches
 | `translation.table` | `1` | Genetic code for CDS translation |
 | `tpm.multimap` | `error` | Ambiguous gene assignments; [TPM policies](outputs.md#tpm-interpretation) |
 | `seed` | `12345` | Tree inference, dating, representative selection, and contrast pairs |
+| `trait` | `carnivory` | Shared trait column for species selection, pairs, and metadata |
 
 ## OrthoDB settings
 
 `odb.node` defaults to `3193` (Embryophyta). Choose a supported OrthoDB v12 level
 covering all your species; see [node selection](references.md#choosing-an-orthodb-node).
+`odb.existing_results` defaults to `null` (new mapping); set a snapshot directory
+to [reuse existing annotations](references.md#reusing-existing-odb-results).
 CPU/memory settings use [launcher and rule overrides](running.md#resource-budgets).
 
 ## Optional analyses and exports
@@ -43,9 +46,55 @@ CPU/memory settings use [launcher and rule overrides](running.md#resource-budget
 | `kegg` | [KO annotation and expression](kegg.md) |
 | `phylogeny` | [BUSCO species trees](phylogeny.md) |
 | `phylogeny.dating` | [Calibrations and treePL dating](dating.md) |
-| `contrast` | [Trait contrast pairs](contrast_pairs.md) |
-| `taxonomy_check` | [MonoPhy review](taxonomy_check.md) |
+| `phylogeny.contrast_pairs` | [Trait contrast pairs](contrast_pairs.md) |
+| `phylogeny.taxonomy_check` | [MonoPhy review](taxonomy_check.md) |
 | `exclude_species` | [Manual species exclusion](species_filter.md) |
 
 See [targets](running.md#targets) for requesting analyses.
 [PhenoRadar input collection](phenoradar_inputs.md) needs no configuration section.
+
+## Choosing species trees
+
+`phylogeny.trees` is the single selection of trees to infer. An empty list disables
+inference; each selected tree is included in `all` and in the `phylogeny` target.
+The common `trait` is read from `input/species_trait.tsv`.
+
+| `phylogeny.trees` | Inference species |
+| --- | --- |
+| `[]` | No species trees |
+| `[all]` | Every species passing input selection and BUSCO filtering |
+| `[phenotyped]` | Selected species with a known `trait`, including state zero |
+| `[representatives]` | Representatives of homogeneous trait clades on the NCBI guide |
+| `[all, representatives]` | Two independent inference runs |
+
+For a compressed tree with contrast pairs:
+
+```yaml
+trait: carnivory
+phylogeny:
+  trees: [representatives]
+  contrast_pairs:
+    enabled: true
+  dating:
+    enabled: false
+  taxonomy_check:
+    enabled: false
+```
+
+Representatives are selected from known-trait species; both trait states are
+compressed. This selection does not preserve every positive-trait species.
+The remaining BUSCO, alignment, rooting, and inference settings apply to every
+selected tree. Changing which trees are requested does not change inference
+parameters for an existing tree.
+
+`phylogeny.contrast_pairs.enabled` selects pairs on those trees; it never chooses
+a different inference species set. `phylogeny.dating.enabled` and
+`phylogeny.taxonomy_check.enabled` likewise request postprocessing of each tree.
+Dating and taxonomy checks currently support only `all` and `phenotyped`;
+combining either with `representatives` is rejected.
+
+Enabled postprocessing requires a nonempty `trees` list. Explicit phylogeny targets
+respect these settings: a disabled step produces an error rather than becoming
+enabled by its target name. `phylogeny` runs through tree inference only; `all`
+also runs enabled postprocessing. Startup logs show the selected trees and steps,
+and resolved marker plans report the number of species before inference.

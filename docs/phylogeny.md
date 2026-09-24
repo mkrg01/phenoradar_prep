@@ -38,22 +38,30 @@ original IDs fail extraction.
 ## Species sets
 
 ```yaml
+trait: carnivory
 phylogeny:
-  species_sets: [all, phenotyped]
-  trait: C4
+  trees: [representatives]
+  contrast_pairs:
+    enabled: false
 ```
 
-| Set | Species | Output under `results/<run_name>/` |
+| Tree | Inference species | Output under `results/<run_name>/` |
 | --- | --- | --- |
-| `all` (default) | All species passing input selection | `phylogeny/all/` |
-| `phenotyped` | Selected species with a nonmissing `phylogeny.trait` | `phylogeny/phenotyped/` |
+| `all` | All species passing input selection | `phylogeny/all/` |
+| `phenotyped` | Selected species with a nonmissing `trait` | `phylogeny/phenotyped/` |
+| `representatives` | Known-trait species compressed on the NCBI guide | `phylogeny/representatives/` |
 
-Each set needs `min_taxa` species and gets independent markers, alignments,
-trees, and roots. The `all` set needs no trait file; see [traits](inputs.md#traits)
-for defining the phenotyped subset.
+Use `trees: []` to disable inference, or list multiple trees to infer them
+independently. Each tree gets its own markers, alignments, roots, and diagnostics.
+Representative selection requires two observed states and at least four
+representatives; both trait states are compressed, selecting by BUSCO completeness
+with seeded ties. See [representative selection](contrast_pairs.md#representative-selection).
+The `all` tree needs no trait file. See [traits](inputs.md#traits) for missing values.
 
-Dating, taxonomy checks, and `phylogeny_contrast_pairs` also follow `species_sets`.
-[Representative analysis](contrast_pairs.md#representative-analysis) is separate.
+Pair selection, dating, and taxonomy checks consume the selected trees; enabling
+pairs never changes inference species. Dating and taxonomy checks currently
+reject representative trees. Their flags are under `phylogeny`; all enabled
+postprocessing requires a nonempty `trees` list.
 
 ## Setup and execution
 
@@ -65,8 +73,8 @@ Dating, taxonomy checks, and `phylogeny_contrast_pairs` also follow `species_set
 ./run_pipeline.sh --cores 32 --resources mem_gb=128 -- phylogeny
 ```
 
-Set `phylogeny.enabled: true` to include trees in `all`. Tools are bundled in the
-container; see [native execution](containers.md#native-execution) for Conda setup.
+The selected trees are included in `all`. `phylogeny` stops at tree inference;
+`all` also includes enabled postprocessing. Tools are bundled in the container; see [native execution](containers.md#native-execution) for Conda setup.
 
 ## Rooting
 
@@ -129,7 +137,7 @@ Under `results/<run_name>/phylogeny/<set>/`:
 
 | Output | Contents |
 | --- | --- |
-| `selection/`, `rooting/` | Phenotyped selection, outgroup, and supporting records |
+| `selection/`, `rooting/` | Phenotyped/representative selection, outgroup, and supporting records |
 | `plan/` | Marker ranks/selection, source paths, lineage, and provenance |
 | `species/*.faa`, `*.json` | Prepared proteins and sequence QC |
 | `markers/`, `alignments/raw/` | Marker inputs and raw alignments |

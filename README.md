@@ -28,6 +28,12 @@ then submit from the repository root:
 sbatch run_pipeline.sh
 ```
 
+Choose species trees with `phylogeny.trees`: `[]` disables inference, `[all]`
+uses every selected species, `[phenotyped]` uses known-trait species, and
+`[representatives]` compresses known-trait species before inference. Pair
+selection is controlled by `phylogeny.contrast_pairs.enabled` and uses those
+same trees. See [configuration](docs/configuration.md#choosing-species-trees).
+
 The workflow reads `config/config.yaml` automatically and uses the CPUs and
 memory allocated by Slurm. See [running the workflow](docs/running.md) for direct
 execution, individual targets, and resource settings.

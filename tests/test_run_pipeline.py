@@ -280,3 +280,72 @@ def test_real_workflow_container_setup(batch_workspace, mode, deployment):
         assert not {"prepare", "phenoradar_metadata"} & rules
     for directory in ("results", "resources", "work"):
         assert not (checkout / directory).exists()
+
+
+@pytest.mark.parametrize("mode", ["batch", "direct"])
+def test_container_bootstrap_pulls_before_conda_probe_and_reuses_cache(batch_workspace, tmp_path, mode):
+    checkout, script, env = batch_workspace
+    snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
+    if not snakemake:
+        pytest.skip("Snakemake is not available")
+    # Snakemake's own Singularity command builder requires a whitespace-free image path.
+    renamed = tmp_path / "bootstrap"
+    checkout.rename(renamed)
+    checkout = renamed
+    shutil.copyfile(ROOT / "workflow/container.smk", checkout / "workflow/container.smk")
+    (checkout / "workflow/scripts").mkdir()
+    shutil.copyfile(ROOT / "workflow/scripts/versioning.py", checkout / "workflow/scripts/versioning.py")
+    shutil.copyfile(ROOT / "VERSION", checkout / "VERSION")
+    fake_bin = tmp_path / "bootstrap_bin"
+    fake_bin.mkdir()
+    events = tmp_path / "container_events.jsonl"
+    command = fake_bin / "singularity"
+    command.write_text(
+        f"#!{sys.executable}\n" + r'''import json, os, sys
+from pathlib import Path
+args = sys.argv[1:]
+if args == ["--version"]:
+    print("apptainer version 1.4.2")
+    raise SystemExit(0)
+if args[0] == "pull":
+    image = Path(args[args.index("--name") + 1])
+    image.write_text("synthetic image")
+    event = {"action": "pull", "image": str(image.resolve()), "url": args[-1]}
+else:
+    assert "exec" in args, args
+    image = next(Path(arg) for arg in args if arg.endswith(".simg"))
+    assert image.is_file(), "container was probed before it was pulled"
+    assert "conda info --json" in args[-1], args
+    event = {"action": "probe", "image": str(image.resolve())}
+with Path(os.environ["PHENORADAR_TEST_EVENTS"]).open("a") as handle:
+    handle.write(json.dumps(event) + "\n")
+''')
+    command.chmod(0o755)
+    forbidden = fake_bin / "conda"
+    forbidden.write_text(f"#!{sys.executable}\nraise SystemExit('host Conda must not run')\n")
+    forbidden.chmod(0o755)
+    env.update({"SNAKEMAKE_BIN": str(Path(snakemake).resolve()),
+                "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
+                "PHENORADAR_TEST_EVENTS": str(events)})
+    if mode == "direct":
+        env = {k: v for k, v in env.items() if not k.startswith("SLURM_")}
+        script = checkout / "run_pipeline.sh"
+    args = [str(script), "--prepare-container", "--cores", "1", "--resources", "mem_gb=4"]
+    for _ in range(2):
+        result = subprocess.run(args, cwd=checkout, env=env, text=True, capture_output=True, timeout=60)
+        assert result.returncode == 0, result.stdout + result.stderr
+    records = [json.loads(line) for line in events.read_text().splitlines()]
+    assert [r["action"] for r in records] == ["pull", "probe", "probe"]
+    assert len({r["image"] for r in records}) == 1
+    assert records[0]["url"].endswith(":v" + (ROOT / "VERSION").read_text().strip())
+    assert not (checkout / "input").exists()
+    assert not (checkout / "results").exists()
+
+
+def test_container_bootstrap_rejects_analysis_targets(batch_workspace):
+    checkout, script, env = batch_workspace
+    env["SNAKEMAKE_BIN"] = sys.executable
+    result = subprocess.run([str(script), "--prepare-container", "--", "all"],
+                            cwd=checkout, env=env, text=True, capture_output=True)
+    assert result.returncode == 2
+    assert "does not accept analysis targets" in result.stderr

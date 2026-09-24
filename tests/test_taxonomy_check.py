@@ -221,7 +221,7 @@ def test_snakemake_reuses_species_tree_without_gene_inputs(check_inputs, workflo
             shutil.copyfile(check_inputs["samples"], folder / "selection/samples.tsv")
     before = {p: (sha256(p), p.stat().st_mtime_ns) for p in originals}
     override = project / "override.yaml"
-    cfg = {"run_name": "test", "phylogeny": {"species_sets": ["all"]}, "taxonomy_check": {"ranks": ["family"]}}
+    cfg = {"run_name": "test", "phylogeny": {"trees": ["all"], "taxonomy_check": {"enabled": True, "ranks": ["family"]}}}
     environment = command_environment({"python": sys.executable})
     wrapper = project / "workflow/CheckSnakefile"
     wrapper.parent.mkdir()
@@ -242,11 +242,11 @@ def test_snakemake_reuses_species_tree_without_gene_inputs(check_inputs, workflo
     assert json.loads((full/"summary.json").read_text())["candidate_species"] == 1
     assert not phenotyped.exists()
     assert "Nothing to be done" in run()
-    cfg["taxonomy_check"]["outlierlevel"] = 0.4
+    cfg["phylogeny"]["taxonomy_check"]["outlierlevel"] = 0.4
     run()
     assert json.loads((full/"summary.json").read_text())["candidate_species"] > 1
     full_times = {p: p.stat().st_mtime_ns for p in full.rglob("*") if p.is_file()}
-    cfg["phylogeny"]["species_sets"] = ["phenotyped"]
+    cfg["phylogeny"]["trees"] = ["phenotyped"]
     run()
     assert phenotyped.is_dir()
     assert {p: p.stat().st_mtime_ns for p in full.rglob("*") if p.is_file()} == full_times

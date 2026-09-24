@@ -8,8 +8,10 @@ your own minimum/maximum ages for ancestors. The topology and root stay fixed,
 and all tips are treated as living species with age zero.
 
 Prepare the [BUSCO inputs](phylogeny.md#inputs) and [software](containers.md), then
-run from the repository root. `phylogeny.species_sets` selects the trees to date
-(`[all]` by default). Missing upstream steps are run automatically.
+set `phylogeny.trees: [all]` (or `[phenotyped]`, or both) and
+`phylogeny.dating.enabled: true`, then run from the repository root.
+Missing upstream steps are run automatically. Representative trees currently
+cannot be dated through this workflow; an unsupported combination is rejected.
 
 ## TimeTree calibrations
 
@@ -34,8 +36,8 @@ Run dating after review:
 ./run_pipeline.sh --cores 32 --resources mem_gb=128 -- timetree
 ```
 
-`timetree` also prepares missing calibrations. Set `phylogeny.dating.enabled: true`
-to include dating in `phylogeny`. TimeTree responses are cached across runs;
+`timetree` also prepares missing calibrations. Enabled dating is included in
+`all`; the `phylogeny` target stops at inference. TimeTree responses are cached across runs;
 to refresh, archive `resources/timetree_cache/` and rerun with a new `run_name`.
 
 ## Manual calibrations

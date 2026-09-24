@@ -2,6 +2,7 @@ from busco_phylogeny import busco_full_path
 
 
 def phylogeny_samples(wc):
+    report_phylogeny_plan()
     if wc.phylo_branch == REPRESENTATIVES_REL:
         return checkpoints.select_contrast_representatives.get().output.samples
     if wc.phylo_branch == PHYLO_BRANCHES["phenotyped"]:
@@ -29,8 +30,16 @@ def phylogeny_tables(wc):
             for species in sorted({r["species"] for r in phylogeny_input_rows(wc)})]
 
 
+REPORTED_PHYLOGENY_PLANS = set()
+
+
 def phylogeny_plan_rows(wc, table):
     output = checkpoints.plan_phylogeny.get(phylo_branch=wc.phylo_branch).output
+    if wc.phylo_branch not in REPORTED_PHYLOGENY_PLANS:
+        with open(output.species) as handle:
+            count = sum(1 for _ in csv.DictReader(handle, delimiter="\t"))
+        logger.info(f"Phylogeny inference species: {wc.phylo_branch} = {count} (trait={config['trait']})")
+        REPORTED_PHYLOGENY_PLANS.add(wc.phylo_branch)
     with open(getattr(output, table)) as handle:
         return list(csv.DictReader(handle, delimiter="\t"))
 
@@ -272,7 +281,7 @@ rule infer_busco_species_tree:
 
 
 rule prepare_timetree_calibrations:
-    wildcard_constraints: phylo_branch=MOLECULAR_BRANCH_PATTERN
+    wildcard_constraints: phylo_branch=DATING_BRANCH_PATTERN
     input:
         tree=f"{PHYLO_RUN}/species_tree.nwk",
         metadata=f"{META}/metadata_high_busco.tsv",
@@ -300,7 +309,7 @@ rule prepare_timetree_calibrations:
 
 
 rule date_busco_species_tree:
-    wildcard_constraints: phylo_branch=MOLECULAR_BRANCH_PATTERN
+    wildcard_constraints: phylo_branch=DATING_BRANCH_PATTERN
     input:
         tree=f"{PHYLO_RUN}/species_tree.nwk",
         provenance=f"{PHYLO_RUN}/species_tree.json",

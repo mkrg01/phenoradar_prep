@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "workflow" / "scripts"))
@@ -19,7 +20,13 @@ from snapshot_taxonomy import snapshot
 def workflow_project(tmp_path):
     """Run the real Snakefile with fixed storage paths in an isolated project."""
     (tmp_path / "config").mkdir()
-    shutil.copyfile(ROOT / "config/config.yaml", tmp_path / "config/config.yaml")
+    config = yaml.safe_load((ROOT / "config/config.yaml").read_text())
+    # Keep tests independent of the user's active analysis selection.
+    config["trait"] = "C4"
+    config["phylogeny"]["trees"] = []
+    for section in ["contrast_pairs", "dating", "taxonomy_check"]:
+        config["phylogeny"][section]["enabled"] = False
+    (tmp_path / "config/config.yaml").write_text(yaml.safe_dump(config))
     return tmp_path
 
 

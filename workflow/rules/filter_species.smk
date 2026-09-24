@@ -18,7 +18,7 @@ rule filter_species:
         source=str(Path(OUT).resolve()),
         excluded=json.dumps(EXCLUDE_SPECIES),
         traits=INPUTS["species_trait"],
-        trait=config["contrast"]["trait"], seed=config["seed"],
+        trait=config["trait"], seed=config["seed"],
         inventory=lambda wc: json.dumps(filter_snapshot()["sections"], sort_keys=True)
     conda: "../envs/timetree.yaml"
     resources: mem_mb=8000

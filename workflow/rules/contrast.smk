@@ -41,57 +41,59 @@ rule prepare_phylogeny_outgroup:
         "{params.tree_flag} {input.tree:q} > {log:q} 2>&1"
 
 
-checkpoint select_contrast_representatives:
-    input:
-        samples=f"{META}/samples.tsv",
-        metadata=f"{META}/metadata_high_busco.tsv",
-        traits=INPUTS["species_trait"],
-        tree=f"{ROOTING}/ncbi_tree.nwk",
-        code=f"{SCRIPTS}/contrast_pairs.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/phylogeny_root.py"]
-    output:
-        samples=f"{REPRESENTATIVES}/selection/samples.tsv",
-        traits=f"{REPRESENTATIVES}/selection/traits.tsv",
-        tree=f"{REPRESENTATIVES}/selection/ncbi_skim.nwk",
-        all=f"{REPRESENTATIVES}/selection/ncbi_skim.all.tsv",
-        sampled=f"{REPRESENTATIVES}/selection/ncbi_skim.sampled.tsv",
-        qc=f"{REPRESENTATIVES}/selection/selection.json"
-    params:
-        outdir=f"{REPRESENTATIVES}/selection", trait=config["contrast"]["trait"], seed=config["seed"]
-    conda: "../envs/timetree.yaml"
-    resources: mem_mb=4000
-    log: f"{LOG}/{REPRESENTATIVES_REL}/selection.log"
-    shell:
-        "{PYTHON:q} {input.code:q} prepare --samples {input.samples:q} --metadata {input.metadata:q} "
-        "--traits {input.traits:q} --tree {input.tree:q} "
-        "--trait {params.trait:q} --seed {params.seed} --outdir {params.outdir:q} > {log:q} 2>&1"
+if "representatives" in PHY["trees"]:
+    checkpoint select_contrast_representatives:
+        input:
+            samples=f"{META}/samples.tsv",
+            metadata=f"{META}/metadata_high_busco.tsv",
+            traits=INPUTS["species_trait"],
+            tree=f"{ROOTING}/ncbi_tree.nwk",
+            code=f"{SCRIPTS}/contrast_pairs.py",
+            helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/phylogeny_root.py"]
+        output:
+            samples=f"{REPRESENTATIVES}/selection/samples.tsv",
+            traits=f"{REPRESENTATIVES}/selection/traits.tsv",
+            tree=f"{REPRESENTATIVES}/selection/ncbi_skim.nwk",
+            all=f"{REPRESENTATIVES}/selection/ncbi_skim.all.tsv",
+            sampled=f"{REPRESENTATIVES}/selection/ncbi_skim.sampled.tsv",
+            qc=f"{REPRESENTATIVES}/selection/selection.json"
+        params:
+            outdir=f"{REPRESENTATIVES}/selection", trait=config["trait"], seed=config["seed"]
+        conda: "../envs/timetree.yaml"
+        resources: mem_mb=4000
+        log: f"{LOG}/{REPRESENTATIVES_REL}/selection.log"
+        shell:
+            "{PYTHON:q} {input.code:q} prepare --samples {input.samples:q} --metadata {input.metadata:q} "
+            "--traits {input.traits:q} --tree {input.tree:q} "
+            "--trait {params.trait:q} --seed {params.seed} --outdir {params.outdir:q} > {log:q} 2>&1"
 
 
-rule identify_contrast_pairs:
-    input:
-        tree=f"{REPRESENTATIVES}/species_tree.nwk",
-        outgroup=f"{REPRESENTATIVES}/rooting/outgroup.txt",
-        selection=rules.select_contrast_representatives.output,
-        code=f"{SCRIPTS}/contrast_pairs.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/phylogeny_root.py"]
-    output:
-        tree=f"{CONTRAST}/summary_tree.nwk",
-        all=f"{CONTRAST}/summary_tree.all.tsv",
-        sampled=f"{CONTRAST}/summary_tree.sampled.tsv",
-        contrastive=f"{CONTRAST}/contrastive.nwk",
-        contrast_all=f"{CONTRAST}/contrastive.all.tsv",
-        contrast_sampled=f"{CONTRAST}/contrastive.sampled.tsv",
-        pairs=f"{CONTRAST}/contrast_pairs.tsv",
-        metadata=f"{CONTRAST}/species_metadata.tsv",
-        qc=f"{CONTRAST}/summary.json"
-    params:
-        selection=f"{REPRESENTATIVES}/selection", outdir=CONTRAST, seed=config["seed"]
-    conda: "../envs/timetree.yaml"
-    resources: mem_mb=4000
-    log: f"{LOG}/{REPRESENTATIVES_REL}/contrast/pairs.log"
-    shell:
-        "{PYTHON:q} {input.code:q} summarize --tree {input.tree:q} --selection-dir {params.selection:q} "
-        "--outgroup-file {input.outgroup:q} --outdir {params.outdir:q} --seed {params.seed} > {log:q} 2>&1"
+    if PHY["contrast_pairs"]["enabled"]:
+        rule identify_contrast_pairs:
+            input:
+                tree=f"{REPRESENTATIVES}/species_tree.nwk",
+                outgroup=f"{REPRESENTATIVES}/rooting/outgroup.txt",
+                selection=rules.select_contrast_representatives.output,
+                code=f"{SCRIPTS}/contrast_pairs.py",
+                helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/phylogeny_root.py"]
+            output:
+                tree=f"{CONTRAST}/summary_tree.nwk",
+                all=f"{CONTRAST}/summary_tree.all.tsv",
+                sampled=f"{CONTRAST}/summary_tree.sampled.tsv",
+                contrastive=f"{CONTRAST}/contrastive.nwk",
+                contrast_all=f"{CONTRAST}/contrastive.all.tsv",
+                contrast_sampled=f"{CONTRAST}/contrastive.sampled.tsv",
+                pairs=f"{CONTRAST}/contrast_pairs.tsv",
+                metadata=f"{CONTRAST}/species_metadata.tsv",
+                qc=f"{CONTRAST}/summary.json"
+            params:
+                selection=f"{REPRESENTATIVES}/selection", outdir=CONTRAST, seed=config["seed"]
+            conda: "../envs/timetree.yaml"
+            resources: mem_mb=4000
+            log: f"{LOG}/{REPRESENTATIVES_REL}/contrast/pairs.log"
+            shell:
+                "{PYTHON:q} {input.code:q} summarize --tree {input.tree:q} --selection-dir {params.selection:q} "
+                "--outgroup-file {input.outgroup:q} --outdir {params.outdir:q} --seed {params.seed} > {log:q} 2>&1"
 
 
 rule plot_contrast_tree:
@@ -114,7 +116,7 @@ rule plot_contrast_tree:
 
 
 rule identify_phylogeny_contrast_pairs:
-    wildcard_constraints: phylo_branch=MOLECULAR_BRANCH_PATTERN
+    wildcard_constraints: phylo_branch=PAIR_BRANCH_PATTERN
     input:
         tree=f"{PHYLO_RUN}/species_tree.nwk",
         tree_qc=f"{PHYLO_RUN}/species_tree.json",
@@ -134,7 +136,7 @@ rule identify_phylogeny_contrast_pairs:
         pairs=f"{PHYLO_RUN}/contrast/contrast_pairs.tsv",
         metadata=f"{PHYLO_RUN}/contrast/species_metadata.tsv",
         qc=f"{PHYLO_RUN}/contrast/summary.json"
-    params: outdir=f"{PHYLO_RUN}/contrast", trait=config["contrast"]["trait"], seed=config["seed"]
+    params: outdir=f"{PHYLO_RUN}/contrast", trait=config["trait"], seed=config["seed"]
     conda: "../envs/timetree.yaml"
     resources: mem_mb=4000
     log: f"{LOG}/{{phylo_branch}}/contrast/pairs.log"

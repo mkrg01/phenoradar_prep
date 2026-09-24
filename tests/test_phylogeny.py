@@ -410,7 +410,7 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
             original.rename(target)
     seed_taxonomy(source / "taxa.sqlite")
     cfg = {"run_name": "test", "seed": 17,
-           "phylogeny": {"outgroup": species[0], "max_markers": 3}}
+           "phylogeny": {"trees": ["all"], "outgroup": species[0], "max_markers": 3}}
     conda_prefix = os.environ.get("PHYLOGENY_CONDA_PREFIX")
     config = tmp_path / "config.yaml"
     config.write_text(yaml.safe_dump(cfg))
@@ -480,7 +480,7 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
         write_tsv(calibrations, ["taxa", "min_age_ma", "max_age_ma", "source"],
                   [{"taxa": ",".join(species[:2]), "min_age_ma": 100, "max_age_ma": 100,
                     "source": "synthetic workflow test only"}])
-        cfg["phylogeny"]["dating"] = {"calibration_source": "file"}
+        cfg["phylogeny"]["dating"] = {"enabled": True, "calibration_source": "file"}
         config.write_text(yaml.safe_dump(cfg))
         argv[-1] = "timetree"
         run()

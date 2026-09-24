@@ -1,6 +1,7 @@
 # Run from the project root; place dataset files in input/ (see docs/inputs.md).
 run_name: run001  # Output subdirectory under results/, work/, logs/.
 seed: 12345  # Random seed for supported steps.
+trait: carnivory  # Shared column in input/species_trait.tsv.
 selection:
   species_list: false  # true: use input/species_list.txt; false: consider all species.
   busco_threshold: 0.5  # Minimum complete BUSCO fraction, applied after species_list.
@@ -8,6 +9,7 @@ selection:
 translation:
   table: 1  # Seqkit genetic code ID; 1: Standard.
 odb:  # Work files are retained for reuse.
+  existing_results: null  # Snapshot directory; null runs ODB-mapper. See docs/references.md.
   node: 3193  # OrthoDB v12 mapping taxid; 3193: Embryophyta. See docs/references.md.
 tpm:
   multimap: error  # Ambiguous genes: error rejects; drop omits; split divides TPM equally.
@@ -17,9 +19,7 @@ kegg:  # Missing references download on first use.
   enabled: false  # Include in all; explicit kegg target also works when false.
   ambiguity: duplicate  # Multi-KO genes: duplicate gives full TPM to each KO; drop omits; error rejects.
 phylogeny:  # Reuse CDS from input/cds and BUSCO full tables from input/busco/full.
-  enabled: false  # Include in all; explicit phylogeny/timetree targets also work when false.
-  species_sets: [all]  # all: selected species; phenotyped: known trait only; either or both.
-  trait: C4  # Column in input/species_trait.tsv for the phenotyped set.
+  trees: [representatives]  # [] disables trees; choose all, phenotyped, representatives, or several.
   lineage: embryophyta_odb12
   outgroup: auto  # auto: NCBI/APG IV per species set; or a species ID.
   max_markers: 500  # Highest BUSCO coverage first; ties: BUSCO ID ascending.
@@ -30,12 +30,11 @@ phylogeny:  # Reuse CDS from input/cds and BUSCO full tables from input/busco/fu
   dating:
     enabled: false
     calibration_source: timetree  # timetree: fetch calibrations; file: use input/calibrations.tsv.
-contrast:
-  enabled: false  # Include representative pairs in all; explicit contrast_pairs also works when false.
-  trait: C4  # Column in input/species_trait.tsv.
-taxonomy_check:
-  enabled: false  # Attach reports to phylogeny; explicit taxonomy_check also works when false.
-  ranks: [family, subfamily, tribe, subtribe, genus]  # Unique NCBI ranks; see docs/taxonomy_check.md.
-  outlierlevel: 0.5  # MonoPhy core-clade fraction of tips, not confidence.
-  collapse_monophyletic: true  # Display only; retain all flagged tips.
+  contrast_pairs:
+    enabled: true  # Select pairs on each tree listed above; never changes inference species.
+  taxonomy_check:
+    enabled: false  # Available for all/phenotyped trees; explicit targets respect this flag.
+    ranks: [family, subfamily, tribe, subtribe, genus]  # Unique NCBI ranks.
+    outlierlevel: 0.5  # MonoPhy core-clade fraction of tips, not confidence.
+    collapse_monophyletic: true  # Display only; retain all flagged tips.
 exclude_species: []  # Species IDs from metadata/samples.tsv; apply with the filter_species target.

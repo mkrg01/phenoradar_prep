@@ -11,12 +11,13 @@ configfile: "config/config.yaml"
 ROOT = str(Path(workflow.basedir).parent)
 SCRIPTS = str(Path(workflow.basedir) / "scripts")
 sys.path.insert(0, SCRIPTS)
-from configuration import validate_keys
+from configuration import validate_keys, validate_analysis
 from layout import INPUTS, BUSCO_FULL, SPECIES_LIST, CALIBRATIONS
 from versioning import resolve_container_image
 USE_CONTAINER = DeploymentMethod.APPTAINER in workflow.deployment_settings.deployment_method
 try:
     validate_keys(config)
+    validate_analysis(config)
     CONTAINER_IMAGE = resolve_container_image(ROOT) if USE_CONTAINER else None
 except ValueError as error:
     raise WorkflowError(str(error))
@@ -30,6 +31,7 @@ if USE_CONTAINER:
 containerized: CONTAINER_IMAGE
 
 ODB_VERSION = "v12"
+EXISTING_ODB = config["odb"]["existing_results"]
 PYTHON = "python"
 TAXONOMY_DB = "resources/taxonomy/taxa.sqlite"
 TIMETREE_CACHE = "resources/timetree_cache"
@@ -40,23 +42,13 @@ if type(config["odb"]["node"]) is not int or config["odb"]["node"] < 1:
     raise WorkflowError("odb.node must be a positive integer")
 if config["tpm"]["multimap"] not in {"error", "drop", "split"}:
     raise WorkflowError("tpm.multimap must be error, drop, or split")
-for section in ["alignment", "kegg", "contrast", "phylogeny"]:
+for section in ["alignment", "kegg"]:
     if type(config[section]["enabled"]) is not bool:
         raise WorkflowError(f"{section}.enabled must be true or false")
 if config["kegg"]["ambiguity"] not in {"duplicate", "drop", "error"}:
     raise WorkflowError("kegg.ambiguity must be duplicate, drop, or error")
 PHY = dict(config["phylogeny"], busco_full_dir=BUSCO_FULL,
-           translation_table=config["translation"]["table"])
-if not isinstance(config["contrast"]["trait"], str) or not config["contrast"]["trait"].strip():
-    raise WorkflowError("contrast.trait must name a column in input/species_trait.tsv")
-if config["contrast"]["trait"] in {"species", "role", "group", "representative", "is_representative", "n_species_in_group", "contrast_pair_id"}:
-    raise WorkflowError("contrast.trait conflicts with a reserved output column")
-if (not isinstance(PHY["species_sets"], list) or not PHY["species_sets"]
-        or any(not isinstance(s, str) or s not in {"all", "phenotyped"} for s in PHY["species_sets"])
-        or len(set(PHY["species_sets"])) != len(PHY["species_sets"])):
-    raise WorkflowError("phylogeny.species_sets must be a nonempty list of all and/or phenotyped, without duplicates")
-if not isinstance(PHY["trait"], str) or not PHY["trait"].strip() or PHY["trait"] == "species":
-    raise WorkflowError("phylogeny.trait must name a phenotype column in input/species_trait.tsv")
+           translation_table=config["translation"]["table"], trait=config["trait"])
 for key in ["max_markers", "min_protein_length", "min_taxa"]:
     if type(PHY[key]) is not int or PHY[key] <= 0:
         raise WorkflowError(f"phylogeny.{key} must be a positive integer")
@@ -84,14 +76,14 @@ ASTRAL = str(Path(ROOT) / "resources/phylogeny_tools/bin/astral4_int128")
 from layout import (
     ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
     PHYLOGENY_BRANCHES, REPRESENTATIVES as REPRESENTATIVES_REL,
-    ROOTING as ROOTING_REL, CONTRAST_BRANCHES,
+    ROOTING as ROOTING_REL,
 )
 from make_manifests import chunk_plan
 from taxonomy_check import validate_settings as validate_taxonomy_check_settings
 from filter_species import validate_exclusions, discover as discover_filter_inputs
 from phenoradar_inputs import discover as discover_phenoradar_inputs
 try:
-    TAXONOMY_CHECK = validate_taxonomy_check_settings(config["taxonomy_check"])
+    TAXONOMY_CHECK = validate_taxonomy_check_settings(PHY["taxonomy_check"])
     EXCLUDE_SPECIES = validate_exclusions(config["exclude_species"])
 except ValueError as error:
     raise WorkflowError(str(error))
@@ -120,9 +112,16 @@ KEGG_FINAL = [f"{KEGG}/{name}" for name in [
 PHYLO_BRANCHES = PHYLOGENY_BRANCHES
 PHENOTYPED = f"{OUT}/{PHYLO_BRANCHES['phenotyped']}"
 REPRESENTATIVES = f"{OUT}/{REPRESENTATIVES_REL}"
-PHYLO_BRANCH_PATTERN = "|".join(re.escape(branch) for branch in [*PHYLO_BRANCHES.values(), REPRESENTATIVES_REL])
-MOLECULAR_BRANCH_PATTERN = "|".join(re.escape(branch) for branch in PHYLO_BRANCHES.values())
-CONTRAST_BRANCH_PATTERN = "|".join(re.escape(branch) for branch in sorted(CONTRAST_BRANCHES))
+TREE_BRANCHES = dict(PHYLO_BRANCHES, representatives=REPRESENTATIVES_REL)
+ACTIVE_TREE_BRANCHES = [TREE_BRANCHES[name] for name in PHY["trees"]]
+PHYLO_BRANCH_PATTERN = "|".join(re.escape(branch) for branch in ACTIVE_TREE_BRANCHES) or r"(?!)"
+MOLECULAR_BRANCH_PATTERN = "|".join(re.escape(TREE_BRANCHES[name]) for name in PHY["trees"]
+                                      if name != "representatives") or r"(?!)"
+DATING_BRANCH_PATTERN = MOLECULAR_BRANCH_PATTERN if PHY["dating"]["enabled"] else r"(?!)"
+TAXONOMY_BRANCH_PATTERN = MOLECULAR_BRANCH_PATTERN if PHY["taxonomy_check"]["enabled"] else r"(?!)"
+PAIR_BRANCH_PATTERN = MOLECULAR_BRANCH_PATTERN if PHY["contrast_pairs"]["enabled"] else r"(?!)"
+CONTRAST_BRANCH_PATTERN = ("|".join(re.escape(f"{branch}/contrast") for branch in ACTIVE_TREE_BRANCHES)
+                          if PHY["contrast_pairs"]["enabled"] else "") or r"(?!)"
 GUIDE_BRANCH_PATTERN = "|".join(re.escape(f"{branch}/rooting") for branch in PHYLO_BRANCHES.values())
 # All inference runs use the same rules, environments and settings.
 PHYLO_RUN = f"{OUT}/{{phylo_branch}}"
@@ -133,32 +132,55 @@ ROOTING = f"{OUT}/{ROOTING_REL}"
 CONTRAST_OUTPUTS = [
     "contrast_pairs.tsv", "species_metadata.tsv", "summary.json", "summary_tree.nwk",
     "summary_tree.pdf", "summary_tree.svg", "contrastive.nwk"]
-CONTRAST_FINAL = [f"{CONTRAST}/{name}" for name in CONTRAST_OUTPUTS]
 
 def phylogeny_targets(names):
     # Selecting targets must not change any inference job's parameters.
-    return [f"{OUT}/{PHYLO_BRANCHES[s]}/{name}" for s in PHY["species_sets"] for name in names]
+    return [f"{OUT}/{TREE_BRANCHES[s]}/{name}" for s in PHY["trees"] for name in names]
 
 
-def phylogeny_contrast_targets(wc):
+def requested_phylogeny(target, outputs):
+    # Snakemake supplies CLI targets after parsing the Snakefile. Validate at
+    # aggregate-rule expansion so this also applies to dry-runs and API calls.
+    validate_analysis(config, [target])
+    report_phylogeny_plan()
+    return outputs
+
+
+def contrast_targets(wc):
+    validate_analysis(config, ["contrast_pairs"])
+    report_phylogeny_plan()
     if EXCLUDE_SPECIES:
+        if "representatives" in PHY["trees"]:
+            raise WorkflowError("filtered contrast pairs do not support representatives; clear exclude_species or select all/phenotyped trees")
         snapshot = discover_filter_inputs(OUT, INPUTS["species_trait"])
-        for species_set in PHY["species_sets"]:
+        for species_set in PHY["trees"]:
             branch = PHYLO_BRANCHES[species_set]
             section = snapshot["sections"][f"{branch}_contrast"]
             if section["status"] != "ready":
                 raise WorkflowError(f"excluded-species contrast requires completed {branch} inputs: {section['missing']}")
         return [f"{OUT}/filtered"]
-    return phylogeny_targets([f"contrast/{name}" for name in [*CONTRAST_OUTPUTS, "observed_tree.nwk"]])
+    return [f"{OUT}/{TREE_BRANCHES[name]}/contrast/{output}"
+            for name in PHY["trees"]
+            for output in [*CONTRAST_OUTPUTS, *([] if name == "representatives" else ["observed_tree.nwk"])]]
 
 
 PHYLO_FINAL = phylogeny_targets(["species_tree.nwk", "species_tree.json", "species_coverage.tsv"])
 TAXONOMY_CHECK_FINAL = phylogeny_targets(["taxonomy_check"])
-if TAXONOMY_CHECK["enabled"]:
-    PHYLO_FINAL += TAXONOMY_CHECK_FINAL
 PHYLO_DATED = phylogeny_targets(["dating/species_tree.dated.nwk", "dating/provenance.json"])
-if PHY["dating"]["enabled"]:
-    PHYLO_FINAL += PHYLO_DATED
+
+from snakemake.logging import logger
+PHYLOGENY_PLAN_REPORTED = False
+
+
+def report_phylogeny_plan():
+    # Log during DAG expansion, after Snakemake has configured its log handlers.
+    global PHYLOGENY_PLAN_REPORTED
+    if not PHYLOGENY_PLAN_REPORTED:
+        logger.info("Phylogeny plan: trait=%s; trees=%s; contrast_pairs=%s; dating=%s; taxonomy_check=%s",
+                    config["trait"], ",".join(PHY["trees"]) or "none",
+                    PHY["contrast_pairs"]["enabled"], PHY["dating"]["enabled"], TAXONOMY_CHECK["enabled"])
+        PHYLOGENY_PLAN_REPORTED = True
+
 
 def sample_rows(wildcards):
     path = checkpoints.select_metadata.get().output.samples
@@ -218,8 +240,10 @@ rule all:
         f"{TPM}/mapping_qc.tsv",
         lambda wc: alignment_targets(wc) if config["alignment"]["enabled"] else [],
         KEGG_FINAL if config["kegg"]["enabled"] else [],
-        PHYLO_FINAL if PHY["enabled"] else [],
-        CONTRAST_FINAL if config["contrast"]["enabled"] else []
+        lambda wc: requested_phylogeny("all", PHYLO_FINAL),
+        PHYLO_DATED if PHY["dating"]["enabled"] else [],
+        TAXONOMY_CHECK_FINAL if TAXONOMY_CHECK["enabled"] else [],
+        contrast_targets if PHY["contrast_pairs"]["enabled"] else []
 
 
 rule references:
@@ -264,39 +288,33 @@ rule alignments:
 rule phylogeny:
     input:
         f"{OUT}/run.json",
-        PHYLO_FINAL
+        lambda wc: requested_phylogeny("phylogeny", PHYLO_FINAL)
 
 
 rule phylogeny_prepare:
     input:
-        phylogeny_targets(["plan/markers.tsv", "plan/species.tsv", "plan/marker_stats.tsv", "plan/provenance.json"])
+        lambda wc: requested_phylogeny("phylogeny_prepare", phylogeny_targets(
+            ["plan/markers.tsv", "plan/species.tsv", "plan/marker_stats.tsv", "plan/provenance.json"]))
 
 
 rule taxonomy_check:
-    input: TAXONOMY_CHECK_FINAL
+    input: lambda wc: requested_phylogeny("taxonomy_check", TAXONOMY_CHECK_FINAL)
 
 
 rule contrast_pairs:
-    input:
-        f"{OUT}/run.json",
-        f"{META}/species_metadata.tsv",
-        CONTRAST_FINAL
-
-
-rule phylogeny_contrast_pairs:
-    input:
-        phylogeny_contrast_targets
+    input: contrast_targets
 
 
 rule phylogeny_calibrations:
     input:
-        phylogeny_targets(["timetree/calibrations.tsv", "timetree/candidates.tsv", "timetree/provenance.json"])
+        lambda wc: requested_phylogeny("phylogeny_calibrations", phylogeny_targets(
+            ["timetree/calibrations.tsv", "timetree/candidates.tsv", "timetree/provenance.json"]))
 
 
 rule timetree:
     input:
         f"{OUT}/run.json",
-        PHYLO_DATED
+        lambda wc: requested_phylogeny("timetree", PHYLO_DATED)
 
 
 include: "rules/metadata.smk"

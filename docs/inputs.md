@@ -74,8 +74,8 @@ Spaces normalize to underscores; duplicate normalized species names are errors.
 Blanks, `NA`, `NaN`, `nan`, and absent rows are unknown. `C4` accepts only
 `0`, `1`, or missing values. Extra species do not enter the dataset.
 
-`phylogeny.trait` defines the nonmissing species for phenotyped inference;
-`contrast.trait` selects the column for pairs and PhenoRadar metadata.
-Both default to `C4`. Phenotyped inference accepts other traits, including
+Top-level `trait` selects one shared column for phenotyped/representative
+selection, contrast pairs, and PhenoRadar metadata.
+The current configuration uses `carnivory`. Phenotyped inference accepts
 single-state traits; pairs support two observed states, and PhenoRadar metadata
 requires `0`, `1`, or blank. Without a trait file, base metadata has blank traits.

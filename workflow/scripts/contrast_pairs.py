@@ -199,7 +199,7 @@ def from_tree(tree, tree_qc, samples, metadata, traits, outdir, trait="C4", seed
         raise ValueError("duplicate excluded species IDs")
     if not isinstance(trait, str) or not trait.strip() or trait in {
             "species", "role", "group", "representative", "is_representative", "n_species_in_group", "contrast_pair_id"}:
-        raise ValueError("contrast.trait must name a non-reserved phenotype column")
+        raise ValueError("trait must name a non-reserved phenotype column")
     if type(seed) is not int or seed <= 0:
         raise ValueError("seed must be a positive integer")
     names = {r["species"] for r in read_tsv(samples)}

@@ -192,7 +192,8 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     write_tsv(traits, ["species", "C4"], [{"species": n.replace("_", " "), "C4": "" if i == 0 else i % 2}
                                          for i, n in enumerate(species)])
     cfg = {"run_name": "test", "seed": 19,
-           "phylogeny": {"outgroup": "auto", "max_markers": 3}}
+           "phylogeny": {"trees": ["representatives"], "contrast_pairs": {"enabled": False},
+                         "outgroup": "auto", "max_markers": 3}}
     config = tmp_path / "config.yaml"
     config.write_text(yaml.safe_dump(cfg))
     env = command_environment({"python": sys.executable, "famsa": famsa, "trimal": trimal_binary(), "VeryFastTree": vft})
@@ -210,8 +211,18 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
         assert result.returncode == 0, result.stdout + "\n" + "\n".join(
             p.read_text()[-3000:] for p in (tmp_path / "logs").rglob("*.log"))
         return result.stdout
-    run(["contrast_pairs"])
+    # A representative tree is an independent phylogeny, even without pairs.
+    log = run(["phylogeny"])
+    assert "Phylogeny plan: trait=C4; trees=representatives; contrast_pairs=False" in log
+    assert "Phylogeny inference species: phylogeny/representatives = " in log
     result = tmp_path / "results/test"
+    representative_tree = result / "phylogeny/representatives/species_tree.nwk"
+    representative_mtime = representative_tree.stat().st_mtime_ns
+    assert not (result / "phylogeny/representatives/contrast").exists()
+    cfg["phylogeny"]["contrast_pairs"]["enabled"] = True
+    config.write_text(yaml.safe_dump(cfg))
+    run(["contrast_pairs"])
+    assert representative_tree.stat().st_mtime_ns == representative_mtime
     assert not (result / "phylogeny/all/species_tree.nwk").exists()
     assert not (result / "phylogeny/all/gene_trees.nwk").exists()
     assert (result / "phylogeny/representatives/rooting/outgroup.txt").read_text().strip() == species[1]
@@ -222,6 +233,8 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     assert selected == {r["leaf_name"] for r in read_tsv(result / "phylogeny/representatives/selection/ncbi_skim.sampled.tsv")}
     assert species[0] not in selected and species[1] in selected
     assert "Nothing to be done" in run(["contrast_pairs"])
+    cfg["phylogeny"]["trees"] = ["all"]
+    config.write_text(yaml.safe_dump(cfg))
     run(["phylogeny"])
     assert (result / "phylogeny/all/rooting/outgroup.txt").read_text().strip() == species[0]
     assert json.loads((result / "phylogeny/all/species_tree.json").read_text())["outgroup"] == species[0]
@@ -231,29 +244,29 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     contrast_mtime = contrast_tree.stat().st_mtime_ns
     # The post-inference target uses the completed full tree, with no NCBI
     # representative selection. Selecting additional runs retains old outputs.
-    run(["phylogeny_contrast_pairs"])
+    run(["contrast_pairs"])
     full_pairs = result / "phylogeny/all/contrast/contrast_pairs.tsv"
     full_pair_mtime = full_pairs.stat().st_mtime_ns
     assert {r["species"] for r in read_tsv(full_pairs.parent / "species_metadata.tsv")} == set(species)
     assert json.loads((full_pairs.parent / "summary.json").read_text())["seed"] == 19
-    assert "Nothing to be done" in run(["phylogeny_contrast_pairs"])
-    cfg["phylogeny"]["species_sets"] = ["phenotyped"]
+    assert "Nothing to be done" in run(["contrast_pairs"])
+    cfg["phylogeny"]["trees"] = ["phenotyped"]
     config.write_text(yaml.safe_dump(cfg))
-    run(["phylogeny_contrast_pairs"])
+    run(["contrast_pairs"])
     observed = result / "phylogeny/phenotyped"
     assert {r["species"] for r in read_tsv(observed / "contrast/species_metadata.tsv")} == set(species[1:])
     observed_mtime = (observed / "species_tree.nwk").stat().st_mtime_ns
-    cfg["phylogeny"]["species_sets"] = ["all", "phenotyped"]
+    cfg["phylogeny"]["trees"] = ["all", "phenotyped"]
     config.write_text(yaml.safe_dump(cfg))
-    assert "Nothing to be done" in run(["phylogeny_contrast_pairs"])
+    assert "Nothing to be done" in run(["contrast_pairs"])
     assert full_pairs.stat().st_mtime_ns == full_pair_mtime
     (full_pairs.parent / "summary_tree.pdf").unlink()
-    run(["phylogeny_contrast_pairs"])
+    run(["contrast_pairs"])
     assert full_pairs.stat().st_mtime_ns == full_pair_mtime
     assert full_tree.stat().st_mtime_ns == full_mtime
     assert contrast_tree.stat().st_mtime_ns == contrast_mtime
     assert (observed / "species_tree.nwk").stat().st_mtime_ns == observed_mtime
-    cfg["phylogeny"]["species_sets"] = ["all"]
+    cfg["phylogeny"]["trees"] = ["representatives"]
     config.write_text(yaml.safe_dump(cfg))
     (result / "phylogeny/representatives/contrast/summary_tree.pdf").unlink()
     run(["contrast_pairs"])

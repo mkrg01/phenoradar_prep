@@ -17,7 +17,7 @@ rule phenoradar_inputs:
         bundle=f"{OUT}/phenoradar_inputs",
         source=str(Path(OUT).resolve()),
         excluded=json.dumps(EXCLUDE_SPECIES),
-        trait=config["contrast"]["trait"],
+        trait=config["trait"],
         inventory=lambda wc: json.dumps(phenoradar_snapshot()["sections"], sort_keys=True)
     conda: "../envs/analysis.yaml"
     resources: mem_mb=4000

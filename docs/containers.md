@@ -10,8 +10,18 @@ The launcher uses the container by default; host Conda activation is unnecessary
 
 Use a published release checkout. The GHCR image matches [VERSION](../VERSION):
 `0.2.1` selects `docker://ghcr.io/mkrg01/phenoradar_prep:v0.2.1`.
-Snakemake downloads/caches it on first use. Switch checkouts to use another release;
-unpublished versions cannot be pulled.
+Before the first analysis or dry-run, fetch the image and check Conda inside it:
+
+```bash
+./run_pipeline.sh --prepare-container --cores 1 --resources mem_gb=4
+```
+
+For Slurm, use `sbatch --cpus-per-task=1 --mem=8G run_pipeline.sh --prepare-container`
+and wait for successful completion before submitting the analysis. This dedicated
+step avoids Snakemake 9.8 querying Conda in an image before it has been downloaded.
+It needs no dataset inputs, uses the same image cache as analysis jobs, and reuses
+an existing image. Repeat after switching to a new release; unpublished versions
+cannot be pulled. A cached image still permits offline runs.
 
 The launcher mounts the repository automatically. Keep dataset files in `input/`
 and references in `resources/`; no additional bind settings are needed.

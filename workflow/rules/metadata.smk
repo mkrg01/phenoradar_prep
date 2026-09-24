@@ -62,7 +62,7 @@ rule prepare_phenoradar_metadata:
         helpers=[f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/common.py"]
     output: f"{META}/species_metadata.tsv"
     params:
-        trait=config["contrast"]["trait"],
+        trait=config["trait"],
         traits_source=PHENORADAR_TRAITS,
         traits_flag="--traits" if PHENORADAR_TRAITS else ""
     log: f"{LOG}/phenoradar_metadata.log"
