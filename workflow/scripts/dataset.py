@@ -47,7 +47,7 @@ def settings(root, config, analysis_config=None):
     cfg = read_yaml(config)
     if analysis_config is not None:
         raise ValueError("build does not accept analysis overrides; use run_analysis.sh")
-    unknown = set(cfg) - {"metadata", "store", "translation", "busco", "odb", "genegalleon", "slurm", "excluded_accessions"}
+    unknown = set(cfg) - {"name", "metadata", "store", "translation", "busco", "odb", "genegalleon", "slurm", "excluded_accessions"}
     if unknown: raise ValueError(f"unknown build settings: {sorted(unknown)}; migrate old dataset/config files first")
     excluded = cfg.get("excluded_accessions")
     if excluded is not None and (not isinstance(excluded, str) or not excluded.strip()):
@@ -161,11 +161,17 @@ def implementation(root):
 
 def prepare(root, name, config, metadata=None, analysis_config=None):
     root = Path(root).resolve()
-    if not SAFE.fullmatch(name): raise ValueError("dataset name must be a simple directory name")
+    if name is None:
+        name = read_yaml(config).get("name")
+    if name is None:
+        raise ValueError("build name is required: set name in build config or pass --name")
+    if not isinstance(name, str) or not SAFE.fullmatch(name):
+        raise ValueError("build name must be a simple directory name")
     target = root / "builds" / name
     if target.exists() or (root / "results" / ("build_" + name)).exists():
         raise ValueError("dataset/run name already exists; resume it or choose a new name")
     cfg, analysis, metadata, fields, items, selection, report = plan(root, config, metadata, analysis_config)
+    cfg["name"] = name
     if not items: raise ValueError("all metadata runs are excluded; no build was prepared")
     conflicts = [r for r in report if r["assembly"] == "conflict"]
     if conflicts: raise ValueError("resolve conflicts before preparing: " + json.dumps(conflicts))
@@ -604,7 +610,7 @@ def main():
         command.add_argument("--root", default=".")
         command.add_argument("--config", default="config/build.yaml")
         if name != "fetch-software": command.add_argument("--metadata")
-        if name == "prepare": command.add_argument("--name", required=True)
+        if name == "prepare": command.add_argument("--name", help="Override name from the build config")
         if name == "register":
             command.add_argument("--input-dir")
             command.add_argument("--products", help="Portable completed products to register in this project")

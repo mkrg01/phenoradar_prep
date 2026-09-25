@@ -27,7 +27,7 @@ GeneGalleon source/image pins belong to build settings.
 
 | Build (`build.yaml`) | Analysis (`analysis.yaml`) |
 | --- | --- |
-| `metadata`, `excluded_accessions`, `store` | Completed `build` or copied `products/` bundle |
+| `name` (overridden by `prepare --name`), `metadata`, `excluded_accessions`, `store` | Completed `build` or copied `products/` bundle |
 | `genegalleon` software and assembly/quant settings | `inputs` for traits, species list, and calibrations |
 | `busco.lineage`, `translation.table` | `selection.busco_threshold`, `exclude_species` |
 | `odb.node`, `odb.cache_dir`, `odb.chunk_size` | `trait`, `seed`, `tpm`, optional branches |

@@ -49,6 +49,60 @@ def imported(root):
     return store
 
 
+@pytest.mark.parametrize("override", [None, "pilot_20260925"])
+def test_prepare_cli_uses_config_name_with_optional_override(dataset_project, override):
+    root = dataset_project
+    imported(root)
+    cfg = yaml.safe_load((root / "config/build.yaml").read_text())
+    cfg["name"] = "angiosperm_leaf_20260925"
+    config = root / "config/named.yaml"
+    config.write_text(yaml.safe_dump(cfg))
+    command = [sys.executable, str(root / "workflow/scripts/dataset.py"),
+               "prepare", "--config", "config/named.yaml"]
+    if override is not None:
+        command.extend(["--name", override])
+    result = subprocess.run(command, cwd=root, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    name = override or cfg["name"]
+    path = root / "builds" / name
+    assert result.stdout.strip() == str(path)
+    frozen = load(path, check_code=True)
+    assert frozen["name"] == frozen["config"]["name"] == name
+    assert frozen["analysis"]["run_name"] == "build_" + name
+    assert {row["assembly"] for row in status(path)} == {"reuse"}
+    # Renaming in the source config cannot rename an existing preparation.
+    cfg["name"] = "angiosperm_leaf_20260926"
+    config.write_text(yaml.safe_dump(cfg))
+    assert load(path, check_code=True)["name"] == name
+    with pytest.raises(ValueError, match="name already exists"):
+        prepare(root, name, config)
+
+
+def test_prepare_legacy_config_requires_explicit_name(dataset_project):
+    root = dataset_project
+    imported(root)
+    config = root / "config/build.yaml"
+    cfg = yaml.safe_load(config.read_text())
+    cfg.pop("name", None)
+    config.write_text(yaml.safe_dump(cfg))
+    with pytest.raises(ValueError, match="set name in build config or pass --name"):
+        prepare(root, None, config)
+    path = prepare(root, "explicit_20260925", config)
+    assert load(path)["name"] == "explicit_20260925"
+
+
+@pytest.mark.parametrize("name", ["", "../escape", "leaf/20260925", "two words", 20260925, True])
+def test_prepare_rejects_invalid_config_name(dataset_project, name):
+    root = dataset_project
+    config = root / "config/build.yaml"
+    cfg = yaml.safe_load(config.read_text())
+    cfg["name"] = name
+    config.write_text(yaml.safe_dump(cfg))
+    with pytest.raises(ValueError, match="build name must be a simple directory name"):
+        prepare(root, None, config)
+    assert not (root / "builds").exists()
+
+
 def test_manual_metadata_unique_species_and_normalized_collisions(tmp_path):
     path = tmp_path / "metadata.tsv"
     fields = ["scientific_name", "run", "taxid"]

@@ -1,5 +1,6 @@
 # Reusable species products through ODB mapping. Paths are relative to the project root.
 # GeneGalleon version, revision and image digest must be updated together.
+name: angiosperm_leaf_20260925  # A new name for each build; prepare --name overrides.
 metadata: input/metadata.tsv
 excluded_accessions: config/excluded_accessions.tsv  # Manual run exclusions; null disables.
 store: resources/dataset_assets

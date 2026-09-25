@@ -95,7 +95,7 @@ slurm:
 Apply resource edits to an existing preparation explicitly:
 
 ```bash
-./run_build.sh submit --build builds/build001 --resources config/build.yaml
+./run_build.sh submit --build builds/angiosperm_leaf_20260925 --resources config/build.yaml
 ./run_analysis.sh submit --analysis analyses/analysis001 --resources config/analysis.yaml
 ```
 

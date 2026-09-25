@@ -4,7 +4,8 @@
 
 ## Directory layout
 
-Names supplied to `prepare --name` determine these directories:
+Build `name` in `config/build.yaml` (or `prepare --name`) and analysis
+`prepare --name` determine these directories:
 
 | Path | Contents |
 | --- | --- |

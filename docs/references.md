@@ -49,7 +49,7 @@ Build prepares `resources/orthodb/v12_<node>/` automatically. For separate setup
 use a prepared build's resolved config:
 
 ```bash
-sbatch --cpus-per-task=1 --mem=40G run_pipeline.sh --configfile builds/build001/pipeline.yaml -- references
+sbatch --cpus-per-task=1 --mem=40G run_pipeline.sh --configfile builds/angiosperm_leaf_20260925/pipeline.yaml -- references
 python workflow/scripts/verify_odb_reference.py \
   --reference resources/orthodb/v12_3193/reference.json
 ```

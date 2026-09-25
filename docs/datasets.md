@@ -34,15 +34,19 @@ use a separate `store` for a deliberate rebuild with different conditions.
 
 ## Build through mapping
 
+Set `name` in `config/build.yaml`, for example `angiosperm_leaf_20260925`.
+Use a new name for each build; `prepare --name NAME` overrides the config.
+Names are literal: update the date yourself, adding `_v2` for same-day revisions.
+
 ```bash
 ./run_build.sh plan
-./run_build.sh prepare --name build001
-./run_build.sh submit --build builds/build001 --until busco --dry-run
-./run_build.sh submit --build builds/build001 --until busco
-./run_build.sh status --build builds/build001
+./run_build.sh prepare
+./run_build.sh submit --build builds/angiosperm_leaf_20260925 --until busco --dry-run
+./run_build.sh submit --build builds/angiosperm_leaf_20260925 --until busco
+./run_build.sh status --build builds/angiosperm_leaf_20260925
 
 # After inspection, finish the build:
-./run_build.sh submit --build builds/build001 --until mapping
+./run_build.sh submit --build builds/angiosperm_leaf_20260925 --until mapping
 ```
 
 Endpoints are `assembly`, `busco`, `quant`, and `mapping` (default). Each includes
@@ -68,8 +72,8 @@ In `analysis.yaml`, choose the BUSCO threshold, species selection, traits, and
 optional branches. Set `build` there or pass `--build`:
 
 ```bash
-./run_analysis.sh plan --build builds/build001
-./run_analysis.sh prepare --build builds/build001 --name analysis001
+./run_analysis.sh plan --build builds/angiosperm_leaf_20260925
+./run_analysis.sh prepare --build builds/angiosperm_leaf_20260925 --name analysis001
 ./run_analysis.sh submit --analysis analyses/analysis001 --dry-run
 ./run_analysis.sh submit --analysis analyses/analysis001
 ./run_analysis.sh status --analysis analyses/analysis001

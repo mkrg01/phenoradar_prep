@@ -1,6 +1,6 @@
 # One analysis of a completed build; use a new analysis name for changed conditions.
 # BUSCO selection is applied here, after all build species have been mapped.
-build: builds/build001
+build: builds/angiosperm_leaf_20260925
 inputs:
   species_trait: input/species_trait.tsv
   species_list: null
