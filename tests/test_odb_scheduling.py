@@ -91,3 +91,25 @@ def test_hundred_species_chunks_and_cpu_dependent_batches(
     assert "Nothing to be done" in execute(targets)
     assert len(events.read_text().splitlines()) == 2
     assert all(path.stat().st_mtime_ns == stamp for path, stamp in before.items())
+
+
+def test_translation_rules_use_individual_slurm_jobs(tiny_inputs, workflow_project, seed_taxonomy, tmp_path):
+    from prepare_metadata import prepare
+    snakemake = shutil.which('snakemake')
+    if not snakemake:
+        pytest.skip('Snakemake required')
+    seed_taxonomy(tiny_inputs['taxonomy_db'])
+    prepare(**tiny_inputs, outdir=workflow_project/'results/grouped/metadata')
+    override = tmp_path/'grouped.yaml'
+    override.write_text('run_name: grouped\n')
+    targets = [str((workflow_project/'results/grouped/proteins'/f'{name}_protein.fa').resolve())
+               for name in ('Alpha_plant','Beta_sp_X')]
+    from phase_config import write_profile
+    profile = write_profile(tmp_path/'profile', yaml.safe_load((ROOT/'config/build.yaml').read_text())['slurm'])
+    result = subprocess.run([snakemake, '--snakefile', str(ROOT/'workflow/Snakefile'),
+        '--configfile', str(override), '--profile', str(profile), '--dry-run','--',*targets],
+        cwd=workflow_project, text=True, capture_output=True, timeout=60)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert 'Group job' not in output, output
+    assert output.count('rule translate_cds:') == 2, output

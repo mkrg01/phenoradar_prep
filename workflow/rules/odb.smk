@@ -2,13 +2,15 @@ rule translate_cds:
     input:
         cds=lambda wc: species_row(wc)["cds"],
         code=f"{SCRIPTS}/translate_cds.py",
-        common=f"{SCRIPTS}/common.py"
+        common=f"{SCRIPTS}/common.py",
+        cache_code=[f"{SCRIPTS}/protein_cache.py", f"{SCRIPTS}/dataset_assets.py"]
     output:
         protein=f"{PROTEINS}/{{species}}_protein.fa",
         provenance=f"{PROTEINS}/{{species}}_protein.json"
     params:
         seqkit="seqkit",
-        table=config["translation"]["table"]
+        table=config["translation"]["table"],
+        cache=config["translation_cache"]
     threads: 1
     log: f"{LOG}/translate/{{species}}.log"
     conda: "../envs/seqkit.yaml"
@@ -16,7 +18,7 @@ rule translate_cds:
     shell:
         "{PYTHON:q} {input.code:q} --cds {input.cds:q} --output {output.protein:q} "
         "--provenance {output.provenance:q} --seqkit {params.seqkit:q} --table {params.table} "
-        "--threads {threads} > {log:q} 2>&1"
+        "--threads {threads} --cache-dir {params.cache:q} > {log:q} 2>&1"
 
 
 rule make_manifests:
@@ -99,7 +101,7 @@ rule odb_map:
         "{params.publish:q} --chunk-dir {params.out:q} --label {wildcards.chunk:q} >> {log:q} 2>&1; fi"
 
 
-rule merge_odb:
+rule collect_odb:
     input:
         samples=f"{META}/samples.tsv",
         manifests=odb_manifests,
@@ -108,24 +110,24 @@ rule merge_odb:
         summaries=lambda wc: odb_source_files(wc, "summary.txt"),
         provenance=lambda wc: odb_source_files(wc, "provenance.json"),
         proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa' for r in sample_rows(wc)}),
-        code=f"{SCRIPTS}/merge_odb.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/translate_cds.py", f"{SCRIPTS}/incremental_odb.py"]
+        code=f"{SCRIPTS}/mapping_tables.py",
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/translate_cds.py", f"{SCRIPTS}/incremental_odb.py", f"{SCRIPTS}/dataset_assets.py"]
     output:
-        database=f"{MAPPING}/mappings.sqlite",
-        mappings=f"{MAPPING}/gene_orthogroups.tsv",
-        qc=f"{MAPPING}/merge_qc.json"
+        snapshot=f"{MAPPING}/snapshot.json",
+        tables=directory(f"{MAPPING}/species")
     params:
-        chunks=CHUNKS, proteins=PROTEINS, plan=f"{MANIFESTS}/chunks.json",
+        out=MAPPING, cache=ODB_CACHE, chunks=CHUNKS, proteins=PROTEINS, plan=f"{MANIFESTS}/chunks.json",
         existing=(["--source-plan", f"{ODB_PLAN}/plan.json"] if INCREMENTAL_ODB else
                   ["--existing", EXISTING_ODB] if EXISTING_ODB else []),
         version=ODB_VERSION, node=config["odb"]["node"]
-    log: f"{LOG}/{ORTHOGROUP_MAPPING}/merge.log"
+    log: f"{LOG}/{ORTHOGROUP_MAPPING}/tables.log"
     conda: "../envs/analysis.yaml"
-    resources: mem_mb=8000
+    threads: 8
+    resources: mem_mb=16000
     shell:
         "{PYTHON:q} {input.code:q} --samples {input.samples:q} --chunks {params.plan:q} "
-        "--chunk-dir {params.chunks:q} --protein-dir {params.proteins:q} --database {output.database:q} "
-        "--mappings {output.mappings:q} --qc {output.qc:q} {params.existing:q} "
+        "--chunk-dir {params.chunks:q} --protein-dir {params.proteins:q} --outdir {params.out:q} --cache-dir {params.cache:q} --threads {threads} "
+        "{params.existing:q} "
         "--version {params.version:q} --node {params.node} > {log:q} 2>&1"
 
 

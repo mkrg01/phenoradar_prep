@@ -21,8 +21,6 @@ genegalleon:
   image: null
   settings:
     assembly_method: rnaSPAdes
-    amalgkit_rrna_filter: 'yes'
-    amalgkit_contam_filter: 'no'
 slurm:
   partition: null  # Use the cluster default; set a name when required.
   account: null
@@ -44,8 +42,8 @@ slurm:
     controller:
       cpus: 1
       mem_mb: 8000
-      time: 3-00:00:00
-  jobs: 10
+      time: 14-00:00:00
+  jobs: 64  # Submission ceiling; Slurm limits actual CPU/memory allocation.
   default_resources:
     mem_mb: 8000
     runtime: 1440

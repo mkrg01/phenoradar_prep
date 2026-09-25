@@ -57,7 +57,9 @@ def write_profile(destination, slurm):
     for key in ('partition','account'):
         if slurm.get(key): defaults['slurm_' + key] = slurm[key]
     profile = {'executor':'slurm', 'jobs':slurm['jobs'], 'latency-wait':90,
-               'rerun-incomplete':True, 'printshellcmds':True, 'default-resources':defaults}
+               'rerun-incomplete':True, 'printshellcmds':True, 'default-resources':defaults,
+               'slurm-status-command':'squeue', 'slurm-init-seconds-before-status-checks':10,
+               'seconds-between-status-checks':10}
     profile['set-resources'] = {rule:{k:v for k,v in values.items() if k != 'cpus'} for rule,values in slurm.get('rules', {}).items()}
     profile['set-threads'] = {rule:values['cpus'] for rule,values in slurm.get('rules', {}).items() if 'cpus' in values}
     destination = Path(destination)

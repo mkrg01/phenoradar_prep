@@ -65,7 +65,6 @@ def load_products(path, data, verify_files=True):
         return copy.deepcopy(stored)
 
     bound['mapping'] = bind(bound['mapping'])
-    bound['odb_snapshot'] = bind(bound['odb_snapshot'])
     for species, product in bound['products'].items():
         if product['row']['scientific_name'].replace(' ', '_') != species:
             raise ValueError('product species differs from metadata')
@@ -108,7 +107,10 @@ def publish_products(build, data):
                     raise ValueError('existing products differ from completed build')
             if product['translation']['sha256'] != existing['products'][species]['source_translation_sha256']:
                 raise ValueError('existing translation differs from completed build')
-        if existing['mapping']['sha256'] != data['mapping']['sha256']:
+        from mapping_tables import load_tables
+        old_tables = load_tables(existing['mapping']['path'])['tables']
+        new_tables = load_tables(data['mapping']['path'])['tables']
+        if {s:e['table']['sha256'] for s,e in old_tables.items()} != {s:e['table']['sha256'] for s,e in new_tables.items()}:
             raise ValueError('existing mapping differs from completed build')
         return target / 'manifest.json'
     staging = Path(tempfile.mkdtemp(prefix='.products-', dir=build))
@@ -156,28 +158,21 @@ def publish_products(build, data):
             translation_relative = protein_relative.with_suffix('.json')
             write_json(staging / translation_relative, translation)
             product['translation'] = created(translation_relative)
-        mapping = add(data['mapping'], 'odb/mappings.sqlite')
-        mapping_root = Path(data['mapping']['path']).parent
-        annotations = add(record(mapping_root / 'gene_orthogroups.tsv'), 'odb/annotations.tsv')
-        if (mapping_root / 'merge_qc.json').exists():
-            qc_path = mapping_root / 'merge_qc.json'
-            add(record(qc_path), 'provenance/mapping_qc.json')
-            for index, entry in enumerate(json.loads(qc_path.read_text()).get('sources', [])):
-                add(entry, f'provenance/mapping_sources/{index:04d}.json')
-        snapshot = {'schema_version':1, **data['odb'],
-                    'proteins':[{'species':s, 'odb_species':p['odb_species'],
-                                 **{k:v for k,v in p['protein'].items() if k != 'stat'}}
-                                for s,p in sorted(products.items())],
-                    'annotations':{k:('annotations.tsv' if k == 'path' else v) for k,v in annotations.items() if k != 'stat'},
-                    'source_build':data['build_id']}
-        if data.get('odb_reference_sha256s'):
-            snapshot['reference_sha256s'] = data['odb_reference_sha256s']
-        write_json(staging / 'odb/snapshot.json', snapshot)
-        odb_snapshot = created('odb/snapshot.json')
+        from mapping_tables import load_tables, relative_file, write_tables
+        source_mapping = verify(data['mapping'])
+        snapshot = load_tables(source_mapping)
+        entries = {name:dict(entry, table=relative_file(source_mapping.parent, entry['table']))
+                   for name,entry in snapshot['tables'].items()}
+        mapping_path = write_tables(staging / 'odb', entries, snapshot['version'], snapshot['node'],
+                                    snapshot.get('qc'), snapshot.get('reference_sha256s', []))
+        published = load_tables(mapping_path, verify_files=False)
+        for entry in published['tables'].values():
+            relative = 'odb/' + entry['table']['path']
+            files[relative] = dict(entry['table'], path=relative)
+        mapping = created('odb/snapshot.json')
         portable = {k:copy.deepcopy(data[k]) for k in
                     ('kind','build_id','created_at','fields','translation','lineage','odb','excluded_runs')}
-        portable.update(schema_version=2, products=products, mapping=mapping,
-                        odb_snapshot=odb_snapshot, files=list(files.values()))
+        portable.update(schema_version=3, products=products, mapping=mapping, files=list(files.values()))
         portable['sha256'] = digest(portable)
         write_json(staging / 'manifest.json', portable)
         load_complete(staging)
@@ -203,7 +198,7 @@ def register_products(source, store, cache_dir, lineage, translation, node, excl
     from incremental_odb import import_snapshot
     source = completion_path(source)
     completed = load_complete(source)
-    if completed['schema_version'] != 2:
+    if completed['schema_version'] != 3:
         raise ValueError('register --products requires a portable products directory')
     if completed['lineage'] != lineage or completed['translation'] != translation or completed['odb'] != {'version':'v12','node':node}:
         raise ValueError('portable build lineage/translation/ODB settings differ from build.yaml')
@@ -226,6 +221,9 @@ def register_products(source, store, cache_dir, lineage, translation, node, excl
         ref = register_reference(store, item, product['cds']['path'], provenance('assembly'))
         register_busco(store, ref, full=product['busco']['path'], lineage=lineage, provenance=provenance('busco'))
         register_quant(store, ref, item, product['abundance']['path'], provenance('quant'))
+        from protein_cache import register_translation
+        register_translation(product['cds']['path'], product['protein']['path'],
+                             product['translation']['path'], Path(store) / '.proteins', translation['table'])
         results.append({'species':item['species'], 'status':'registered'})
-    odb = import_snapshot(Path(completed['odb_snapshot']['path']).parent, cache_dir, node=node)
+    odb = import_snapshot(Path(completed['mapping']['path']).parent, cache_dir, node=node)
     return results, odb

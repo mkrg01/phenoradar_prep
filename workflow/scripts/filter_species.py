@@ -12,6 +12,7 @@ import sqlite3
 import tempfile
 
 from common import file_record, now, species_from_gene_id, write_json, write_tsv
+from mapping_tables import load_tables, read_species, relative_file, subset
 from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
                     PHYLOGENY_BRANCHES, REPRESENTATIVES)
 
@@ -21,7 +22,7 @@ PHENOTYPED_PHYLOGENY = PHYLOGENY_BRANCHES["phenotyped"]
 
 SAFE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 BUNDLES = {
-    "odb": [f"{ORTHOGROUP_MAPPING}/mappings.sqlite", f"{ORTHOGROUP_MAPPING}/gene_orthogroups.tsv", f"{ORTHOGROUP_MAPPING}/merge_qc.json"],
+    "odb": [f"{ORTHOGROUP_MAPPING}/snapshot.json"],
     "tpm": [f"{ORTHOGROUP_EXPRESSION}/{n}.tsv" for n in ["tpm", "tpm_wide", "tpm_sum", "tpm_sum_wide", "mapping_qc"]],
     "alignments": [f"{ORTHOGROUP_ALIGNMENTS}/provenance.json"],
     "kegg": [f"kegg/{n}.tsv" for n in ["genes", "gene_kos", "ko_tpm_sum", "ko_tpm_sum_wide", "ko_support", "mapping_qc"]],
@@ -99,6 +100,15 @@ def discover(source, traits=None):
         sections[name] = {"status": "ready" if not missing else "absent" if len(missing) == len(names) else "incomplete",
                           "missing": missing}
         files.update(source / n for n in names if (source / n).is_file())
+    if sections['odb']['status'] == 'ready':
+        snapshot = source / ORTHOGROUP_MAPPING / 'snapshot.json'
+        data = load_tables(snapshot, verify_files=False)
+        for entry in data['tables'].values():
+            path = Path(relative_file(snapshot.parent, entry['table'])['path'])
+            if not path.is_file():
+                sections['odb']['status'] = 'incomplete'
+                sections['odb']['missing'].append(str(path))
+            else: files.add(path)
     if sections["alignments"]["status"] == "absent":
         unfinished = list((source / ORTHOGROUP_ALIGNMENTS).glob("*.faa"))
         if unfinished:
@@ -288,38 +298,16 @@ class Export:
         self.counts["protein_files"] = dict(before=len(self.species), after=len(self.keep))
 
     def odb(self):
-        destination = self.stage / ORTHOGROUP_MAPPING
-        destination.mkdir(parents=True)
-        path = self.input(self.source / f"{ORTHOGROUP_MAPPING}/mappings.sqlite")
-        with sqlite3.connect(destination / "mappings.sqlite", uri=True) as db:
-            db.execute("ATTACH DATABASE ? AS original", (path.as_uri() + "?mode=ro",))
-            unknown = db.execute("SELECT DISTINCT species FROM original.genes").fetchall()
-            if {s for s, in unknown} != self.species:
-                raise ValueError("ODB database species differ from the source manifest")
-            db.executescript("""
-                CREATE TABLE genes(query TEXT PRIMARY KEY, species TEXT NOT NULL);
-                CREATE TABLE mappings(query TEXT NOT NULL REFERENCES genes(query), og TEXT NOT NULL,
-                                      PRIMARY KEY(query, og)) WITHOUT ROWID;
-                CREATE TEMP TABLE kept_species(species TEXT PRIMARY KEY);
-                PRAGMA foreign_keys=ON;
-            """)
-            db.executemany("INSERT INTO kept_species VALUES (?)", ((s,) for s in sorted(self.keep)))
-            db.execute("INSERT INTO genes SELECT g.query,g.species FROM original.genes g JOIN kept_species USING(species)")
-            db.execute("CREATE INDEX genes_species ON genes(species)")
-            db.execute("INSERT INTO mappings SELECT m.query,m.og FROM original.mappings m JOIN genes g USING(query)")
-            if db.execute("SELECT 1 FROM original.mappings m LEFT JOIN original.genes g USING(query) WHERE g.query IS NULL LIMIT 1").fetchone():
-                raise ValueError("orphan gene in source ODB mappings")
-            pairs_before = db.execute("SELECT count(*) FROM original.mappings").fetchone()[0]
-            pairs_after = db.execute("SELECT count(*) FROM mappings").fetchone()[0]
-            genes_before = db.execute("SELECT count(*) FROM original.genes").fetchone()[0]
-            genes_after = db.execute("SELECT count(*) FROM genes").fetchone()[0]
-            write_tsv(destination / "gene_orthogroups.tsv", ["#query", "ODB_OG"],
-                      ({"#query": g, "ODB_OG": og} for g, og in db.execute("SELECT query,og FROM mappings ORDER BY query,og")))
-            # All copies and ambiguous assignments of retained genes remain intact.
-            self.counts["odb_gene_og_pairs"] = dict(before=pairs_before, after=pairs_after)
-            self.counts["odb_genes"] = dict(before=genes_before, after=genes_after)
-            write_json(destination / "filter_qc.json", {"operation": "subset_original_mappings", "remapped": False,
-                       "unique_gene_og_pairs": pairs_after, "genes": genes_after})
+        path = self.input(self.source / ORTHOGROUP_MAPPING / 'snapshot.json')
+        data = load_tables(path, verify_files=False)
+        if set(data['tables']) != self.species:
+            raise ValueError('ODB mapping species differ from the source manifest')
+        for entry in data['tables'].values():
+            self.input(relative_file(path.parent, entry['table'])['path'], entry['table']['sha256'])
+        subset(path, self.keep, self.stage / ORTHOGROUP_MAPPING)
+        for label, key in [('odb_gene_og_pairs','unique_gene_og_pairs'), ('odb_genes','protein_genes')]:
+            self.counts[label] = {'before':sum(e['qc'][key] for e in data['tables'].values()),
+                                  'after':sum(data['tables'][s]['qc'][key] for s in self.keep)}
 
     def tpm(self):
         for relative in BUNDLES["tpm"]:
@@ -327,15 +315,21 @@ class Export:
             self.subset_table(relative, ["species", "run"], self.run_row, unique_runs=unique, complete_runs=True)
 
     def verify_gene_owners(self, db, table_name, gene_column):
-        if self.inventory["sections"]["odb"]["status"] != "ready":
-            return
-        original = self.input(self.source / f"{ORTHOGROUP_MAPPING}/mappings.sqlite")
-        db.execute("ATTACH DATABASE ? AS original_odb", (original.as_uri() + "?mode=ro",))
-        # Identifiers below are fixed internal table/column names, never config.
-        bad = db.execute(f"SELECT m.{gene_column} FROM {table_name} m LEFT JOIN original_odb.genes g "
-                         f"ON m.{gene_column}=g.query WHERE g.query IS NULL OR m.species!=g.species LIMIT 1").fetchone()
-        if bad:
-            raise ValueError("gene/species ownership differs from ODB: " + bad[0])
+        if self.inventory['sections']['odb']['status'] != 'ready': return
+        snapshot = self.input(self.source / ORTHOGROUP_MAPPING / 'snapshot.json')
+        db.execute(f'CREATE INDEX owners_species ON {table_name}(species)')
+        if {r[0] for r in db.execute(f'SELECT DISTINCT species FROM {table_name}')} - self.species:
+            raise ValueError('gene/species ownership differs from ODB')
+        for species in self.species:
+            genes, _ = read_species(snapshot, species)
+            if table_name == 'members':
+                actual = set(db.execute('SELECT gene,og FROM members WHERE species=?', (species,)))
+                expected = {(gene,og) for gene,ogs in genes.items() for og in ogs}
+                if actual != expected:
+                    raise ValueError('alignment gene/OG membership differs from completed ODB mappings')
+            else:
+                for (gene,) in db.execute(f'SELECT {gene_column} FROM {table_name} WHERE species=?', (species,)):
+                    if gene not in genes: raise ValueError('gene/species ownership differs from ODB: ' + gene)
 
     def alignments(self):
         destination = self.stage / ORTHOGROUP_ALIGNMENTS
@@ -380,13 +374,6 @@ class Export:
                     empty.append(og)
                 records.append(dict(orthogroup=og, before=len(seen), after=after, columns=width))
             self.verify_gene_owners(db, "members", "gene")
-            if self.inventory["sections"]["odb"]["status"] == "ready":
-                missing = db.execute("SELECT m.gene FROM members m LEFT JOIN original_odb.mappings p "
-                                     "ON m.gene=p.query AND m.og=p.og WHERE p.query IS NULL LIMIT 1").fetchone()
-                extra = db.execute("SELECT p.query FROM original_odb.mappings p LEFT JOIN members m "
-                                   "ON m.gene=p.query AND m.og=p.og WHERE m.gene IS NULL LIMIT 1").fetchone()
-                if missing or extra:
-                    raise ValueError("alignment gene/OG membership differs from completed ODB mappings")
             write_json(destination / "filter_qc.json", {"realigned": False, "columns_changed": False,
                        "empty_orthogroups": empty, "alignments": records})
             self.counts["alignment_sequences"] = dict(before=sum(r["before"] for r in records), after=sum(r["after"] for r in records))

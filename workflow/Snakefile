@@ -186,21 +186,22 @@ def report_phylogeny_plan():
         PHYLOGENY_PLAN_REPORTED = True
 
 
+from sample_table import sample_table
+
+
 def sample_rows(wildcards):
-    path = checkpoints.select_metadata.get().output.samples
-    with open(path) as handle:
-        return list(csv.DictReader(handle, delimiter="\t"))
+    return sample_table(checkpoints.select_metadata.get().output.samples)[0]
 
 
 def species_row(wildcards):
-    rows = [r for r in sample_rows(wildcards) if r["odb_species"] == wildcards.species]
+    rows = sample_table(checkpoints.select_metadata.get().output.samples)[1].get(wildcards.species, [])
     if not rows:
         raise WorkflowError(f"species not selected: {wildcards.species}")
     return rows[0]
 
 
 def run_row(wildcards):
-    rows = [r for r in sample_rows(wildcards) if r["run"] == wildcards.run]
+    rows = sample_table(checkpoints.select_metadata.get().output.samples)[2].get(wildcards.run, [])
     if len(rows) != 1:
         raise WorkflowError(f"run not uniquely selected: {wildcards.run}")
     return rows[0]
@@ -224,7 +225,11 @@ def odb_source_files(wildcards, suffix):
     for source in odb_plan(wildcards)["sources"]:
         if source["kind"] == "existing":
             if suffix in {"og.annotations", "provenance.json"}:
-                paths.append(str(Path(source["root"]) / ("snapshot.json" if suffix == "provenance.json" else "annotations.tsv")))
+                root = Path(source["root"])
+                snapshot = json.loads((root / "snapshot.json").read_text())
+                if suffix == "provenance.json": paths.append(str(root / "snapshot.json"))
+                elif snapshot["schema_version"] == 1: paths.append(str(root / "annotations.tsv"))
+                else: paths.extend(str(root / snapshot["tables"][name]["table"]["path"]) for name in source["species"])
         else:
             label = source["chunk"]
             paths.append(f"{CHUNKS}/{label}/" + ("provenance.json" if suffix == "provenance.json" else f"{label}.{suffix}"))
@@ -298,9 +303,8 @@ rule proteins:
 
 rule mapping:
     input:
-        f"{MAPPING}/mappings.sqlite",
-        f"{MAPPING}/gene_orthogroups.tsv",
-        f"{MAPPING}/merge_qc.json"
+        f"{MAPPING}/snapshot.json",
+        f"{MAPPING}/species"
 
 
 rule kegg:

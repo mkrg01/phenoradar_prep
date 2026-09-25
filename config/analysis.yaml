@@ -46,7 +46,7 @@ exclude_species: []
 slurm:
   partition: null  # Use the cluster default; set a name when required.
   account: null
-  jobs: 10
+  jobs: 64  # Submission ceiling; Slurm limits actual CPU/memory allocation.
   default_resources:
     mem_mb: 8000
     runtime: 1440

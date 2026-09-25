@@ -3,13 +3,13 @@ import json
 import os
 from pathlib import Path
 import shutil
-import sqlite3
 import subprocess
 import sys
 
 import pytest
 import yaml
 
+from mapping_fixtures import make_mapping, edit_mapping
 from align_orthogroups import align, collect, fasta_records, finish
 from common import file_record, read_tsv, species_from_gene_id, write_tsv
 
@@ -48,22 +48,16 @@ def collected_inputs(tmp_path):
     proteins = tmp_path / "proteins"
     proteins.mkdir()
     (proteins / "Alpha_protein.fa").write_text(
-        ">Alpha_g1\nMACDEFGHIKLMNPQRSTVWY*\n>Alpha_g2\nMACDEFGHIKLMNPQRSTVWY*\n>unused\nMXXX*\n")
+        ">Alpha_g1\nMACDEFGHIKLMNPQRSTVWY*\n>Alpha_g2\nMACDEFGHIKLMNPQRSTVWY*\n>Alpha_g99\nMXXX*\n")
     (proteins / "Beta_X_protein.fa").write_text(
         ">Beta-X_g1\nMACDXXGHIKLMNPQRSTVWY*\n>Beta-X_g2\nMAUBZOJ*ACD\n")
-    database = tmp_path / "mappings.sqlite"
-    with sqlite3.connect(database) as db:
-        db.executescript("""
-            CREATE TABLE genes (query TEXT PRIMARY KEY, species TEXT NOT NULL);
-            CREATE TABLE mappings (query TEXT, og TEXT, PRIMARY KEY (query, og));
-            INSERT INTO genes VALUES ('Alpha_g1','Alpha'), ('Alpha_g2','Alpha'), ('unused','Alpha'),
-                                     ('Beta-X_g1','Beta-X'), ('Beta-X_g2','Beta-X');
-            INSERT INTO mappings VALUES ('Alpha_g1','OG1'), ('Alpha_g2','OG1'), ('Beta-X_g1','OG1'),
-                                        ('Beta-X_g2','OG2'), ('Alpha_g2','OG3');
-        """)
+    mapping = tmp_path / 'mapping/snapshot.json'
+    make_mapping(mapping, [('Alpha_g1','Alpha'),('Alpha_g2','Alpha'),('Alpha_g99','Alpha'),
+                            ('Beta-X_g1','Beta-X'),('Beta-X_g2','Beta-X')],
+                 [('Alpha_g1','OG1'),('Alpha_g2','OG1'),('Beta-X_g1','OG1'),('Beta-X_g2','OG2'),('Alpha_g2','OG3')])
     inputs = tmp_path / "inputs"
-    collect(samples, database, proteins, inputs)
-    return samples, database, proteins, inputs
+    collect(samples, mapping, proteins, inputs)
+    return samples, mapping, proteins, inputs
 
 
 def test_collect_preserves_all_copies_assignments_and_species(collected_inputs):
@@ -78,18 +72,16 @@ def test_collect_preserves_all_copies_assignments_and_species(collected_inputs):
     assert len(members) == 5  # repeated runs do not duplicate sequences
     assert next(r for r in members if r["gene_id"] == "Beta-X_g2")["species"] == "Beta-X"
     assert {r["orthogroup"] for r in members if r["gene_id"] == "Alpha_g2"} == {"OG1", "OG3"}
-    assert "unused" not in {r["gene_id"] for r in members}
+    assert "Alpha_g99" not in {r["gene_id"] for r in members}
 
 
 def test_collection_replaces_removed_ogs_and_handles_no_mappings(collected_inputs):
-    samples, database, proteins, inputs = collected_inputs
-    with sqlite3.connect(database) as db:
-        db.execute("DELETE FROM mappings WHERE og = 'OG3'")
-    collect(samples, database, proteins, inputs)
+    samples, mapping, proteins, inputs = collected_inputs
+    edit_mapping(mapping, pairs=lambda rows: [(g,o) for g,o in rows if o != 'OG3'])
+    collect(samples, mapping, proteins, inputs)
     assert not (inputs / "OG3.faa").exists()
-    with sqlite3.connect(database) as db:
-        db.execute("DELETE FROM mappings")
-    collect(samples, database, proteins, inputs)
+    edit_mapping(mapping, pairs=lambda rows: [])
+    collect(samples, mapping, proteins, inputs)
     assert not list(inputs.glob("*.faa"))
     assert not (inputs / "members.tsv").exists()
     out = inputs.parent / "alignments"
@@ -99,7 +91,7 @@ def test_collection_replaces_removed_ogs_and_handles_no_mappings(collected_input
 
 @pytest.mark.parametrize("kind", ["missing", "duplicate", "invalid", "unsafe_og", "wrong_species", "gene_format", "gene_species"])
 def test_collection_rejects_inconsistent_inputs_without_replacing_checkpoint(collected_inputs, kind):
-    samples, database, proteins, inputs = collected_inputs
+    samples, mapping, proteins, inputs = collected_inputs
     previous = {p.name: p.read_bytes() for p in inputs.iterdir()}
     if kind == "missing":
         (proteins / "Beta_X_protein.fa").write_text(">Beta-X_g1\nMXX*\n")
@@ -112,15 +104,14 @@ def test_collection_rejects_inconsistent_inputs_without_replacing_checkpoint(col
         gene = "arbitrary_id" if kind == "gene_format" else "Beta_X_g2"
         path = proteins / "Beta_X_protein.fa"
         path.write_text(path.read_text().replace("Beta-X_g2", gene))
-        with sqlite3.connect(database) as db:
-            db.execute("UPDATE genes SET query=? WHERE query='Beta-X_g2'", (gene,))
-            db.execute("UPDATE mappings SET query=? WHERE query='Beta-X_g2'", (gene,))
+        edit_mapping(mapping, genes=lambda rows:[(gene if g=='Beta-X_g2' else g,s) for g,s in rows],
+                     pairs=lambda rows:[(gene if g=='Beta-X_g2' else g,o) for g,o in rows])
+    elif kind == 'unsafe_og':
+        edit_mapping(mapping, pairs=lambda rows:[(g,'../escape' if o=='OG3' else o) for g,o in rows])
     else:
-        with sqlite3.connect(database) as db:
-            db.execute("UPDATE mappings SET og = '../escape' WHERE og = 'OG3'" if kind == "unsafe_og"
-                       else "UPDATE genes SET species = 'Other' WHERE query = 'Beta-X_g2'")
+        edit_mapping(mapping, genes=lambda rows:[(g,'Other' if g=='Beta-X_g2' else s) for g,s in rows])
     with pytest.raises(ValueError):
-        collect(samples, database, proteins, inputs)
+        collect(samples, mapping, proteins, inputs)
     assert {p.name: p.read_bytes() for p in inputs.iterdir()} == previous
 
 
@@ -133,11 +124,10 @@ def test_singleton_is_saved_without_running_famsa(collected_inputs, tmp_path):
 
 
 def test_finish_accepts_relocated_results_and_preserves_historical_reports(collected_inputs, tmp_path):
-    samples, database, proteins, inputs = collected_inputs
+    samples, mapping, proteins, inputs = collected_inputs
     # Singleton groups exercise completed-job provenance without an aligner.
-    with sqlite3.connect(database) as db:
-        db.execute("DELETE FROM mappings WHERE og = 'OG1'")
-    collect(samples, database, proteins, inputs)
+    edit_mapping(mapping, pairs=lambda rows: [(g,o) for g,o in rows if o != 'OG1'])
+    collect(samples, mapping, proteins, inputs)
     output, reports = tmp_path / "alignments", tmp_path / "reports"
     for fasta in inputs.glob("*.faa"):
         align(fasta, output / fasta.name, reports / f"{fasta.stem}.json", command="nonexistent-famsa")
@@ -177,12 +167,10 @@ def test_alignment_rejects_noncanonical_gene_id_before_running_famsa(tmp_path):
 
 
 def test_collection_reopens_many_og_files_without_losing_copies(collected_inputs):
-    samples, database, proteins, inputs = collected_inputs
+    samples, mapping, proteins, inputs = collected_inputs
     groups = [f"many{i:03d}" for i in range(70)]
-    with sqlite3.connect(database) as db:
-        db.executemany("INSERT INTO mappings VALUES (?, ?)",
-                       [(gene, og) for gene in ["Alpha_g1", "Alpha_g2"] for og in groups])
-    collect(samples, database, proteins, inputs)
+    edit_mapping(mapping, pairs=lambda rows: rows + [(gene,og) for gene in ['Alpha_g1','Alpha_g2'] for og in groups])
+    collect(samples, mapping, proteins, inputs)
     for og in groups:
         assert [name for name, _ in fasta_records(inputs / f"{og}.faa")] == ["Alpha_g1", "Alpha_g2"]
 
@@ -215,16 +203,15 @@ def famsa_binary():
 
 
 def test_real_famsa_preserves_residues_and_finish_prunes_removed_ogs(collected_inputs, tmp_path):
-    samples, database, proteins, inputs = collected_inputs
+    samples, mapping, proteins, inputs = collected_inputs
     output, reports = tmp_path / "alignments", tmp_path / "reports"
     binary = famsa_binary()
     # Different lengths, stop/ambiguity symbols, identical copies and singletons.
     with open(proteins / "Alpha_protein.fa", "a") as handle:
         handle.write(">Alpha_g3\nMAUBZOJ*ACD\n>Alpha_g4\nXXXXX\n")
-    with sqlite3.connect(database) as db:
-        db.executemany("INSERT INTO genes VALUES (?, 'Alpha')", [("Alpha_g3",), ("Alpha_g4",)])
-        db.executemany("INSERT INTO mappings VALUES (?, 'OG1')", [("Alpha_g3",), ("Alpha_g4",)])
-    collect(samples, database, proteins, inputs)
+    edit_mapping(mapping, genes=lambda rows:rows+[('Alpha_g3','Alpha'),('Alpha_g4','Alpha')],
+                 pairs=lambda rows:rows+[('Alpha_g3','OG1'),('Alpha_g4','OG1')])
+    collect(samples, mapping, proteins, inputs)
     for fasta in sorted(inputs.glob("*.faa")):
         align(fasta, output / fasta.name, reports / f"{fasta.stem}.json", command=binary)
         result = dict(fasta_records(output / fasta.name))

@@ -31,7 +31,9 @@ results/<analysis>/
   metadata/                         # Selection, samples, traits, BUSCO QC
   proteins/                         # Proteins reused from the build
   orthogroups/
-    mapping/                        # Selected-species gene-to-OG mappings
+    mapping/
+      snapshot.json                 # Selected species, checksums, mapping QC
+      species/{species}.tsv.gz       # gene_id, orthogroup; blank OG means unmapped
     expression/
       tpm_sum.tsv                   # Original TPM sums by OG
       tpm.tsv                       # Rescaled OG TPM
@@ -50,6 +52,10 @@ Start with `metadata/selection.json`, `samples.tsv`, and
 PhenoRadar metadata. See the [analysis guides](index.md#choose-an-analysis)
 for optional outputs. Keep `run.json`, branch provenance, reference snapshots,
 and the release's `image.json` with the analysis.
+
+Mapping tables retain all genes and all distinct OG assignments. Their snapshot
+records the input protein hash and QC per species, so unchanged tables can be
+reused without rebuilding a global database.
 
 ## TPM interpretation
 

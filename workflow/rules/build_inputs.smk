@@ -22,17 +22,17 @@ rule import_build_protein:
 rule import_build_mapping:
     input:
         completion=config['build_manifest'],
-        database=COMPLETED_BUILD['mapping']['path'],
+        mapping=COMPLETED_BUILD['mapping']['path'],
         samples=f'{META}/samples.tsv',
         proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa' for r in sample_rows(wc)}),
         code=f'{SCRIPTS}/build_products.py',
         helpers=[f'{SCRIPTS}/portable_build.py', f'{SCRIPTS}/dataset_assets.py']
     output:
-        database=f'{MAPPING}/mappings.sqlite',
-        mappings=f'{MAPPING}/gene_orthogroups.tsv',
-        qc=f'{MAPPING}/merge_qc.json'
+        snapshot=f'{MAPPING}/snapshot.json',
+        tables=directory(f'{MAPPING}/species')
+    params: out=MAPPING
     conda: '../envs/analysis.yaml'
     resources: mem_mb=8000
     shell:
         '{PYTHON:q} {input.code:q} mapping --completion {input.completion:q} --samples {input.samples:q} '
-        '--database {output.database:q} --mappings {output.mappings:q} --qc {output.qc:q}'
+        '--outdir {params.out:q}'

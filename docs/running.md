@@ -27,6 +27,8 @@ Use `status`, `squeue`, and the prepared run's `jobs/logs/` to inspect progress.
 Assembly, BUSCO, and quantification use species arrays with `afterok` dependencies.
 Mapping and analysis each use a controller; Snakemake submits individual rules as
 separate workers. Each array task, controller, and worker has its own time limit.
+Status polling uses `squeue`, starting at 10 seconds; long-running jobs can increase
+the interval automatically.
 
 ## Pilot run
 
@@ -68,11 +70,16 @@ Edit the relevant config's `slurm` section:
 | `concurrency`, `array_size` (build only) | Concurrent species tasks and array batch size |
 | `stages.assembly`, `.busco`, `.quant` (build only) | Per-species `cpus`, `mem_mb`, and Slurm `time` |
 | `stages.controller` | Controller `cpus`, `mem_mb`, and `time` |
-| `jobs` | Concurrent Snakemake worker jobs |
+| `jobs` | Maximum outstanding Snakemake worker jobs (default 64), including queued jobs |
 | `rules.<rule>` | Per-rule `cpus`, `mem_mb`, and `runtime` in minutes |
 
 `partition: null` uses the cluster default. Check available names with `sinfo`
 before choosing an explicit partition.
+
+`jobs` is not a CPU count. Slurm starts only the jobs that fit the requested
+CPU/memory allocations and site/account limits; the rest wait in the queue.
+Set `jobs` within your site's submission limit; raising it does not reserve that many workers
+at once. Assembly/BUSCO/quant arrays instead use `concurrency`.
 
 `array_size` must be below the site's `MaxArraySize`. For example, increase assembly
 memory/time or change ODB job sizing in `build.yaml`:

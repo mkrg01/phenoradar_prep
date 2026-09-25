@@ -193,8 +193,21 @@ def new_dataset(root, names=("New plant",), array_size=None):
     return prepare(root, "addition", root / "config/build.yaml", "input/new.tsv")
 
 
-def test_staged_workers_reuse_and_native_array_filename_order(dataset_project):
+@pytest.mark.parametrize("key", ["amalgkit_rrna_filter", "amalgkit_contam_filter"])
+@pytest.mark.parametrize("value", ["yes", "no"])
+def test_read_filter_settings_are_not_configurable(dataset_project, key, value):
+    config = dataset_project / "config/build.yaml"
+    cfg = yaml.safe_load(config.read_text())
+    cfg["genegalleon"]["settings"][key] = value
+    config.write_text(yaml.safe_dump(cfg))
+    with pytest.raises(ValueError, match=f"managed/invalid GeneGalleon setting: {key}"):
+        plan(dataset_project, config)
+
+
+def test_staged_workers_reuse_and_native_array_filename_order(dataset_project, monkeypatch):
     root = dataset_project
+    for key in ("AMALGKIT_RRNA_FILTER", "AMALGKIT_CONTAM_FILTER"):
+        monkeypatch.setenv("GG_TRANSCRIPTOME_" + key, "yes")
     # Prefix species sort order differs from the order of *_metadata.tsv filenames.
     path = new_dataset(root, ("New plant", "New plant alba"))
     commands = submit(path, until="busco", dry_run=True)
@@ -205,6 +218,9 @@ def test_staged_workers_reuse_and_native_array_filename_order(dataset_project):
         for index in (1, 2): worker(path, stage, index)
     events = [json.loads(line) for line in (path / "genegalleon/events.jsonl").read_text().splitlines()]
     assert [e["species"] for e in events] == ["New_plant", "New_plant_alba"] * 3
+    for event in events:
+        assert event["env"]["GG_TRANSCRIPTOME_AMALGKIT_RRNA_FILTER"] == "no"
+        assert event["env"]["GG_TRANSCRIPTOME_AMALGKIT_CONTAM_FILTER"] == "no"
     assert all(r["quant"] == "reuse" for r in status(path))
     worker(path, "assembly", 1)
     assert len((path / "genegalleon/events.jsonl").read_text().splitlines()) == 6

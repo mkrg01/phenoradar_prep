@@ -3,14 +3,14 @@
 import argparse
 import csv
 import math
-import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
-from common import file_record, now, read_tsv, write_json, write_tsv
+from common import file_record, now, read_tsv, species_from_gene_id, write_json, write_tsv
+from mapping_tables import read_species
 
 
-def aggregate(samples, run, database, output, qc, multimap="error"):
+def aggregate(samples, run, mapping, output, qc, multimap="error"):
     if multimap not in {"error", "drop", "split"}:
         raise ValueError("unknown multimap policy")
     rows = [row for row in read_tsv(samples) if row["run"] == run]
@@ -33,22 +33,13 @@ def aggregate(samples, run, database, output, qc, multimap="error"):
     total = math.fsum(values.values())
     if not values or total <= 0:
         raise ValueError(f"{run}: abundance has no positive TPM")
-    db = sqlite3.connect(Path(database).resolve().as_uri() + "?mode=ro", uri=True)
-    mapping = defaultdict(list)
-    try:
-        db.execute("CREATE TEMP TABLE targets (query TEXT PRIMARY KEY)")
-        db.executemany("INSERT INTO targets VALUES (?)", ((gene,) for gene in values))
-        foreign = db.execute("SELECT genes.query FROM genes JOIN targets USING(query) WHERE species != ? LIMIT 1",
-                             (sample["species"],)).fetchone()
-        if foreign:
-            raise ValueError(f"{run}: target ID belongs to a different species: {foreign[0]}")
-        for gene, og in db.execute("SELECT mappings.query, og FROM mappings JOIN targets USING(query)"):
-            mapping[gene].append(og)
-        protein_genes = db.execute("SELECT count(*) FROM genes WHERE species = ?", (sample["species"],)).fetchone()[0]
-        quantified_proteins = db.execute("SELECT count(*) FROM genes JOIN targets USING(query) WHERE species = ?",
-                                        (sample["species"],)).fetchone()[0]
-    finally:
-        db.close()
+    genes, entry = read_species(mapping, sample['species'])
+    foreign = next((gene for gene in values if species_from_gene_id(gene) != sample['species']), None)
+    if foreign:
+        raise ValueError(f"{run}: target ID belongs to a different species: {foreign}")
+    mapping = {gene:groups for gene,groups in genes.items() if groups and gene in values}
+    protein_genes = len(genes)
+    quantified_proteins = len(genes.keys() & values.keys())
     ambiguous = [gene for gene, groups in mapping.items() if len(groups) > 1]
     if ambiguous and multimap == "error":
         raise ValueError(f"{run}: {len(ambiguous)} genes map to multiple OGs; choose drop/split explicitly; examples {ambiguous[:5]}")
@@ -77,7 +68,7 @@ def aggregate(samples, run, database, output, qc, multimap="error"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    for flag in ["samples", "run", "database", "output", "qc"]:
+    for flag in ["samples", "run", "mapping", "output", "qc"]:
         parser.add_argument(f"--{flag}", required=True)
     parser.add_argument("--multimap", choices=["error", "drop", "split"], default="error")
     aggregate(**vars(parser.parse_args()))

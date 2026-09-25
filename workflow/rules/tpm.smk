@@ -2,9 +2,10 @@ rule aggregate_tpm:
     input:
         samples=f"{META}/samples.tsv",
         abundance=lambda wc: run_row(wc)["abundance"],
-        database=f"{MAPPING}/mappings.sqlite",
+        mapping=f"{MAPPING}/snapshot.json",
+        tables=f"{MAPPING}/species",
         code=f"{SCRIPTS}/aggregate_tpm.py",
-        common=f"{SCRIPTS}/common.py"
+        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/mapping_tables.py", f"{SCRIPTS}/dataset_assets.py"]
     output:
         tpm=f"{TPM}/runs/{{run}}.tsv",
         qc=f"{TPM}/runs/{{run}}.qc.json"
@@ -14,7 +15,7 @@ rule aggregate_tpm:
     resources: mem_mb=2000
     shell:
         "{PYTHON:q} {input.code:q} --samples {input.samples:q} --run {wildcards.run:q} "
-        "--database {input.database:q} --output {output.tpm:q} --qc {output.qc:q} "
+        "--mapping {input.mapping:q} --output {output.tpm:q} --qc {output.qc:q} "
         "--multimap {params.multimap:q} > {log:q} 2>&1"
 
 

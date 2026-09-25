@@ -299,5 +299,11 @@ def import_existing(store, input_dir, metadata, lineage="embryophyta_odb12", exc
         abundance = root / "quant" / species / run / f"{run}_abundance.tsv"
         if abundance.is_file():
             register_quant(store, ref, item, abundance)
+        protein = root / "proteins" / f"{item['odb_species']}_protein.fa"
+        if protein.is_file() and protein.with_suffix('.json').is_file():
+            from protein_cache import register_translation
+            provenance = json.loads(protein.with_suffix('.json').read_text())
+            register_translation(cds, protein, protein.with_suffix('.json'),
+                                 Path(store) / '.proteins', provenance['translation_table'])
         result.append({"species": species, "status": "registered", "reference_id": ref["reference_id"]})
     return result

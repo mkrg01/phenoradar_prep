@@ -473,12 +473,10 @@ def test_collects_all_tree_variants_and_future_inputs(snapshot, tmp_path):
         (snapshot / base / "alignments/stale.faa").write_text(">Unknown_species\nAA\n")
     mapping = snapshot / "orthogroups/mapping"
     mapping.mkdir()
-    (mapping / "mappings.sqlite").write_bytes(b"completed mapping database")
-    write_tsv(mapping / "gene_orthogroups.tsv", ["gene_id", "orthogroup"],
-              [dict(gene_id="Plant_A_g1", orthogroup="OG1")])
-    write_json(mapping / "merge_qc.json", {"pairs": 1})
-    expected.update(f"orthogroups/mapping/{name}" for name in
-                    ["mappings.sqlite", "gene_orthogroups.tsv", "merge_qc.json"])
+    from mapping_fixtures import make_mapping
+    make_mapping(mapping / 'snapshot.json', [('Plant_A_g1','Plant_A')], [('Plant_A_g1','OG1')])
+    shutil.rmtree(mapping / '.fixtures')
+    expected.update(f'orthogroups/mapping/{name}' for name in ['snapshot.json','species/Plant_A.tsv.gz'])
     for name in SPECIES:
         stem = name.replace("-", "_") + "_protein"
         path = snapshot / "proteins" / f"{stem}.fa"

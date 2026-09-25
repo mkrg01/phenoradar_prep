@@ -15,7 +15,8 @@ def alignment_targets(wc):
 checkpoint collect_orthogroup_proteins:
     input:
         samples=f"{META}/samples.tsv",
-        database=f"{MAPPING}/mappings.sqlite",
+        mapping=f"{MAPPING}/snapshot.json",
+        tables=f"{MAPPING}/species",
         proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa' for r in sample_rows(wc)}),
         code=f"{SCRIPTS}/align_orthogroups.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/busco_phylogeny.py"]
@@ -25,7 +26,7 @@ checkpoint collect_orthogroup_proteins:
     conda: "../envs/alignment.yaml"
     log: f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/collect.log"
     shell:
-        "{PYTHON:q} {input.code:q} collect --samples {input.samples:q} --database {input.database:q} "
+        "{PYTHON:q} {input.code:q} collect --samples {input.samples:q} --mapping {input.mapping:q} "
         "--protein-dir {params.proteins:q} --outdir {output.fasta:q} > {log:q} 2>&1"
 
 

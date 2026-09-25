@@ -25,7 +25,8 @@ from dataset_assets import (COUNTS, SAFE, digest, identities, import_existing, l
 
 STAGES = ("assembly", "busco", "quant")
 UNTIL = (*STAGES, "mapping")
-MANAGED = {"mode_transcriptome_assembly", "kallisto_reference", "remove_amalgkit_fastq_after_completion", "delete_tmp_dir"}
+FIXED_GENEGALLEON_SETTINGS = {"amalgkit_rrna_filter": "no", "amalgkit_contam_filter": "no"}
+MANAGED = {"mode_transcriptome_assembly", "kallisto_reference", "remove_amalgkit_fastq_after_completion", "delete_tmp_dir"} | FIXED_GENEGALLEON_SETTINGS.keys()
 
 
 def absolute(root, value):
@@ -79,6 +80,7 @@ def settings(root, config, analysis_config=None):
             raise ValueError(f"GeneGalleon setting must be scalar: {key}")
     validate_slurm(cfg["slurm"])
     cfg["store"] = str(inside(root, absolute(root, cfg["store"])))
+    analysis["translation_cache"] = str(Path(cfg["store"]) / ".proteins")
     gg["cache_dir"] = str(inside(root, absolute(root, gg.get("cache_dir", "resources/software/genegalleon"))))
     for key in ("repository", "image"):
         if gg.get(key): gg[key] = str(absolute(root, gg[key]))
@@ -96,7 +98,8 @@ def stage_conditions(cfg):
                                   for p in source_records(gg["repository"])]
     image = gg.get("image") or (str(Path(gg["repository"]) / "genegalleon.sif") if gg.get("repository") else None)
     if image and Path(image).is_file(): software["image"] = file_record(image)["sha256"]
-    base = {"software": software, "settings": gg.get("settings", {}), "translation": cfg["translation"]}
+    effective_settings = {**gg.get("settings", {}), **FIXED_GENEGALLEON_SETTINGS}
+    base = {"software": software, "settings": effective_settings, "translation": cfg["translation"]}
     return {s: digest(dict(base, **({"lineage": cfg["busco"]["lineage"]} if s == "busco" else {}))) for s in STAGES}
 
 
@@ -314,7 +317,7 @@ def gg_environment(manifest, item, products, stage, work, task_id):
     # Do not inherit unrelated GeneGalleon overrides from the submission shell.
     env = {k: v for k, v in os.environ.items() if not k.startswith(("GG_TRANSCRIPTOME_", "GG_COMMON_"))}
     gg = manifest["config"]["genegalleon"]
-    overrides = dict(gg.get("settings", {}))
+    overrides = {**gg.get("settings", {}), **FIXED_GENEGALLEON_SETTINGS}
     ref = products["reference"]
     overrides.update({
         "mode_transcriptome_assembly": "metadata", "run_amalgkit_metadata_or_integrate": 0,

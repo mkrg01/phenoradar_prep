@@ -3,7 +3,6 @@ import json
 import os
 from pathlib import Path
 import shutil
-import sqlite3
 import subprocess
 import sys
 
@@ -11,6 +10,8 @@ import pytest
 import yaml
 
 from common import file_record, read_tsv, sha256, write_json, write_tsv
+from mapping_fixtures import make_mapping, edit_mapping
+from mapping_tables import read_species, load_tables
 from filter_species import discover, export, fasta_records, validate_exclusions
 from filter_species_phylogeny import read_tree
 
@@ -38,12 +39,7 @@ def snapshot(tmp_path):
     pairs = [(g, "OGshared") for g, s in genes] + [("Plant_A_g99", "OGempty"), ("Plant_B-x_g2", "OGamb")]
     folder = source / "orthogroups/mapping"
     folder.mkdir(parents=True)
-    with sqlite3.connect(folder / "mappings.sqlite") as db:
-        db.executescript("CREATE TABLE genes(query TEXT PRIMARY KEY,species TEXT); CREATE TABLE mappings(query TEXT,og TEXT,PRIMARY KEY(query,og));")
-        db.executemany("INSERT INTO genes VALUES (?,?)", genes)
-        db.executemany("INSERT INTO mappings VALUES (?,?)", pairs)
-    write_tsv(folder / "gene_orthogroups.tsv", ["#query", "ODB_OG"], [{"#query": g, "ODB_OG": og} for g, og in pairs])
-    write_json(folder / "merge_qc.json", {"unique_gene_og_pairs": len(pairs)})
+    make_mapping(folder / 'snapshot.json', genes, pairs)
     (source / "proteins").mkdir()
     for row in rows[:5]:
         (source / "proteins" / f"{row['odb_species']}_protein.fa").write_text(
@@ -143,10 +139,9 @@ def test_export_all_outputs_preserves_values_and_sources(snapshot, tmp_path):
                 assert read_tsv(path) == [r for r in original if r["species"] != "Plant_A"]
     wide = read_tsv(out / "kegg/ko_tpm_sum_wide.tsv")
     assert all(row["K00001"] == "0" and row["K00002"] == "" for row in wide)
-    with sqlite3.connect(out / "orthogroups/mapping/mappings.sqlite") as db:
-        assert db.execute("SELECT query FROM genes WHERE species='Plant_A'").fetchall() == []
-        assert db.execute("SELECT og FROM mappings WHERE query='Plant_B-x_g2' ORDER BY og").fetchall() == [("OGamb",), ("OGshared",)]
-        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+    mapping = out / 'orthogroups/mapping/snapshot.json'
+    assert 'Plant_A' not in load_tables(mapping)['tables']
+    assert sorted(read_species(mapping, 'Plant_B-x')[0]['Plant_B-x_g2']) == ['OGamb','OGshared']
     assert not (out / "orthogroups/alignments/OGempty.faa").exists()
     assert not (out / "orthogroups/alignments/members.tsv").exists()
     assert list(fasta_records(out / "orthogroups/alignments/OGshared.faa")) == [r for r in fasta_records(source / "orthogroups/alignments/OGshared.faa") if not r[0].startswith("Plant_A_g99 ")]
@@ -281,11 +276,11 @@ def test_inconsistent_inputs_fail_without_changing_originals(snapshot, tmp_path,
         rows[1]["species"] = "Plant_A"
         write_tsv(path, list(rows[0]), rows)
     elif damage == "odb_owner":
-        with sqlite3.connect(source / "orthogroups/mapping/mappings.sqlite") as db:
-            db.execute("UPDATE genes SET species='Plant_A' WHERE query='Plant_B-x_g2'")
+        edit_mapping(source / 'orthogroups/mapping/snapshot.json',
+                     genes=lambda rows:[(g,'Plant_A' if g=='Plant_B-x_g2' else s) for g,s in rows])
     elif damage == "odb_pair":
-        with sqlite3.connect(source / "orthogroups/mapping/mappings.sqlite") as db:
-            db.execute("UPDATE mappings SET og='changed_OG' WHERE query='Plant_B-x_g2' AND og='OGamb'")
+        edit_mapping(source / 'orthogroups/mapping/snapshot.json',
+                     pairs=lambda rows:[(g,'changed_OG' if g=='Plant_B-x_g2' and o=='OGamb' else o) for g,o in rows])
     else:
         path = source / "phylogeny/all/gene_trees.nwk"
         path.write_text(path.read_text().replace("Plant_A:1", "Plant_A:2"))

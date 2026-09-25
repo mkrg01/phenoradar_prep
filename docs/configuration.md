@@ -38,6 +38,9 @@ Build requires complete products for every included species. The manual
 before scheduling; BUSCO acceptance thresholds apply only in analysis.
 Analysis inherits lineage, genetic code, and ODB node from its build.
 
+Build always disables AMALGKIT rRNA and contamination filtering; these are not
+configurable GeneGalleon settings.
+
 Build discovers matching ODB snapshots automatically and maps missing species
 in chunks (default 20). `odb.node` defaults to v12 taxid `3193` (Embryophyta).
 Import old mappings with `register --odb-results <snapshot> --odb-only`;

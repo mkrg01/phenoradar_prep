@@ -92,6 +92,9 @@ for partial execution; collect again after additional branches finish.
 ## Slurm and retries
 
 `submit` validates inputs, submits jobs, and returns without waiting for completion.
+CDS translations are cached by CDS content and genetic code; `register --products`
+also imports the bundle's verified translations.
+
 Assembly/BUSCO/quant use species arrays; mapping and analysis use Snakemake
 controllers with separate rule jobs. See [execution and resources](running.md)
 for concurrency, time limits, and resource overrides.
@@ -149,6 +152,8 @@ absent from current metadata too, so future metadata preparation can avoid them.
 Edit metadata and prepare a **new build ID**. Added species run missing work;
 removed species leave the new outputs. Historical builds and caches remain.
 Changing only a run can reuse CDS/BUSCO/mapping and quantify the new run.
+Mappings are stored per species; updating membership links only the selected tables.
+There is no combined mapping database to rebuild.
 
 **Fresh builds need no registration.** To import legacy CDS/BUSCO/quant files,
 use the [import layout](inputs.md#importing-existing-products):
@@ -194,8 +199,19 @@ To seed a **new build with additional species**, register the copied bundle once
 
 Keep the copied bundle: species registration references it. Use compatible
 lineage, genetic code, and ODB node settings. Destination run exclusions apply.
-New builds still translate CDS and merge mapping tables; analysis of a completed
-bundle reuses both directly. Copying products does not resume an interrupted build.
+Registered translations and species mapping tables are reused by new builds.
+Copying products does not resume an interrupted build.
+
+Legacy bundles containing an ODB SQLite database can be imported without using
+that database:
+
+```bash
+./run_build.sh register --input-dir imports/legacy --metadata imports/legacy/metadata.tsv \
+  --odb-results imports/legacy/odb
+```
+
+Prepare a new build afterward. Legacy annotations are split and validated once;
+subsequent builds reuse the species tables.
 
 ## Migrating old configurations
 

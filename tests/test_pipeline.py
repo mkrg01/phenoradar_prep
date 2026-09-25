@@ -12,7 +12,8 @@ import pytest
 from aggregate_tpm import aggregate
 from common import file_record, read_tsv, write_json, write_tsv
 from make_manifests import make
-from merge_odb import annotation_pairs, merge as merge_odb
+from mapping_tables import annotation_pairs, collect as collect_odb
+from mapping_fixtures import make_mapping, edit_mapping
 from merge_tpm import merge as merge_tpm
 from prepare_metadata import prepare
 from prepare_odb_reference import prepare as prepare_odb_reference
@@ -214,21 +215,19 @@ def test_merge_rejects_queries_outside_chunk(tmp_path, query):
         root.mkdir(parents=True)
         annotated = root / f"{label}.og.annotations"
         annotated.write_text(f"#query\tODB_OG\n{value}\tOG1\n")
-        write_json(root / "provenance.json", {"results": [file_record(annotated)]})
+        write_json(root / "provenance.json", {"results": [file_record(annotated)], "identity":{"reference":{"sha256":"0"*64}}})
     with pytest.raises(ValueError, match="does not belong"):
-        merge_odb(samples, manifests / "chunks.json", chunks, proteins,
-                  tmp_path / "db.sqlite", tmp_path / "map.tsv", tmp_path / "qc.json")
+        collect_odb(samples, manifests / "chunks.json", chunks, proteins,
+                  tmp_path / "mapping", tmp_path / "cache")
 
 
 def test_aggregation_ambiguity_and_run_preservation(tiny_inputs, tmp_path):
     meta = tmp_path / "metadata"
     prepare(**tiny_inputs, outdir=meta)
-    database = tmp_path / "mappings.sqlite"
-    with sqlite3.connect(database) as db:
-        db.executescript("CREATE TABLE genes(query TEXT PRIMARY KEY, species TEXT); CREATE TABLE mappings(query TEXT, og TEXT);")
-        for name in ["Alpha_plant", "Beta_sp-X"]:
-            db.executemany("INSERT INTO genes VALUES (?, ?)", [(f"{name}_g{i}", name) for i in [1, 2, 3]])
-            db.executemany("INSERT INTO mappings VALUES (?, ?)", [(f"{name}_g1", "OG1"), (f"{name}_g2", "OG2")])
+    database = tmp_path / 'mapping/snapshot.json'
+    genes = [(f'{name}_g{i}', name) for name in ['Alpha_plant','Beta_sp-X'] for i in [1,2,3]]
+    pairs = [(f'{name}_g{i}', f'OG{i}') for name in ['Alpha_plant','Beta_sp-X'] for i in [1,2]]
+    make_mapping(database, genes, pairs)
     runs = tmp_path / "runs"
     for run in ["A1", "A2", "B1"]:
         aggregate(meta / "samples.tsv", run, database, runs / f"{run}.tsv", runs / f"{run}.qc.json")
@@ -239,8 +238,7 @@ def test_aggregation_ambiguity_and_run_preservation(tiny_inputs, tmp_path):
     assert report["mapped_tpm_fraction"] == 0.5
     merge_tpm(meta / "samples.tsv", runs, tmp_path / "final")
     assert [r["run"] for r in read_tsv(tmp_path / "final/tpm_wide.tsv")] == ["A1", "A2", "B1"]
-    with sqlite3.connect(database) as db:
-        db.execute("INSERT INTO mappings VALUES ('Alpha_plant_g1', 'OG3')")
+    edit_mapping(database, pairs=lambda rows: rows + [('Alpha_plant_g1','OG3')])
     with pytest.raises(ValueError, match="multiple OGs"):
         aggregate(meta / "samples.tsv", "A1", database, runs / "x.tsv", runs / "x.json")
     aggregate(meta / "samples.tsv", "A1", database, runs / "split.tsv", runs / "split.json", "split")
@@ -378,9 +376,8 @@ def test_existing_odb_rejects_incompatible_inputs(existing_odb, tmp_path, proble
         snapshot["proteins"].pop()
     write_json(root / "snapshot.json", snapshot)
     with pytest.raises(ValueError, match=message):
-        merge_odb(samples, "unused", "unused", proteins, tmp_path / "db.sqlite",
-                  tmp_path / "map.tsv", tmp_path / "qc.json", existing=root)
-    assert not (tmp_path / "db.sqlite").exists()
+        collect_odb(samples, "unused", "unused", proteins, tmp_path / "mapping", tmp_path / "cache", existing=root)
+    assert not (tmp_path / "mapping/snapshot.json").exists()
 
 
 @pytest.mark.parametrize("reuse", [False, True])
@@ -445,7 +442,7 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     assert len(read_tsv(out / "orthogroups/expression/tpm_wide.tsv")) == 3
     events = tmp_path / "events.txt"
     assert (len(events.read_text().splitlines()) if events.exists() else 0) == (0 if reuse else 1)
-    assert json.loads((out / "orthogroups/mapping/merge_qc.json").read_text())["duplicate_pairs_removed"] == 4
+    assert json.loads((out / "orthogroups/mapping/snapshot.json").read_text())["qc"]["duplicate_pairs_removed"] == 4
     completed_work = {p: p.stat().st_mtime_ns for p in
                       (tmp_path / "work/test/orthogroups/mapping").glob("chunk_*/*/completed.json")}
     assert len(completed_work) == (0 if reuse else 1)
@@ -460,7 +457,7 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     dry = execute(["--dry-run"])
     assert "rule aggregate_tpm" in dry
     assert "rule odb_map:" not in dry
-    assert "rule merge_odb:" not in dry
+    assert "rule collect_odb:" not in dry
     execute()
     assert (len(events.read_text().splitlines()) if events.exists() else 0) == (0 if reuse else 1)
     # Shrinking selection must rebuild the checkpoint DAG and omit stale runs/chunks.
@@ -472,7 +469,7 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     assert json.loads((out / "metadata/selection.json").read_text())["requested_species"] == ["Beta_sp-X", "Gamma_plant"]
     assert (len(events.read_text().splitlines()) if events.exists() else 0) == (0 if reuse else 2)
     if reuse:
-        qc = json.loads((out / "orthogroups/mapping/merge_qc.json").read_text())
+        qc = json.loads((out / "orthogroups/mapping/snapshot.json").read_text())["qc"]
         assert qc["mode"] == "existing"
         assert qc["excluded_annotation_rows"] == 4
         assert qc["duplicate_pairs_removed"] == 2

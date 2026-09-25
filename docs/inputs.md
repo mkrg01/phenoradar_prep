@@ -43,7 +43,7 @@ against the metadata directory; use a new run ID when read content changes.
 | `cds/{species}_longestCDS.fa.gz` | Gzip FASTA, one per species |
 | `quant/{species}/{run}/{run}_abundance.tsv` | TSV: `target_id`, `tpm` |
 | `proteins/{odb_species}_protein.fa` | Translated protein FASTA |
-| `odb/` | Mapping database, annotations, and reusable snapshot |
+| `odb/` | `snapshot.json` and verified per-species `species/*.tsv.gz` gene/OG tables |
 
 Build creates or reuses these automatically. See [output layout](outputs.md#directory-layout)
 for intermediate workspaces and [portable builds](datasets.md#copying-a-completed-build-to-another-project)
@@ -62,6 +62,11 @@ BUSCO full tables also accept `{species}_busco.full.tsv`; either form may have
 `.gz`. A summary alone cannot complete BUSCO. Keep registered source files inside
 the project. Old `input/cds/`, `input/busco/`, and `input/quant/` layouts remain
 supported with `--input-dir input`, but new builds do not write there.
+
+Translation FASTAs with matching `_protein.json` provenance are also imported
+from `proteins/`. Without CDS/protein provenance, translations are verified by
+computing them once, then cached under the build store's `.proteins/` directory.
+Future builds reuse them by CDS hash and genetic code.
 
 Copied bundles use `register --products <directory>` to seed a new build;
 analysis consumes them directly. See [importing work](datasets.md#updating-species-and-importing-existing-work)

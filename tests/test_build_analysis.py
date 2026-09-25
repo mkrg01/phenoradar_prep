@@ -105,8 +105,8 @@ def test_complete_build_multiple_analyses_and_species_updates(dataset_project,fa
         output = root/'results'/name
         assert {r['species'] for r in read_tsv(output/'orthogroups/expression/tpm.tsv')} == expected
         assert {r['species'] for r in read_tsv(output/'phenoradar_inputs/tpm.tsv')} == expected
-        qc = json.loads((output/'orthogroups/mapping/merge_qc.json').read_text())
-        assert qc['mode'] == 'completed_build' and qc['mapped_species'] == 0
+        qc = json.loads((output/'orthogroups/mapping/snapshot.json').read_text())['qc']
+        assert qc['mode'] == 'existing' and qc['mapped_species'] == 0
         assert len(events.read_text().splitlines()) == 1
         assert receipt.read_bytes() == original
     # Resource changes are recorded per analysis submission without editing the frozen analysis.

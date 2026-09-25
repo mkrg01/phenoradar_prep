@@ -73,8 +73,8 @@ def discover(source, exclusions=()):
         folder(ORTHOGROUP_EXPRESSION)
         publish(f"{ORTHOGROUP_EXPRESSION}/tpm.tsv", "tpm.tsv")
     if branch("mapping", [f"{ORTHOGROUP_MAPPING}/{name}" for name in
-                          ["gene_orthogroups.tsv", "mappings.sqlite", "merge_qc.json"]]):
-        folder(ORTHOGROUP_MAPPING)
+                          ["snapshot.json"]]):
+        folder(ORTHOGROUP_MAPPING, recursive=True)
     if branch("kegg", ["kegg/ko_tpm_sum.tsv", "kegg/mapping_qc.tsv", "kegg/ko_support.tsv"]):
         for name in ["ko_tpm_sum.tsv", "ko_tpm_sum_wide.tsv", "ko_support.tsv", "mapping_qc.tsv",
                      "genes.tsv", "gene_kos.tsv"]:

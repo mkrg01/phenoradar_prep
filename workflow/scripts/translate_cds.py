@@ -41,4 +41,11 @@ if __name__ == "__main__":
     parser.add_argument("--seqkit", default="seqkit")
     parser.add_argument("--table", type=int, default=1)
     parser.add_argument("--threads", type=int, default=1)
-    translate(**vars(parser.parse_args()))
+    parser.add_argument("--cache-dir")
+    args = vars(parser.parse_args())
+    cache_dir = args.pop("cache_dir")
+    if cache_dir:
+        from protein_cache import cached_translate
+        cached_translate(cache_dir=cache_dir, **args)
+    else:
+        translate(**args)

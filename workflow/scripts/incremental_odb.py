@@ -15,11 +15,14 @@ from make_manifests import make
 def load_snapshot(root, version, node):
     root = Path(root)
     record = json.loads((root / "snapshot.json").read_text())
-    if record.get("schema_version") != 1 or record.get("version") != version or record.get("node") != node:
+    if record.get("schema_version") not in (1, 2) or record.get("version") != version or record.get("node") != node:
         raise ValueError(f"existing ODB snapshot schema/version/node differs: {root}")
     proteins = {p["species"]: p for p in record["proteins"]}
     if len(proteins) != len(record["proteins"]):
         raise ValueError(f"existing ODB snapshot has duplicate or missing selected species: {root}")
+    if record["schema_version"] == 2:
+        from mapping_tables import load_tables
+        return load_tables(root / "snapshot.json", verify_files=False), proteins
     if record["annotations"]["path"] != "annotations.tsv":
         raise ValueError(f"snapshot must contain annotations.tsv: {root}")
     return record, proteins
@@ -41,6 +44,19 @@ def import_snapshot(source, cache_dir, version="v12", node=3193):
         normalized.add(protein["odb_species"])
         if len(protein.get("sha256", "")) != 64 or any(c not in "0123456789abcdef" for c in protein["sha256"]):
             raise ValueError("invalid ODB protein checksum")
+    if snapshot["schema_version"] == 2:
+        from mapping_tables import load_tables, relative_file, write_tables
+        data = load_tables(source / "snapshot.json")
+        identity = digest({"version":version,"node":node,"proteins":data["proteins"],
+                           "tables":{s:e["table"]["sha256"] for s,e in data["tables"].items()},
+                           "references":data.get("reference_sha256s",[])})
+        destination = Path(cache_dir).resolve() / f"{version}_{node}" / ("import_" + identity)
+        with locked(destination.parent / ".publish.lock"):
+            if (destination / "snapshot.json").is_file():
+                load_tables(destination / "snapshot.json"); return destination
+            entries = {s:dict(e, table=relative_file(source, e["table"])) for s,e in data["tables"].items()}
+            write_tables(destination, entries, version, node, data.get("qc"), data.get("reference_sha256s", []))
+        return destination
     annotations = file_entry(source / "annotations.tsv")
     if annotations["sha256"] != snapshot["annotations"]["sha256"]:
         raise ValueError(f"ODB result changed after completion: {source}")
@@ -76,7 +92,8 @@ def import_snapshot(source, cache_dir, version="v12", node=3193):
 def plan(samples, protein_dir, outdir, cache_dir, existing=None, reference=None,
          version="v12", node=3193, chunk_size=20):
     rows = {r["species"]: r for r in read_tsv(samples)}
-    inputs = {s: file_record(Path(protein_dir) / f'{r["odb_species"]}_protein.fa') for s, r in rows.items()}
+    from mapping_tables import checked, protein_record, relative_file
+    inputs = {s: protein_record(Path(protein_dir) / f'{r["odb_species"]}_protein.fa') for s, r in rows.items()}
     roots = [Path(existing)] if existing else []
     roots += sorted((Path(cache_dir) / f"{version}_{node}").glob("*/snapshot.json"))
     roots = [p.parent if p.name == "snapshot.json" else p for p in roots]
@@ -85,22 +102,25 @@ def plan(samples, protein_dir, outdir, cache_dir, existing=None, reference=None,
     reference_hash = sha256(reference) if reference and Path(reference).is_file() else None
     for root in roots:
         record, proteins = load_snapshot(root, version, node)
-        members = sorted(set(rows) & set(proteins))
-        if not members:
-            continue
-        constraints = set(record.get("reference_sha256s", []))
-        if record.get("reference_sha256"): constraints.add(record["reference_sha256"])
+        candidates = sorted(set(rows) & set(proteins))
+        members = [name for name in candidates if proteins[name]['odb_species'] == rows[name]['odb_species']
+                   and proteins[name]['sha256'] == inputs[name]['sha256']]
+        if existing and root.resolve() == Path(existing).resolve() and members != candidates:
+            raise ValueError('protein differs from existing ODB input; select a matching snapshot/cache')
+        if not members: continue
+        constraints = set(record.get('reference_sha256s', []))
+        if record.get('reference_sha256'): constraints.add(record['reference_sha256'])
         if reference_hash and any(expected != reference_hash for expected in constraints):
-            raise ValueError(f"ODB reference changed since cached mapping: {root}; use a new reference/cache namespace")
-        for name in members:
-            original = proteins[name]
-            if original["odb_species"] != rows[name]["odb_species"] or original["sha256"] != inputs[name]["sha256"]:
-                raise ValueError(f"protein differs from existing ODB input: {name}; select a matching snapshot/cache")
+            raise ValueError(f'ODB reference changed since cached mapping: {root}; use a new reference/cache namespace')
         members = [s for s in members if s not in assigned]
         if not members:
             continue
-        if sha256(root / "annotations.tsv") != record["annotations"]["sha256"]:
-            raise ValueError(f"ODB result changed after completion: {root}")
+        if record["schema_version"] == 2:
+            for name in members:
+                from dataset_assets import verify
+                verify(relative_file(root, record["tables"][name]["table"]))
+        else:
+            checked(dict(record["annotations"], path=str(root / "annotations.tsv")), cache_dir)
         index = len(sources)
         assigned.update({s: index for s in members})
         sources.append({"kind": "existing", "root": str(root.resolve()), "species": members,

@@ -11,7 +11,7 @@ import yaml
 
 from common import file_record, read_tsv, write_json, write_tsv
 from incremental_odb import plan
-from merge_odb import merge
+from mapping_tables import collect, load_tables, read_species
 from translate_cds import translate
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,10 +40,12 @@ def test_plan_and_merge_do_not_leak_other_species_from_import(tmp_path):
     out = tmp_path / "plan"
     result = plan(samples, proteins, out, tmp_path / "cache", existing=old)
     assert result["mapped_species"] == []
-    merge(samples, out / "chunks.json", tmp_path / "chunks", proteins, tmp_path / "db.sqlite",
-          tmp_path / "mapping.tsv", tmp_path / "qc.json", source_plan=out / "plan.json")
-    assert not any(r["#query"].startswith("Removed_") for r in read_tsv(tmp_path / "mapping.tsv"))
-    assert json.loads((tmp_path / "qc.json").read_text())["excluded_annotation_rows"] == 2
+    collect(samples, out / 'chunks.json', tmp_path / 'chunks', proteins, tmp_path / 'mapping',
+            tmp_path / 'cache', source_plan=out / 'plan.json')
+    data = load_tables(tmp_path / 'mapping/snapshot.json')
+    assert set(data['tables']) == set(names[:2])
+    assert data['qc']['excluded_annotation_rows'] == 2
+    assert not list(tmp_path.rglob('*.sqlite'))
 
 
 def test_mixed_mapping_and_cross_run_reuse(tiny_inputs, fake_odb, frozen_reference,
@@ -78,12 +80,13 @@ def test_mixed_mapping_and_cross_run_reuse(tiny_inputs, fake_odb, frozen_referen
         return root / "results" / config["run_name"]
     first = execute()
     assert len(events.read_text().splitlines()) == 1
-    assert json.loads((first / "orthogroups/mapping/merge_qc.json").read_text())["mode"] == "mixed"
+    assert json.loads((first / "orthogroups/mapping/snapshot.json").read_text())["qc"]["mode"] == "mixed"
     assert len(list((root / "resources/odb_cache/v12_3193").glob("*/snapshot.json"))) == 1
     config["run_name"] = "same_species_new_run"
     second = execute()
+    assert all(json.loads(p.read_text())["reused"] for p in (second / "proteins").glob("*_protein.json"))
     assert len(events.read_text().splitlines()) == 1
-    assert json.loads((second / "orthogroups/mapping/merge_qc.json").read_text())["mode"] == "existing"
+    assert json.loads((second / "orthogroups/mapping/snapshot.json").read_text())["qc"]["mode"] == "existing"
     metadata = root / "input/metadata.tsv"
     all_rows = read_tsv(metadata)
     write_tsv(metadata, list(all_rows[0]), [r for r in all_rows if r["scientific_name"] == "Beta sp-X"])

@@ -97,7 +97,7 @@ def test_bundle_relocation_analysis_and_incremental_reuse(completed_project):
     (build/'completed.json').unlink()
     assert complete(build) == build/'completed.json'
     original = json.loads((source/'manifest.json').read_text())
-    assert original['schema_version'] == 2
+    assert original['schema_version'] == 3
     odb_snapshot = json.loads((source/'odb/snapshot.json').read_text())
     assert len(odb_snapshot['reference_sha256s']) == 1
     assert all(not Path(r['path']).is_absolute() for r in original['files'])
@@ -146,6 +146,8 @@ def test_bundle_relocation_analysis_and_incremental_reuse(completed_project):
         assert dataset.submit(expansion,until='quant',dry_run=True) == []
         dataset.materialize(expansion)
         execute(second,expansion,'mapping',env,mapping=True)
+        translated = second/'results'/('build_' + expansion.name)/'proteins'
+        assert all(json.loads(p.read_text())['reused'] for p in translated.glob('*_protein.json'))
         complete(expansion)
         assert len(events.read_text().splitlines()) == 1
         assert (expansion/'products/manifest.json').exists()
