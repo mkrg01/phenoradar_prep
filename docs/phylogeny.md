@@ -2,40 +2,33 @@
 
 [Documentation](index.md) · [Dating](dating.md)
 
-The `phylogeny` target infers rooted species trees from existing BUSCO full tables
-and original CDS, independently of ODB/KEGG:
+`phylogeny` infers rooted species trees from the completed build's BUSCO full
+tables and CDS. Tree inference does not use ODB/KEGG assignments:
 
 ```text
 BUSCO markers -> cdskit -> FAMSA -> trimAl/QC -> VeryFastTree -> ASTRAL-IV/CASTLES-II
 ```
 
-Branch lengths are substitutions/site; absolute ages require [treePL dating](dating.md).
-TimeTree provides age calibrations for that step by default.
+Branch lengths are substitutions/site; absolute ages require [dating](dating.md).
 
 ## Inputs
 
-Alongside ordinary [inputs](inputs.md), provide one full table per species in
-`input/busco/full/`. Use one lineage
-dataset/version; `phylogeny.lineage` defaults to `embryophyta_odb12`.
+CDS and full tables are staged automatically from `builds/<build>/products/`.
+Analysis inherits `busco.lineage` from build settings (default `embryophyta_odb12`).
 
 Full tables need `Busco id`, `Status`, `Sequence`, `Score`, and `Length` columns,
 a lineage header, and the same complete marker-ID set. Counts-only summaries and
-genome-mode tables are unsupported. Supported paths below also accept `.gz`;
-missing or multiple matches are errors:
+genome-mode tables are unsupported. For existing external results, follow the
+[registration layout](inputs.md#importing-existing-products).
 
-```text
-{species}.busco.full.tsv
-{species}.tsv
-{species}/full_table.tsv
-{species}/run_{lineage}/full_table.tsv
-```
-
-Supply original, oriented, in-frame CDS matching BUSCO hits in `input/cds/`.
+Original CDS must be oriented, in-frame, and match the BUSCO hits.
 IDs such as `Species_g123:60-698` resolve to `Species_g123`; the full CDS is
 translated, without reconstructing BUSCO-predicted peptides. Missing or ambiguous
 original IDs fail extraction.
 
 ## Species sets
+
+Set options before [preparing analysis](datasets.md#run-an-analysis):
 
 ```yaml
 trait: carnivory
@@ -45,7 +38,7 @@ phylogeny:
     enabled: false
 ```
 
-| Tree | Inference species | Output under `results/<run_name>/` |
+| Tree | Inference species | Output under `results/<analysis>/` |
 | --- | --- | --- |
 | `all` | All species passing input selection | `phylogeny/all/` |
 | `phenotyped` | Selected species with a nonmissing `trait` | `phylogeny/phenotyped/` |
@@ -58,23 +51,21 @@ representatives; both trait states are compressed, selecting by BUSCO completene
 with seeded ties. See [representative selection](contrast_pairs.md#representative-selection).
 The `all` tree needs no trait file. See [traits](inputs.md#traits) for missing values.
 
-Pair selection, dating, and taxonomy checks consume the selected trees; enabling
-pairs never changes inference species. Dating and taxonomy checks currently
-reject representative trees. Their flags are under `phylogeny`; all enabled
-postprocessing requires a nonempty `trees` list.
+Pair selection, dating, and taxonomy checks use the selected trees and require
+a nonempty `trees` list. Dating and taxonomy checks reject representative trees.
 
 ## Setup and execution
 
 ```bash
 # Optional input audit, marker plan, and outgroup check.
-./run_pipeline.sh --cores 4 --resources mem_gb=16 --configfile analyses/analysis001/pipeline.yaml -- phylogeny_prepare
+./run_analysis.sh submit --analysis analyses/analysis001 --target phylogeny_prepare
 
-# Infer gene trees and species trees.
-./run_pipeline.sh --cores 32 --resources mem_gb=128 --configfile analyses/analysis001/pipeline.yaml -- phylogeny
+# After that job finishes and the audit is reviewed:
+./run_analysis.sh submit --analysis analyses/analysis001 --target phylogeny
 ```
 
-The selected trees are included in `all`. `phylogeny` stops at tree inference;
-`all` also includes enabled postprocessing. Tools are bundled in the container; see [native execution](containers.md#native-execution) for Conda setup.
+`phylogeny` includes missing preparation steps and stops at inference.
+`all` includes selected trees and enabled postprocessing.
 
 ## Rooting
 
@@ -108,7 +99,7 @@ padding can change reading frames, and QC cannot verify ORFs or exclude paralogy
 FAMSA aligns proteins; trimAl selects columns with X treated as gaps, then restores
 X in retained columns. After trimming, sequences need `min_protein_length` known
 residues; columns without known residues are removed. Each locus needs `min_taxa`
-species and a variable amino-acid site. Changing trimAl mode reuses raw alignments.
+species and a variable amino-acid site.
 
 VeryFastTree uses double precision and `-lg -gamma` (LG+CAT search, Gamma20 length
 rescaling), with SH-like local supports and no bootstrap or support filtering.
@@ -120,20 +111,18 @@ Missing data, gene-tree error, paralogy, and model assumptions affect estimates.
 
 ## Resources
 
-Per-job memory totals all threads; see [overrides](running.md#resource-budgets).
+Per-job defaults; see [resource overrides](running.md#resource-budgets).
 
 | Rule | Job unit | Threads | Memory (GB) |
 | --- | --- | --- | --- |
 | `align_busco_marker`, `infer_busco_gene_tree` | Marker | 4 | 8 |
 | `infer_busco_species_tree` | Species set | 32 | 64 |
 
-Preparation, extraction, collection, trimming, merging, and calibration retrieval
-each default to 1 thread and 4 GB per job.
-[Dating](dating.md#resources) also requests 4 GB and requires 1 thread.
+Preparation/QC steps generally use 1 CPU/4 GB; [dating](dating.md#resources) requires 1 CPU.
 
 ## Outputs
 
-Under `results/<run_name>/phylogeny/<set>/`:
+Under `results/<analysis>/phylogeny/<set>/`:
 
 | Output | Contents |
 | --- | --- |
@@ -146,7 +135,7 @@ Under `results/<run_name>/phylogeny/<set>/`:
 | `species_coverage.tsv` | Retained locus counts per species |
 | `species_tree.nwk`, `species_tree.json` | Rooted species tree and inference provenance |
 
-Logs/benchmarks are under `logs/<run_name>/phylogeny/`. Optional dating, taxonomy
+Logs/benchmarks are under `logs/<analysis>/phylogeny/`. Optional dating, taxonomy
 review, and contrast-pair outputs live beside their source tree.
 
 ## Methods and source documentation

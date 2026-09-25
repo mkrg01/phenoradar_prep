@@ -17,9 +17,9 @@ smoke checks also run during release, and must pass before publication.
    finish before using the new image. Finish one release before starting another.
 
 The [Release workflow](../.github/workflows/release.yml) tests and publishes the
-matching container, Git tag, and GitHub Release. For `VERSION` equal to `0.2.0`,
-the tag is `v0.2.0` and the image is `ghcr.io/mkrg01/phenoradar_prep:v0.2.0`.
-The Release's `image.json` records its exact digest and source commit.
+matching container, Git tag, and GitHub Release. Tags and image tags use `v<VERSION>`;
+the image is `ghcr.io/mkrg01/phenoradar_prep:v<VERSION>`. The Release's `image.json`
+records its exact digest and source commit.
 
 `VERSION` is the only number to edit. CI never commits to `main`, so no
 synchronization pull is needed. Ordinary commits leave published versions intact.

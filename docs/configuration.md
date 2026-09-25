@@ -3,118 +3,76 @@
 [Documentation](index.md) · [Input formats](inputs.md)
 
 Edit [build.yaml](../config/build.yaml) for reusable species products and
-[analysis.yaml](../config/analysis.yaml) for analyses of a completed build.
-Edit these files directly; both commands load their corresponding file by default.
-See the [two-phase guide](datasets.md) for preparation, submission, and migration.
+[analysis.yaml](../config/analysis.yaml) for downstream analyses. Both commands
+load these files by default. See the [build/analysis guide](datasets.md) for commands.
 
 ## Loading settings and paths
 
-Paths are relative to the repository root. Build settings are frozen by
-`run_build.sh prepare --name <build>`. Analysis settings and auxiliary inputs
-are frozen by `run_analysis.sh prepare --name <analysis>`. Later edits to the
-source YAML files apply to new preparations; prepared runs retain their saved
-settings. For optional alternative configs, use `--config`; an analysis config
-can be a partial override of `config/analysis.yaml`. Execution uses generated
-`builds/<id>/pipeline.yaml` or `analyses/<id>/pipeline.yaml` files.
-`workflow/pipeline_defaults.yaml` is an internal compatibility schema for
-Snakemake, not a third user configuration.
+Paths are relative to the repository root. `prepare` freezes settings and inputs
+under `builds/<build>/` or `analyses/<analysis>/`. Later source edits affect new
+preparations only; scientific changes require a new name. Do not edit generated
+`pipeline.yaml` files. `workflow/pipeline_defaults.yaml` is an internal schema.
 
-Scientific changes require a new build or analysis ID. Retry CPU, memory, time,
-and concurrency changes use `submit --resources config/build.yaml` or
-`submit --resources config/analysis.yaml` after editing the relevant file.
-Only its `slurm` section is applied and recorded per submission.
-The workflow container follows [VERSION](../VERSION);
-GeneGalleon source/SIF pins belong to build settings.
+For retries with different CPU, memory, time, or concurrency, edit the phase
+config and pass `submit --resources config/build.yaml` or
+`submit --resources config/analysis.yaml`. Only its `slurm` section is applied.
+See [resource budgets](running.md#resource-budgets).
+
+Alternative files are optional: `--config` selects one, and an analysis config
+can be a partial override of `config/analysis.yaml`. `WORKFLOW_PYTHON` selects
+a host Python with PyYAML. The workflow image follows [VERSION](../VERSION);
+GeneGalleon source/image pins belong to build settings.
 
 ## Settings by phase
 
-| Build settings | Analysis settings |
+| Build (`build.yaml`) | Analysis (`analysis.yaml`) |
 | --- | --- |
-| `metadata`, `excluded_accessions`, `store` | Completed `build` |
-| `genegalleon` source, SIF and assembly/quant settings | `inputs` for traits, species list and calibrations |
+| `metadata`, `excluded_accessions`, `store` | Completed `build` or copied `products/` bundle |
+| `genegalleon` software and assembly/quant settings | `inputs` for traits, species list, and calibrations |
 | `busco.lineage`, `translation.table` | `selection.busco_threshold`, `exclude_species` |
-| `odb.node`, `cache_dir`, `chunk_size` | `trait`, `seed`, `tpm`, optional analysis branches |
+| `odb.node`, `odb.cache_dir`, `odb.chunk_size` | `trait`, `seed`, `tpm`, optional branches |
 | Build `slurm` resources | Analysis `slurm` resources |
 
-Build always computes full BUSCO tables for every included metadata species.
-`excluded_accessions` applies manual run-level exclusions before scheduling;
-see [failure recovery and exclusions](datasets.md#failure-and-recovery-behavior). Acceptance
-thresholds apply only in analysis. Genetic code and lineage are inherited from
-the completed build and cannot be overridden by analysis.
+Build requires complete products for every included species. The manual
+[accession list](datasets.md#manually-excluding-unusable-accessions) excludes runs
+before scheduling; BUSCO acceptance thresholds apply only in analysis.
+Analysis inherits lineage, genetic code, and ODB node from its build.
 
-`odb.node` defaults to OrthoDB v12 taxid `3193` (Embryophyta). Build always uses
-incremental mapping: matching imported/native snapshots are reused and missing
-species are mapped in chunks (default 20). Register old ODB snapshots once with
-`run_build.sh register --odb-results <snapshot> --odb-only`; later builds discover
-them automatically. `odb.existing_results` is retained only as an optional legacy
-override. See [reference configuration](references.md).
+Build discovers matching ODB snapshots automatically and maps missing species
+in chunks (default 20). `odb.node` defaults to v12 taxid `3193` (Embryophyta).
+Import old mappings with `register --odb-results <snapshot> --odb-only`;
+see [references](references.md).
 
-Analysis `build` may also point to a copied, completed `products/` directory inside
-the project. See [portable builds](datasets.md#copying-a-completed-build-to-another-project).
-
-`selection.busco_threshold` defaults to `0.5`. `selection.species_list: true`
-enables `inputs.species_list`. `exclude_species` removes listed IDs before any
-analysis. Set `inputs.species_trait: null` when no trait table is needed;
-trait-based tree settings require an actual table. `tpm.multimap` remains
-`error` by default; `drop` and `split` are also supported.
+Analysis uses BUSCO completeness `>= selection.busco_threshold` (default `0.5`).
+`selection.species_list: true` enables `inputs.species_list`; `exclude_species`
+removes exact IDs before computation. Set `inputs.species_trait: null` when traits
+are unused. `tpm.multimap` defaults to `error`; [OG expression](outputs.md#tpm-interpretation)
+also supports `drop` and `split`.
 
 ## Optional analyses and exports
+
+Set options **before preparing the analysis**. Target examples in the guides
+assume an already prepared `analyses/analysis001`.
 
 | Configuration section | Guide |
 | --- | --- |
 | `alignment` | [All-copy OG alignments](alignments.md) |
 | `kegg` | [KO annotation and expression](kegg.md) |
 | `phylogeny` | [BUSCO species trees](phylogeny.md) |
-| `phylogeny.dating` | [Calibrations and treePL dating](dating.md) |
+| `phylogeny.dating` | [Calibrations and dating](dating.md) |
 | `phylogeny.contrast_pairs` | [Trait contrast pairs](contrast_pairs.md) |
-| `phylogeny.taxonomy_check` | [MonoPhy review](taxonomy_check.md) |
-| `exclude_species` | [Species selection](datasets.md#run-an-analysis) |
+| `phylogeny.taxonomy_check` | [Taxonomic review](taxonomy_check.md) |
 
-See [targets](running.md#targets) for requesting analyses.
-[PhenoRadar input collection](phenoradar_inputs.md) needs no configuration section.
+[PhenoRadar collection](phenoradar_inputs.md) needs no settings.
+[Post hoc species filtering](species_filter.md) is a separate export utility.
 
 ## Choosing species trees
 
-`phylogeny.trees` is the single selection of trees to infer. An empty list disables
-inference; each selected tree is included in `all` and in the `phylogeny` target.
-The common `trait` is read from `input/species_trait.tsv`.
+`phylogeny.trees` selects `all`, `phenotyped`, `representatives`, or several trees
+for independent inference; `[]` disables inference. See
+[species sets](phylogeny.md#species-sets) for selection details.
 
-| `phylogeny.trees` | Inference species |
-| --- | --- |
-| `[]` | No species trees |
-| `[all]` | Every species passing input selection and BUSCO filtering |
-| `[phenotyped]` | Selected species with a known `trait`, including state zero |
-| `[representatives]` | Representatives of homogeneous trait clades on the NCBI guide |
-| `[all, representatives]` | Two independent inference runs |
-
-For a compressed tree with contrast pairs:
-
-```yaml
-trait: carnivory
-phylogeny:
-  trees: [representatives]
-  contrast_pairs:
-    enabled: true
-  dating:
-    enabled: false
-  taxonomy_check:
-    enabled: false
-```
-
-Representatives are selected from known-trait species; both trait states are
-compressed. This selection does not preserve every positive-trait species.
-The remaining BUSCO, alignment, rooting, and inference settings apply to every
-selected tree. Changing which trees are requested does not change inference
-parameters for an existing tree.
-
-`phylogeny.contrast_pairs.enabled` selects pairs on those trees; it never chooses
-a different inference species set. `phylogeny.dating.enabled` and
-`phylogeny.taxonomy_check.enabled` likewise request postprocessing of each tree.
-Dating and taxonomy checks currently support only `all` and `phenotyped`;
-combining either with `representatives` is rejected.
-
-Enabled postprocessing requires a nonempty `trees` list. Explicit phylogeny targets
-respect these settings: a disabled step produces an error rather than becoming
-enabled by its target name. `phylogeny` runs through tree inference only; `all`
-also runs enabled postprocessing. Startup logs show the selected trees and steps,
-and resolved marker plans report the number of species before inference.
+Enabled `contrast_pairs`, `dating`, and `taxonomy_check` postprocessing applies to
+those trees and requires a nonempty list. Dating and taxonomy checks support only
+`all` and `phenotyped`. Explicit postprocessing targets require their enabled flag;
+`phylogeny` stops at inference, while `all` includes enabled postprocessing.

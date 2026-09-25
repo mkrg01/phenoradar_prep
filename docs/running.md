@@ -4,119 +4,120 @@
 
 ## Installation and normal execution
 
-Use Linux/Bash with the [requirements](../README.md#requirements) and prepare the
-[containers](containers.md). Start with manually curated AMALGKIT metadata and
-the [build/analysis commands](datasets.md). Each phase submits its own Slurm
-controller; heavy work runs as species arrays or independent rule jobs.
+Use Linux/Bash with the [requirements](../README.md#requirements) and
+[container setup](containers.md). Follow the [build/analysis commands](datasets.md)
+from manually curated metadata through completed outputs.
+
+`plan` and `prepare` run locally. `submit` validates inputs, submits Slurm jobs,
+and returns without waiting for completion; `submit --dry-run` writes/previews
+submission scripts without submitting jobs. It is not a full Snakemake DAG dry-run.
+Use `status`, `squeue`, and the prepared run's `jobs/logs/` to inspect progress.
+
+Assembly, BUSCO, and quantification use species arrays with `afterok` dependencies.
+Mapping and analysis each use a controller; Snakemake submits individual rules as
+separate workers. Each array task, controller, and worker has its own time limit.
+
+## Pilot run
+
+For upstream inspection, add `--species-list pilot.txt` to build `submit`, then
+submit without the list to finish the build. For a smaller analysis, set
+`inputs.species_list` and `selection.species_list: true` in `analysis.yaml` before
+preparing a new analysis. BUSCO filtering still applies to the candidate species.
+
+## Targets
+
+Use `run_analysis.sh submit --analysis analyses/<analysis> --target <target>`.
+Targets include missing prerequisites within the analysis; they never rebuild
+upstream species products. Edit branch settings before `prepare`.
+
+| Analysis target | Work requested |
+| --- | --- |
+| `all` (default) | OG expression/QC and enabled branches, followed by PhenoRadar collection |
+| `alignments` | [All-copy OG alignments](alignments.md) |
+| `kegg` | [KO annotation and original-TPM sums](kegg.md) |
+| `phylogeny_prepare` | BUSCO input audit, outgroup, and marker plan |
+| `phylogeny` | Infer trees selected by `phylogeny.trees` |
+| `phylogeny_calibrations` | Trees and [TimeTree calibrations](dating.md#timetree-calibrations), without dating |
+| `timetree` | [treePL dating](dating.md) |
+| `taxonomy_check` | [MonoPhy review](taxonomy_check.md) |
+| `contrast_pairs` | [Trait pairs](contrast_pairs.md) on selected trees |
+| `phenoradar_inputs` | [Collect completed results](phenoradar_inputs.md), without starting producers |
+
+Phylogeny postprocessing targets require their enabled flag. Explicit `alignments`
+and `kegg` targets work without enabling their inclusion in `all`.
+Build endpoints are documented [separately](datasets.md#build-through-mapping).
+
+## Resource budgets
+
+Edit the relevant config's `slurm` section:
+
+| Setting | Controls |
+| --- | --- |
+| `partition`, `account` | Site allocation |
+| `concurrency`, `array_size` (build only) | Concurrent species tasks and array batch size |
+| `stages.assembly`, `.busco`, `.quant` (build only) | Per-species `cpus`, `mem_mb`, and Slurm `time` |
+| `stages.controller` | Controller `cpus`, `mem_mb`, and `time` |
+| `jobs` | Concurrent Snakemake worker jobs |
+| `rules.<rule>` | Per-rule `cpus`, `mem_mb`, and `runtime` in minutes |
+
+`array_size` must be below the site's `MaxArraySize`. For example, increase assembly
+memory/time or change ODB job sizing in `build.yaml`:
+
+```yaml
+slurm:
+  stages:
+    assembly: {cpus: 8, mem_mb: 256000, time: "7-00:00:00"}
+  rules:
+    odb_map: {cpus: 16, mem_mb: 192000, runtime: 4320}
+```
+
+Apply resource edits to an existing preparation explicitly:
+
+```bash
+./run_build.sh submit --build builds/build001 --resources config/build.yaml
+./run_analysis.sh submit --analysis analyses/analysis001 --resources config/analysis.yaml
+```
+
+Only resources change; scientific settings remain frozen. Requests are per job,
+not totals for all concurrent jobs. See [phylogeny](phylogeny.md#resources) and
+[dating](dating.md#resources) for their defaults.
+
+## Re-running and recovery
+
+After checking the queue and logs, resubmit the same prepared build/analysis.
+Completed work is reused within that run; failed or missing work is retried.
+Active or unresolved submissions block overlapping retries. A timed-out controller
+may leave workers active: inspect those before resubmitting.
+
+New build IDs can reuse registered species products and ODB caches. New analysis
+IDs share build products and reference caches, but do not automatically reuse
+optional alignment, KO, or tree results from another analysis.
+See [build failures](datasets.md#failure-and-recovery-behavior) for download and
+assembly recovery, and [imports](datasets.md#updating-species-and-importing-existing-work)
+for older results.
 
 ## Direct execution
 
-A prepared analysis can run locally with an explicit budget:
+A prepared analysis can run synchronously with a local resource budget:
 
 ```bash
 ./run_analysis.sh run --analysis analyses/analysis001 --local --cores 16 --mem-mb 192000
 ```
 
-`run_pipeline.sh` remains a low-level launcher. Supply the **resolved** phase
-configuration, not `config/build.yaml` or `config/analysis.yaml`:
+For low-level targets or a Snakemake DAG preview, use the **resolved** config,
+not `config/build.yaml` or `config/analysis.yaml`:
 
 ```bash
 ./run_pipeline.sh --cores 16 --resources mem_gb=192 \
-  --configfile analyses/analysis001/pipeline.yaml -- all
+  --configfile analyses/analysis001/pipeline.yaml --dry-run -- all
 ```
 
-Put options before `--` and targets after it. A resolved analysis configuration
-can only consume completed build products. A resolved build configuration is
-used for the `mapping` target; afterwards publish its verified completion with
-`run_build.sh complete --build builds/<id>`. Normal build submission does this
-automatically. For an existing schema-1 dataset use its original checkout to
-resume, or [migrate](datasets.md#migrating-old-configurations).
+Options precede `--`; targets follow it. `references`, `kegg_references`, and
+`filter_species` are low-level targets, not `run_analysis.sh --target` values.
+A resolved build config supports `mapping`; afterwards run
+`run_build.sh complete --build builds/<id>` to validate and publish it.
 
-## Pilot run
-
-For upstream inspection, pass `--species-list pilot.txt` to build `submit`, then
-resume without that list to finish all metadata species. For a small downstream
-analysis, [config/pilot.yaml](../config/pilot.yaml) is an analysis override:
-
-```bash
-./run_analysis.sh prepare --config config/pilot.yaml \
-  --build builds/build001 --name pilot
-./run_analysis.sh submit --analysis analyses/pilot
-```
-
-Prepare `input/species_list.txt` with candidate species IDs first; the BUSCO
-threshold still applies. Inspect selection and mapping QC before larger analyses.
-
-## Targets
-
-Targets schedule missing prerequisites automatically. Phylogeny targets use
-`phylogeny.trees` and require the corresponding postprocessing flag for
-`contrast_pairs`, `timetree`, `phylogeny_calibrations`, and `taxonomy_check`.
-`phylogeny` stops at tree inference; `all` also runs enabled postprocessing.
-Alignment and KEGG targets retain their explicit-target opt-in behavior.
-
-| Target | Work requested |
-| --- | --- |
-| `all` (default) | OG expression/QC and enabled alignment, KEGG, phylogeny, and contrast branches |
-| `references`, `kegg_references` | [OrthoDB or KOfam/KEGG snapshots](references.md) |
-| `proteins` | CDS translation |
-| `mapping` | ODB mapping and merged gene-to-OG index |
-| `alignments` | [All-copy OG alignments](alignments.md) |
-| `kegg` | [KO annotation and original-TPM sums](kegg.md) |
-| `phylogeny_prepare` | BUSCO input audit, outgroup, and marker plan |
-| `phylogeny` | Infer the trees selected by `phylogeny.trees` |
-| `phylogeny_calibrations` | Trees and [TimeTree calibrations](dating.md#timetree-calibrations), without dating |
-| `timetree` | [treePL dating](dating.md), with TimeTree or manual age calibrations |
-| `taxonomy_check` | [MonoPhy review](taxonomy_check.md) |
-| `contrast_pairs` | [Pairs on the selected trees](contrast_pairs.md); includes their missing inference steps |
-| `filter_species` | [Export completed results after exclusions](species_filter.md) |
-| `phenoradar_inputs` | [Collect available completed results](phenoradar_inputs.md) |
-
-All phylogeny targets follow `phylogeny.trees`; a target never changes the species
-set. Filtering and collection are manual targets that never start producer analyses.
-
-## Resource budgets
-
-Rule resources apply to one job; the launcher budget limits concurrent jobs.
-Rule defaults can be overridden by the relevant phase's `slurm.rules`; `runtime` is in minutes.
-
-| Rule | Job unit | Threads | Memory (GB) |
-| --- | --- | --- | --- |
-| `odb_map` | Mapping chunk (default 20 species) | 16 | 192 |
-| `align_orthogroup` | OG | 4 | 8 |
-| `annotate_kofam` | Species | 4 | 8 |
-| `check_taxonomy` | Species set | 1 | 8 |
-
-See [phylogeny resources](phylogeny.md#resources) for tree-inference defaults.
-The [dating rule](dating.md#resources) requires one thread; its memory can be overridden.
-Two default ODB jobs need 32 CPUs and 384 GB. To reduce per-job requests:
-
-```bash
-./run_pipeline.sh --cores 16 --resources mem_gb=192 \
-  --configfile builds/build001/pipeline.yaml \
-  --set-threads odb_map=8 --set-resources odb_map:mem_mb=64000 -- mapping
-```
-
-This allocates 8 threads and 64 GB per chunk within a 16-CPU/192-GB budget.
-
-Rule overrides use `mem_mb`; the launcher uses positive whole decimal
-`mem_gb`. Slurm `--mem` uses GiB; the launcher converts it and reserves 4 GB.
-Inside Slurm, allocation limits override direct budgets; request one node, one
-task, and finite memory. For direct runs, leave memory outside the budget for
-Snakemake and other processes.
-
-## Re-running and recovery
-
-Rerun the same command after interruption. Unchanged completed jobs are reused;
-abundance-only changes recalculate expression without remapping proteins.
-Use a new build or analysis ID for changed scientific conditions.
-
-ODB retains resumable work in `work/<run_name>/orthogroups/mapping/`;
-changed inputs use separate work. Native results/logs also appear in `results/`.
-Use a separate build/store/cache for deliberate changes to upstream software; do not edit frozen runs.
-To import previously saved annotations, set
-[`odb.existing_results`](references.md#reusing-existing-odb-results).
-
-KofamScan retains work in `work/<run_name>/kegg/`: completed species annotations
-are reused, while failed annotations restart with prior attempts retained.
-See [reference updates](references.md) when changing snapshots.
+The low-level launcher accepts `mem_mb` or whole decimal `mem_gb`. Inside a direct
+Slurm allocation it derives the CPU/memory budget from Slurm and reserves 4 GB;
+request one node, one task, and finite memory. Local runs should leave memory
+outside the budget for the controller and other processes.

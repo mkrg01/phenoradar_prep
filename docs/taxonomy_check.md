@@ -8,6 +8,8 @@ runs. Flags support review; they never exclude species automatically.
 
 ## Configuration and execution
 
+Set these options before [preparing analysis](datasets.md#run-an-analysis):
+
 ```yaml
 phylogeny:
   trees: [all]
@@ -19,13 +21,12 @@ phylogeny:
 ```
 
 ```bash
-./run_pipeline.sh --cores 1 --resources mem_gb=8 --configfile analyses/analysis001/pipeline.yaml -- taxonomy_check
+./run_analysis.sh submit --analysis analyses/analysis001 --target taxonomy_check
 ```
 
-The target follows `phylogeny.trees` and can schedule missing inference:
-check `--dry-run` and increase resources as needed. Set
-`phylogeny.taxonomy_check.enabled: true` to include reports in `all`. The explicit
-target also requires this flag. Representative trees are currently unsupported.
+The enabled flag is required and includes reports in `all`. The target follows
+`phylogeny.trees`, including missing inference. Representative trees are unsupported.
+Review jobs default to 1 CPU/8 GB; inference steps use their own resources.
 
 Choose unique NCBI `ranks`. `outlierlevel` is the required focal-group fraction
 inside a candidate core clade, in `(0, 1]`; it is not confidence.
@@ -48,7 +49,7 @@ responsible RNA-seq run without further sequence analysis.
 
 ## Outputs and figures
 
-Under `results/<run_name>/phylogeny/<set>/taxonomy_check/`:
+Under `results/<analysis>/phylogeny/<set>/taxonomy_check/`:
 
 | File | Use |
 | --- | --- |
@@ -62,9 +63,6 @@ Under `results/<run_name>/phylogeny/<set>/taxonomy_check/`:
 Figure colors denote registered groups: triangles mark intruders, squares
 outliers, diamonds both, and gray tips missing ranks. Unflagged monophyletic
 groups may be collapsed; use source/assessment trees for lengths and supports.
-
-For archived results, [taxonomy_check.py](../workflow/scripts/taxonomy_check.py)
-accepts source paths directly; see `--help`.
 
 ## References
 

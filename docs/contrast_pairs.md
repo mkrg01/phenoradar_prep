@@ -3,10 +3,11 @@
 [Documentation](index.md) · [BUSCO phylogeny](phylogeny.md)
 
 Pairs use nwkit's homogeneous-clade grouping and contrastive-clade selection.
-Top-level `trait` selects the column in `input/species_trait.tsv`; missing traits
-stay unknown and expression replicates do not add species weight.
+Top-level `trait` selects a column in `inputs.species_trait`; missing traits stay unknown.
 
 ## Configuration and execution
+
+Set these options before [preparing analysis](datasets.md#run-an-analysis):
 
 ```yaml
 trait: carnivory
@@ -17,7 +18,7 @@ phylogeny:
 ```
 
 ```bash
-./run_pipeline.sh --cores 32 --resources mem_gb=128 --configfile analyses/analysis001/pipeline.yaml -- contrast_pairs
+./run_analysis.sh submit --analysis analyses/analysis001 --target contrast_pairs
 ```
 
 The same target works for `trees: [all]`, `[phenotyped]`, `[representatives]`, or
@@ -34,8 +35,7 @@ explicit target and includes pairs in `all`. Use `phylogeny` to stop at inferenc
 For full/phenotyped trees, missing-trait tips are pruned with root direction/path
 lengths preserved in `observed_tree.nwk`; their metadata retains empty pair IDs.
 Zero/one observed state yields zero pairs; more than two states is unsupported.
-Pair-only jobs need 1 core/8 GB, but the target can schedule inference: check
-`--dry-run` before reducing resources.
+Pair jobs default to 1 CPU/8 GB; missing inference steps use their own resources.
 
 ## Representative selection
 
@@ -56,15 +56,14 @@ Dating and taxonomy checks currently do not support representative trees.
 
 ## After species exclusion
 
-With nonempty `exclude_species`, `contrast_pairs` supports only `all`/`phenotyped`
-and requires completed source trees. It requests the filtered export and never
-schedules inference. Filtering recomputes pairs for completed full/phenotyped
-trees under `filtered/phylogeny/<set>/contrast/`. Representatives are not filtered;
-requesting representative pairs with exclusions gives an error.
+Normal `analysis.yaml` exclusions apply before inference for every selected tree,
+including representatives. The separate [post hoc export](species_filter.md)
+recomputes pairs only for completed `all`/`phenotyped` trees; it cannot export
+representative results or replace inference on a newly selected species set.
 
 ## Outputs
 
-Each `results/<run_name>/phylogeny/<tree>/contrast/` directory contains:
+Each `results/<analysis>/phylogeny/<tree>/contrast/` directory contains:
 
 | Output | Contents |
 | --- | --- |

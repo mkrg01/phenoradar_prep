@@ -4,60 +4,60 @@
 
 ## Directory layout
 
-`run_name` selects directories under `results/`, `work/` (retained work), and
-`logs/` (per-step logs/benchmarks). Shared [references](references.md) live in
-`resources/`.
+Names supplied to `prepare --name` determine these directories:
+
+| Path | Contents |
+| --- | --- |
+| `input/` | User-maintained metadata, traits, and other auxiliary inputs |
+| `builds/<build>/` | Frozen build settings/metadata, GeneGalleon workspace, and job records |
+| `builds/<build>/products/` | Completed portable CDS/BUSCO/quant, proteins, mappings, and provenance |
+| `results/build_<build>/` | Build translation and mapping outputs |
+| `analyses/<analysis>/` | Frozen analysis settings/inputs and job records |
+| `results/<analysis>/` | Downstream results |
+| `work/<run>/`, `logs/<run>/` | Retained work and rule logs; run is `build_<build>` or `<analysis>` |
+| `resources/` | Shared reference/software caches and species-product registry |
+
+New CDS/BUSCO/quant files originate in the build's
+`genegalleon/output/transcriptome_assembly/` workspace. Phase-local `input/`
+directories contain staged links/copies; they are separate from top-level `input/`.
+Copy the [completed products bundle](datasets.md#copying-a-completed-build-to-another-project)
+for reuse elsewhere. Treat generated products as immutable.
 
 ## Result files
 
 ```text
-results/<run_name>/
+results/<analysis>/
   run.json                          # Configuration and provenance
   metadata/                         # Selection, samples, traits, BUSCO QC
-  proteins/                         # Translated species FASTAs
+  proteins/                         # Proteins reused from the build
   orthogroups/
-    mapping/gene_orthogroups.tsv     # Gene-to-OG assignments
-    mapping/mappings.sqlite         # Indexed mappings
+    mapping/                        # Selected-species gene-to-OG mappings
     expression/
       tpm_sum.tsv                   # Original TPM sums by OG
       tpm.tsv                       # Rescaled OG TPM
       tpm_sum_wide.tsv
       tpm_wide.tsv
       mapping_qc.tsv
-    alignments/                     # Optional OG alignments
+    alignments/                     # Optional all-copy OG alignments
   kegg/                             # Optional KO results
   phylogeny/{all,phenotyped,representatives}/
-  filtered/                         # Curated species subset
-  phenoradar_inputs/                 # Downstream collection
+  filtered/                         # Optional post hoc export
+  phenoradar_inputs/                 # Collected downstream inputs
 ```
 
 Start with `metadata/selection.json`, `samples.tsv`, and
-`busco_completeness.svg` for selection QC; `species_metadata.tsv` is base
-PhenoRadar metadata. Optional outputs are described in their
-[analysis guides](index.md#choose-an-analysis).
+`busco_completeness.svg` for selection QC. `species_metadata.tsv` is base
+PhenoRadar metadata. See the [analysis guides](index.md#choose-an-analysis)
+for optional outputs. Keep `run.json`, branch provenance, reference snapshots,
+and the release's `image.json` with the analysis.
 
 ## TPM interpretation
 
-Long tables have `species`, `run`, `orthogroup`, and `tpm_sum` or `tpm`.
+Long tables contain `species`, `run`, `orthogroup`, and `tpm_sum` or `tpm`.
 Wide tables have one row per run and one column per OG; missing combinations
-are zero. Multiple runs per species are kept separately.
+are zero. Build currently requires one run per species.
 
-The [PhenoRadar input collector](phenoradar_inputs.md) writes
-`phenoradar_inputs/tpm.tsv` with exactly `species`, `orthogroup`, and `tpm`
-columns, preserving the source numeric values. It rejects multiple runs per
-species instead of aggregating them automatically. The run-level tables above
-remain available for QC and other analyses.
-
-For a TPM-only conversion of completed results, without collecting other files:
-
-```bash
-python workflow/scripts/export_species_tpm.py \
-  --samples results/full/metadata/samples.tsv \
-  --input results/full/orthogroups/expression/tpm.tsv \
-  --output results/full/orthogroups/expression/tpm_species.tsv
-```
-
-- `tpm_sum`: original TPM summed by OG; unmapped genes excluded.
+- `tpm_sum`: original TPM summed by OG, excluding unmapped genes.
 - `tpm`: retained OG values rescaled to one million per run, describing relative
   expression within the retained OG set.
 
@@ -71,11 +71,11 @@ multiple OGs:
 | `split` | Divide TPM equally among assigned OGs |
 
 Review `mapping_qc.tsv` for mapped/retained TPM fractions and ambiguous targets.
-Duplicate target IDs, negative/nonfinite TPM, or no positive retained TPM stop
-aggregation. [KO expression](kegg.md#outputs) has different normalization and
+Duplicate targets, negative/nonfinite TPM, or no positive retained TPM stop
+aggregation. [KO expression](kegg.md#outputs) uses different normalization and
 missing-value rules.
 
-## Provenance
-
-Keep `run.json`, branch QC/provenance, the Release's `image.json`, and reference
-snapshots with the analysis.
+The [collector](phenoradar_inputs.md) creates `phenoradar_inputs/tpm.tsv` with
+exactly `species`, `orthogroup`, and `tpm`, preserving source values. It rejects
+multiple runs per species rather than averaging them; run-level tables remain
+available for QC.

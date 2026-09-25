@@ -2,11 +2,10 @@
 
 [Documentation](index.md) · [PhenoRadar inputs](phenoradar_inputs.md)
 
-`filter_species` exports completed results to `results/<run_name>/filtered/`,
-removing all runs and gene copies of named species while preserving the original
-analysis. For new analyses, set exact IDs in `analysis.yaml` before preparing; those species
-are removed before computation. For a separate export of existing completed
-results, set IDs from `metadata/samples.tsv` in a low-level resolved override, e.g.:
+Normally, set `exclude_species` in `config/analysis.yaml` **before preparing a new
+analysis**. Those species are removed before any computation, including tree
+inference. Use exact species IDs from the build; unknown/duplicate IDs or an empty
+selection are errors. Taxonomy flags never exclude species automatically.
 
 ```yaml
 exclude_species:
@@ -14,40 +13,43 @@ exclude_species:
   - Cleistogenes_squarrosa
 ```
 
-The default is `[]`. Unknown/duplicate IDs or removing all species are errors;
-taxonomy flags never set exclusions automatically.
+To exclude an RNA-seq run from future builds as well, use the
+[accession list](datasets.md#manually-excluding-unusable-accessions).
 
 ## Execute after the source analysis
 
+Alternatively, `filter_species` exports a subset of completed results without
+repeating analysis. Save the YAML above as `config/export_exclusions.yaml`, using
+IDs from the source `metadata/samples.tsv`, and invoke the low-level launcher:
+
 ```bash
-./run_pipeline.sh --cores 1 --resources mem_gb=8 --configfile analyses/analysis001/pipeline.yaml config/exclusions.local.yaml -- filter_species
+./run_pipeline.sh --cores 1 --resources mem_gb=8 \
+  --configfile analyses/analysis001/pipeline.yaml config/export_exclusions.yaml -- filter_species
+./run_pipeline.sh --cores 1 --resources mem_gb=4 \
+  --configfile analyses/analysis001/pipeline.yaml config/export_exclusions.yaml -- phenoradar_inputs
 ```
 
-This requires the original sample manifest and completed outputs. It exports
-complete branches and reports absent/incomplete ones in `manifest.json`, without
-starting analyses. Invalid identities, checksums, or missing recorded files fail.
-
-Rerunning refreshes changed exclusions/results from the original analysis;
-removing an exclusion restores that species. To restore deleted export files,
-use `--forcerun filter_species`. For archived analyses, see
-[filter_species.py](../workflow/scripts/filter_species.py) `--help` in the
-workflow's `timetree` environment.
+Use the same override for both commands; do not edit the frozen `pipeline.yaml`.
+Filtering writes `results/<analysis>/filtered/`, preserves the original analysis,
+and never starts producer jobs. It validates completed branches and reports
+missing/incomplete ones in `manifest.json`. Rerunning refreshes from the originals;
+removing an exclusion restores that species. To recreate deleted export files,
+add `--forcerun filter_species` before `--`.
 
 ## Exported dataset
 
 | Output under `filtered/` | Contents |
 | --- | --- |
 | `metadata/`, `excluded_samples.tsv` | Retained metadata and excluded identities |
-| `proteins/` | Symlinks to retained species' proteins |
+| `proteins/` | Links to retained proteins |
 | `orthogroups/`, `kegg/` | Filtered mappings, expression, alignments, support, and QC |
-| `phylogeny/all/` | Pruned species/gene trees, available alignments, and dated tree |
-| `phylogeny/{all,phenotyped}/contrast/` | Recomputed pairs when tree/QC, manifest, BUSCO scores, and traits are complete |
+| `phylogeny/all/` | Pruned species/gene trees, alignments, and dated tree |
+| `phylogeny/{all,phenotyped}/contrast/` | Recomputed pairs when required source records are complete |
 | `manifest.json` | Exported/skipped sections, exclusions, and checksums |
 
-Representative analysis, phenotyped inference files, and taxonomy reports remain
+Representative results, phenotyped inference files, and taxonomy reports remain
 in the source analysis. Completed phenotyped trees can still supply new pairs.
-Pairs use top-level `trait` and `seed`; IDs can change after exclusion,
-and zero/one-state subsets yield zero pairs.
+Pairs use `trait` and `seed`; pair IDs can change after exclusion.
 
 ## Numerical and phylogenetic meaning
 
@@ -57,9 +59,6 @@ all columns; empty OGs are omitted and listed in `filter_qc.json`.
 
 Pruned trees retain path lengths but are not new inference/dating estimates.
 Internal supports are removed. Removing the outgroup marks the root for review
-in `pruning.json`; no new root is chosen. Original age/calibration tables stay
-with the source analysis.
-
-Tables/databases use new disk space; protein symlinks and metadata paths depend
-on original files. Keep sources available and use the
-[collector](phenoradar_inputs.md#species-exclusions) to pass the subset downstream.
+in `pruning.json`; no new root is chosen. Original age/calibration tables remain
+with the source. Keep source files available: protein links and metadata paths
+depend on them.

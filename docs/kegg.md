@@ -3,18 +3,20 @@
 [Documentation](index.md)
 
 The `kegg` target annotates proteins with KofamScan and sums original TPM by
-KEGG Orthology (KO), independently of ODB mapping.
+KEGG Orthology (KO). It uses build proteins, with assignments independent of ODB.
 
 ## Run the branch
 
 ```bash
-./run_pipeline.sh --cores 24 --resources mem_gb=128 --configfile analyses/analysis001/pipeline.yaml -- kegg
+./run_analysis.sh submit --analysis analyses/analysis001 --target kegg
 ```
 
-Set `kegg.enabled: true` to include KEGG in `all`; the explicit target works
-either way. Missing [references](references.md#kofam-and-kegg-reference) are
-prepared automatically. Annotation runs once per species and is reused after
-abundance or ambiguity-policy changes. See [resources](running.md#resource-budgets).
+Set `kegg.enabled: true` before [preparing analysis](datasets.md#run-an-analysis)
+to include KEGG in `all`; the explicit target works either way. Missing
+[references](references.md#kofam-and-kegg-reference) are prepared automatically.
+Completed annotations are reused on retry within the same analysis. New analysis
+IDs do not share annotations automatically. Each annotation job defaults to
+4 CPUs/8 GB; see [resources](running.md#resource-budgets).
 
 ## Assignment and quantification
 
@@ -36,7 +38,7 @@ Multiple assignments alone do not distinguish multifunctionality from ambiguity.
 
 ## Outputs
 
-Under `results/<run_name>/kegg/`:
+Under `results/<analysis>/kegg/`:
 
 | Output | Contents |
 | --- | --- |
@@ -60,11 +62,7 @@ Coverage QC counts each retained gene/its TPM once; `quantified_assignments` and
 missing values: these results do not establish genomic absence, pathway activity,
 or MODULE completeness.
 
-## Passing KO features to PhenoRadar
-
-The [input collector](phenoradar_inputs.md#data-checks-and-downstream-use) links
-completed KO results and documents downstream column settings. Expression runs
-remain separate.
+Use the [input collector](phenoradar_inputs.md#data-checks-and-downstream-use) to pass KO features to PhenoRadar.
 
 ## References
 

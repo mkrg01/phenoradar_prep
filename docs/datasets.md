@@ -2,336 +2,188 @@
 
 [Documentation](index.md) · [Configuration](configuration.md)
 
-`run_build.sh` produces reusable species artifacts through ODB mapping.
+`run_build.sh` prepares reusable species products through ODB mapping.
 `run_analysis.sh` selects species from a completed build and produces expression,
-alignment, phylogeny, and PhenoRadar outputs. Build and analysis names are independent; analysis names starting with `build_`
-are reserved for build output directories.
+alignment, phylogeny, and PhenoRadar outputs.
 
 ## Prepare a manually curated dataset
 
-Maintain `input/metadata.tsv` yourself. Include **all desired species**, one run
-per species, whether the reads come from NCBI or local files. A manually curated
-[run exclusion list](#manually-excluding-unusable-accessions) can omit known
-unusable runs without deleting their metadata rows. The workflow does not search
-for runs or infer biological inclusion decisions.
+Maintain `input/metadata.tsv` with **all desired species**, one run per species,
+from NCBI or local FASTQs. See [input formats](inputs.md) for required columns and
+local-read paths. Keep known unusable runs in the
+[manual exclusion list](#manually-excluding-unusable-accessions).
 
-Required columns are `scientific_name`, `run`, and positive NCBI `taxid`.
-Use AMALGKIT-compatible run metadata; additional columns pass through to
-GeneGalleon. Species/run IDs must be unique after normalization. Species IDs
-replace spaces with underscores; avoid collisions between hyphens and underscores.
-
-For local reads also supply `private_file: yes`, `lib_layout: single` or `paired`,
-`read1_path`, and, for paired reads, `read2_path`. These are TSV column values,
-not YAML. Relative FASTQ paths are resolved against the metadata file's directory.
-Paths are frozen and reads are made available inside the GeneGalleon workspace.
-Use a new run ID when the read content changes.
-
-Edit `config/build.yaml` and `config/analysis.yaml` directly. The build and
-analysis commands load these files by default; `prepare` freezes the settings
-for each run. Paths are relative to the repository root. `WORKFLOW_PYTHON`
-(or the older `DATASET_PYTHON`) can select the host Python with PyYAML.
-Install the [workflow environment](../environment.yaml) and prepare the
-[workflow container](containers.md) before submitting mapping or analysis jobs.
+Edit `config/build.yaml` and `config/analysis.yaml` directly. These are the default
+configs; `prepare` freezes settings and inputs for each named run. Install the
+[workflow environment](../environment.yaml) and prepare the
+[container](containers.md) before submitting mapping or analysis jobs.
 
 ## Pinned GeneGalleon source and SIF
 
-`build.yaml` pins `genegalleon.version`, the exact source `revision`, and an
-OCI image digest in `image_uri`. Missing source/SIF files are fetched when a
-build needs assembly, BUSCO, or quantification. A reuse-only build does not fetch
-them. `plan` never downloads software. To fetch ahead of time:
+Build settings pin GeneGalleon's version, source revision, and image digest.
+Missing software is fetched only when assembly, BUSCO, or quantification is needed;
+`plan` and reuse-only builds do not fetch it. To download in advance:
 
 ```bash
 ./run_build.sh fetch-software
 ```
 
-Downloads are cached under `genegalleon.cache_dir`. Source and image checksums
-are frozen with the build. An HTTPS SIF URL requires `image_sha256`; OCI pulls
-record the produced SIF hash. `repository` and `image` allow explicit local
-overrides; an existing `<repository>/genegalleon.sif` is also supported.
-Update the version, revision, and image digest together for a deliberate upgrade.
-Native products record their conditions; incompatible reuse is reported as a
-conflict. Use a separate `store` for a deliberate rebuild with different conditions.
-Legacy imports retain their known provenance and are not retroactively assigned
-the current software version.
+See [container setup](containers.md#genegalleon-for-incremental-datasets) for cache
+and override settings. Incompatible product conditions are reported as conflicts;
+use a separate `store` for a deliberate rebuild with different conditions.
 
 ## Build through mapping
 
 ```bash
 ./run_build.sh plan
-./run_build.sh prepare --name expansion001
-./run_build.sh submit --build builds/expansion001 --until busco --dry-run
-./run_build.sh submit --build builds/expansion001 --until busco
-./run_build.sh status --build builds/expansion001
+./run_build.sh prepare --name build001
+./run_build.sh submit --build builds/build001 --until busco --dry-run
+./run_build.sh submit --build builds/build001 --until busco
+./run_build.sh status --build builds/build001
 
-# After inspection, schedule any remaining prerequisites and mapping:
-./run_build.sh submit --build builds/expansion001 --until mapping
+# After inspection, finish the build:
+./run_build.sh submit --build builds/build001 --until mapping
 ```
 
-Endpoints are `assembly`, `busco`, `quant`, and `mapping` (default). Each runs
-missing prerequisites. Assembly includes longest-CDS generation. BUSCO always
-retains its full table, regardless of future tree settings. No BUSCO threshold,
-trait, or species-list filtering applies to a build: every species remaining after explicit run exclusions must
-finish all required products before the build is complete.
+Endpoints are `assembly`, `busco`, `quant`, and `mapping` (default). Each includes
+missing prerequisites; assembly includes longest-CDS generation. Every species
+remaining after run exclusions must finish CDS, full BUSCO, quantification, and
+mapping. BUSCO acceptance thresholds apply later, in analysis.
 
-The plan reports `reuse`, `pending`, or `conflict` for species products. Mapping
-reuse requires translated protein hashes: before translation its state is
-`check_after_translation` (or `pending_inputs` without CDS). The subsequent
-incremental ODB plan records `planned_reuse`/`planned_mapping`; completion gives
-`reuse`. An unresolved conflict stops preparation/submission. Reports include
-BUSCO completeness once available, for manual inspection.
+The plan reports `reuse`, `pending`, or `conflict`. ODB reuse is confirmed after
+translation provides protein hashes. Conflicts stop preparation/submission.
+For a pilot, add `--species-list pilot.txt` to `submit`; later submit without it
+to finish all species. An incomplete pilot does not start mapping or publish a
+completed build.
 
-`builds/<id>/` holds frozen metadata/configuration, the persistent GeneGalleon
-workspace, and job records. Mapping results live in `results/build_<id>/`.
-After successful mapping, validation checks full metadata coverage, CDS/protein
-identity, BUSCO/quant files, and mapping gene coverage. Only then are portable
-`builds/<id>/products/` and `builds/<id>/completed.json` published. Analysis rejects
-a missing or changed completion record or product. If an independently run mapping finished before
-its completion record was written, `run_build.sh complete --build builds/<id>`
-validates and publishes it without running analyses.
-
-For a pilot, put species IDs in a file and add `--species-list pilot.txt` to
-`submit`. Only those species' missing upstream tasks are submitted; no mapping
-controller or completion record is produced for an incomplete pilot. Later
-submit without the pilot list to finish the build.
+After successful mapping and validation, build publishes
+**`builds/<id>/products/`** and `completed.json`. New CDS/BUSCO/quant files are not
+written to the top-level `input/`; see the [output layout](outputs.md#directory-layout).
+If mapping was run separately, `run_build.sh complete --build builds/<id>`
+validates and publishes it. Normal submission does this automatically.
 
 ## Run an analysis
 
-Set `build` in `analysis.yaml`, or override it with `--build` when preparing.
-Set BUSCO acceptance, species selection, traits, and optional analyses here:
+In `analysis.yaml`, choose the BUSCO threshold, species selection, traits, and
+optional branches. Set `build` there or pass `--build`:
 
 ```bash
-./run_analysis.sh plan --build builds/expansion001
-./run_analysis.sh prepare --build builds/expansion001 --name carnivory001
-./run_analysis.sh submit --analysis analyses/carnivory001 --dry-run
-./run_analysis.sh submit --analysis analyses/carnivory001
-./run_analysis.sh status --analysis analyses/carnivory001
+./run_analysis.sh plan --build builds/build001
+./run_analysis.sh prepare --build builds/build001 --name analysis001
+./run_analysis.sh submit --analysis analyses/analysis001 --dry-run
+./run_analysis.sh submit --analysis analyses/analysis001
+./run_analysis.sh status --analysis analyses/analysis001
 ```
 
-Analysis uses verified build proteins and a selected-species subset of the
-completed mapping database. Its DAG contains no assembly, BUSCO, `translate_cds`,
-or ODB-mapper producer. Missing build products cause an error; they are not rebuilt.
-KO annotation remains an optional analysis branch.
+Analysis reuses verified proteins and mappings; it never runs assembly, BUSCO,
+CDS translation, or ODB-mapper. Missing or modified build products cause an error.
+Multiple analyses can share one build, inheriting its lineage, genetic code, and
+ODB node. Optional analysis outputs are not automatically shared across analysis IDs.
 
-`inputs.species_trait` names the trait TSV (use `null` when unused).
-`selection.species_list: true` enables the file named by `inputs.species_list`.
-`exclude_species` removes exact species IDs before downstream computation.
-`inputs.calibrations` supplies optional manual dating constraints.
-Use a new analysis name after changing any of these inputs or scientific settings.
-Multiple analyses can share a completed build; they cannot change its lineage,
-genetic code, ODB node, or membership. They inherit those values.
+`exclude_species` removes exact species IDs **before computation**.
+`inputs.species_trait` supplies traits (`null` when unused); other auxiliary inputs
+are described in [configuration](configuration.md). Changed inputs or scientific
+settings require a new analysis name. Names beginning with `build_` are reserved.
 
-`analyses/<id>/` holds frozen inputs and resolved settings. Results, work, and logs
-use the analysis ID under `results/`, `work/`, and `logs/`. The default target
-`all` also collects `results/<id>/phenoradar_inputs/` after successful execution.
+The default target `all` collects `results/<analysis>/phenoradar_inputs/` on success.
 Use `submit --target phylogeny` or another [analysis target](running.md#targets)
-for partial downstream execution. `run --local --cores 8 --mem-mb 32000` runs a
-prepared analysis directly with the same container launcher.
+for partial execution; collect again after additional branches finish.
 
 ## Slurm and retries
 
-Assembly, BUSCO, and quantification run as species arrays. `slurm.concurrency`
-limits concurrent species tasks; `slurm.array_size` bounds the largest local
-array index (default 1000; must be below the site's `MaxArraySize`). Large arrays
-are split into dependent batches with stable species indices. Phases and batches
-are connected by `afterok`; mapping starts only when upstream jobs succeed.
+`submit` validates inputs, submits jobs, and returns without waiting for completion.
+Assembly/BUSCO/quant use species arrays; mapping and analysis use Snakemake
+controllers with separate rule jobs. See [execution and resources](running.md)
+for concurrency, time limits, and resource overrides.
 
-Mapping and analysis each have a small controller allocation. Snakemake submits
-individual rules as separate Slurm jobs with their own time/memory limits.
-`slurm.jobs` controls their concurrency; `slurm.stages.controller` controls the
-controller, and `slurm.rules` controls rule resources. Update these entries
-in `config/build.yaml`, for example:
-
-```yaml
-slurm:
-  stages:
-    assembly: {cpus: 8, mem_mb: 256000, time: "7-00:00:00"}
-  rules:
-    odb_map: {cpus: 16, mem_mb: 192000, runtime: 4320}
-```
-
-After editing the resource settings, apply them to a retry explicitly:
-
-```bash
-./run_build.sh submit --build builds/expansion001 --until mapping \
-  --resources config/build.yaml
-./run_analysis.sh submit --analysis analyses/carnivory001 \
-  --resources config/analysis.yaml
-```
-
-Only the current `slurm` section is read from the specified file. Scientific settings and
-metadata remain frozen. Each submission stores its resolved resources and
-scripts separately, including dry-runs. Retrying submits unfinished species
-steps and reuses completed mapping chunks. Active or ambiguous recorded Slurm
-submissions block overlapping submissions; inspect/cancel them before retrying.
-A controller timeout can leave its independently submitted workers active, so
-also inspect those worker jobs before resubmitting. Job logs are under the
-build/analysis `jobs/logs/` directory.
+Before retrying, inspect `status`, Slurm jobs, and `jobs/logs/` under the prepared
+build/analysis. Queued/running or unresolved submissions block overlapping retries.
+A controller timeout can leave worker jobs running; inspect those jobs too.
 
 ## Failure and recovery behavior
 
-Failure never automatically excludes an accession or publishes a completed
-build. A successful, validated species/stage is registered for reuse. A failed
-species/stage stays `pending` in `status`, with its last attempt recorded as
-`failed` under `jobs/status/`; the record includes run accession, species, stage,
-job ID, and error. Check `jobs/logs/` and the retained GeneGalleon logs for the
-underlying download/assembler error. Slurm timeouts or hard kills may leave the
-last-attempt record at `running`; that record alone is not proof of completion.
+Failures do not automatically exclude species. Successful, validated species
+stages are registered; failed or missing stages remain pending. Resubmit the
+**same build** after inspecting the queue to retry them. Completed work is reused.
+Failure details are recorded in `jobs/status/` and logs; a hard kill may leave an
+attempt marked `running` even though the job has stopped.
 
-Submit the **same build** again after inspecting the queue:
+Array batches/phases depend on predecessor success (`afterok`), so a failure can
+block later jobs. Let remaining jobs finish or cancel them before resubmitting.
+Retries are explicit, not an automatic retry loop.
 
-```bash
-./run_build.sh status --build builds/expansion001
-./run_build.sh submit --build builds/expansion001 --until mapping
-```
-
-Completed species/stages are skipped. Failed/missing ones are retried, and
-unfinished published outputs are moved to `jobs/incomplete/` before retrying.
-FASTQ/download and temporary work directories are retained. Missing downstream
-prerequisites are included in the new submission. Other species already running
-in the same array can finish, but the current `afterok` dependencies stop later
-batches/phases when any predecessor fails. Remaining queued jobs must finish or
-be cancelled before resubmission; retries are explicit, not an unlimited loop.
-
-**Stage retry and within-assembler checkpoint resume are different.** The pinned
-GeneGalleon 0.7.77 uses AMALGKIT `getfastq --redo no` and has recovery code for
-retained download/run state; reusable reads are kept when valid. It does not
-promise recovery of every partially downloaded byte. Its rnaSPAdes path removes
-`rnaspades_output` before starting rnaSPAdes again, so an interrupted assembly is
-recomputed for that species. Other assembler behavior is tool-dependent.
-For repeated timeouts or memory errors, first consider a resource override;
-resubmitting unchanged limits may fail again.
+Reads and temporary work are retained, but stage retry is not always checkpoint
+resume. The pinned GeneGalleon uses AMALGKIT `getfastq --redo no` to reuse valid
+read state; partially downloaded bytes are not guaranteed reusable. Its rnaSPAdes
+path restarts a failed species' assembly from scratch. Successful species are
+unaffected. For repeated timeouts or memory errors, adjust
+[resources](running.md#resource-budgets) before retrying.
 
 ## Manually excluding unusable accessions
 
-Edit [config/excluded_accessions.tsv](../config/excluded_accessions.tsv) manually.
-Entries match the metadata **`run`**
-column exactly (SRR/ERR/DRR accessions or your local run IDs):
+Edit [config/excluded_accessions.tsv](../config/excluded_accessions.tsv):
 
 ```tsv
 accession	reason
 SRR123456	download_failed_repeatedly
-ERR987654	assembly_failed_after_review
 LOCAL_BAD1	unusable_reads
 ```
 
-These are illustrative IDs, not built-in exclusions. `accession` is required;
-`reason` is optional but recommended. Additional columns such as `stage`,
-`notes`, or `reviewed_on` are retained. Duplicate/malformed entries are errors.
-Matching is case-sensitive and uses exact IDs, not prefixes or regular expressions.
-BioProject/experiment/species identifiers do not exclude their associated runs.
+`accession` matches the metadata **`run`** column exactly; `reason` is optional.
+Additional review columns are retained. Project/experiment/species IDs do not
+exclude their associated runs. The list is selected by `build.yaml`'s
+`excluded_accessions`; `null` disables it.
 
-The build config selects the list:
+Exclusions apply before cached-product lookup or FASTQ requirements in a new
+build. Excluding a species' only run removes it from that build and its analyses.
+Prepare a **new build ID** after edits; previous builds and jobs are unchanged.
+Eligible completed products remain reusable. The list does not retroactively
+invalidate an existing CDS reference from another run of the same species.
 
-```yaml
-excluded_accessions: config/excluded_accessions.tsv
-```
-
-Use `null` to disable it. Older configs without this key retain their
-old behavior; add the key to enable exclusions. `plan` and `status` show excluded
-runs with their reasons. `prepare` removes them before resolving cached products
-or requiring FASTQs, and they receive no worker-array indices. `register` also
-skips them. Excluding the only run for a species removes that species from the
-new build and all analyses based on it; no replacement run is chosen automatically.
-The remaining metadata still requires one run per species.
-
-After editing the list, prepare a **new build ID** using the same metadata and
-store. The new build reuses eligible completed products. An existing build keeps
-its frozen membership; source-list edits neither modify it nor cancel its jobs.
-Remove an entry to permit the run in a later build again. Products and historical
-outputs are retained. The list selects metadata runs; it does not retroactively
-invalidate a CDS reference originally assembled from another run of the same
-species. Reference rejection/replacement remains an explicit choice of
-`reference_id` or a separate store.
-
-Each build preserves the original `source_metadata.tsv`, the exact exclusion TSV,
-its effective `metadata.tsv`, and an `excluded_runs.tsv` audit with species/run/reason.
-These records are checksummed with the build. A list may contain accessions absent
-from current metadata: keep those decisions so future metadata preparation can
-avoid them too. The independent `accession_exclusions.read_exclusions()` reader
-can be reused by a future metadata generator. No automatic failure classification
-or automatic editing of the exclusion list is performed.
+Each build preserves `source_metadata.tsv`, the exclusion list, effective
+`metadata.tsv`, and `excluded_runs.tsv` with reasons. Keep decisions for accessions
+absent from current metadata too, so future metadata preparation can avoid them.
 
 ## Updating species and importing existing work
 
 Edit metadata and prepare a **new build ID**. Added species run missing work;
-removed species are absent from the new build and its analyses. Existing build
-membership and historical results are unchanged. Species receipts in
-`resources/dataset_assets/` and mappings in `resources/odb_cache/` persist, so
-re-adding a species can reuse them. A changed run can reuse CDS/BUSCO/mapping
-and request quantification for the new run.
+removed species leave the new outputs. Historical builds and caches remain.
+Changing only a run can reuse CDS/BUSCO/mapping and quantify the new run.
 
-To register already assembled/quantified species using the [input layout](inputs.md):
+**Fresh builds need no registration.** To import legacy CDS/BUSCO/quant files,
+use the [import layout](inputs.md#importing-existing-products):
 
 ```bash
-./run_build.sh register \
-  --input-dir input --metadata input/metadata.tsv
+./run_build.sh register --input-dir imports/legacy --metadata input/metadata.tsv
+./run_build.sh register --odb-results imports/old_odb --odb-only
 ```
 
-Registration validates artifacts without recomputation. Missing CDS is reported;
-missing full BUSCO tables or quantification remain pending. A summary alone
-cannot complete the new build. Preserve original data/workspaces referenced by
-receipts. If multiple CDS references exist, set the desired `reference_id` in
-metadata explicitly.
+Registration validates existing work without recomputation. Missing full BUSCO
+tables or quantification remain pending; a BUSCO summary alone is insufficient.
+Keep source files referenced by the species store. With multiple CDS references,
+select `reference_id` in metadata explicitly.
 
-Register old ODB snapshots once, alongside species registration or separately:
-
-```bash
-./run_build.sh register --odb-results resources/odb_existing/tlight --odb-only
-```
-
-`--odb-only` skips CDS/BUSCO/quant registration. Without it, the same invocation
-also registers `--input-dir` (default `input`). Repeat `--odb-results` for multiple
-snapshots. Registration validates the snapshot and places a hard link or copy in
-`odb.cache_dir`; it preserves the source and is safe to repeat. The normal build
-automatically combines matching registered snapshots, native cached chunks, and
-missing species. **No `odb.existing_results` setting is needed.** That option is
-still accepted for older configurations. Protein/reference mismatches remain
-conflicts rather than silent reuse. See [ODB imports](references.md#reusing-existing-odb-results).
+ODB registration copies or hard-links a validated snapshot into the automatic
+cache, preserving its source. Repeat `--odb-results` for multiple snapshots.
+No `odb.existing_results` setting is needed. See [ODB imports](references.md#reusing-existing-odb-results).
 
 ## Copying a completed build to another project
 
-After completion, `builds/<id>/products/` contains everything needed to reuse the
-biological products. Copy that directory as a unit:
-
-```text
-products/
-  manifest.json
-  metadata.tsv
-  source_metadata.tsv
-  excluded_accessions.tsv
-  excluded_runs.tsv
-  cds/
-  busco/
-  quant/
-  proteins/
-  odb/          # Mapping database, annotations, reusable snapshot
-  provenance/   # Original build settings and mapping records
-```
-
-All runtime file references in `manifest.json` are relative to this directory.
-Original absolute paths in provenance or sample attributes are historical records;
-analysis does not need those original paths. Products are immutable: edit the
-source metadata/configs and prepare a new build instead of editing this directory.
-On the same filesystem, publication uses hard links to avoid copying large data;
-across filesystems it copies files. External symlinks are not portable products.
-
-Place the copied directory inside the destination project for container access:
+Copy **`builds/<id>/products/` as a unit**, including its manifest, metadata,
+CDS/BUSCO/quant, proteins, ODB mappings, and provenance. Put it inside the destination
+project, for example `imports/baseline/`:
 
 ```bash
-# Run in the destination project after copying products/ to imports/baseline/:
 ./run_analysis.sh prepare --build imports/baseline --name analysis001
 ./run_analysis.sh submit --analysis analyses/analysis001
 ```
 
-No registration is needed for analysis. The destination supplies its own analysis
-settings, traits, software/container, and shared reference resources such as taxonomy.
-The original project, its caches, reads, GeneGalleon workspace, and Slurm logs are
-not required. `builds/<id>/` and `builds/<id>/products/` are both accepted as build
-arguments. Pre-existing schema-1 completed builds keep their original behavior;
-this automatic portable publication applies to builds completed by the new code.
+Analysis needs no registration or original reads/workspaces. The destination
+supplies analysis settings, traits, software, and shared reference resources.
+Both `builds/<id>/` and its `products/` directory are valid build arguments.
+Products are immutable; publication may use hard links, so never edit them in place.
 
-To use a copied bundle as the starting point for a **new build with additional
-species**, register it once in the destination project:
+To seed a **new build with additional species**, register the copied bundle once:
 
 ```bash
 ./run_build.sh register --products imports/baseline
@@ -340,20 +192,15 @@ species**, register it once in the destination project:
 ./run_build.sh submit --build builds/expansion001 --until mapping
 ```
 
-Keep the copied bundle: species registration references its files. Set the desired
-metadata in `build.yaml` and keep lineage, translation table, and ODB node compatible.
-Registration honors the destination's run exclusions without editing the bundle.
-It registers CDS/BUSCO/quant and its ODB snapshot together; later builds discover
-the ODB cache automatically. A new build still translates CDS and combines mapping
-tables; analysis of a completed bundle reuses both proteins and mappings directly.
-This does not resume an interrupted build on a new host or recreate the original
-GeneGalleon working directory.
+Keep the copied bundle: species registration references it. Use compatible
+lineage, genetic code, and ODB node settings. Destination run exclusions apply.
+New builds still translate CDS and merge mapping tables; analysis of a completed
+bundle reuses both directly. Copying products does not resume an interrupted build.
 
 ## Migrating old configurations
 
-`config/config.yaml` and `config/dataset.yaml` are replaced by the two phase
-configs. Existing stores, snapshots, `datasets/`, and results are not deleted.
-Convert saved old settings with:
+`config/config.yaml` and `config/dataset.yaml` have been replaced by the two phase
+configs. To convert saved settings without changing existing data:
 
 ```bash
 python workflow/scripts/migrate_phase_config.py \
@@ -361,12 +208,8 @@ python workflow/scripts/migrate_phase_config.py \
   --build-output config/build.migrated.yaml --analysis-output config/analysis.migrated.yaml
 ```
 
-Alternatively, pass `--legacy-dataset datasets/<old-id>/dataset.json` to recover
-its frozen settings/metadata. The converter retains cache paths and writes only
-new configuration files; it refuses to overwrite existing files. Review the
-generated settings and apply them to `config/build.yaml` and `config/analysis.yaml`,
-then select the new completed build in analysis settings.
-Register old input snapshots if needed, then prepare a new build. Old schema-1
-dataset jobs should be resumed with their original checkout, not modified in
-place. `run_dataset.sh` remains a command-name alias for the new build interface;
-its old `--until all` combined execution has been removed.
+A saved `datasets/<old-id>/dataset.json` also works as `--legacy-dataset`.
+Review the converted settings, apply them to `build.yaml`/`analysis.yaml`, import
+old products if needed, and prepare a new build. Older schema-1 builds are not
+portable bundles; resume their jobs with the original checkout. `run_dataset.sh`
+remains an alias for the build interface; the old combined `--until all` is removed.

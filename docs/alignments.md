@@ -8,11 +8,12 @@ copy without filtering or trimming.
 ## Running
 
 ```bash
-./run_pipeline.sh --cores 16 --resources mem_gb=192 --configfile analyses/analysis001/pipeline.yaml -- alignments
+./run_analysis.sh submit --analysis analyses/analysis001 --target alignments
 ```
 
-Prerequisites run automatically. Set `alignment.enabled: true` to include this
-in `all`; see [resources](running.md#resource-budgets) for job sizing.
+Set `alignment.enabled: true` before [preparing analysis](datasets.md#run-an-analysis)
+to include alignments in `all`; the explicit target works either way. Each OG job
+defaults to 4 CPUs/8 GB; see [resource overrides](running.md#resource-budgets).
 
 ## Input requirements
 
@@ -25,7 +26,7 @@ OG regardless of `tpm.multimap`; expression replicates do not duplicate sequence
 
 ## Outputs and PhenoRadar
 
-Results are in `results/<run_name>/orthogroups/alignments/`:
+Results are in `results/<analysis>/orthogroups/alignments/`:
 
 - `{og}.faa`: untrimmed alignment with original gene IDs as FASTA headers.
 - `provenance.json`: completed alignment inventory and provenance.
@@ -35,6 +36,5 @@ Remove the final `_g{number}` to recover the species, e.g. `Abelia_chinensis_g0`
 protein positions. PhenoRadar selects copies/sites. Missing sequences alone do
 not establish gene deletion.
 
-Rerunning reuses completed OG jobs. Abundance/TPM-policy changes leave alignments
-intact; sequence/membership changes rebuild them, potentially changing columns
-and removing obsolete OG files. Logs: `logs/<run_name>/orthogroups/alignments/`.
+Retries within the same analysis reuse completed OG jobs. New analysis IDs do
+not share alignment results automatically. Logs: `logs/<analysis>/orthogroups/alignments/`.
