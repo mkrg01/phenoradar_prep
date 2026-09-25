@@ -20,6 +20,11 @@ die() {
     exit 2
 }
 
+executor=local
+for launcher_option in "$@"; do
+    [[ "$launcher_option" == -- ]] && break
+    [[ "$launcher_option" == --slurm ]] && executor=slurm
+done
 allocation_args=()
 if [[ -n "${SLURM_JOB_ID:-}" ]]; then
     # Slurm spools the script elsewhere; use the submission directory or --chdir.
@@ -27,6 +32,7 @@ if [[ -n "${SLURM_JOB_ID:-}" ]]; then
     [[ -f "$root/workflow/Snakefile" ]] || die 'Submit from the repository root, or set sbatch --chdir to that directory.'
     [[ "${SLURM_JOB_NUM_NODES:-${SLURM_NNODES:-1}}" == 1 && "${SLURM_NTASKS:-1}" == 1 ]] ||
         die 'Use one node and one task; set parallelism with sbatch --cpus-per-task.'
+    if [[ "$executor" == local ]]; then
     batch_cores=${SLURM_CPUS_PER_TASK:-1}
     [[ "$batch_cores" =~ ^[1-9][0-9]*$ ]] || die 'SLURM_CPUS_PER_TASK must be a positive integer.'
     if [[ -n "${SLURM_MEM_PER_NODE:-}" ]]; then
@@ -44,6 +50,7 @@ if [[ -n "${SLURM_JOB_ID:-}" ]]; then
     printf 'Workflow budget: %s CPUs, %s.%03d GB (4 GB reserved for overhead)\n' \
         "$batch_cores" "$((workflow_memory_mb / 1000))" "$((workflow_memory_mb % 1000))"
     allocation_args=(--cores "$batch_cores" --resources "mem_mb=$workflow_memory_mb")
+    fi
 else
     root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 fi
@@ -64,6 +71,7 @@ while (($#)); do
     shift
     case "$arg" in
         --) break ;;
+        --slurm) reading_resources=false; continue ;;
         --prepare-container) prepare_container=true; reading_resources=false; continue ;;
         --resources|--res)
             arg=--resources
@@ -87,16 +95,17 @@ done
 # Conda inside the image before its normal image-pull step.
 container_setup_args=()
 if "$prepare_container"; then
+    [[ "$executor" == local ]] || die "--prepare-container is local; omit --slurm."
     (($# == 0)) || die '--prepare-container does not accept analysis targets.'
     container_setup_args=(--snakefile workflow/container.smk --software-deployment-method apptainer)
     set -- prepare_container
 fi
 
-# Mount the repository, including input/ and resources/. The local executor and
-# allocation limits apply after user options.
+# Mount the repository, including dataset snapshots. In local mode the allocation
+# limits win; Slurm mode uses per-rule resources and an independent controller.
 printf -v container_root '%q' "$root"
 exec "$snakemake_bin" --printshellcmds --rerun-incomplete \
     --snakefile workflow/Snakefile \
     --software-deployment-method conda apptainer \
     --apptainer-args "--cleanenv --bind $container_root" "${workflow_args[@]}" \
-    "${container_setup_args[@]}" --executor local "${allocation_args[@]}" -- "$@"
+    "${container_setup_args[@]}" --executor "$executor" "${allocation_args[@]}" -- "$@"

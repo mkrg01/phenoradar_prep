@@ -25,7 +25,7 @@ rule make_manifests:
         code=f"{SCRIPTS}/make_manifests.py",
         common=f"{SCRIPTS}/common.py"
     output: directory(MANIFESTS)
-    params: proteins=PROTEINS, chunk_size=100  # Species per chunk; also used by DAG planning.
+    params: proteins=PROTEINS, chunk_size=config["odb"].get("chunk_size", 100)  # Species per chunk; also used by DAG planning.
     log: f"{LOG}/{ORTHOGROUP_MAPPING}/manifests.log"
     conda: "../envs/analysis.yaml"
     resources: mem_mb=1000
@@ -60,26 +60,31 @@ rule prepare_odb_reference:
 
 rule odb_map:
     input:
-        manifests=MANIFESTS,
+        manifests=odb_manifests,
         proteins=lambda wc: chunk_row(wc)["proteins"],
         reference=f"{REFERENCE}/reference.json",
         inventory=f"{REFERENCE}/files.json",
         code=f"{SCRIPTS}/run_odb_chunk.py",
-        helpers=[f"{SCRIPTS}/odb_map.sh", f"{SCRIPTS}/odb_environment.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/make_manifests.py"]
+        helpers=[f"{SCRIPTS}/odb_map.sh", f"{SCRIPTS}/odb_environment.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/make_manifests.py", f"{SCRIPTS}/incremental_odb.py"],
+        samples=f"{META}/samples.tsv"
     output:
         annotations=f"{CHUNKS}/{{chunk}}/{{chunk}}.og.annotations",
         hits=f"{CHUNKS}/{{chunk}}/{{chunk}}.og.hits",
         summary=f"{CHUNKS}/{{chunk}}/{{chunk}}.summary.txt",
         provenance=f"{CHUNKS}/{{chunk}}/provenance.json"
     params:
-        manifest=lambda wc: f"{MANIFESTS}/{wc.chunk}.fs",
+        manifest=lambda wc: f"{ODB_PLAN if INCREMENTAL_ODB else MANIFESTS}/{wc.chunk}.fs",
         out=lambda wc: f"{CHUNKS}/{wc.chunk}",
         work=f"{WORK}/{ORTHOGROUP_MAPPING}",
         command="ODB-mapper",
         prefix="",
         version=ODB_VERSION,
         node=config["odb"]["node"],
-        batch=lambda wildcards, threads: 4 * threads  # Internal jobs per batch.
+        batch=lambda wildcards, threads: 4 * threads,  # Internal jobs per batch.
+        incremental=int(INCREMENTAL_ODB),
+        publish=([PYTHON, f"{SCRIPTS}/incremental_odb.py", "publish", "--samples", f"{META}/samples.tsv",
+                  "--protein-dir", PROTEINS, "--cache-dir", ODB_CACHE, "--version", ODB_VERSION,
+                  "--node", str(config["odb"]["node"])] if INCREMENTAL_ODB else [])
     threads: 16
     resources: mem_mb=192000
     log: f"{LOG}/{ORTHOGROUP_MAPPING}/chunks/{{chunk}}.log"
@@ -89,28 +94,30 @@ rule odb_map:
         "{PYTHON:q} {input.code:q} --manifest {params.manifest:q} --reference {input.reference:q} "
         "--output-dir {params.out:q} --work-dir {params.work:q} --label {wildcards.chunk:q} "
         "--command {params.command:q} --prefix={params.prefix:q} --version {params.version:q} "
-        "--node {params.node} --jobs {threads} --batch-size {params.batch} > {log:q} 2>&1"
+        "--node {params.node} --jobs {threads} --batch-size {params.batch} > {log:q} 2>&1; "
+        "if [ {params.incremental} -eq 1 ]; then "
+        "{params.publish:q} --chunk-dir {params.out:q} --label {wildcards.chunk:q} >> {log:q} 2>&1; fi"
 
 
 rule merge_odb:
     input:
         samples=f"{META}/samples.tsv",
-        manifests=MANIFESTS,
-        annotations=lambda wc: [f"{EXISTING_ODB}/annotations.tsv"] if EXISTING_ODB else chunk_outputs(wc, "og.annotations"),
-        hits=lambda wc: [] if EXISTING_ODB else chunk_outputs(wc, "og.hits"),
-        summaries=lambda wc: [] if EXISTING_ODB else chunk_outputs(wc, "summary.txt"),
-        provenance=lambda wc: [f"{EXISTING_ODB}/snapshot.json"] if EXISTING_ODB else
-            [f'{CHUNKS}/{r["chunk"]}/provenance.json' for r in chunk_rows(wc)],
+        manifests=odb_manifests,
+        annotations=lambda wc: odb_source_files(wc, "og.annotations"),
+        hits=lambda wc: odb_source_files(wc, "og.hits"),
+        summaries=lambda wc: odb_source_files(wc, "summary.txt"),
+        provenance=lambda wc: odb_source_files(wc, "provenance.json"),
         proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa' for r in sample_rows(wc)}),
         code=f"{SCRIPTS}/merge_odb.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/translate_cds.py"]
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/translate_cds.py", f"{SCRIPTS}/incremental_odb.py"]
     output:
         database=f"{MAPPING}/mappings.sqlite",
         mappings=f"{MAPPING}/gene_orthogroups.tsv",
         qc=f"{MAPPING}/merge_qc.json"
     params:
         chunks=CHUNKS, proteins=PROTEINS, plan=f"{MANIFESTS}/chunks.json",
-        existing=["--existing", EXISTING_ODB] if EXISTING_ODB else [],
+        existing=(["--source-plan", f"{ODB_PLAN}/plan.json"] if INCREMENTAL_ODB else
+                  ["--existing", EXISTING_ODB] if EXISTING_ODB else []),
         version=ODB_VERSION, node=config["odb"]["node"]
     log: f"{LOG}/{ORTHOGROUP_MAPPING}/merge.log"
     conda: "../envs/analysis.yaml"
@@ -120,3 +127,25 @@ rule merge_odb:
         "--chunk-dir {params.chunks:q} --protein-dir {params.proteins:q} --database {output.database:q} "
         "--mappings {output.mappings:q} --qc {output.qc:q} {params.existing:q} "
         "--version {params.version:q} --node {params.node} > {log:q} 2>&1"
+
+
+checkpoint plan_incremental_odb:
+    input:
+        samples=f"{META}/samples.tsv",
+        proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa' for r in sample_rows(wc)}),
+        snapshots=[f"{EXISTING_ODB}/snapshot.json", f"{EXISTING_ODB}/annotations.tsv"] if EXISTING_ODB else [],
+        code=f"{SCRIPTS}/incremental_odb.py",
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/make_manifests.py"]
+    output: directory(ODB_PLAN)
+    params:
+        proteins=PROTEINS, cache=ODB_CACHE, reference=f"{REFERENCE}/reference.json",
+        existing=["--existing", EXISTING_ODB] if EXISTING_ODB else [],
+        version=ODB_VERSION, node=config["odb"]["node"], chunk_size=config["odb"].get("chunk_size", 20)
+    log: f"{LOG}/{ORTHOGROUP_MAPPING}/incremental_plan.log"
+    conda: "../envs/analysis.yaml"
+    resources: mem_mb=2000
+    shell:
+        "{PYTHON:q} {input.code:q} plan --samples {input.samples:q} --protein-dir {params.proteins:q} "
+        "--outdir {output:q} --cache-dir {params.cache:q} --reference {params.reference:q} "
+        "--version {params.version:q} --node {params.node} --chunk-size {params.chunk_size} "
+        "{params.existing:q} > {log:q} 2>&1"

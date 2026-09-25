@@ -7,8 +7,9 @@ when resuming an analysis; see [running the workflow](running.md) for execution.
 
 ## Loading settings and paths
 
-Run from the repository root. Dataset paths are fixed under `input/`;
-see the [file layout](inputs.md#file-formats).
+Run from the repository root. Dataset paths default to `input/`;
+`input_root` selects the same layout in a frozen [dataset snapshot](datasets.md).
+See the [file layout](inputs.md#file-formats).
 `config/config.yaml` loads automatically. Supply an override with
 `--configfile path/to/override.yaml`; unspecified settings retain their defaults
 from the main file. [Optional treePL overrides](dating.md#optional-overrides) use
@@ -36,6 +37,9 @@ Use a new name to retain an earlier analysis. The container image matches
 covering all your species; see [node selection](references.md#choosing-an-orthodb-node).
 `odb.existing_results` defaults to `null` (new mapping); set a snapshot directory
 to [reuse existing annotations](references.md#reusing-existing-odb-results).
+`odb.incremental: true` combines existing snapshots with new mapping and caches
+completed batches under `odb.cache_dir`; `odb.chunk_size` controls the maximum
+species per new mapping job. See [incremental mapping](datasets.md#incremental-odb-outside-the-dataset-interface).
 CPU/memory settings use [launcher and rule overrides](running.md#resource-budgets).
 
 ## Optional analyses and exports

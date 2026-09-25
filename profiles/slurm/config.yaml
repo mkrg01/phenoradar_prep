@@ -1,0 +1,18 @@
+# Install snakemake-executor-plugin-slurm in the Snakemake environment.
+# Controller resources are independent of these per-job worker resources.
+executor: slurm
+jobs: 10
+latency-wait: 90
+rerun-incomplete: true
+printshellcmds: true
+default-resources:
+  mem_mb: 8000
+  runtime: 1440
+  slurm_partition: epyc
+set-resources:
+  odb_map:
+    mem_mb: 192000
+    runtime: 4320
+  prepare_odb_reference:
+    mem_mb: 32000
+    runtime: 1440

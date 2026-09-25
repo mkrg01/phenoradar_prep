@@ -1,5 +1,8 @@
 # Documentation
 
+For manually curated RNA-seq additions/removals and staged Slurm jobs, see
+[incremental datasets](datasets.md).
+
 ## Start a dataset
 
 1. Check the [input formats and species selection](inputs.md).

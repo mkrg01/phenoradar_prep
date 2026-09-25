@@ -12,7 +12,8 @@ ROOT = str(Path(workflow.basedir).parent)
 SCRIPTS = str(Path(workflow.basedir) / "scripts")
 sys.path.insert(0, SCRIPTS)
 from configuration import validate_keys, validate_analysis
-from layout import INPUTS, BUSCO_FULL, SPECIES_LIST, CALIBRATIONS
+from layout import input_layout
+INPUTS, BUSCO_FULL, SPECIES_LIST, CALIBRATIONS = input_layout(config.get("input_root", "input"))
 from versioning import resolve_container_image
 USE_CONTAINER = DeploymentMethod.APPTAINER in workflow.deployment_settings.deployment_method
 try:
@@ -32,6 +33,8 @@ containerized: CONTAINER_IMAGE
 
 ODB_VERSION = "v12"
 EXISTING_ODB = config["odb"]["existing_results"]
+INCREMENTAL_ODB = config["odb"].get("incremental", False)
+ODB_CACHE = config["odb"].get("cache_dir", "resources/odb_cache")
 PYTHON = "python"
 TAXONOMY_DB = "resources/taxonomy/taxa.sqlite"
 TIMETREE_CACHE = "resources/timetree_cache"
@@ -95,6 +98,7 @@ META = f"{OUT}/metadata"
 MAPPING = f"{OUT}/{ORTHOGROUP_MAPPING}"
 MANIFESTS = f"{MAPPING}/manifests"
 CHUNKS = f"{MAPPING}/chunks"
+ODB_PLAN = f"{MAPPING}/incremental_plan"
 TPM = f"{OUT}/{ORTHOGROUP_EXPRESSION}"
 ALIGNMENTS = f"{OUT}/{ORTHOGROUP_ALIGNMENTS}"
 ALIGNMENT_INPUTS = f"{WORK}/{ORTHOGROUP_ALIGNMENTS}/inputs"
@@ -202,7 +206,34 @@ def run_row(wildcards):
     return rows[0]
 
 
+def odb_plan(wildcards):
+    root = checkpoints.plan_incremental_odb.get().output[0]
+    return json.loads((Path(root) / "plan.json").read_text())
+
+
+def odb_manifests(wildcards):
+    return checkpoints.plan_incremental_odb.get().output[0] if INCREMENTAL_ODB else MANIFESTS
+
+
+def odb_source_files(wildcards, suffix):
+    if not INCREMENTAL_ODB:
+        if EXISTING_ODB:
+            return [f"{EXISTING_ODB}/" + ("snapshot.json" if suffix == "provenance.json" else "annotations.tsv")] if suffix in {"og.annotations", "provenance.json"} else []
+        return [f'{CHUNKS}/{r["chunk"]}/' + ("provenance.json" if suffix == "provenance.json" else f'{r["chunk"]}.{suffix}') for r in chunk_rows(wildcards)]
+    paths = []
+    for source in odb_plan(wildcards)["sources"]:
+        if source["kind"] == "existing":
+            if suffix in {"og.annotations", "provenance.json"}:
+                paths.append(str(Path(source["root"]) / ("snapshot.json" if suffix == "provenance.json" else "annotations.tsv")))
+        else:
+            label = source["chunk"]
+            paths.append(f"{CHUNKS}/{label}/" + ("provenance.json" if suffix == "provenance.json" else f"{label}.{suffix}"))
+    return paths
+
+
 def chunk_rows(wildcards):
+    if INCREMENTAL_ODB:
+        return odb_plan(wildcards)["chunks"]
     return chunk_plan(sample_rows(wildcards), PROTEINS, rules.make_manifests.params.chunk_size)
 
 

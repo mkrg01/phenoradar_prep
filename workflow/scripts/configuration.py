@@ -1,10 +1,10 @@
 """Accepted configuration keys, including optional tool-specific overrides."""
 KEYS = {
     "": "run_name selection translation odb tpm alignment kegg phylogeny "
-        "trait exclude_species seed",
+        "trait exclude_species seed input_root",
     "selection": "busco_threshold species_list missing_taxonomy",
     "translation": "table",
-    "odb": "existing_results node",
+    "odb": "existing_results node incremental cache_dir chunk_size",
     "tpm": "multimap",
     "alignment": "enabled",
     "kegg": "enabled ambiguity",
@@ -35,6 +35,15 @@ def validate_keys(config):
     existing = config.get("odb", {}).get("existing_results")
     if existing is not None and (not isinstance(existing, str) or not existing.strip()):
         raise ValueError("odb.existing_results must be null or a snapshot directory")
+    if "input_root" in config and (not isinstance(config["input_root"], str) or not config["input_root"].strip()):
+        raise ValueError("input_root must be a directory")
+    odb = config.get("odb", {})
+    if type(odb.get("incremental", False)) is not bool:
+        raise ValueError("odb.incremental must be true or false")
+    if type(odb.get("chunk_size", 100)) is not int or odb.get("chunk_size", 100) < 1:
+        raise ValueError("odb.chunk_size must be a positive integer")
+    if not isinstance(odb.get("cache_dir", "resources/odb_cache"), str) or not odb.get("cache_dir", "resources/odb_cache").strip():
+        raise ValueError("odb.cache_dir must be a directory")
     # Use the positive signed 32-bit range supported by all seeded tools.
     if "seed" in config and (type(config["seed"]) is not int or not 1 <= config["seed"] <= 2147483647):
         raise ValueError("seed must be an integer between 1 and 2147483647")

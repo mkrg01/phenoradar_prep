@@ -79,6 +79,9 @@ records `version` (`v12`), `node`, `proteins` (one record per species with `spec
 `path: annotations.tsv` and `sha256`). Existing recorded absolute input paths are
 provenance only; the original files need not remain at those paths.
 
+For mixed existing/new species, use [incremental mapping](datasets.md#incremental-odb-outside-the-dataset-interface).
+The following describes the default strict import mode (`odb.incremental: false`).
+
 Use the normal `mapping` or `all` target. Both bypass reference downloads and
 ODB-mapper when this setting is supplied. `null` selects new mapping. The explicit
 `references` target still prepares a reference and is unnecessary for imports.

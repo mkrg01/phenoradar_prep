@@ -349,3 +349,48 @@ def test_container_bootstrap_rejects_analysis_targets(batch_workspace):
                             cwd=checkout, env=env, text=True, capture_output=True)
     assert result.returncode == 2
     assert "does not accept analysis targets" in result.stderr
+
+
+def test_distributed_launcher_does_not_apply_controller_budget(batch_workspace, tmp_path):
+    checkout, script, env = batch_workspace
+    capture = tmp_path / "slurm_args.json"
+    fake = tmp_path / "snakemake"
+    fake.write_text(f"#!{sys.executable}\nimport json,sys\nfrom pathlib import Path\n"
+                    f"Path({str(capture)!r}).write_text(json.dumps(sys.argv[1:]))\n")
+    fake.chmod(0o755)
+    env["SNAKEMAKE_BIN"] = str(fake)
+    env["SLURM_MEM_PER_NODE"] = "2048"  # The controller does not allocate worker memory.
+    result = subprocess.run([str(script), "--slurm", "--profile", "profiles/slurm", "--jobs", "7", "--", "mapping"],
+                            cwd=checkout, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    args = json.loads(capture.read_text())
+    assert args[args.index("--executor") + 1] == "slurm"
+    assert "--cores" not in args
+    assert not any(a.startswith("mem_mb=") for a in args)
+    assert args[args.index("--jobs") + 1] == "7"
+    assert args[-2:] == ["--", "mapping"]
+
+
+def test_slurm_profile_parses_without_submitting_jobs(batch_workspace, tmp_path):
+    checkout, script, env = batch_workspace
+    snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
+    if not snakemake: pytest.skip("Snakemake required")
+    pytest.importorskip("snakemake_executor_plugin_slurm")
+    shutil.copytree(ROOT / "profiles", checkout / "profiles")
+    (checkout / "workflow/Snakefile").write_text('''
+rule all:
+    input: "a.txt", "b.txt"
+rule task:
+    output: "{sample}.txt"
+    threads: 4
+    resources: mem_mb=32000
+    shell: "touch {output}"
+''')
+    env["SNAKEMAKE_BIN"] = snakemake
+    result = subprocess.run([str(script), "--slurm", "--profile", "profiles/slurm", "--dry-run"],
+                            cwd=checkout, env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    output = result.stdout + result.stderr
+    assert "mem_mb=32000" in output
+    assert not (checkout / "a.txt").exists()
+    assert not (checkout / "b.txt").exists()

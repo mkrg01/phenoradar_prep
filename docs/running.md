@@ -26,6 +26,21 @@ Monitor `pipeline-<job_id>.out` / `.err`
 in the repository root and per-step logs in `logs/<run_name>/`.
 Avoid concurrent jobs writing the same results.
 
+## Distributed Slurm execution
+
+The default launcher uses one allocation. To submit workflow rules as independent
+Slurm jobs, install `snakemake-executor-plugin-slurm` and use:
+
+```bash
+./run_pipeline.sh --slurm --profile profiles/slurm --jobs 10 -- all
+```
+
+Run the controller in an appropriate allocated environment. Its resources are
+independent of workers; configure worker resources in the profile. Use
+[the dataset interface](datasets.md) for GeneGalleon species arrays, frozen input
+selection, and staged submission. Do not run copies of the complete workflow as
+an array against the same output directory.
+
 ## Direct execution
 
 From the repository root, supply a CPU and memory budget:

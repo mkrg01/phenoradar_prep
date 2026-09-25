@@ -9,6 +9,11 @@ assignments, protein alignments, BUSCO species trees, and trait contrast pairs.
 See [input preparation and formats](docs/inputs.md) for upstream data from
 [AMALGKIT](https://github.com/kfuku52/amalgkit) and [GeneGalleon](https://github.com/kfuku52/genegalleon).
 
+To add RNA-seq species incrementally, use the [dataset interface](docs/datasets.md):
+manual metadata, reuse of completed products, staged GeneGalleon Slurm arrays,
+and ODB mapping of missing species only. Removing metadata rows removes species
+from the next dataset output while retaining reusable products.
+
 ## Requirements
 
 Before running the workflow, make sure the following software is installed:

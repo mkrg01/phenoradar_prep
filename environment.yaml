@@ -6,5 +6,6 @@ channels:
   - nodefaults
 dependencies:
   - python=3.12
+  - snakemake-executor-plugin-slurm
   - snakemake-minimal=9.8.0
   - pytest=8.4.1

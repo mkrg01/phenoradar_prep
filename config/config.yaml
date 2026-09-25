@@ -1,4 +1,5 @@
 # Run from the project root; place dataset files in input/ (see docs/inputs.md).
+input_root: input  # Dataset snapshots override this; manual inputs keep the default.
 run_name: run001  # Output subdirectory under results/, work/, logs/.
 seed: 12345  # Random seed for supported steps.
 trait: carnivory  # Shared column in input/species_trait.tsv.
@@ -9,6 +10,9 @@ selection:
 translation:
   table: 1  # Seqkit genetic code ID; 1: Standard.
 odb:  # Work files are retained for reuse.
+  incremental: false  # Dataset runs enable mixed import/new mapping and persistent caching.
+  cache_dir: resources/odb_cache
+  chunk_size: 100  # Dataset runs can use smaller Slurm mapping batches.
   existing_results: null  # Snapshot directory; null runs ODB-mapper. See docs/references.md.
   node: 3193  # OrthoDB v12 mapping taxid; 3193: Embryophyta. See docs/references.md.
 tpm:

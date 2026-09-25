@@ -230,3 +230,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Frozen dataset plans and persistent upstream products.
+/datasets/
+/resources/dataset_assets/
+/resources/odb_cache/
