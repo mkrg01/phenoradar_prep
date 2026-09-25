@@ -18,6 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Download checked container recipe
+        uses: actions/download-artifact@v8
+        with:
+          name: container-recipe
       - uses: docker/setup-buildx-action@v4
       - name: Build image for testing
         uses: docker/build-push-action@v7

@@ -8,6 +8,9 @@
 *.sif
 /.snakemake/
 
+# Generated from source recipes by CI or generate_container.py.
+/Dockerfile
+
 # User-specific execution settings and species selections.
 /config/mydata.yaml
 /config/*.local.yaml

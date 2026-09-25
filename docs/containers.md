@@ -46,8 +46,10 @@ To use host Conda environments instead of the container:
 
 ## Build and publish with GitHub Actions
 
-After environment or installer changes, regenerate and commit the Dockerfile:
-`python workflow/scripts/generate_container.py`. The
-[workflow environment](../environment.yaml) pins Snakemake for generation.
-See [development](development.md) for checks and [releases](releases.md) for
-publication. Changed environment recipes require a matching image.
+Commit environment and installer changes; CI generates the Dockerfile and saves
+it as the `container-recipe` artifact. Container builds use that generated file.
+To publish a matching image, update [VERSION](../VERSION) and follow
+[releases](releases.md). No Dockerfile commit is needed.
+
+For local image builds only, run `python workflow/scripts/generate_container.py`
+first using the pinned [workflow environment](../environment.yaml).

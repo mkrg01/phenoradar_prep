@@ -64,6 +64,25 @@ def test_release_requires_committed_sources(release_repo):
         release.plan(REPOSITORY, root)
 
 
+def test_generated_recipe_does_not_hide_uncommitted_release_sources(release_repo):
+    root, _ = release_repo
+    (root / ".gitignore").write_text((ROOT / ".gitignore").read_text())
+    recipe = root / "workflow/envs/example.yaml"
+    recipe.parent.mkdir(parents=True)
+    recipe.write_text("dependencies: [python=3.12]\n")
+    release.git("add", ".gitignore", "workflow/envs/example.yaml", root=root)
+    release.git("commit", "-m", "Track source recipes instead of generated Dockerfile", root=root)
+
+    # CI downloads this generated artifact after checkout and before publication.
+    (root / "Dockerfile").write_text("FROM scratch\n")
+    assert release.git("status", "--porcelain", root=root) == ""
+    assert release.plan(REPOSITORY, root)["release"] == "true"
+
+    recipe.write_text("dependencies: [python=3.13]\n")
+    with pytest.raises(ValueError, match="Commit all release changes"):
+        release.plan(REPOSITORY, root)
+
+
 @pytest.fixture
 def services(release_repo, monkeypatch):
     root, _ = release_repo

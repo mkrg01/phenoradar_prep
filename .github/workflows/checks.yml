@@ -19,7 +19,14 @@ jobs:
           miniforge-version: 26.1.1-3
           activate-environment: phenoradar-workflow
           environment-file: tests/environment.yaml
-      - name: Check generated Dockerfile
-        run: python workflow/scripts/generate_container.py --check
+      - name: Generate Dockerfile from source recipes
+        run: python workflow/scripts/generate_container.py
       - name: Run Python test suite
         run: python -m pytest -q -ra tests
+      - name: Save generated Dockerfile
+        uses: actions/upload-artifact@v7
+        with:
+          name: container-recipe
+          path: Dockerfile
+          if-no-files-found: error
+          overwrite: true

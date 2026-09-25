@@ -43,8 +43,9 @@ SNAKEMAKE_BIN=/path/to/snakemake SEQKIT_BIN=/path/to/seqkit \
 
 `PHYLOGENY_CONDA_PREFIX` enables tests with actual stage environments.
 [GitHub Actions](../.github/workflows/container.yml) runs the same Python suite
-and checks the generated Dockerfile on every branch push and pull request.
-Manual runs and releases also build the container and run
+and generates the Dockerfile on every branch push and pull request. The generated
+file is saved as `container-recipe`, not tracked in Git. Manual runs and releases
+build that recipe and run
 [smoke checks](../tests/container_smoke.py) with real tools;
 [tests/container/Snakefile](../tests/container/Snakefile) checks Apptainer activation.
 
