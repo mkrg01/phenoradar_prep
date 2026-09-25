@@ -17,18 +17,16 @@ Adding or removing species reuses completed species products and mappings.
 ## Quick start
 
 Prepare `input/metadata.tsv` with one run per species, from NCBI or local FASTQ
-files. Copy [build.yaml](config/build.yaml) and [analysis.yaml](config/analysis.yaml)
-to `config/build.local.yaml` and `config/analysis.local.yaml`, then adjust their
-settings. See the [build and analysis guide](docs/datasets.md) for setup and imports.
+files. Edit [build.yaml](config/build.yaml) and [analysis.yaml](config/analysis.yaml)
+directly. See the [build and analysis guide](docs/datasets.md) for setup and imports.
 
 ```bash
-./run_build.sh plan --config config/build.local.yaml
-./run_build.sh prepare --config config/build.local.yaml --name build001
+./run_build.sh plan
+./run_build.sh prepare --name build001
 ./run_build.sh submit --build builds/build001 --until mapping
 
 # After the build finishes:
-./run_analysis.sh prepare --config config/analysis.local.yaml \
-  --build builds/build001 --name analysis001
+./run_analysis.sh prepare --build builds/build001 --name analysis001
 ./run_analysis.sh submit --analysis analyses/analysis001
 ```
 

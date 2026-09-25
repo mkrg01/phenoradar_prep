@@ -4,22 +4,25 @@
 
 Edit [build.yaml](../config/build.yaml) for reusable species products and
 [analysis.yaml](../config/analysis.yaml) for analyses of a completed build.
-Keep local copies as `config/build.local.yaml` and `config/analysis.local.yaml`.
+Edit these files directly; both commands load their corresponding file by default.
 See the [two-phase guide](datasets.md) for preparation, submission, and migration.
 
 ## Loading settings and paths
 
 Paths are relative to the repository root. Build settings are frozen by
 `run_build.sh prepare --name <build>`. Analysis settings and auxiliary inputs
-are frozen by `run_analysis.sh prepare --name <analysis>`; an analysis config can
-be a partial override of `config/analysis.yaml`. Execution uses generated
+are frozen by `run_analysis.sh prepare --name <analysis>`. Later edits to the
+source YAML files apply to new preparations; prepared runs retain their saved
+settings. For optional alternative configs, use `--config`; an analysis config
+can be a partial override of `config/analysis.yaml`. Execution uses generated
 `builds/<id>/pipeline.yaml` or `analyses/<id>/pipeline.yaml` files.
 `workflow/pipeline_defaults.yaml` is an internal compatibility schema for
 Snakemake, not a third user configuration.
 
 Scientific changes require a new build or analysis ID. Retry CPU, memory, time,
-and concurrency changes use `submit --resources <yaml>` and are recorded per
-submission. The workflow container follows [VERSION](../VERSION);
+and concurrency changes use `submit --resources config/build.yaml` or
+`submit --resources config/analysis.yaml` after editing the relevant file.
+Only its `slurm` section is applied and recorded per submission. The workflow container follows [VERSION](../VERSION);
 GeneGalleon source/SIF pins belong to build settings.
 
 ## Settings by phase

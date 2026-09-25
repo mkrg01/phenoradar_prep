@@ -31,7 +31,7 @@ and references in `resources/`; no additional bind settings are needed.
 The upstream GeneGalleon dependency is pinned separately in
 [config/build.yaml](../config/build.yaml). Build preparation fetches its
 source and SIF only when upstream work is missing. Use
-`./run_build.sh fetch-software --config config/build.local.yaml` to prepare
+`./run_build.sh fetch-software` to prepare
 these dependencies in advance. See [pinned GeneGalleon source and SIF](datasets.md#pinned-genegalleon-source-and-sif)
 for cache reuse, local overrides, and updating the pins.
 

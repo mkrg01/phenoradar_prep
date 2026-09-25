@@ -26,8 +26,9 @@ not YAML. Relative FASTQ paths are resolved against the metadata file's director
 Paths are frozen and reads are made available inside the GeneGalleon workspace.
 Use a new run ID when the read content changes.
 
-Copy `config/build.yaml` and `config/analysis.yaml` to `.local.yaml` files.
-Paths in configurations are relative to the repository root. `WORKFLOW_PYTHON`
+Edit `config/build.yaml` and `config/analysis.yaml` directly. The build and
+analysis commands load these files by default; `prepare` freezes the settings
+for each run. Paths are relative to the repository root. `WORKFLOW_PYTHON`
 (or the older `DATASET_PYTHON`) can select the host Python with PyYAML.
 Install the [workflow environment](../environment.yaml) and prepare the
 [workflow container](containers.md) before submitting mapping or analysis jobs.
@@ -40,7 +41,7 @@ build needs assembly, BUSCO, or quantification. A reuse-only build does not fetc
 them. `plan` never downloads software. To fetch ahead of time:
 
 ```bash
-./run_build.sh fetch-software --config config/build.local.yaml
+./run_build.sh fetch-software
 ```
 
 Downloads are cached under `genegalleon.cache_dir`. Source and image checksums
@@ -56,8 +57,8 @@ the current software version.
 ## Build through mapping
 
 ```bash
-./run_build.sh plan --config config/build.local.yaml
-./run_build.sh prepare --config config/build.local.yaml --name expansion001
+./run_build.sh plan
+./run_build.sh prepare --name expansion001
 ./run_build.sh submit --build builds/expansion001 --until busco --dry-run
 ./run_build.sh submit --build builds/expansion001 --until busco
 ./run_build.sh status --build builds/expansion001
@@ -99,9 +100,8 @@ Set `build` in `analysis.yaml`, or override it with `--build` when preparing.
 Set BUSCO acceptance, species selection, traits, and optional analyses here:
 
 ```bash
-./run_analysis.sh plan --config config/analysis.local.yaml --build builds/expansion001
-./run_analysis.sh prepare --config config/analysis.local.yaml \
-  --build builds/expansion001 --name carnivory001
+./run_analysis.sh plan --build builds/expansion001
+./run_analysis.sh prepare --build builds/expansion001 --name carnivory001
 ./run_analysis.sh submit --analysis analyses/carnivory001 --dry-run
 ./run_analysis.sh submit --analysis analyses/carnivory001
 ./run_analysis.sh status --analysis analyses/carnivory001
@@ -138,7 +138,8 @@ are connected by `afterok`; mapping starts only when upstream jobs succeed.
 Mapping and analysis each have a small controller allocation. Snakemake submits
 individual rules as separate Slurm jobs with their own time/memory limits.
 `slurm.jobs` controls their concurrency; `slurm.stages.controller` controls the
-controller, and `slurm.rules` controls rule resources. For example:
+controller, and `slurm.rules` controls rule resources. Update these entries
+in `config/build.yaml`, for example:
 
 ```yaml
 slurm:
@@ -148,15 +149,16 @@ slurm:
     odb_map: {cpus: 16, mem_mb: 192000, runtime: 4320}
 ```
 
-Save resource adjustments in `config/retry.local.yaml`, then:
+After editing the resource settings, apply them to a retry explicitly:
 
 ```bash
 ./run_build.sh submit --build builds/expansion001 --until mapping \
-  --resources config/retry.local.yaml
-# The same option is available on run_analysis.sh submit.
+  --resources config/build.yaml
+./run_analysis.sh submit --analysis analyses/carnivory001 \
+  --resources config/analysis.yaml
 ```
 
-Only the `slurm` section is read from this override. Scientific settings and
+Only the current `slurm` section is read from the specified file. Scientific settings and
 metadata remain frozen. Each submission stores its resolved resources and
 scripts separately, including dry-runs. Retrying submits unfinished species
 steps and reuses completed mapping chunks. Active or ambiguous recorded Slurm
@@ -224,7 +226,7 @@ The build config selects the list:
 excluded_accessions: config/excluded_accessions.tsv
 ```
 
-Use `null` to disable it. Existing local configs without this key retain their
+Use `null` to disable it. Older configs without this key retain their
 old behavior; add the key to enable exclusions. `plan` and `status` show excluded
 runs with their reasons. `prepare` removes them before resolving cached products
 or requiring FASTQs, and they receive no worker-array indices. `register` also
@@ -261,7 +263,7 @@ and request quantification for the new run.
 To register already assembled/quantified species using the [input layout](inputs.md):
 
 ```bash
-./run_build.sh register --config config/build.local.yaml \
+./run_build.sh register \
   --input-dir input --metadata input/metadata.tsv
 ```
 
@@ -285,13 +287,14 @@ Convert saved old settings with:
 ```bash
 python workflow/scripts/migrate_phase_config.py \
   --legacy-dataset config/dataset.local.yaml --legacy-config saved-config.yaml \
-  --build-output config/build.local.yaml --analysis-output config/analysis.local.yaml
+  --build-output config/build.migrated.yaml --analysis-output config/analysis.migrated.yaml
 ```
 
 Alternatively, pass `--legacy-dataset datasets/<old-id>/dataset.json` to recover
 its frozen settings/metadata. The converter retains cache paths and writes only
-new configuration files; it refuses to overwrite existing files. Inspect the
-converted paths and select the new completed build in analysis settings.
+new configuration files; it refuses to overwrite existing files. Review the
+generated settings and apply them to `config/build.yaml` and `config/analysis.yaml`,
+then select the new completed build in analysis settings.
 Register old input snapshots if needed, then prepare a new build. Old schema-1
 dataset jobs should be resumed with their original checkout, not modified in
 place. `run_dataset.sh` remains a command-name alias for the new build interface;
