@@ -25,6 +25,54 @@ def load_snapshot(root, version, node):
     return record, proteins
 
 
+def import_snapshot(source, cache_dir, version="v12", node=3193):
+    """Validate and publish a legacy/bundled snapshot in the automatic cache."""
+    from dataset_assets import SAFE, digest, link_file, locked, record as file_entry, verify
+    source = Path(source).resolve()
+    snapshot_entry = file_entry(source / "snapshot.json")
+    snapshot, proteins = load_snapshot(source, version, node)
+    if not proteins:
+        raise ValueError("cannot register an empty ODB snapshot")
+    normalized = set()
+    for species, protein in proteins.items():
+        if (not SAFE.fullmatch(species) or protein["odb_species"] != species.replace("-", "_")
+                or protein["odb_species"] in normalized):
+            raise ValueError("invalid or colliding ODB snapshot species")
+        normalized.add(protein["odb_species"])
+        if len(protein.get("sha256", "")) != 64 or any(c not in "0123456789abcdef" for c in protein["sha256"]):
+            raise ValueError("invalid ODB protein checksum")
+    annotations = file_entry(source / "annotations.tsv")
+    if annotations["sha256"] != snapshot["annotations"]["sha256"]:
+        raise ValueError(f"ODB result changed after completion: {source}")
+    def identity_of(value, members):
+        return {"version": value["version"], "node": value["node"],
+                "proteins": [{k: members[s][k] for k in ("species", "odb_species", "sha256")}
+                             for s in sorted(members)],
+                "annotations": value["annotations"]["sha256"],
+                "reference": value.get("reference_sha256"),
+                **({"reference_constraints": sorted(value["reference_sha256s"])} if value.get("reference_sha256s") else {})}
+    identity = identity_of(snapshot, proteins)
+    base = Path(cache_dir).resolve() / f"{version}_{node}"
+    destination = base / ("import_" + digest(identity))
+    with locked(base / ".publish.lock"):
+        if destination.exists():
+            saved, members = load_snapshot(destination, version, node)
+            if identity_of(saved, members) != identity or sha256(destination / "annotations.tsv") != annotations["sha256"]:
+                raise ValueError(f"conflicting registered ODB snapshot: {destination}")
+            return destination
+        staging = Path(tempfile.mkdtemp(prefix=".importing-", dir=base))
+        try:
+            link_file(verify(annotations), staging / "annotations.tsv")
+            verify(snapshot_entry)
+            # Paths to original proteins are provenance, not runtime dependencies.
+            write_json(staging / "snapshot.json", snapshot)
+            verify(annotations)
+            os.rename(staging, destination)
+        finally:
+            if staging.exists(): shutil.rmtree(staging)
+    return destination
+
+
 def plan(samples, protein_dir, outdir, cache_dir, existing=None, reference=None,
          version="v12", node=3193, chunk_size=20):
     rows = {r["species"]: r for r in read_tsv(samples)}
@@ -40,7 +88,9 @@ def plan(samples, protein_dir, outdir, cache_dir, existing=None, reference=None,
         members = sorted(set(rows) & set(proteins))
         if not members:
             continue
-        if record.get("reference_sha256") and reference_hash and record["reference_sha256"] != reference_hash:
+        constraints = set(record.get("reference_sha256s", []))
+        if record.get("reference_sha256"): constraints.add(record["reference_sha256"])
+        if reference_hash and any(expected != reference_hash for expected in constraints):
             raise ValueError(f"ODB reference changed since cached mapping: {root}; use a new reference/cache namespace")
         for name in members:
             original = proteins[name]

@@ -22,7 +22,8 @@ Snakemake, not a third user configuration.
 Scientific changes require a new build or analysis ID. Retry CPU, memory, time,
 and concurrency changes use `submit --resources config/build.yaml` or
 `submit --resources config/analysis.yaml` after editing the relevant file.
-Only its `slurm` section is applied and recorded per submission. The workflow container follows [VERSION](../VERSION);
+Only its `slurm` section is applied and recorded per submission.
+The workflow container follows [VERSION](../VERSION);
 GeneGalleon source/SIF pins belong to build settings.
 
 ## Settings by phase
@@ -32,7 +33,7 @@ GeneGalleon source/SIF pins belong to build settings.
 | `metadata`, `excluded_accessions`, `store` | Completed `build` |
 | `genegalleon` source, SIF and assembly/quant settings | `inputs` for traits, species list and calibrations |
 | `busco.lineage`, `translation.table` | `selection.busco_threshold`, `exclude_species` |
-| `odb.node`, `existing_results`, `cache_dir`, `chunk_size` | `trait`, `seed`, `tpm`, optional analysis branches |
+| `odb.node`, `cache_dir`, `chunk_size` | `trait`, `seed`, `tpm`, optional analysis branches |
 | Build `slurm` resources | Analysis `slurm` resources |
 
 Build always computes full BUSCO tables for every included metadata species.
@@ -43,7 +44,13 @@ the completed build and cannot be overridden by analysis.
 
 `odb.node` defaults to OrthoDB v12 taxid `3193` (Embryophyta). Build always uses
 incremental mapping: matching imported/native snapshots are reused and missing
-species are mapped in chunks (default 20). See [reference configuration](references.md).
+species are mapped in chunks (default 20). Register old ODB snapshots once with
+`run_build.sh register --odb-results <snapshot> --odb-only`; later builds discover
+them automatically. `odb.existing_results` is retained only as an optional legacy
+override. See [reference configuration](references.md).
+
+Analysis `build` may also point to a copied, completed `products/` directory inside
+the project. See [portable builds](datasets.md#copying-a-completed-build-to-another-project).
 
 `selection.busco_threshold` defaults to `0.5`. `selection.species_list: true`
 enables `inputs.species_list`. `exclude_species` removes listed IDs before any

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import yaml
 from build_products import load_complete
+from portable_build import completion_path, input_entries
 from common import now, read_tsv, write_json
 from configuration import validate_analysis, validate_keys
 from dataset import absolute, implementation, inside, load_execution
@@ -32,9 +33,9 @@ def settings(root, config, build=None):
     if set(cfg['inputs']) - {'species_trait','species_list','calibrations'}: raise ValueError('unknown analysis input')
     validate_slurm(cfg['slurm'], build=False)
     source = inside(root, absolute(root, build or cfg['build']))
-    if source.is_dir(): source /= 'completed.json'
+    source = inside(root, completion_path(source))
     completed = load_complete(source)
-    if Path(completed['root']).resolve() != root:
+    if completed['schema_version'] == 1 and Path(completed['root']).resolve() != root:
         raise ValueError('completed build must belong to this project for container mounts')
     base = read_yaml(root / 'workflow/pipeline_defaults.yaml')
     resolved = deep_merge(base, {k:v for k,v in cfg.items() if k not in {'build','inputs','slurm'}})
@@ -81,10 +82,8 @@ def prepare(root, name, config, build=None):
     staging = Path(tempfile.mkdtemp(prefix='.prepare-', dir=target.parent))
     try:
         inputs = staging / 'input'
-        source_inputs = Path(completed['input'])
-        for entry in completed['files']:
-            path = Path(entry['path'])
-            if path.is_relative_to(source_inputs): link_file(verify(entry), inputs / path.relative_to(source_inputs))
+        for entry, relative in input_entries(completed):
+            link_file(verify(entry), inputs / relative)
         for key, filename in [('species_trait','species_trait.tsv'), ('calibrations','calibrations.tsv')]:
             if cfg['inputs'].get(key): shutil.copy2(absolute(root,cfg['inputs'][key]), inputs / filename)
         # One frozen selection combines the user list and explicit exclusions.

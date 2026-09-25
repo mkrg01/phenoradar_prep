@@ -602,7 +602,11 @@ def main():
         command.add_argument("--config", default="config/build.yaml")
         if name != "fetch-software": command.add_argument("--metadata")
         if name == "prepare": command.add_argument("--name", required=True)
-        if name == "register": command.add_argument("--input-dir", default="input")
+        if name == "register":
+            command.add_argument("--input-dir")
+            command.add_argument("--products", help="Portable completed products to register in this project")
+            command.add_argument("--odb-results", action="append", default=[], help="Existing ODB snapshot to add to the automatic cache")
+            command.add_argument("--odb-only", action="store_true", help="Register only --odb-results, without scanning species artifacts")
     for name in ("status", "submit", "materialize", "worker", "mapping", "complete"):
         command = sub.add_parser(name)
         command.add_argument("--build", "--dataset", dest="dataset", required=True)
@@ -634,12 +638,32 @@ def main():
                               "container": software_lock["container"].get("identity", {"kind": "local_image"})}, indent=2))
         else:
             cfg, analysis = settings(root, config)
-            rows = import_existing(cfg["store"], absolute(root, args.input_dir),
-                                   absolute(root, args.metadata or cfg["metadata"]), analysis["phylogeny"]["lineage"],
-                                   excluded_runs=read_exclusions(cfg["excluded_accessions"]))
+            if args.products and (args.input_dir or args.metadata or args.odb_only or args.odb_results):
+                parser.error("--products cannot be combined with --input-dir, --metadata, --odb-only or --odb-results")
+            if args.odb_only and (not args.odb_results or args.input_dir or args.metadata):
+                parser.error("--odb-only requires --odb-results and cannot use --input-dir or --metadata")
+            from incremental_odb import import_snapshot
+            cache = inside(root, absolute(root, cfg["odb"]["cache_dir"]))
+            exclusions = read_exclusions(cfg["excluded_accessions"])
+            odb = []
+            if args.products:
+                from portable_build import completion_path, register_products
+                source = inside(root, completion_path(absolute(root, args.products)))
+                rows, snapshot = register_products(source, cfg["store"], cache, cfg["busco"]["lineage"],
+                                                  cfg["translation"], cfg["odb"]["node"], exclusions)
+                odb.append(str(snapshot))
+            elif args.odb_only:
+                rows = []
+            else:
+                rows = import_existing(cfg["store"], absolute(root, args.input_dir or "input"),
+                                       absolute(root, args.metadata or cfg["metadata"]), cfg["busco"]["lineage"],
+                                       excluded_runs=exclusions)
+            for source in args.odb_results:
+                odb.append(str(import_snapshot(absolute(root, source), cache, node=cfg["odb"]["node"])))
             print(json.dumps({"registered": sum(r["status"] == "registered" for r in rows),
                               "no_cds": [r["species"] for r in rows if r["status"] == "no_cds"],
-                              "excluded": [r for r in rows if r["status"] == "excluded"]}, indent=2))
+                              "excluded": [r for r in rows if r["status"] == "excluded"],
+                              "odb_snapshots": odb}, indent=2))
     elif args.command == "status":
         report = status(args.dataset)
         print(json.dumps(report, indent=2))

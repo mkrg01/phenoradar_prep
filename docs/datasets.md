@@ -83,9 +83,9 @@ BUSCO completeness once available, for manual inspection.
 `builds/<id>/` holds frozen metadata/configuration, the persistent GeneGalleon
 workspace, and job records. Mapping results live in `results/build_<id>/`.
 After successful mapping, validation checks full metadata coverage, CDS/protein
-identity, BUSCO/quant files, and mapping gene coverage. Only then is
-`builds/<id>/completed.json` published. Analysis rejects a missing or changed
-completion record or product. If an independently run mapping finished before
+identity, BUSCO/quant files, and mapping gene coverage. Only then are portable
+`builds/<id>/products/` and `builds/<id>/completed.json` published. Analysis rejects
+a missing or changed completion record or product. If an independently run mapping finished before
 its completion record was written, `run_build.sh complete --build builds/<id>`
 validates and publishes it without running analyses.
 
@@ -204,7 +204,7 @@ resubmitting unchanged limits may fail again.
 ## Manually excluding unusable accessions
 
 Edit [config/excluded_accessions.tsv](../config/excluded_accessions.tsv) manually.
-It starts with a header and no exclusions. Entries match the metadata **`run`**
+Entries match the metadata **`run`**
 column exactly (SRR/ERR/DRR accessions or your local run IDs):
 
 ```tsv
@@ -273,10 +273,81 @@ cannot complete the new build. Preserve original data/workspaces referenced by
 receipts. If multiple CDS references exist, set the desired `reference_id` in
 metadata explicitly.
 
-For old ODB results, set `odb.existing_results` in **build.yaml** to an imported
-snapshot; see [ODB imports](references.md#reusing-existing-odb-results). The build
-combines matching old snapshots, native cached chunks, and missing species.
-Protein/reference mismatches are conflicts rather than silent reuse.
+Register old ODB snapshots once, alongside species registration or separately:
+
+```bash
+./run_build.sh register --odb-results resources/odb_existing/tlight --odb-only
+```
+
+`--odb-only` skips CDS/BUSCO/quant registration. Without it, the same invocation
+also registers `--input-dir` (default `input`). Repeat `--odb-results` for multiple
+snapshots. Registration validates the snapshot and places a hard link or copy in
+`odb.cache_dir`; it preserves the source and is safe to repeat. The normal build
+automatically combines matching registered snapshots, native cached chunks, and
+missing species. **No `odb.existing_results` setting is needed.** That option is
+still accepted for older configurations. Protein/reference mismatches remain
+conflicts rather than silent reuse. See [ODB imports](references.md#reusing-existing-odb-results).
+
+## Copying a completed build to another project
+
+After completion, `builds/<id>/products/` contains everything needed to reuse the
+biological products. Copy that directory as a unit:
+
+```text
+products/
+  manifest.json
+  metadata.tsv
+  source_metadata.tsv
+  excluded_accessions.tsv
+  excluded_runs.tsv
+  cds/
+  busco/
+  quant/
+  proteins/
+  odb/          # Mapping database, annotations, reusable snapshot
+  provenance/   # Original build settings and mapping records
+```
+
+All runtime file references in `manifest.json` are relative to this directory.
+Original absolute paths in provenance or sample attributes are historical records;
+analysis does not need those original paths. Products are immutable: edit the
+source metadata/configs and prepare a new build instead of editing this directory.
+On the same filesystem, publication uses hard links to avoid copying large data;
+across filesystems it copies files. External symlinks are not portable products.
+
+Place the copied directory inside the destination project for container access:
+
+```bash
+# Run in the destination project after copying products/ to imports/baseline/:
+./run_analysis.sh prepare --build imports/baseline --name analysis001
+./run_analysis.sh submit --analysis analyses/analysis001
+```
+
+No registration is needed for analysis. The destination supplies its own analysis
+settings, traits, software/container, and shared reference resources such as taxonomy.
+The original project, its caches, reads, GeneGalleon workspace, and Slurm logs are
+not required. `builds/<id>/` and `builds/<id>/products/` are both accepted as build
+arguments. Pre-existing schema-1 completed builds keep their original behavior;
+this automatic portable publication applies to builds completed by the new code.
+
+To use a copied bundle as the starting point for a **new build with additional
+species**, register it once in the destination project:
+
+```bash
+./run_build.sh register --products imports/baseline
+./run_build.sh plan
+./run_build.sh prepare --name expansion001
+./run_build.sh submit --build builds/expansion001 --until mapping
+```
+
+Keep the copied bundle: species registration references its files. Set the desired
+metadata in `build.yaml` and keep lineage, translation table, and ODB node compatible.
+Registration honors the destination's run exclusions without editing the bundle.
+It registers CDS/BUSCO/quant and its ODB snapshot together; later builds discover
+the ODB cache automatically. A new build still translates CDS and combines mapping
+tables; analysis of a completed bundle reuses both proteins and mappings directly.
+This does not resume an interrupted build on a new host or recreate the original
+GeneGalleon working directory.
 
 ## Migrating old configurations
 

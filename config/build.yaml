@@ -10,7 +10,6 @@ busco:
 odb:
   cache_dir: resources/odb_cache
   chunk_size: 20
-  existing_results: null
   node: 3193
 genegalleon:
   version: 0.7.77

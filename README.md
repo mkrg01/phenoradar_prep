@@ -32,6 +32,7 @@ directly. See the [build and analysis guide](docs/datasets.md) for setup and imp
 
 Builds can stop after assembly, BUSCO, or quantification for inspection. A completed
 build supports multiple analyses with different species selections and traits.
+Its `products/` directory can be copied to another project for reuse.
 Use a new build name after editing metadata; removed species leave the new outputs.
 
 Final inputs are written to `results/<analysis>/phenoradar_inputs/`.

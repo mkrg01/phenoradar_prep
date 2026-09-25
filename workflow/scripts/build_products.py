@@ -13,14 +13,16 @@ from translate_cds import fasta_ids
 
 
 def load_complete(path, verify_files=True):
-    path = Path(path)
-    if path.is_dir(): path = path / 'completed.json'
+    from portable_build import completion_path, load_products
+    path = completion_path(path)
     if not path.is_file(): raise ValueError(f'build is incomplete: missing {path}; finish build through mapping first')
     data = json.loads(path.read_text())
-    if data.get('kind') != 'completed_build' or data.get('schema_version') != 1:
+    if data.get('kind') != 'completed_build' or data.get('schema_version') not in (1, 2):
         raise ValueError('unsupported build completion record')
     payload = {k:v for k,v in data.items() if k != 'sha256'}
     if digest(payload) != data.get('sha256'): raise ValueError('build completion record changed')
+    if data['schema_version'] == 2:
+        return load_products(path, data, verify_files=verify_files)
     if verify_files:
         for entry in data['files']: verify(entry)
     return data
@@ -53,7 +55,12 @@ def complete(path):
             raise ValueError('mapping plan differs from build reference or membership')
         qc = json.loads((mapping / 'merge_qc.json').read_text())
         if qc['reused_species'] + qc['mapped_species'] != len(names): raise ValueError('mapping QC does not cover the build')
-        for source in qc['sources']: verify(source)
+        reference_hashes = set()
+        for source in qc['sources']:
+            origin = json.loads(verify(source).read_text())
+            reference_hashes.update(origin.get('reference_sha256s', []))
+            known = origin.get('reference_sha256') or origin.get('identity', {}).get('reference', {}).get('sha256')
+            if known: reference_hashes.add(known)
         products = {}
         with sqlite3.connect(required[0].as_uri() + '?mode=ro', uri=True) as db:
             if db.execute('PRAGMA quick_check').fetchone()[0] != 'ok': raise ValueError('invalid build mapping database')
@@ -78,6 +85,8 @@ def complete(path):
                 if sample_map[species]['run'] != run: raise ValueError(f'mapping run differs: {species}')
                 products[species] = {'row':item['row'], 'reference_id':product['reference']['reference_id'],
                     'odb_species':odb_species, 'counts':product['busco']['counts'],
+                    'conditions':{stage:product[key].get('provenance', {}).get('condition')
+                                  for stage,key in [('assembly','reference'),('busco','busco'),('quant','quant')]},
                     'cds':record(inputs / 'cds' / f'{species}_longestCDS.fa.gz'),
                     'busco':record(inputs / 'busco/full' / f'{species}.busco.full.tsv'),
                     'abundance':record(inputs / 'quant' / species / run / f'{run}_abundance.tsv'),
@@ -92,10 +101,10 @@ def complete(path):
                 'translation':manifest['analysis']['translation'], 'lineage':manifest['analysis']['phylogeny']['lineage'],
                 'odb':{'version':'v12','node':manifest['analysis']['odb']['node']},
                 'mapping':record(required[0]), 'products':products, 'files':files,
+                'odb_reference_sha256s':sorted(reference_hashes),
                 'excluded_runs':manifest.get('excluded', [])}
-        data['sha256'] = digest(data)
-        write_json(target, data)
-        return target
+        from portable_build import publish_products, publish_pointer
+        return publish_pointer(path, publish_products(path, data))
 
 
 def import_protein(completion, species, protein, provenance):

@@ -8,7 +8,8 @@ rule import_build_protein:
         completion=config['build_manifest'],
         protein=lambda wc: BUILD_PROTEINS[wc.species]['protein']['path'],
         provenance=lambda wc: BUILD_PROTEINS[wc.species]['translation']['path'],
-        code=f'{SCRIPTS}/build_products.py'
+        code=f'{SCRIPTS}/build_products.py',
+        helpers=[f'{SCRIPTS}/portable_build.py', f'{SCRIPTS}/dataset_assets.py']
     output:
         protein=f'{PROTEINS}/{{species}}_protein.fa',
         provenance=f'{PROTEINS}/{{species}}_protein.json'
@@ -24,7 +25,8 @@ rule import_build_mapping:
         database=COMPLETED_BUILD['mapping']['path'],
         samples=f'{META}/samples.tsv',
         proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa' for r in sample_rows(wc)}),
-        code=f'{SCRIPTS}/build_products.py'
+        code=f'{SCRIPTS}/build_products.py',
+        helpers=[f'{SCRIPTS}/portable_build.py', f'{SCRIPTS}/dataset_assets.py']
     output:
         database=f'{MAPPING}/mappings.sqlite',
         mappings=f'{MAPPING}/gene_orthogroups.tsv',

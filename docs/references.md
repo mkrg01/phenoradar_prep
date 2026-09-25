@@ -64,35 +64,34 @@ To refresh, archive the node's snapshot and use a new `run_name`.
 
 ### Reusing existing ODB results
 
-Set `odb.existing_results` to a snapshot directory, relative to the repository
-root (or an absolute path). Keep it inside the repository for container runs:
+Import existing snapshots into the automatic build cache once:
 
-```yaml
-odb:
-  existing_results: resources/odb_existing/tlight
-  node: 3193
+```bash
+./run_build.sh register --odb-results resources/odb_existing/tlight --odb-only
 ```
 
 The directory must contain `annotations.tsv` and `snapshot.json`. Schema version 1
 records `version` (`v12`), `node`, `proteins` (one record per species with `species`,
 `odb_species`, and the input FASTA's `sha256`), and `annotations` (with
-`path: annotations.tsv` and `sha256`). Existing recorded absolute input paths are
+`path: annotations.tsv` and `sha256`). Recorded original protein paths are
 provenance only; the original files need not remain at those paths.
 
-For mixed existing/new species, use [incremental mapping](datasets.md#incremental-odb-outside-the-dataset-interface).
-The following describes the default strict import mode (`odb.incremental: false`).
+Registration validates the annotation checksum and configured version/node, then
+publishes a hard link or copy under `odb.cache_dir/v12_<node>/`. It preserves the
+source and avoids registering identical mappings twice. Subsequent builds discover
+these snapshots automatically, reuse matching species, and map only missing ones.
+A subset is supported; annotations from excluded species are omitted from outputs.
+Abundance-only changes reuse the completed mapping.
 
-Use the normal `mapping` or `all` target. Both bypass reference downloads and
-ODB-mapper when this setting is supplied. `null` selects new mapping. The explicit
-`references` target still prepares a reference and is unnecessary for imports.
+CDS translation still runs for a new build. Every reused protein FASTA must match
+its recorded SHA256; mismatches stop execution instead of silently remapping.
+Analysis of a [completed portable build](datasets.md#copying-a-completed-build-to-another-project)
+reuses its proteins and mapping database directly.
 
-CDS translation still runs: every selected protein FASTA must have the same SHA256
-as its recorded original input. The import also checks the OrthoDB version/node,
-species coverage, and annotations checksum. Mismatches stop the import; they never
-silently trigger remapping. A subset of the recorded species is supported, with
-other species' annotations omitted. Output tables retain their normal formats;
-`orthogroups/mapping/merge_qc.json` records `mode: existing`, excluded rows, and
-snapshot provenance. Abundance-only changes reuse the completed mapping.
+For compatibility, old configurations may still set `odb.existing_results` to an
+explicit snapshot. Build combines that snapshot with the automatic cache. Low-level
+Snakemake runs with `odb.incremental: false` retain their strict, explicit import
+mode. Normal build usage no longer requires this setting.
 
 ## KOfam and KEGG reference
 
