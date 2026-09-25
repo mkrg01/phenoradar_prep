@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def settings(**updates):
-    cfg = yaml.safe_load((ROOT / "config/config.yaml").read_text())["phylogeny"]
+    cfg = yaml.safe_load((ROOT / "workflow/pipeline_defaults.yaml").read_text())["phylogeny"]
     cfg.update(translation_table=1)
     cfg.update(updates)
     return cfg

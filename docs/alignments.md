@@ -8,7 +8,7 @@ copy without filtering or trimming.
 ## Running
 
 ```bash
-./run_pipeline.sh --cores 16 --resources mem_gb=192 -- alignments
+./run_pipeline.sh --cores 16 --resources mem_gb=192 --configfile analyses/analysis001/pipeline.yaml -- alignments
 ```
 
 Prerequisites run automatically. Set `alignment.enabled: true` to include this

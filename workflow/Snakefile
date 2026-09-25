@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from snakemake_interface_executor_plugins.settings import DeploymentMethod
 
-configfile: "config/config.yaml"
+configfile: "workflow/pipeline_defaults.yaml"
 
 ROOT = str(Path(workflow.basedir).parent)
 SCRIPTS = str(Path(workflow.basedir) / "scripts")
@@ -349,7 +349,10 @@ rule timetree:
 
 
 include: "rules/metadata.smk"
-include: "rules/odb.smk"
+if config.get("build_manifest"):
+    include: "rules/build_inputs.smk"
+else:
+    include: "rules/odb.smk"
 include: "rules/tpm.smk"
 include: "rules/alignments.smk"
 include: "rules/kegg.smk"

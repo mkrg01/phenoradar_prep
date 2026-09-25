@@ -29,9 +29,9 @@ and references in `resources/`; no additional bind settings are needed.
 ## GeneGalleon for incremental datasets
 
 The upstream GeneGalleon dependency is pinned separately in
-[config/dataset.yaml](../config/dataset.yaml). Dataset preparation fetches its
+[config/build.yaml](../config/build.yaml). Build preparation fetches its
 source and SIF only when upstream work is missing. Use
-`./run_dataset.sh fetch-software --config config/dataset.local.yaml` to prepare
+`./run_build.sh fetch-software --config config/build.local.yaml` to prepare
 these dependencies in advance. See [pinned GeneGalleon source and SIF](datasets.md#pinned-genegalleon-source-and-sif)
 for cache reuse, local overrides, and updating the pins.
 

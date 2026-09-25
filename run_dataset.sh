@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run from any directory. Heavy work is submitted only by the explicit submit command.
+# Compatibility command name: dataset construction is now the build phase.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-cd "$root"
-exec "${DATASET_PYTHON:-python}" "$root/workflow/scripts/dataset.py" "$@"
+printf '%s\n' 'run_dataset.sh is now run_build.sh; downstream analyses use run_analysis.sh (see docs/datasets.md).' >&2
+exec "$root/run_build.sh" "$@"

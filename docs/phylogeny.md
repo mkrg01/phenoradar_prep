@@ -67,10 +67,10 @@ postprocessing requires a nonempty `trees` list.
 
 ```bash
 # Optional input audit, marker plan, and outgroup check.
-./run_pipeline.sh --cores 4 --resources mem_gb=16 -- phylogeny_prepare
+./run_pipeline.sh --cores 4 --resources mem_gb=16 --configfile analyses/analysis001/pipeline.yaml -- phylogeny_prepare
 
 # Infer gene trees and species trees.
-./run_pipeline.sh --cores 32 --resources mem_gb=128 -- phylogeny
+./run_pipeline.sh --cores 32 --resources mem_gb=128 --configfile analyses/analysis001/pipeline.yaml -- phylogeny
 ```
 
 The selected trees are included in `all`. `phylogeny` stops at tree inference;

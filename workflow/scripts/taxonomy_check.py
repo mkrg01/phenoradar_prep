@@ -243,7 +243,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ["tree", "tree-qc", "samples", "taxonomy", "outdir"]:
         parser.add_argument("--" + name, required=True)
-    parser.add_argument("--settings", default="{}", help="JSON; see taxonomy_check in config/config.yaml")
+    parser.add_argument("--settings", default="{}", help="JSON; see taxonomy_check in config/analysis.yaml")
     args = vars(parser.parse_args())
     args["settings"] = json.loads(args["settings"])
     check(**args)

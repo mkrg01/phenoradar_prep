@@ -1,9 +1,9 @@
 # Documentation
 
 For manually curated RNA-seq additions/removals and staged Slurm jobs, see
-[incremental datasets](datasets.md).
+[reusable builds and analyses](datasets.md).
 
-## Start a dataset
+## Start from metadata
 
 1. Check the [input formats and species selection](inputs.md).
 2. Edit the [configuration](configuration.md); the matching [container image](containers.md) is selected automatically.

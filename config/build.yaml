@@ -1,0 +1,60 @@
+# Reusable species products through ODB mapping. Paths are relative to the project root.
+# GeneGalleon version, revision and image digest must be updated together.
+metadata: input/metadata.tsv
+excluded_accessions: config/excluded_accessions.tsv  # Manual run exclusions; null disables.
+store: resources/dataset_assets
+translation:
+  table: 1
+busco:
+  lineage: embryophyta_odb12
+odb:
+  cache_dir: resources/odb_cache
+  chunk_size: 20
+  existing_results: null
+  node: 3193
+genegalleon:
+  version: 0.7.77
+  revision: 3a6460e8a8201ab1293db1fec445fd7de063e46e
+  image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:df357fc1857c737df1cdfe17fc12b7e1fcb891353e9bac9e534fb4155b98aff3
+  image_sha256: null
+  cache_dir: resources/software/genegalleon
+  repository: null
+  image: null
+  settings:
+    assembly_method: rnaSPAdes
+    amalgkit_rrna_filter: 'yes'
+    amalgkit_contam_filter: 'no'
+slurm:
+  partition: epyc
+  account: null
+  concurrency: 5
+  array_size: 1000
+  stages:
+    assembly:
+      cpus: 4
+      mem_mb: 128000
+      time: 3-00:00:00
+    busco:
+      cpus: 4
+      mem_mb: 32000
+      time: 1-00:00:00
+    quant:
+      cpus: 4
+      mem_mb: 32000
+      time: 1-00:00:00
+    controller:
+      cpus: 1
+      mem_mb: 8000
+      time: 3-00:00:00
+  jobs: 10
+  default_resources:
+    mem_mb: 8000
+    runtime: 1440
+  rules:
+    odb_map:
+      cpus: 16
+      mem_mb: 192000
+      runtime: 4320
+    prepare_odb_reference:
+      mem_mb: 32000
+      runtime: 1440

@@ -18,7 +18,7 @@ cannot be dated through this workflow; an unsupported combination is rejected.
 For a first run, prepare calibrations before dating:
 
 ```bash
-./run_pipeline.sh --cores 32 --resources mem_gb=128 -- phylogeny_calibrations
+./run_pipeline.sh --cores 32 --resources mem_gb=128 --configfile analyses/analysis001/pipeline.yaml -- phylogeny_calibrations
 ```
 
 Inspect `results/<run_name>/phylogeny/<set>/timetree/`: `calibrations.tsv` contains
@@ -33,7 +33,7 @@ intervals become hard age bounds; the study count alone does not establish quali
 Run dating after review:
 
 ```bash
-./run_pipeline.sh --cores 32 --resources mem_gb=128 -- timetree
+./run_pipeline.sh --cores 32 --resources mem_gb=128 --configfile analyses/analysis001/pipeline.yaml -- timetree
 ```
 
 `timetree` also prepares missing calibrations. Enabled dating is included in
@@ -43,7 +43,7 @@ to refresh, archive `resources/timetree_cache/` and rerun with a new `run_name`.
 ## Manual calibrations
 
 Create `input/calibrations.tsv` and set `phylogeny.dating.calibration_source: file`
-in [config/config.yaml](../config/config.yaml), then run `timetree`.
+in [config/analysis.yaml](../config/analysis.yaml), then run `timetree`.
 Each row identifies an ancestor by at least two exact tip labels, separated by
 commas. Their most recent common ancestor receives the specified age bounds.
 Replace this **example** with suitable species, ages, and a source citation:

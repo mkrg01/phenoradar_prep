@@ -1,0 +1,58 @@
+# One analysis of a completed build; use a new analysis name for changed conditions.
+# BUSCO selection is applied here, after all build species have been mapped.
+build: builds/build001
+inputs:
+  species_trait: input/species_trait.tsv
+  species_list: null
+  calibrations: null
+seed: 12345
+trait: carnivory
+selection:
+  species_list: false
+  busco_threshold: 0.5
+  missing_taxonomy: error
+tpm:
+  multimap: error
+alignment:
+  enabled: false
+kegg:
+  enabled: false
+  ambiguity: duplicate
+phylogeny:
+  trees:
+  - representatives
+  outgroup: auto
+  max_markers: 500
+  min_protein_length: 100
+  max_unknown_fraction: 0.05
+  min_taxa: 4
+  trimal_mode: gappyout
+  dating:
+    enabled: false
+    calibration_source: timetree
+  contrast_pairs:
+    enabled: true
+  taxonomy_check:
+    enabled: false
+    ranks:
+    - family
+    - subfamily
+    - tribe
+    - subtribe
+    - genus
+    outlierlevel: 0.5
+    collapse_monophyletic: true
+exclude_species: []
+slurm:
+  partition: epyc
+  account: null
+  jobs: 10
+  default_resources:
+    mem_mb: 8000
+    runtime: 1440
+  stages:
+    controller:
+      cpus: 1
+      mem_mb: 8000
+      time: 3-00:00:00
+  rules: {}

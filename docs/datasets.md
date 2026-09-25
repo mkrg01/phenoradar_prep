@@ -1,268 +1,298 @@
-# Incremental RNA-seq datasets
+# Reusable builds and independent analyses
 
-[Documentation](index.md) · [Input contract](inputs.md) · [Slurm execution](running.md)
+[Documentation](index.md) · [Configuration](configuration.md)
 
-`run_dataset.sh` integrates manually curated RNA-seq metadata, existing species
-products, GeneGalleon, and the downstream workflow. Metadata acquisition and
-biological inclusion decisions remain manual. The dataset interface requires
-one row and one run per species; it never averages runs or infers sample labels.
-The existing prepared-input workflow remains available unchanged.
-
-## Storage and identity
-
-- `resources/software/genegalleon/`: version-pinned source, SIF files, and download receipts, shared across datasets.
-- `resources/dataset_assets/`: receipts binding CDS, BUSCO, and quantification to
-  a species, CDS SHA256, and run. Legacy files are registered in place; retain
-  their original files. New native GeneGalleon outputs remain in their dataset
-  workspace, including counts, effective lengths, and tool logs.
-- `resources/odb_cache/v12_<node>/`: immutable completed ODB mapping snapshots,
-  reusable across datasets, independently of the original mapping batch size.
-- `datasets/<name>/`: frozen metadata, configuration, code/image fingerprints,
-  stable task indices, GeneGalleon workspace, submission records, and input view.
-- `results/<name>/`: results containing only this dataset's selected species.
-
-Never edit registered files in place. A changed registered input is a conflict,
-not permission to silently reuse an incompatible output or restart heavy work.
-Existing provenance is recorded as legacy; importing does not claim to recover
-historical tool versions or prove the original quantification reference beyond
-available IDs and retained inputs. Generated products record the GeneGalleon
-code/image and effective settings. A metadata-only edit does not invalidate
-unchanged species products.
-
-## Configure once
-
-Use the Snakemake environment in [environment.yaml](../environment.yaml), or
-install `snakemake-executor-plugin-slurm` alongside your existing Snakemake.
-`run_dataset.sh` uses `python`; set `DATASET_PYTHON` to an absolute interpreter
-path if that environment is not activated.
-
-Copy [config/dataset.yaml](../config/dataset.yaml) to a local configuration,
-then set:
-
-- `genegalleon.version`, `revision`, and `image_uri`: the pinned upstream version,
-  full source commit SHA, and matching OCI digest. The defaults select GeneGalleon
-  0.7.77; leave `repository` and `image` null for automatic retrieval;
-- `analysis_config`: an optional override to the main downstream configuration;
-  use `config/reuse_odb.local.yaml` for the local tlight snapshot when available;
-- Slurm partition/account, per-stage CPUs/memory/time, concurrency, and the
-  downstream job limit. The provided `epyc` and resource values are examples.
-
-The downstream settings in `config/config.yaml` still select BUSCO thresholds,
-traits, trees, alignments, and optional analyses. Dataset preparation freezes the
-resolved configuration; later edits to the source config apply to later datasets.
-Upstream mapping/quantification must use the CDS retained for this reference.
-GeneGalleon stage flags, metadata mode, reference selection, and cleanup are
-managed by the adapter. Other scalar settings can be set in
-`genegalleon.settings`; they are frozen and recorded.
-
-## Pinned GeneGalleon source and SIF
-
-`prepare` automatically fetches missing GeneGalleon dependencies when assembly,
-BUSCO, or quantification remains pending. It does not fetch anything for a dataset
-that can reuse all upstream products. `plan`, `register`, and `submit --dry-run`
-do not download software. Workers use the paths frozen by `prepare`, so every
-array task uses the same source and SIF without repeating downloads.
-
-The default pins correspond to the published
-[GeneGalleon 0.7.77 source](https://github.com/kfuku52/genegalleon/tree/3a6460e8a8201ab1293db1fec445fd7de063e46e)
-and its matching multi-architecture image:
-
-```yaml
-genegalleon:
-  version: "0.7.77"
-  revision: 3a6460e8a8201ab1293db1fec445fd7de063e46e
-  image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:df357fc1857c737df1cdfe17fc12b7e1fcb891353e9bac9e534fb4155b98aff3
-  image_sha256: null
-  cache_dir: resources/software/genegalleon
-  repository: null
-  image: null
-```
-
-Source archives are fetched by full commit SHA and checked against `VERSION`.
-Apptainer (or Singularity) pulls the pinned OCI digest and converts it to a SIF
-for the host architecture. This first conversion can require substantial time,
-memory, and temporary disk space. Fetch dependencies ahead of dataset preparation
-on a suitable node/allocation with:
-
-```bash
-./run_dataset.sh fetch-software --config config/dataset.local.yaml
-```
-
-This command needs no RNA-seq metadata and submits no analysis jobs. Network
-access is needed only for missing dependencies. The source, image, and runtime
-blob cache are stored under `genegalleon.cache_dir`, which must be inside the
-project. Successfully published caches can be reused offline. Concurrent fetches
-are protected by file locks; if another preparation holds the lock, retry after
-it finishes. Failed or interrupted downloads never become completed cache entries.
-
-An HTTPS URL for a directly distributed SIF is also supported, with its mandatory
-`image_sha256`. OCI tags such as `latest` are rejected: use an immutable digest.
-The final SIF checksum, architecture, source commit, source archive checksum,
-and available OCI labels are recorded in `dataset.json` under `software_lock`.
-Image/source revision and version labels are checked when the image provides them.
-OCI-to-SIF conversion may produce different SIF bytes with a different runtime;
-each prepared dataset remains bound to its original SIF checksum. Keep its cache
-while the dataset is in use. Changed cached files are reported as conflicts.
-
-For an existing checkout/container, set `repository` and `image` to local paths.
-If only `repository` is set and `<repository>/genegalleon.sif` exists, it is reused.
-These are explicit local overrides; their actual files are fingerprinted rather
-than claimed to match the default pins. Without a local SIF, automatic image
-retrieval requires the local checkout's `VERSION` to match the configured version.
-
-Update `version`, `revision`, and `image_uri` together when selecting a new release.
-Each dependency identity gets a separate cache entry. Existing datasets retain
-their frozen paths and fingerprints, and changing software pins does not by itself
-rerun completed species products.
-
-## Register completed work
-
-Register existing prepared inputs once, without assembly, BUSCO, or quantification:
-
-```bash
-./run_dataset.sh register --config config/dataset.local.yaml \
-  --input-dir input --metadata input/metadata.original.tsv
-```
-
-Use the metadata describing the original run/reference combinations. Registration
-checks CDS IDs, positive finite TPM, equality of abundance/CDS target sets, and
-BUSCO counts. Full BUSCO tables additionally check sequence IDs and lineage.
-CDS-only and CDS+BUSCO imports are allowed; missing steps remain pending. Species
-without CDS are reported as `no_cds`, not marked complete. If the analysis needs
-phylogeny, full BUSCO tables must be present or that BUSCO step remains pending.
-Files are hashed on registration; later checks use file identity and rehash
-changed files. Registration does not require the original FASTQ files.
-For newly processed private runs, retained FASTQs are checked against their
-recorded hashes when reusing quantification; replacing bytes under the same run
-ID is a conflict. Completed outputs can still be reused after raw reads are
-removed. Use a new run ID for a different sample.
+`run_build.sh` produces reusable species artifacts through ODB mapping.
+`run_analysis.sh` selects species from a completed build and produces expression,
+alignment, phylogeny, and PhenoRadar outputs. Build and analysis names are independent; analysis names starting with `build_`
+are reserved for build output directories.
 
 ## Prepare a manually curated dataset
 
-Prepare a TSV containing all desired species, including already processed ones.
-It needs `scientific_name`, `run`, and `taxid`, plus the AMALGKIT fields needed for
-new work. For local reads specify `private_file=yes`, `lib_layout=single|paired`,
-`read1_path`, and (for paired reads) `read2_path`. Relative FASTQ paths resolve
-against the metadata file's directory. Biological labels and `is_sampled` /
-`exclusion` must already be curated for AMALGKIT. Inclusion in the final dataset
-is governed by row membership and configured species/BUSCO filters, not by an
-implicit interpretation of AMALGKIT exclusion columns.
+Maintain `input/metadata.tsv` yourself. Include **all desired species**, one run
+per species, whether the reads come from NCBI or local files. A manually curated
+[run exclusion list](#manually-excluding-unusable-accessions) can omit known
+unusable runs without deleting their metadata rows. The workflow does not search
+for runs or infer biological inclusion decisions.
+
+Required columns are `scientific_name`, `run`, and positive NCBI `taxid`.
+Use AMALGKIT-compatible run metadata; additional columns pass through to
+GeneGalleon. Species/run IDs must be unique after normalization. Species IDs
+replace spaces with underscores; avoid collisions between hyphens and underscores.
+
+For local reads also supply `private_file: yes`, `lib_layout: single` or `paired`,
+`read1_path`, and, for paired reads, `read2_path`. These are TSV column values,
+not YAML. Relative FASTQ paths are resolved against the metadata file's directory.
+Paths are frozen and reads are made available inside the GeneGalleon workspace.
+Use a new run ID when the read content changes.
+
+Copy `config/build.yaml` and `config/analysis.yaml` to `.local.yaml` files.
+Paths in configurations are relative to the repository root. `WORKFLOW_PYTHON`
+(or the older `DATASET_PYTHON`) can select the host Python with PyYAML.
+Install the [workflow environment](../environment.yaml) and prepare the
+[workflow container](containers.md) before submitting mapping or analysis jobs.
+
+## Pinned GeneGalleon source and SIF
+
+`build.yaml` pins `genegalleon.version`, the exact source `revision`, and an
+OCI image digest in `image_uri`. Missing source/SIF files are fetched when a
+build needs assembly, BUSCO, or quantification. A reuse-only build does not fetch
+them. `plan` never downloads software. To fetch ahead of time:
 
 ```bash
-./run_dataset.sh plan --config config/dataset.local.yaml \
-  --metadata input/metadata.tsv
-./run_dataset.sh prepare --config config/dataset.local.yaml \
-  --metadata input/metadata.tsv --name expansion001
+./run_build.sh fetch-software --config config/build.local.yaml
 ```
 
-`plan` reports reuse, pending work, explicit exclusions, and conflicts without
-submitting jobs or acquiring metadata. `prepare` freezes the dataset, hashes
-new private read inputs, and resolves/fingerprints the pinned GeneGalleon code/image
-when upstream work is needed. It does not launch analyses. Use a new dataset name when changing
-the species/run selection; existing names and existing result directories cannot
-be overwritten. An optional `reference_id` column chooses a registered CDS SHA256
-when a species has multiple imported references. No automatic reassembly follows
-from adding/changing RNA-seq runs: existing CDS are reused and only missing run
-quantification is scheduled. An intentional reference replacement requires a
-separately prepared/imported reference and compatible ODB snapshots/cache; an
-incompatible old ODB snapshot is reported instead of silently remapping.
+Downloads are cached under `genegalleon.cache_dir`. Source and image checksums
+are frozen with the build. An HTTPS SIF URL requires `image_sha256`; OCI pulls
+record the produced SIF hash. `repository` and `image` allow explicit local
+overrides; an existing `<repository>/genegalleon.sif` is also supported.
+Update the version, revision, and image digest together for a deliberate upgrade.
+Native products record their conditions; incompatible reuse is reported as a
+conflict. Use a separate `store` for a deliberate rebuild with different conditions.
+Legacy imports retain their known provenance and are not retroactively assigned
+the current software version.
 
-## Submit through a chosen endpoint
-
-Inspect generated batch commands before submitting:
+## Build through mapping
 
 ```bash
-./run_dataset.sh submit --dataset datasets/expansion001 --until busco --dry-run
-./run_dataset.sh submit --dataset datasets/expansion001 --until busco
-./run_dataset.sh status --dataset datasets/expansion001
-# After reviewing BUSCO and assembly outputs:
-./run_dataset.sh submit --dataset datasets/expansion001 --until all
+./run_build.sh plan --config config/build.local.yaml
+./run_build.sh prepare --config config/build.local.yaml --name expansion001
+./run_build.sh submit --build builds/expansion001 --until busco --dry-run
+./run_build.sh submit --build builds/expansion001 --until busco
+./run_build.sh status --build builds/expansion001
+
+# After inspection, schedule any remaining prerequisites and mapping:
+./run_build.sh submit --build builds/expansion001 --until mapping
 ```
 
-Endpoints are `assembly` (including CDS extraction), `busco`, `quant` (including
-merge), `mapping`, and `all`. Earlier missing stages are included automatically.
-Each upstream stage is a species array; only pending indices are submitted.
-The species-to-index assignment remains fixed across stage arrays and retries.
-The adapter translates it to GeneGalleon's sorted metadata filename index.
-`array_size` defaults to 1000 and must be less than the site's `MaxArraySize`.
-Species above that logical index are submitted in separate batches with a fixed
-index offset, so a metadata table of thousands of species does not exceed the
-scheduler's array index limit. Batches run in sequence; tasks within each batch
-run in parallel up to `concurrency`. The submission receipt records the logical
-indices and offset. Each task receives its own CPU, memory, and walltime allocation. Dependencies use `afterok`; failed
-prerequisites cancel dependent jobs rather than publishing a partial dataset.
+Endpoints are `assembly`, `busco`, `quant`, and `mapping` (default). Each runs
+missing prerequisites. Assembly includes longest-CDS generation. BUSCO always
+retains its full table, regardless of future tree settings. No BUSCO threshold,
+trait, or species-list filtering applies to a build: every species remaining after explicit run exclusions must
+finish all required products before the build is complete.
 
-One dataset cannot be submitted again while its recorded jobs remain queued or
-running. After failure, inspect the logs and rerun `submit`; completed species
-products are reused. Status includes recorded worker state, job ID, and BUSCO
-completeness. Logs and `submission_*.json` are under `datasets/<name>/jobs/`.
-An interrupted/ambiguous scheduler submission is reported for reconciliation
-before retry, to avoid submitting duplicate jobs. A timed-out assembler may have
-to restart its unfinished stage; the adapter guarantees reuse of verified
-completed stages, not checkpointing inside every external tool.
+The plan reports `reuse`, `pending`, or `conflict` for species products. Mapping
+reuse requires translated protein hashes: before translation its state is
+`check_after_translation` (or `pending_inputs` without CDS). The subsequent
+incremental ODB plan records `planned_reuse`/`planned_mapping`; completion gives
+`reuse`. An unresolved conflict stops preparation/submission. Reports include
+BUSCO completeness once available, for manual inspection.
 
-For a pilot without editing the master metadata:
+`builds/<id>/` holds frozen metadata/configuration, the persistent GeneGalleon
+workspace, and job records. Mapping results live in `results/build_<id>/`.
+After successful mapping, validation checks full metadata coverage, CDS/protein
+identity, BUSCO/quant files, and mapping gene coverage. Only then is
+`builds/<id>/completed.json` published. Analysis rejects a missing or changed
+completion record or product. If an independently run mapping finished before
+its completion record was written, `run_build.sh complete --build builds/<id>`
+validates and publishes it without running analyses.
+
+For a pilot, put species IDs in a file and add `--species-list pilot.txt` to
+`submit`. Only those species' missing upstream tasks are submitted; no mapping
+controller or completion record is produced for an incomplete pilot. Later
+submit without the pilot list to finish the build.
+
+## Run an analysis
+
+Set `build` in `analysis.yaml`, or override it with `--build` when preparing.
+Set BUSCO acceptance, species selection, traits, and optional analyses here:
 
 ```bash
-./run_dataset.sh submit --dataset datasets/expansion001 --until quant \
-  --species-list input/pilot_species.txt
+./run_analysis.sh plan --config config/analysis.local.yaml --build builds/expansion001
+./run_analysis.sh prepare --config config/analysis.local.yaml \
+  --build builds/expansion001 --name carnivory001
+./run_analysis.sh submit --analysis analyses/carnivory001 --dry-run
+./run_analysis.sh submit --analysis analyses/carnivory001
+./run_analysis.sh status --analysis analyses/carnivory001
 ```
 
-Pilot submissions never trigger final dataset integration. Their completed
-products are reused by the subsequent full submission. FASTQs and temporary work
-are retained between stages. Array workers disable GeneGalleon's multispecies
-summary; dataset-level collection is done once after all necessary results exist.
-GeneGalleon provides its own locked shared reference preparation in its workspace;
-all array tasks in a dataset share that workspace's downloads.
+Analysis uses verified build proteins and a selected-species subset of the
+completed mapping database. Its DAG contains no assembly, BUSCO, `translate_cds`,
+or ODB-mapper producer. Missing build products cause an error; they are not rebuilt.
+KO annotation remains an optional analysis branch.
 
-The downstream controller runs after the species arrays and uses the frozen
-Slurm profile to schedule ODB chunks and other workflow jobs separately. Worker
-resources come from the profile/rules, not the controller's CPU/memory allocation.
-The controller also has a time limit: size it for the downstream queue/runtime
-and resume the same dataset if necessary. A single species assembly exceeding
-its own walltime still needs resource/time or assembly-setting adjustment.
-No cluster submissions happen during tests or `--dry-run`.
+`inputs.species_trait` names the trait TSV (use `null` when unused).
+`selection.species_list: true` enables the file named by `inputs.species_list`.
+`exclude_species` removes exact species IDs before downstream computation.
+`inputs.calibrations` supplies optional manual dating constraints.
+Use a new analysis name after changing any of these inputs or scientific settings.
+Multiple analyses can share a completed build; they cannot change its lineage,
+genetic code, ODB node, or membership. They inherit those values.
 
-## Removal and final integration
+`analyses/<id>/` holds frozen inputs and resolved settings. Results, work, and logs
+use the analysis ID under `results/`, `work/`, and `logs/`. The default target
+`all` also collects `results/<id>/phenoradar_inputs/` after successful execution.
+Use `submit --target phylogeny` or another [analysis target](running.md#targets)
+for partial downstream execution. `run --local --cores 8 --mem-mb 32000` runs a
+prepared analysis directly with the same container launcher.
 
-Delete species rows from the manual metadata and prepare a new dataset. The new
-input view, expression, sequences, alignments, trees, and contrast pairs use only
-that dataset's selected species. Previously completed species products and older
-results are retained. Readding a species reuses the matching products.
-Species-set-dependent analyses are recomputed for the new dataset; assembly,
-BUSCO, quantification, and ODB annotations for unchanged species are reused.
+## Slurm and retries
 
-Materialization requires all nonexcluded species to have validated CDS, BUSCO,
-and quantification. An unsuccessful/missing species is not silently dropped.
-BUSCO threshold exclusions are reported separately in `input_receipt.json`.
-Prepared input views are published atomically and never scan all cached species.
+Assembly, BUSCO, and quantification run as species arrays. `slurm.concurrency`
+limits concurrent species tasks; `slurm.array_size` bounds the largest local
+array index (default 1000; must be below the site's `MaxArraySize`). Large arrays
+are split into dependent batches with stable species indices. Phases and batches
+are connected by `afterok`; mapping starts only when upstream jobs succeed.
 
-`--until all` runs the configured downstream analyses and then the PhenoRadar
-collector. Results are in `results/<name>/phenoradar_inputs/`. `--until mapping`
-stops after the combined gene-to-OG mapping. Materialization can also be inspected
-without launching downstream work:
-
-```bash
-./run_dataset.sh materialize --dataset datasets/expansion001
-```
-
-## Incremental ODB outside the dataset interface
-
-The regular workflow also supports mixed mapping:
+Mapping and analysis each have a small controller allocation. Snakemake submits
+individual rules as separate Slurm jobs with their own time/memory limits.
+`slurm.jobs` controls their concurrency; `slurm.stages.controller` controls the
+controller, and `slurm.rules` controls rule resources. For example:
 
 ```yaml
-odb:
-  incremental: true
-  existing_results: resources/odb_existing/tlight
-  cache_dir: resources/odb_cache
-  chunk_size: 20
-  node: 3193
+slurm:
+  stages:
+    assembly: {cpus: 8, mem_mb: 256000, time: "7-00:00:00"}
+  rules:
+    odb_map: {cpus: 16, mem_mb: 192000, runtime: 4320}
 ```
 
-It validates selected protein hashes against explicit and cached snapshots,
-imports matching species, maps only uncovered species, and publishes successful
-new batches to the cache. A later dataset can reuse any subset of those batches.
-OrthoDB version/node and known reference fingerprints must agree; changing the
-reference requires a separate compatible snapshot/cache namespace. Legacy
-snapshots with incomplete reference provenance retain that limitation. With
-`incremental: false`, the original strict import/new-mapping behavior is retained.
+Save resource adjustments in `config/retry.local.yaml`, then:
+
+```bash
+./run_build.sh submit --build builds/expansion001 --until mapping \
+  --resources config/retry.local.yaml
+# The same option is available on run_analysis.sh submit.
+```
+
+Only the `slurm` section is read from this override. Scientific settings and
+metadata remain frozen. Each submission stores its resolved resources and
+scripts separately, including dry-runs. Retrying submits unfinished species
+steps and reuses completed mapping chunks. Active or ambiguous recorded Slurm
+submissions block overlapping submissions; inspect/cancel them before retrying.
+A controller timeout can leave its independently submitted workers active, so
+also inspect those worker jobs before resubmitting. Job logs are under the
+build/analysis `jobs/logs/` directory.
+
+## Failure and recovery behavior
+
+Failure never automatically excludes an accession or publishes a completed
+build. A successful, validated species/stage is registered for reuse. A failed
+species/stage stays `pending` in `status`, with its last attempt recorded as
+`failed` under `jobs/status/`; the record includes run accession, species, stage,
+job ID, and error. Check `jobs/logs/` and the retained GeneGalleon logs for the
+underlying download/assembler error. Slurm timeouts or hard kills may leave the
+last-attempt record at `running`; that record alone is not proof of completion.
+
+Submit the **same build** again after inspecting the queue:
+
+```bash
+./run_build.sh status --build builds/expansion001
+./run_build.sh submit --build builds/expansion001 --until mapping
+```
+
+Completed species/stages are skipped. Failed/missing ones are retried, and
+unfinished published outputs are moved to `jobs/incomplete/` before retrying.
+FASTQ/download and temporary work directories are retained. Missing downstream
+prerequisites are included in the new submission. Other species already running
+in the same array can finish, but the current `afterok` dependencies stop later
+batches/phases when any predecessor fails. Remaining queued jobs must finish or
+be cancelled before resubmission; retries are explicit, not an unlimited loop.
+
+**Stage retry and within-assembler checkpoint resume are different.** The pinned
+GeneGalleon 0.7.77 uses AMALGKIT `getfastq --redo no` and has recovery code for
+retained download/run state; reusable reads are kept when valid. It does not
+promise recovery of every partially downloaded byte. Its rnaSPAdes path removes
+`rnaspades_output` before starting rnaSPAdes again, so an interrupted assembly is
+recomputed for that species. Other assembler behavior is tool-dependent.
+For repeated timeouts or memory errors, first consider a resource override;
+resubmitting unchanged limits may fail again.
+
+## Manually excluding unusable accessions
+
+Edit [config/excluded_accessions.tsv](../config/excluded_accessions.tsv) manually.
+It starts with a header and no exclusions. Entries match the metadata **`run`**
+column exactly (SRR/ERR/DRR accessions or your local run IDs):
+
+```tsv
+accession	reason
+SRR123456	download_failed_repeatedly
+ERR987654	assembly_failed_after_review
+LOCAL_BAD1	unusable_reads
+```
+
+These are illustrative IDs, not built-in exclusions. `accession` is required;
+`reason` is optional but recommended. Additional columns such as `stage`,
+`notes`, or `reviewed_on` are retained. Duplicate/malformed entries are errors.
+Matching is case-sensitive and uses exact IDs, not prefixes or regular expressions.
+BioProject/experiment/species identifiers do not exclude their associated runs.
+
+The build config selects the list:
+
+```yaml
+excluded_accessions: config/excluded_accessions.tsv
+```
+
+Use `null` to disable it. Existing local configs without this key retain their
+old behavior; add the key to enable exclusions. `plan` and `status` show excluded
+runs with their reasons. `prepare` removes them before resolving cached products
+or requiring FASTQs, and they receive no worker-array indices. `register` also
+skips them. Excluding the only run for a species removes that species from the
+new build and all analyses based on it; no replacement run is chosen automatically.
+The remaining metadata still requires one run per species.
+
+After editing the list, prepare a **new build ID** using the same metadata and
+store. The new build reuses eligible completed products. An existing build keeps
+its frozen membership; source-list edits neither modify it nor cancel its jobs.
+Remove an entry to permit the run in a later build again. Products and historical
+outputs are retained. The list selects metadata runs; it does not retroactively
+invalidate a CDS reference originally assembled from another run of the same
+species. Reference rejection/replacement remains an explicit choice of
+`reference_id` or a separate store.
+
+Each build preserves the original `source_metadata.tsv`, the exact exclusion TSV,
+its effective `metadata.tsv`, and an `excluded_runs.tsv` audit with species/run/reason.
+These records are checksummed with the build. A list may contain accessions absent
+from current metadata: keep those decisions so future metadata preparation can
+avoid them too. The independent `accession_exclusions.read_exclusions()` reader
+can be reused by a future metadata generator. No automatic failure classification
+or automatic editing of the exclusion list is performed.
+
+## Updating species and importing existing work
+
+Edit metadata and prepare a **new build ID**. Added species run missing work;
+removed species are absent from the new build and its analyses. Existing build
+membership and historical results are unchanged. Species receipts in
+`resources/dataset_assets/` and mappings in `resources/odb_cache/` persist, so
+re-adding a species can reuse them. A changed run can reuse CDS/BUSCO/mapping
+and request quantification for the new run.
+
+To register already assembled/quantified species using the [input layout](inputs.md):
+
+```bash
+./run_build.sh register --config config/build.local.yaml \
+  --input-dir input --metadata input/metadata.tsv
+```
+
+Registration validates artifacts without recomputation. Missing CDS is reported;
+missing full BUSCO tables or quantification remain pending. A summary alone
+cannot complete the new build. Preserve original data/workspaces referenced by
+receipts. If multiple CDS references exist, set the desired `reference_id` in
+metadata explicitly.
+
+For old ODB results, set `odb.existing_results` in **build.yaml** to an imported
+snapshot; see [ODB imports](references.md#reusing-existing-odb-results). The build
+combines matching old snapshots, native cached chunks, and missing species.
+Protein/reference mismatches are conflicts rather than silent reuse.
+
+## Migrating old configurations
+
+`config/config.yaml` and `config/dataset.yaml` are replaced by the two phase
+configs. Existing stores, snapshots, `datasets/`, and results are not deleted.
+Convert saved old settings with:
+
+```bash
+python workflow/scripts/migrate_phase_config.py \
+  --legacy-dataset config/dataset.local.yaml --legacy-config saved-config.yaml \
+  --build-output config/build.local.yaml --analysis-output config/analysis.local.yaml
+```
+
+Alternatively, pass `--legacy-dataset datasets/<old-id>/dataset.json` to recover
+its frozen settings/metadata. The converter retains cache paths and writes only
+new configuration files; it refuses to overwrite existing files. Inspect the
+converted paths and select the new completed build in analysis settings.
+Register old input snapshots if needed, then prepare a new build. Old schema-1
+dataset jobs should be resumed with their original checkout, not modified in
+place. `run_dataset.sh` remains a command-name alias for the new build interface;
+its old `--until all` combined execution has been removed.

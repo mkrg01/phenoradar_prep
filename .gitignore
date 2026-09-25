@@ -238,3 +238,7 @@ __marimo__/
 
 # Version-pinned upstream source, containers, and runtime download cache.
 /resources/software/
+
+# Frozen reusable builds and independent analyses.
+/builds/
+/analyses/

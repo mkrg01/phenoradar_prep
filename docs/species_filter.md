@@ -4,7 +4,9 @@
 
 `filter_species` exports completed results to `results/<run_name>/filtered/`,
 removing all runs and gene copies of named species while preserving the original
-analysis. Set exact IDs from `metadata/samples.tsv` in `config/config.yaml`, e.g.:
+analysis. For new analyses, set exact IDs in `analysis.yaml` before preparing; those species
+are removed before computation. For a separate export of existing completed
+results, set IDs from `metadata/samples.tsv` in a low-level resolved override, e.g.:
 
 ```yaml
 exclude_species:
@@ -18,7 +20,7 @@ taxonomy flags never set exclusions automatically.
 ## Execute after the source analysis
 
 ```bash
-./run_pipeline.sh --cores 1 --resources mem_gb=8 -- filter_species
+./run_pipeline.sh --cores 1 --resources mem_gb=8 --configfile analyses/analysis001/pipeline.yaml config/exclusions.local.yaml -- filter_species
 ```
 
 This requires the original sample manifest and completed outputs. It exports

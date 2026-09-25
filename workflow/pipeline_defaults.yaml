@@ -1,0 +1,51 @@
+# Internal defaults for resolved Snakemake configurations; edit config/build.yaml or config/analysis.yaml.
+input_root: input
+run_name: run001
+seed: 12345
+trait: carnivory
+selection:
+  species_list: false
+  busco_threshold: 0.5
+  missing_taxonomy: error
+translation:
+  table: 1
+odb:
+  incremental: false
+  cache_dir: resources/odb_cache
+  chunk_size: 100
+  existing_results: null
+  node: 3193
+tpm:
+  multimap: error
+alignment:
+  enabled: false
+kegg:
+  enabled: false
+  ambiguity: duplicate
+phylogeny:
+  trees:
+  - representatives
+  lineage: embryophyta_odb12
+  outgroup: auto
+  max_markers: 500
+  min_protein_length: 100
+  max_unknown_fraction: 0.05
+  min_taxa: 4
+  trimal_mode: gappyout
+  dating:
+    enabled: false
+    calibration_source: timetree
+  contrast_pairs:
+    enabled: true
+  taxonomy_check:
+    enabled: false
+    ranks:
+    - family
+    - subfamily
+    - tribe
+    - subtribe
+    - genus
+    outlierlevel: 0.5
+    collapse_monophyletic: true
+exclude_species: []
+build_manifest: null

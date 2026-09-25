@@ -17,7 +17,7 @@ phylogeny:
 ```
 
 ```bash
-./run_pipeline.sh --cores 32 --resources mem_gb=128 -- contrast_pairs
+./run_pipeline.sh --cores 32 --resources mem_gb=128 --configfile analyses/analysis001/pipeline.yaml -- contrast_pairs
 ```
 
 The same target works for `trees: [all]`, `[phenotyped]`, `[representatives]`, or

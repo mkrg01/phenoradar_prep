@@ -50,7 +50,7 @@ use a new `run_name` to preserve earlier analyses.
 Snapshots live in `resources/orthodb/v12_<node>/`. To prepare separately:
 
 ```bash
-sbatch --cpus-per-task=1 --mem=40G run_pipeline.sh -- references
+sbatch --cpus-per-task=1 --mem=40G run_pipeline.sh --configfile builds/build001/pipeline.yaml -- references
 ```
 
 Mapping also needs network access. Verify checksums with your node:
@@ -100,7 +100,7 @@ Setup downloads [KOfam](https://www.genome.jp/ftp/db/kofam/) profiles/`ko_list`
 and KEGG REST KO-to-MODULE/PATHWAY maps. Prepare without assemblies:
 
 ```bash
-./run_pipeline.sh --cores 1 --resources mem_gb=4 -- kegg_references
+./run_pipeline.sh --cores 1 --resources mem_gb=4 --configfile analyses/analysis001/pipeline.yaml -- kegg_references
 ```
 
 The snapshot is `resources/kegg/snapshot_v1/`; retries reuse downloads in

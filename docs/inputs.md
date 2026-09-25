@@ -2,9 +2,10 @@
 
 [Documentation](index.md) · [Configuration](configuration.md)
 
-Place existing CDS assemblies, expression estimates, and BUSCO results in the
-repository's `input/` directory. Keep the actual files there: symlinks to external
-locations would require additional container mounts.
+Start with manually curated AMALGKIT `input/metadata.tsv`, one run per species.
+The [build phase](datasets.md) generates CDS, BUSCO full tables, and quantification
+from NCBI or local reads. The layout below also supports importing existing work.
+Keep imported artifacts inside the repository for container access.
 
 ## Upstream data preparation
 
@@ -15,7 +16,8 @@ provides longest CDS, expression estimates, and BUSCO results.
 
 ## File formats
 
-Use this layout; no input-path configuration is needed.
+Build creates this layout automatically. Use it when importing existing products;
+analysis auxiliary paths are configured under `inputs` in `analysis.yaml`.
 
 | Path under `input/` | Format |
 | --- | --- |
@@ -31,8 +33,8 @@ Use this layout; no input-path configuration is needed.
 
 ## Identifiers
 
-- Run IDs must be unique. Multiple runs per species must agree on taxid;
-  expression stays per run. BUSCO summary species must be unique.
+- Build metadata requires one unique run per species and consistent taxids.
+  The low-level table utilities also support multiple runs; the build interface does not.
 - Species IDs replace spaces with underscores. Hyphens remain in IDs but become
   underscores in ODB filenames: `Beta sp-X` becomes `Beta_sp-X` / `Beta_sp_X`.
 - FASTA IDs must be unique across species and match abundance `target_id`.
@@ -43,7 +45,7 @@ Use this layout; no input-path configuration is needed.
 ## Species selection
 
 `selection.species_list: false` considers all species. To limit candidates, set
-it to `true` and put exact IDs in `input/species_list.txt`, one per line,
+it to `true` in analysis settings and put exact IDs in `inputs.species_list`, one per line,
 e.g. `Arabidopsis_thaliana`. Unknown IDs are errors. Candidates need a complete BUSCO fraction
 `(single + duplicated) / total >= selection.busco_threshold` (default `0.5`).
 Missing BUSCO data or scores below the threshold exclude species; an empty
@@ -53,7 +55,9 @@ Selected samples need valid CDS and abundance files even for phylogeny-only
 runs. Invalid counts or duplicate identities stop preparation. Unresolved taxids
 fail unless `selection.missing_taxonomy: allow`; missing individual ranks are
 allowed. Metadata columns such as `exclusion` do not filter species:
-use [manual exclusion](species_filter.md) after analysis.
+use `exclude_species` in analysis settings, edit metadata, or apply the
+[manual run exclusion list](datasets.md#manually-excluding-unusable-accessions)
+when preparing a new build.
 
 Results in `metadata/` include `selection.json` (exclusion reasons),
 `samples.tsv` (selected samples and exact input paths), and

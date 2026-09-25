@@ -1,7 +1,7 @@
 """Accepted configuration keys, including optional tool-specific overrides."""
 KEYS = {
     "": "run_name selection translation odb tpm alignment kegg phylogeny "
-        "trait exclude_species seed input_root",
+        "trait exclude_species seed input_root build_manifest",
     "selection": "busco_threshold species_list missing_taxonomy",
     "translation": "table",
     "odb": "existing_results node incremental cache_dir chunk_size",

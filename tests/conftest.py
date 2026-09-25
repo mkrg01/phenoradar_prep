@@ -20,13 +20,14 @@ from snapshot_taxonomy import snapshot
 def workflow_project(tmp_path):
     """Run the real Snakefile with fixed storage paths in an isolated project."""
     (tmp_path / "config").mkdir()
-    config = yaml.safe_load((ROOT / "config/config.yaml").read_text())
+    (tmp_path / "workflow").mkdir()
+    config = yaml.safe_load((ROOT / "workflow/pipeline_defaults.yaml").read_text())
     # Keep tests independent of the user's active analysis selection.
     config["trait"] = "C4"
     config["phylogeny"]["trees"] = []
     for section in ["contrast_pairs", "dating", "taxonomy_check"]:
         config["phylogeny"][section]["enabled"] = False
-    (tmp_path / "config/config.yaml").write_text(yaml.safe_dump(config))
+    (tmp_path / "workflow/pipeline_defaults.yaml").write_text(yaml.safe_dump(config))
     return tmp_path
 
 

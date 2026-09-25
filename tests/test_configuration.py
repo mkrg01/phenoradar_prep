@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_config_and_optional_tool_defaults_cover_supported_keys():
-    config = yaml.safe_load((ROOT / "config/config.yaml").read_text())
+    config = yaml.safe_load((ROOT / "workflow/pipeline_defaults.yaml").read_text())
     validate_keys(config)
     assert "treepl" not in config["phylogeny"]["dating"]
     config["phylogeny"]["dating"]["treepl"] = validate_treepl_settings({})
@@ -22,7 +22,8 @@ def test_config_and_optional_tool_defaults_cover_supported_keys():
         for part in section.split(".") if section else []:
             values = values[part]
         assert set(values) == set(keys.split()), section
-    validate_keys(yaml.safe_load((ROOT / "config/pilot.yaml").read_text()))
+    from analysis import ANALYSIS_KEYS
+    assert set(yaml.safe_load((ROOT / "config/pilot.yaml").read_text())) <= ANALYSIS_KEYS
     validate_keys({"phylogeny": {"dating": {"calibration_source": "file"}}})
     validate_keys({"run_name": "c4_run1"})
 

@@ -19,7 +19,7 @@ phylogeny:
 ```
 
 ```bash
-./run_pipeline.sh --cores 1 --resources mem_gb=8 -- taxonomy_check
+./run_pipeline.sh --cores 1 --resources mem_gb=8 --configfile analyses/analysis001/pipeline.yaml -- taxonomy_check
 ```
 
 The target follows `phylogeny.trees` and can schedule missing inference:

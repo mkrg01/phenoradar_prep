@@ -31,10 +31,15 @@ def dataset_project(tmp_path, tiny_inputs):
     metadata = root / "input/metadata.tsv"
     rows = [r for r in read_tsv(metadata) if r["run"] != "A2"]
     write_tsv(metadata, list(rows[0]), rows)
-    config = yaml.safe_load((root / "config/config.yaml").read_text())
-    config["phylogeny"]["trees"] = []
-    config["phylogeny"]["contrast_pairs"]["enabled"] = False
-    (root / "config/config.yaml").write_text(yaml.safe_dump(config))
+    full = root / "input/busco/full"
+    full.mkdir(parents=True, exist_ok=True)
+    for row in read_tsv(root / "input/busco/summary.tsv"):
+        species = row["Species"].replace(" ", "_")
+        statuses = []
+        for key, state in zip(COUNTS[:-1], ("Complete", "Duplicated", "Fragmented", "Missing")):
+            statuses.extend([state] * int(row[key]))
+        (full / f"{species}.busco.full.tsv").write_text("# The lineage dataset is: embryophyta_odb12\n" + "".join(
+            f"M{i}\t{state}\t{species}_g1\t100\t3\n" for i,state in enumerate(statuses)))
     return root
 
 
@@ -56,10 +61,10 @@ def test_manual_metadata_unique_species_and_normalized_collisions(tmp_path):
 def test_legacy_import_and_changed_metadata_only_reuses_products(dataset_project):
     root = dataset_project
     imported(root)
-    cfg = root / "config/dataset.yaml"
+    cfg = root / "config/build.yaml"
     report = plan(root, cfg)[-1]
     assert [(r["assembly"], r["busco"], r["quant"]) for r in report] == [
-        ("reuse", "reuse", "reuse"), ("reuse", "reuse", "reuse"), ("excluded", "excluded", "excluded")]
+        ("reuse", "reuse", "reuse"), ("reuse", "reuse", "reuse"), ("reuse", "reuse", "reuse")]
     path = prepare(root, "base", cfg)
     assert submit(path, until="quant", dry_run=True) == []
     assert not (path / "genegalleon").exists()
@@ -70,10 +75,10 @@ def test_legacy_import_and_changed_metadata_only_reuses_products(dataset_project
 def test_removal_readdition_and_frozen_membership(dataset_project):
     root = dataset_project
     store = imported(root)
-    cfg = root / "config/dataset.yaml"
+    cfg = root / "config/build.yaml"
     first = prepare(root, "base", cfg)
     first_input = materialize(first)
-    assert {r["scientific_name"] for r in read_tsv(first_input / "metadata.tsv")} == {"Alpha plant", "Beta sp-X"}
+    assert {r["scientific_name"] for r in read_tsv(first_input / "metadata.tsv")} == {"Alpha plant", "Beta sp-X", "Gamma plant"}
     metadata = root / "input/metadata.tsv"
     original = read_tsv(metadata)
     write_tsv(metadata, list(original[0]), [original[0]])
@@ -88,8 +93,8 @@ def test_removal_readdition_and_frozen_membership(dataset_project):
     write_tsv(metadata, list(original[0]), original)
     third = prepare(root, "restored", cfg)
     assert submit(third, until="quant", dry_run=True) == []
-    assert len(read_tsv(materialize(third) / "metadata.tsv")) == 2
-    assert len(read_tsv(first_input / "metadata.tsv")) == 2
+    assert len(read_tsv(materialize(third) / "metadata.tsv")) == 3
+    assert len(read_tsv(first_input / "metadata.tsv")) == 3
 
 
 def test_changed_run_only_requires_quant_and_missing_is_not_silently_dropped(dataset_project):
@@ -99,10 +104,10 @@ def test_changed_run_only_requires_quant_and_missing_is_not_silently_dropped(dat
     rows = read_tsv(metadata)
     rows[0]["run"] = "Anew"
     write_tsv(metadata, list(rows[0]), rows)
-    report = plan(root, root / "config/dataset.yaml")[-1]
+    report = plan(root, root / "config/build.yaml")[-1]
     assert [report[0][s] for s in ("assembly", "busco", "quant")] == ["reuse", "reuse", "pending"]
     fake_genegalleon(root)
-    path = prepare(root, "newrun", root / "config/dataset.yaml")
+    path = prepare(root, "newrun", root / "config/build.yaml")
     with pytest.raises(ValueError, match="dataset incomplete: Alpha_plant: quant"):
         materialize(path)
     assert not (path / "input").exists()
@@ -113,7 +118,7 @@ def test_modified_registered_cds_is_a_conflict(dataset_project):
     imported(root)
     cds = root / "input/cds/Alpha_plant_longestCDS.fa.gz"
     with gzip.open(cds, "wt") as handle: handle.write(">Alpha_plant_g1\nATGCCC\n")
-    report = plan(root, root / "config/dataset.yaml")[-1]
+    report = plan(root, root / "config/build.yaml")[-1]
     assert report[0]["assembly"] == "conflict"
     assert "registered file changed" in report[0]["reason"]
 
@@ -121,7 +126,7 @@ def test_modified_registered_cds_is_a_conflict(dataset_project):
 def test_frozen_metadata_and_configuration_are_verified(dataset_project):
     root = dataset_project
     imported(root)
-    path = prepare(root, "immutable", root / "config/dataset.yaml")
+    path = prepare(root, "immutable", root / "config/build.yaml")
     (path / "metadata.tsv").write_text("modified")
     with pytest.raises(ValueError, match="registered file changed"):
         status(path)
@@ -148,6 +153,8 @@ with (work / "events.jsonl").open("a") as handle:
 assert os.environ["LC_ALL"] == os.environ["SINGULARITYENV_LC_ALL"] == os.environ["APPTAINERENV_LC_ALL"] == "C"
 assert os.environ[prefix+"RUN_MULTISPECIES_SUMMARY"] == "0"
 assert os.environ[prefix+"REMOVE_AMALGKIT_FASTQ_AFTER_COMPLETION"] == "0"
+if os.environ[prefix+"RUN_AMALGKIT_GETFASTQ"] == "1" and os.environ.get("FAKE_GG_FAIL_DOWNLOAD"):
+    sys.exit(29)
 if os.environ[prefix+"RUN_ASSEMBLY"] == "1":
     cds = out / "longest_cds" / (species+"_longestCDS.fa.gz")
     cds.parent.mkdir(parents=True, exist_ok=True)
@@ -169,21 +176,21 @@ if os.environ[prefix+"RUN_AMALGKIT_QUANT"] == "1":
 '''
     script = repo / "workflow/gg_transcriptome_generation_entrypoint.sh"
     script.write_text("#!/usr/bin/env bash\nexec " + sys.executable + " - <<'PY'\n" + implementation + "\nPY\n")
-    cfg = yaml.safe_load((root / "config/dataset.yaml").read_text())
+    cfg = yaml.safe_load((root / "config/build.yaml").read_text())
     cfg["genegalleon"]["repository"] = str(repo)
-    (root / "config/dataset.yaml").write_text(yaml.safe_dump(cfg))
+    (root / "config/build.yaml").write_text(yaml.safe_dump(cfg))
     return repo
 
 
 def new_dataset(root, names=("New plant",), array_size=None):
     fake_genegalleon(root)
     if array_size is not None:
-        cfg = yaml.safe_load((root / "config/dataset.yaml").read_text())
+        cfg = yaml.safe_load((root / "config/build.yaml").read_text())
         cfg["slurm"]["array_size"] = array_size
-        (root / "config/dataset.yaml").write_text(yaml.safe_dump(cfg))
+        (root / "config/build.yaml").write_text(yaml.safe_dump(cfg))
     fields = ["scientific_name", "run", "taxid"]
     write_tsv(root / "input/new.tsv", fields, [dict(zip(fields, [name, f"SRR{i+1}", "42"])) for i,name in enumerate(names)])
-    return prepare(root, "addition", root / "config/dataset.yaml", "input/new.tsv")
+    return prepare(root, "addition", root / "config/build.yaml", "input/new.tsv")
 
 
 def test_staged_workers_reuse_and_native_array_filename_order(dataset_project):
@@ -229,7 +236,7 @@ def test_completed_new_species_reused_by_next_dataset(dataset_project):
     path = new_dataset(root)
     submit(path, until="quant", dry_run=True)
     for stage in ("assembly", "busco", "quant"): worker(path, stage, 1)
-    second = prepare(root, "next", root / "config/dataset.yaml", "input/new.tsv")
+    second = prepare(root, "next", root / "config/build.yaml", "input/new.tsv")
     assert submit(second, until="quant", dry_run=True) == []
     assert read_tsv(materialize(second) / "metadata.tsv")[0]["run"] == "SRR1"
 
@@ -238,10 +245,10 @@ def test_partial_pilot_never_exports_incomplete_dataset(dataset_project):
     path = new_dataset(dataset_project, ("New plant", "Other plant"))
     subset = dataset_project / "pilot.txt"
     subset.write_text("Other_plant\n")
-    commands = submit(path, until="all", species=subset, dry_run=True)
+    commands = submit(path, until="mapping", species=subset, dry_run=True)
     assert len(commands) == 3
     assert all("--array=2%5" in cmd for cmd in commands)
-    assert not any("downstream" in cmd[-1] for cmd in commands)
+    assert not any("mapping" in cmd[-1] for cmd in commands)
     for stage in ("assembly", "busco", "quant"): worker(path, stage, 2)
     with pytest.raises(ValueError, match="dataset incomplete: New_plant"):
         materialize(path)
@@ -258,14 +265,14 @@ def test_slurm_submission_dependencies_and_duplicate_submission_guard(dataset_pr
         if command[0] == "squeue": return "1001\n" if active else ""
         return str(1000 + len([c for c in calls if c[0] == "sbatch"])) + ";cluster\n"
     monkeypatch.setattr(subprocess, "check_output", scheduler)
-    submit(path, until="all")
+    submit(path, until="mapping")
     batch = json.loads((path / "jobs/submission_0001.json").read_text())
     assert len(batch["jobs"]) == 4
     assert "--dependency=afterok:1001" in batch["jobs"][1]["command"]
     assert "--dependency=afterok:1003" in batch["jobs"][3]["command"]
     active = True
     with pytest.raises(ValueError, match="queued/running"):
-        submit(path, until="all")
+        submit(path, until="mapping")
     assert len([c for c in calls if c[0] == "sbatch"]) == 4
 
 
@@ -277,7 +284,7 @@ def test_private_relative_reads_are_frozen_and_reuse_detects_changed_bytes(datas
     fields = ["scientific_name", "run", "taxid", "private_file", "lib_layout", "read1_path"]
     write_tsv(root / "input/private.tsv", fields,
               [dict(zip(fields, ["Private plant", "LOCAL1", "42", "yes", "single", "local.fastq"]))])
-    cfg = root / "config/dataset.yaml"
+    cfg = root / "config/build.yaml"
     path = prepare(root, "private", cfg, "input/private.tsv")
     submit(path, until="quant", dry_run=True)
     staged = path / "genegalleon/input/reads/Private_plant/read1_path.fastq"
@@ -334,7 +341,7 @@ def test_split_slurm_arrays_preserve_species_identity_and_bound_concurrency(data
         return str(1000 + len(calls)) + "\n"
     monkeypatch.setattr(subprocess, "check_output", scheduler)
     submit(path, until="busco")
-    batch = json.loads((path / "jobs/submission_0001.json").read_text())
+    batch = json.loads((path / "jobs/submission_0002.json").read_text())
     assert [j["array_offset"] for j in batch["jobs"]] == [0, 0, 2]
     assert [j["indices"] for j in batch["jobs"]] == [[1, 2], [1, 2], [3]]
     assert "--dependency=afterok:1001" in calls[1]
@@ -354,7 +361,7 @@ def test_prepare_resolves_automatic_dependencies_once_and_freezes_the_lock(datas
     import dataset_software
     root = dataset_project
     repository = fake_genegalleon(root)
-    config_path = root / "config/dataset.yaml"
+    config_path = root / "config/build.yaml"
     cfg = yaml.safe_load(config_path.read_text())
     cfg["genegalleon"]["repository"] = None
     cfg["genegalleon"]["image"] = None

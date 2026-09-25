@@ -10,8 +10,8 @@
 #SBATCH --error=pipeline-%j.err
 
 # Adjust SBATCH settings for your cluster; see docs/running.md and docs/containers.md.
-# Make snakemake and singularity available on PATH and edit config/config.yaml:
-# sbatch run_pipeline.sh
+# Normally use run_build.sh / run_analysis.sh with their phase configurations.
+# Low-level execution requires --configfile <prepared phase>/pipeline.yaml.
 # Direct execution uses --cores and --resources mem_gb=...; SBATCH lines are ignored.
 set -euo pipefail
 

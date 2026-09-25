@@ -268,7 +268,7 @@ def resolve(store, item, lineage, need_full=False):
             "quant": quant, "assessment": bus}
 
 
-def import_existing(store, input_dir, metadata, lineage="embryophyta_odb12"):
+def import_existing(store, input_dir, metadata, lineage="embryophyta_odb12", excluded_runs=()):
     _, items = identities(metadata)
     normalize_private_paths(items, metadata)
     root = Path(input_dir)
@@ -282,6 +282,8 @@ def import_existing(store, input_dir, metadata, lineage="embryophyta_odb12"):
     result = []
     for item in items:
         species, run = item["species"], item["row"]["run"]
+        if run in excluded_runs:
+            result.append({"species": species, "run": run, "status": "excluded"}); continue
         cds = root / "cds" / f"{species}_longestCDS.fa.gz"
         if not cds.is_file():
             result.append({"species": species, "status": "no_cds"}); continue

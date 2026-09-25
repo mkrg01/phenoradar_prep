@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Freeze manually curated datasets, reuse species products, and submit staged Slurm jobs."""
+"""Build reusable species products from manual metadata through ODB mapping."""
 import argparse
 import copy
 import csv
@@ -15,29 +15,17 @@ from pathlib import Path
 
 import yaml
 
-from common import atomic_writer, file_record, now, read_tsv, write_json, write_tsv
+from common import file_record, now, read_tsv, write_json, write_tsv
 from configuration import validate_analysis, validate_keys
+from accession_exclusions import partition, read_exclusions
+from phase_config import read_yaml
 from dataset_software import resolve as resolve_software, validate as validate_software
 from dataset_assets import (COUNTS, SAFE, digest, identities, import_existing, link_file, locked,
                             normalize_private_paths, record, register_busco, register_quant, register_reference, resolve, verify)
 
 STAGES = ("assembly", "busco", "quant")
-UNTIL = (*STAGES, "mapping", "all")
+UNTIL = (*STAGES, "mapping")
 MANAGED = {"mode_transcriptome_assembly", "kallisto_reference", "remove_amalgkit_fastq_after_completion", "delete_tmp_dir"}
-
-
-def deep_merge(base, override):
-    result = copy.deepcopy(base)
-    for key, value in override.items():
-        result[key] = deep_merge(result[key], value) if isinstance(value, dict) and isinstance(result.get(key), dict) else copy.deepcopy(value)
-    return result
-
-
-def read_yaml(path):
-    value = yaml.safe_load(Path(path).read_text())
-    if not isinstance(value, dict):
-        raise ValueError(f"configuration must be a mapping: {path}")
-    return value
 
 
 def absolute(root, value):
@@ -53,17 +41,35 @@ def inside(root, path):
 
 
 def settings(root, config, analysis_config=None):
+    from phase_config import validate_slurm
     root = Path(root).resolve()
     cfg = read_yaml(config)
-    unknown = set(cfg) - {"metadata", "store", "analysis_config", "odb_chunk_size", "genegalleon", "slurm"}
-    if unknown: raise ValueError(f"unknown dataset settings: {sorted(unknown)}")
-    analysis = read_yaml(root / "config/config.yaml")
-    override = analysis_config or cfg.get("analysis_config")
-    if override:
-        analysis = deep_merge(analysis, read_yaml(absolute(root, override)))
+    if analysis_config is not None:
+        raise ValueError("build does not accept analysis overrides; use run_analysis.sh")
+    unknown = set(cfg) - {"metadata", "store", "translation", "busco", "odb", "genegalleon", "slurm", "excluded_accessions"}
+    if unknown: raise ValueError(f"unknown build settings: {sorted(unknown)}; migrate old dataset/config files first")
+    excluded = cfg.get("excluded_accessions")
+    if excluded is not None and (not isinstance(excluded, str) or not excluded.strip()):
+        raise ValueError("excluded_accessions must be null or a TSV path")
+    cfg["excluded_accessions"] = str(absolute(root, excluded)) if excluded is not None else None
+    analysis = read_yaml(root / "workflow/pipeline_defaults.yaml")
+    analysis["translation"] = cfg["translation"]
+    if set(cfg["busco"]) != {"lineage"} or not isinstance(cfg["busco"]["lineage"], str) or not cfg["busco"]["lineage"].strip():
+        raise ValueError("busco.lineage must be a nonempty string")
+    if set(cfg["odb"]) - {"node", "cache_dir", "existing_results", "chunk_size"}:
+        raise ValueError("unknown build.odb settings")
+    analysis["odb"].update(cfg["odb"], incremental=True)
+    analysis["phylogeny"]["lineage"] = cfg["busco"]["lineage"]
+    analysis["phylogeny"]["trees"] = []
+    for key in ("contrast_pairs", "dating", "taxonomy_check"):
+        analysis["phylogeny"][key]["enabled"] = False
+    analysis["selection"] = {"species_list": False, "busco_threshold": 0, "missing_taxonomy": "allow"}
+    analysis["exclude_species"] = []
     validate_keys(analysis); validate_analysis(analysis)
-    if type(cfg.get("odb_chunk_size", 20)) is not int or cfg.get("odb_chunk_size", 20) < 1:
-        raise ValueError("odb_chunk_size must be a positive integer")
+    if type(analysis["translation"].get("table")) is not int or analysis["translation"]["table"] < 1:
+        raise ValueError("translation.table must be a positive integer")
+    if type(analysis["odb"]["node"]) is not int or analysis["odb"]["node"] < 1:
+        raise ValueError("odb.node must be a positive integer")
     gg = cfg["genegalleon"]
     validate_software(gg)
     for key, value in gg.get("settings", {}).items():
@@ -71,87 +77,93 @@ def settings(root, config, analysis_config=None):
             raise ValueError(f"managed/invalid GeneGalleon setting: {key}")
         if not isinstance(value, (str, int, float, bool)):
             raise ValueError(f"GeneGalleon setting must be scalar: {key}")
-    slurm = cfg["slurm"]
-    if set(slurm) - {"partition", "account", "concurrency", "array_size", "stages", "downstream_jobs", "downstream_profile"}:
-        raise ValueError("unknown slurm setting")
-    slurm.setdefault("array_size", 1000)
-    for key in ("concurrency", "downstream_jobs", "array_size"):
-        if type(slurm[key]) is not int or slurm[key] < 1: raise ValueError(f"slurm.{key} must be positive")
-    for stage in (*STAGES, "downstream"):
-        job = slurm["stages"][stage]
-        if set(job) != {"cpus", "mem_mb", "time"}: raise ValueError(f"invalid resources for {stage}")
-        for key in ("cpus", "mem_mb"):
-            if type(job[key]) is not int or job[key] < 1: raise ValueError(f"invalid {stage}.{key}")
-        if not re.fullmatch(r"(?:[0-9]+-)?[0-9]+(?::[0-9]{2}){0,2}", str(job["time"])):
-            raise ValueError(f"invalid Slurm time: {stage}")
+    validate_slurm(cfg["slurm"])
     cfg["store"] = str(inside(root, absolute(root, cfg["store"])))
-    cfg["slurm"]["downstream_profile"] = str(absolute(root, slurm["downstream_profile"]))
     gg["cache_dir"] = str(inside(root, absolute(root, gg.get("cache_dir", "resources/software/genegalleon"))))
     for key in ("repository", "image"):
         if gg.get(key): gg[key] = str(absolute(root, gg[key]))
+    cfg["conditions"] = stage_conditions(cfg)
     return cfg, analysis
 
 
-def exclusion_reason(analysis, item, product, requested=None):
-    name = item["species"]
-    if requested is not None and name not in requested: return "outside_species_list"
-    if name in analysis["exclude_species"]: return "exclude_species"
-    assessment = product.get("assessment") or product.get("busco")
-    if assessment:
-        c = assessment["counts"]
-        if (c[COUNTS[0]] + c[COUNTS[1]]) / c[COUNTS[-1]] < analysis["selection"]["busco_threshold"]:
-            return "below_busco_threshold"
-    return None
+def stage_conditions(cfg):
+    gg = cfg["genegalleon"]
+    software = {k: gg.get(k) for k in ("version", "revision", "image_uri", "image_sha256")}
+    # Overrides are also bound by content, not merely their path.
+    from dataset_software import source_records
+    if gg.get("repository"):
+        software["repository"] = [{"path": str(Path(p["path"]).relative_to(gg["repository"])), "sha256": p["sha256"]}
+                                  for p in source_records(gg["repository"])]
+    image = gg.get("image") or (str(Path(gg["repository"]) / "genegalleon.sif") if gg.get("repository") else None)
+    if image and Path(image).is_file(): software["image"] = file_record(image)["sha256"]
+    base = {"software": software, "settings": gg.get("settings", {}), "translation": cfg["translation"]}
+    return {s: digest(dict(base, **({"lineage": cfg["busco"]["lineage"]} if s == "busco" else {}))) for s in STAGES}
 
 
-def inspect_items(store, items, analysis, requested=None):
+def check_conditions(products, conditions):
+    if not conditions: return
+    for stage, key in zip(STAGES, ("reference", "busco", "quant")):
+        product = products[key]
+        previous = product.get("provenance", {}).get("condition") if product else None
+        if previous and previous != conditions[stage]:
+            raise ValueError(f"{stage} settings differ from registered product; choose a separate store for a deliberate rebuild")
+
+
+def inspect_items(store, items, analysis, requested=None, conditions=None):
     result = []
     for item in items:
         try:
-            products = resolve(store, item, analysis["phylogeny"]["lineage"], need_full=bool(analysis["phylogeny"]["trees"]))
-            reason = exclusion_reason(analysis, item, products, requested)
-            status = {stage: "excluded" if reason else "reuse" if products[key] else "pending"
+            products = resolve(store, item, analysis["phylogeny"]["lineage"], need_full=True)
+            check_conditions(products, conditions)
+            status = {stage: "reuse" if products[key] else "pending"
                       for stage, key in zip(STAGES, ("reference", "busco", "quant"))}
             result.append({"species": item["species"], "run": item["row"]["run"], **status,
-                           "reason": reason or "", "reference_id": products["reference"]["reference_id"] if products["reference"] else ""})
+                           "reason": "", "mapping": "pending_inputs" if not products["reference"] else "check_after_translation", "reference_id": products["reference"]["reference_id"] if products["reference"] else ""})
         except (ValueError, OSError, KeyError) as error:
             result.append({"species": item["species"], "run": item["row"]["run"],
-                           **{stage: "conflict" for stage in STAGES}, "reason": str(error), "reference_id": ""})
+                           **{stage: "conflict" for stage in STAGES}, "mapping": "conflict", "reason": str(error), "reference_id": ""})
     return result
 
 
-def requested_species(root, analysis, items):
-    if not analysis["selection"]["species_list"]: return None
-    path = absolute(root, analysis.get("input_root", "input")) / "species_list.txt"
-    values = path.read_text().splitlines()
-    if not values or len(values) != len(set(values)) or set(values) - {i["species"] for i in items}:
-        raise ValueError("species_list must contain unique species present in metadata")
-    return values
+def excluded_report(excluded):
+    return [{"species": row["species"], "run": row["run"], **{s: "excluded" for s in STAGES},
+             "reason": "excluded_accession: " + row["reason"], "mapping": "excluded", "reference_id": ""}
+            for row in excluded]
 
 
 def plan(root, config, metadata=None, analysis_config=None):
     cfg, analysis = settings(root, config, analysis_config)
     metadata = absolute(root, metadata or cfg["metadata"])
+    source = record(metadata)
+    policy_record = record(cfg["excluded_accessions"]) if cfg["excluded_accessions"] else None
+    policy = read_exclusions(cfg["excluded_accessions"])
     fields, items = identities(metadata)
+    items, excluded = partition(items, policy)
     normalize_private_paths(items, metadata)
-    requested = requested_species(root, analysis, items)
-    return cfg, analysis, metadata, fields, items, requested, inspect_items(cfg["store"], items, analysis, requested)
+    verify(source)
+    if policy_record: verify(policy_record)
+    selection = {"source_metadata": source, "exclusion_policy": policy_record, "excluded": excluded}
+    report = inspect_items(cfg["store"], items, analysis, conditions=cfg["conditions"]) + excluded_report(excluded)
+    return cfg, analysis, metadata, fields, items, selection, report
 
 
 def implementation(root):
     # Bind the batch to code, not mutable branch names. Heavy data are recorded separately.
     paths = [*Path(root, "workflow").rglob("*.py"), *Path(root, "workflow").rglob("*.smk"),
-             Path(root, "workflow/Snakefile"), Path(root, "run_pipeline.sh")]
+             Path(root, "workflow/Snakefile"), Path(root, "run_pipeline.sh"),
+             *Path(root, "workflow").rglob("*.yaml"), *Path(root, "workflow").rglob("*.sh")]
+    if Path(root, "VERSION").exists(): paths.append(Path(root, "VERSION"))
     return [record(p) for p in sorted(paths)]
 
 
 def prepare(root, name, config, metadata=None, analysis_config=None):
     root = Path(root).resolve()
     if not SAFE.fullmatch(name): raise ValueError("dataset name must be a simple directory name")
-    target = root / "datasets" / name
-    if target.exists() or (root / "results" / name).exists():
+    target = root / "builds" / name
+    if target.exists() or (root / "results" / ("build_" + name)).exists():
         raise ValueError("dataset/run name already exists; resume it or choose a new name")
-    cfg, analysis, metadata, fields, items, requested, report = plan(root, config, metadata, analysis_config)
+    cfg, analysis, metadata, fields, items, selection, report = plan(root, config, metadata, analysis_config)
+    if not items: raise ValueError("all metadata runs are excluded; no build was prepared")
     conflicts = [r for r in report if r["assembly"] == "conflict"]
     if conflicts: raise ValueError("resolve conflicts before preparing: " + json.dumps(conflicts))
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -177,46 +189,35 @@ def prepare(root, name, config, metadata=None, analysis_config=None):
         for item, state in zip(items, report):
             if item["row"].get("private_file", "").lower() == "yes" and any(state[s] == "pending" for s in ("assembly", "quant")):
                 raw_records[item["species"]] = {k: record(item["row"][k]) for k in ("read1_path", "read2_path") if item["row"].get(k)}
-        source_root = absolute(root, analysis.get("input_root", "input"))
         auxiliary = {}
-        for filename in ("species_trait.tsv", "calibrations.tsv"):
-            path = source_root / filename
-            if path.exists():
-                shutil.copy2(path, staging / filename)
-                auxiliary[filename] = dict(record(staging / filename), path=str(target / filename))
-        original_analysis = copy.deepcopy(analysis)
-        analysis["run_name"] = name
+        for filename, entry in (("source_metadata.tsv", selection["source_metadata"]),
+                                ("excluded_accessions.tsv", selection["exclusion_policy"])):
+            if entry:
+                shutil.copy2(verify(entry), staging / filename)
+                copied = record(staging / filename)
+                if copied["sha256"] != entry["sha256"]: raise ValueError(f"input changed while freezing: {filename}")
+                auxiliary[filename] = dict(copied, path=str(target / filename))
+        write_tsv(staging / "excluded_runs.tsv", ["species", "run", "reason"], selection["excluded"])
+        auxiliary["excluded_runs.tsv"] = dict(record(staging / "excluded_runs.tsv"), path=str(target / "excluded_runs.tsv"))
+        if cfg["excluded_accessions"]: cfg["excluded_accessions"] = str(target / "excluded_accessions.tsv")
+        analysis["run_name"] = "build_" + name
         analysis["input_root"] = str(target / "input")
-        analysis["selection"]["species_list"] = False  # Applied from the frozen selection during materialization.
-        analysis["exclude_species"] = []              # The final snapshot already omits explicit exclusions.
-        analysis["odb"]["incremental"] = True
-        analysis["odb"]["chunk_size"] = cfg.get("odb_chunk_size", 20)
-        analysis["odb"]["cache_dir"] = str(inside(root, absolute(root, analysis["odb"].get("cache_dir", "resources/odb_cache"))))
+        analysis["odb"]["cache_dir"] = str(inside(root, absolute(root, analysis["odb"]["cache_dir"])))
         if analysis["odb"]["existing_results"]:
             analysis["odb"]["existing_results"] = str(absolute(root, analysis["odb"]["existing_results"]))
-        profile_source = Path(cfg["slurm"]["downstream_profile"])
-        profile = read_yaml(profile_source / "config.yaml")
-        default_resources = profile.setdefault("default-resources", {})
-        for key in ("partition", "account"):
-            if cfg["slurm"].get(key): default_resources["slurm_" + key] = cfg["slurm"][key]
-        (staging / "slurm").mkdir()
-        (staging / "slurm/config.yaml").write_text(yaml.safe_dump(profile, sort_keys=False))
-        cfg["slurm"]["downstream_profile"] = str(target / "slurm")
-        auxiliary["slurm/config.yaml"] = dict(record(staging / "slurm/config.yaml"), path=str(target / "slurm/config.yaml"))
         if needs_upstream:
             cfg["genegalleon"], gg_records, software_lock = resolve_software(cfg["genegalleon"])
-        manifest = {"schema_version": 1, "name": name, "created_at": now(), "root": str(root),
-                    "config": cfg, "analysis": analysis, "selection_analysis": original_analysis,
-                    "requested_species": requested, "fields": fields, "items": items,
+        manifest = {"schema_version": 2, "kind": "build", "name": name, "created_at": now(), "root": str(root),
+                    "config": cfg, "analysis": analysis, "fields": fields, "items": items,
                     "metadata": dict(record(frozen), path=str(target / "metadata.tsv")),
-                    "auxiliary": auxiliary, "raw_inputs": raw_records, "implementation": implementation(root),
+                    "auxiliary": auxiliary, "excluded": selection["excluded"], "raw_inputs": raw_records, "implementation": implementation(root),
                     "genegalleon": gg_records, "software_lock": software_lock}
-        write_json(staging / "dataset.json", manifest)
+        write_json(staging / "build.json", manifest)
         write_tsv(staging / "plan.tsv", list(report[0]), report)
-        with (staging / "analysis.yaml").open("w") as handle:
+        with (staging / "pipeline.yaml").open("w") as handle:
             yaml.safe_dump(analysis, handle, sort_keys=False)
         write_json(staging / "checksums.json", {p.name: file_record(p)["sha256"] for p in
-                                              (staging / "dataset.json", staging / "analysis.yaml")})
+                                              (staging / "build.json", staging / "pipeline.yaml")})
         os.rename(staging, target)
     finally:
         if staging.exists(): shutil.rmtree(staging)
@@ -228,7 +229,7 @@ def load(path, check_code=False):
     hashes = json.loads((path / "checksums.json").read_text())
     for name, expected in hashes.items():
         if file_record(path / name)["sha256"] != expected: raise ValueError(f"frozen dataset changed: {name}")
-    manifest = json.loads((path / "dataset.json").read_text())
+    manifest = json.loads((path / "build.json").read_text())
     verify(manifest["metadata"])
     for entry in manifest["auxiliary"].values(): verify(entry)
     if check_code:
@@ -239,8 +240,9 @@ def load(path, check_code=False):
 def item_products(manifest, item):
     bound = copy.deepcopy(item)
     if item.get("reference_id"): bound["row"]["reference_id"] = item["reference_id"]
-    return resolve(manifest["config"]["store"], bound, manifest["analysis"]["phylogeny"]["lineage"],
-                   need_full=bool(manifest["analysis"]["phylogeny"]["trees"]))
+    products = resolve(manifest["config"]["store"], bound, manifest["analysis"]["phylogeny"]["lineage"], need_full=True)
+    check_conditions(products, manifest["config"].get("conditions"))
+    return products
 
 
 def status(path):
@@ -248,7 +250,7 @@ def status(path):
     items = copy.deepcopy(manifest["items"])
     for item in items:
         if item.get("reference_id"): item["row"]["reference_id"] = item["reference_id"]
-    report = inspect_items(manifest["config"]["store"], items, manifest["selection_analysis"], manifest["requested_species"])
+    report = inspect_items(manifest["config"]["store"], items, manifest["analysis"], conditions=manifest["config"].get("conditions"))
     for item, row in zip(items, report):
         row["jobs"] = {}
         for stage in STAGES:
@@ -260,7 +262,19 @@ def status(path):
             if assessment:
                 c = assessment["counts"]
                 row["busco_complete_fraction"] = (c[COUNTS[0]] + c[COUNTS[1]]) / c[COUNTS[-1]]
-    return report
+    completion = Path(path) / "completed.json"
+    if completion.exists():
+        from build_products import load_complete
+        load_complete(completion)
+        for row in report: row["mapping"] = "reuse"
+    else:
+        mapping_plan = Path(manifest["root"]) / "results" / manifest["analysis"]["run_name"] / "orthogroups/mapping/incremental_plan/plan.json"
+        if mapping_plan.exists():
+            planned = json.loads(mapping_plan.read_text())
+            for row in report:
+                if row["assembly"] != "conflict":
+                    row["mapping"] = "planned_reuse" if row["species"] in planned["reused_species"] else "planned_mapping"
+    return report + excluded_report(manifest.get("excluded", []))
 
 
 def workspace(path):
@@ -339,10 +353,9 @@ def worker(path, stage, task_id):
     # Serialize all work on a species, including jobs accidentally submitted twice.
     with locked(Path(manifest["config"]["store"]) / species / ".worker.lock"):
         products = item_products(manifest, item)
-        reason = exclusion_reason(manifest["selection_analysis"], item, products, manifest["requested_species"])
         key = dict(zip(STAGES, ("reference", "busco", "quant")))[stage]
-        if reason or products[key]:
-            write_json(receipt_path, {"state": "excluded" if reason else "reused", "reason": reason, "at": now()})
+        if products[key]:
+            write_json(receipt_path, {"state": "reused", "at": now()})
             return
         work = workspace(path)
         if not (work / "input/amalgkit_metadata" / f"{species}_metadata.tsv").is_file():
@@ -368,7 +381,8 @@ def worker(path, stage, task_id):
                 for source in (out / directory).glob(pattern):
                     quarantine.mkdir(parents=True, exist_ok=True)
                     source.rename(quarantine / (directory + "-" + source.name))
-        write_json(receipt_path, {"state": "running", "started_at": now(), "job_id": os.environ.get("SLURM_JOB_ID")})
+        write_json(receipt_path, {"state": "running", "started_at": now(), "species": species, "run": item["row"]["run"],
+                                      "stage": stage, "job_id": os.environ.get("SLURM_JOB_ID")})
         try:
             ordered = sorted(i["species"] + "_metadata.tsv" for i in manifest["items"])
             actual = sorted(p.name for p in (work / "input/amalgkit_metadata").iterdir()
@@ -382,7 +396,8 @@ def worker(path, stage, task_id):
             provenance = {"source": "genegalleon", "dataset": str(path), "stage": stage,
                           "settings": {k: v for k, v in env.items() if k.startswith(("GG_TRANSCRIPTOME_", "GG_COMMON_"))},
                           "software": manifest["genegalleon"], "run": item["row"]["run"],
-                          "raw_inputs": manifest["raw_inputs"].get(species, {})}
+                          "raw_inputs": manifest["raw_inputs"].get(species, {}),
+                          "condition": manifest["config"]["conditions"][stage]}
             store = manifest["config"]["store"]
             if stage == "assembly":
                 ref = register_reference(store, item, out / "longest_cds" / f"{species}_longestCDS.fa.gz", provenance)
@@ -401,7 +416,8 @@ def worker(path, stage, task_id):
             write_json(receipt_path, {"state": "complete", "finished_at": now(), "reference_id": ref["reference_id"],
                                       "job_id": os.environ.get("SLURM_JOB_ID")})
         except BaseException as error:
-            write_json(receipt_path, {"state": "failed", "at": now(), "error": str(error)})
+            write_json(receipt_path, {"state": "failed", "at": now(), "error": str(error), "species": species,
+                                      "run": item["row"]["run"], "stage": stage, "job_id": os.environ.get("SLURM_JOB_ID")})
             raise
 
 
@@ -414,17 +430,15 @@ def materialize(path):
             receipt = json.loads((path / "input_receipt.json").read_text())
             for entry in receipt["files"]: verify(entry)
             return target
-        rows, summaries, selected, excluded = [], [], [], []
+        rows, summaries, selected = [], [], []
+        excluded = manifest.get("excluded", [])
         products = {}
         for item in manifest["items"]:
             p = item_products(manifest, item)
-            reason = exclusion_reason(manifest["selection_analysis"], item, p, manifest["requested_species"])
-            if reason:
-                excluded.append({"species": item["species"], "reason": reason}); continue
             missing = [k for k in ("reference", "busco", "quant") if not p[k]]
             if missing: raise ValueError(f"dataset incomplete: {item['species']}: {', '.join(missing)}")
             selected.append(item); products[item["species"]] = p
-        if not selected: raise ValueError("no species passed selection")
+        if not selected: raise ValueError("build metadata has no species")
         staging = Path(tempfile.mkdtemp(prefix=".input-", dir=path))
         try:
             for item in selected:
@@ -444,16 +458,6 @@ def materialize(path):
                 summaries.append({"Species": item["row"]["scientific_name"], **p["busco"]["counts"]})
             write_tsv(staging / "metadata.tsv", manifest["fields"], rows)
             write_tsv(staging / "busco/summary.tsv", ["Species", *COUNTS], summaries)
-            for filename, entry in manifest["auxiliary"].items():
-                if filename.startswith("slurm/"): continue
-                if filename == "species_trait.tsv":
-                    with verify(entry).open() as handle:
-                        reader = csv.DictReader(handle, delimiter="\t")
-                        fields = reader.fieldnames
-                        names = {i["species"] for i in selected}
-                        traits = [r for r in reader if r["species"].replace(" ", "_") in names]
-                    write_tsv(staging / filename, fields, traits)
-                else: shutil.copy2(verify(entry), staging / filename)
             if target.exists(): raise ValueError("unpublished input directory exists; inspect it before retrying")
             os.rename(staging, target)
             receipt = {"created_at": now(), "species": [i["species"] for i in selected], "excluded": excluded,
@@ -464,41 +468,49 @@ def materialize(path):
     return target
 
 
-def downstream(path, until):
+def run_mapping(path, execution=None):
+    from build_products import complete
+    from phase_config import write_profile
     path = Path(path).resolve()
     manifest = load(path, check_code=True)
     materialize(path)
     root = Path(manifest["root"])
-    profile = manifest["config"]["slurm"]["downstream_profile"]
-    command = [str(root / "run_pipeline.sh"), "--slurm", "--profile", profile,
-               "--jobs", str(manifest["config"]["slurm"]["downstream_jobs"]),
-               "--configfile", str(path / "analysis.yaml")]
-    subprocess.run([*command, "--", "mapping" if until == "mapping" else "all"], cwd=root, check=True)
-    if until == "all":
-        # Collection is local and only sees this run's completed results.
-        subprocess.run([str(root / "run_pipeline.sh"), "--cores", "1", "--resources", "mem_gb=4",
-                        "--configfile", str(path / "analysis.yaml"), "--", "phenoradar_inputs"], cwd=root,
-                       env={k: v for k, v in os.environ.items() if not k.startswith("SLURM_")}, check=True)
+    slurm = load_execution(execution) if execution else manifest["config"]["slurm"]
+    profile = write_profile(path / "jobs" / (Path(execution).stem if execution else "local") / "profile", slurm)
+    command = [str(root / "run_pipeline.sh"), "--slurm", "--profile", str(profile),
+               "--jobs", str(slurm["jobs"]), "--configfile", str(path / "pipeline.yaml")]
+    subprocess.run([*command, "--", "mapping"], cwd=root, check=True)
+    complete(path)
 
 
-def submit(path, until="all", species=None, dry_run=False):
+def load_execution(path):
+    wrapper = json.loads(Path(path).read_text())
+    if digest(wrapper["slurm"]) != wrapper["sha256"]: raise ValueError("submission resources changed")
+    return wrapper["slurm"]
+
+
+def submit(path, until="mapping", species=None, dry_run=False, resources=None):
     path = Path(path).resolve()
     manifest = load(path, check_code=True)
     wanted = set(Path(species).read_text().splitlines()) if species else None
     if wanted is not None and (not wanted or wanted - {i["species"] for i in manifest["items"]}):
         raise ValueError("pilot species must be present in frozen metadata")
     report = status(path)
+    if (path / "completed.json").exists():
+        print("Build already complete; all recorded products verified.")
+        return []
     if any(r["assembly"] == "conflict" for r in report): raise ValueError("resolve reported input conflicts before submitting")
     stop = STAGES.index(until) if until in STAGES else len(STAGES) - 1
     pending = {stage: [index for index, state in enumerate(report, 1)
                        if state[stage] == "pending" and (wanted is None or state["species"] in wanted)]
                for stage in STAGES[:stop + 1]}
-    slurm = manifest["config"]["slurm"]
+    from phase_config import execution_settings
+    slurm = execution_settings(manifest["config"]["slurm"], resources)
     jobs = path / "jobs"
     jobs.mkdir(exist_ok=True)
     (jobs / "logs").mkdir(exist_ok=True)
     with locked(jobs / ".submit.lock"):
-        records = sorted(jobs.glob("submission_*.json"))
+        records = sorted(p for p in jobs.glob("submission_*.json") if not p.name.endswith(".resources.json"))
         if not dry_run:
             for record_path in records:
                 old = json.loads(record_path.read_text())
@@ -512,8 +524,10 @@ def submit(path, until="all", species=None, dry_run=False):
                     active = [job.strip() for job in queued if job.strip().split("_", 1)[0] in ids]
                     if active: raise ValueError("dataset still has queued/running jobs; inspect or cancel them before resubmitting: " + ", ".join(active))
         if any(pending.values()): stage_workspace(path, manifest)
-        batch_number = len(records) + 1
-        batch = {"created_at": now(), "until": until, "pilot_species": sorted(wanted) if wanted else None, "jobs": []}
+        batch_number = 1 + max([int(p.name.split("_")[1].split(".")[0]) for p in jobs.glob("submission_*.resources.json")] + [0])
+        execution = jobs / f"submission_{batch_number:04d}.resources.json"
+        write_json(execution, {"slurm": slurm, "sha256": digest(slurm)})
+        batch = {"created_at": now(), "until": until, "pilot_species": sorted(wanted) if wanted else None, "resources": record(execution), "jobs": []}
         receipt = jobs / f"submission_{batch_number:04d}.json"
         previous = None
         commands = []
@@ -522,25 +536,25 @@ def submit(path, until="all", species=None, dry_run=False):
         for stage, indices in pending.items():
             for offset in sorted({((i - 1) // array_size) * array_size for i in indices}):
                 scheduled.append((stage, [i for i in indices if offset < i <= offset + array_size], offset))
-        if until in {"mapping", "all"} and wanted is None:
-            scheduled.append(("downstream", None, 0))
+        if until == "mapping" and wanted is None:
+            scheduled.append(("mapping", None, 0))
         for stage, indices, offset in scheduled:
-            resources = slurm["stages"][stage]
+            job_resources = slurm["stages"]["controller" if stage == "mapping" else stage]
             label = stage + (f"_{offset + 1}_{offset + array_size}" if offset else "")
             script = jobs / f"{batch_number:04d}_{label}.sh"
             python = str(Path(sys.executable).resolve())
             cli = Path(manifest["root"]) / "workflow/scripts/dataset.py"
-            worker_command = [python, str(cli), "downstream" if stage == "downstream" else "worker", "--dataset", str(path)]
-            if stage == "downstream":
-                worker_command += ["--until", until]
+            worker_command = [python, str(cli), "mapping" if stage == "mapping" else "worker", "--dataset", str(path)]
+            if stage == "mapping":
+                worker_command += ["--execution", str(execution)]
                 invocation = shlex.join(worker_command)
             else:
                 worker_command += ["--stage", stage]
                 invocation = shlex.join(worker_command) + f' --task-id "$((SLURM_ARRAY_TASK_ID + {offset}))"'
             script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + "exec " + invocation + "\n")
             script.chmod(0o755)
-            cmd = ["sbatch", "--parsable", "--nodes=1", "--ntasks=1", f"--cpus-per-task={resources['cpus']}",
-                   f"--mem={resources['mem_mb']}M", f"--time={resources['time']}", "--chdir=" + manifest["root"],
+            cmd = ["sbatch", "--parsable", "--nodes=1", "--ntasks=1", f"--cpus-per-task={job_resources['cpus']}",
+                   f"--mem={job_resources['mem_mb']}M", f"--time={job_resources['time']}", "--chdir=" + manifest["root"],
                    f"--job-name={manifest['name']}_{label}", f"--output={jobs}/logs/{batch_number:04d}_{label}_%A_%a.out",
                    f"--error={jobs}/logs/{batch_number:04d}_{label}_%A_%a.err"]
             for key in ("partition", "account"):
@@ -585,16 +599,17 @@ def main():
     for name in ("plan", "prepare", "register", "fetch-software"):
         command = sub.add_parser(name)
         command.add_argument("--root", default=".")
-        command.add_argument("--config", default="config/dataset.yaml")
+        command.add_argument("--config", default="config/build.yaml")
         if name != "fetch-software": command.add_argument("--metadata")
-        command.add_argument("--analysis-config")
         if name == "prepare": command.add_argument("--name", required=True)
         if name == "register": command.add_argument("--input-dir", default="input")
-    for name in ("status", "submit", "materialize", "worker", "downstream"):
+    for name in ("status", "submit", "materialize", "worker", "mapping", "complete"):
         command = sub.add_parser(name)
-        command.add_argument("--dataset", required=True)
-        if name in {"submit", "downstream"}: command.add_argument("--until", choices=UNTIL, default="all")
+        command.add_argument("--build", "--dataset", dest="dataset", required=True)
+        if name == "submit": command.add_argument("--until", choices=UNTIL, default="mapping")
+        if name == "mapping": command.add_argument("--execution")
         if name == "submit":
+            command.add_argument("--resources")
             command.add_argument("--species-list")
             command.add_argument("--dry-run", action="store_true")
         if name == "worker":
@@ -605,32 +620,37 @@ def main():
         root = Path(args.root).resolve()
         config = absolute(root, args.config)
         if args.command == "plan":
-            *_, report = plan(root, config, args.metadata, args.analysis_config)
+            *_, report = plan(root, config, args.metadata)
             writer = csv.DictWriter(sys.stdout, fieldnames=list(report[0]), delimiter="\t")
             writer.writeheader(); writer.writerows(report)
             return int(any(r["assembly"] == "conflict" for r in report))
         if args.command == "prepare":
-            print(prepare(root, args.name, config, args.metadata, args.analysis_config))
+            print(prepare(root, args.name, config, args.metadata))
         elif args.command == "fetch-software":
-            cfg, _ = settings(root, config, args.analysis_config)
+            cfg, _ = settings(root, config)
             resolved, _, software_lock = resolve_software(cfg["genegalleon"])
             print(json.dumps({"repository": resolved["repository"], "image": resolved["image"],
                               "source": software_lock["source"].get("identity", {"kind": "local_source"}),
                               "container": software_lock["container"].get("identity", {"kind": "local_image"})}, indent=2))
         else:
-            cfg, analysis = settings(root, config, args.analysis_config)
+            cfg, analysis = settings(root, config)
             rows = import_existing(cfg["store"], absolute(root, args.input_dir),
-                                   absolute(root, args.metadata or cfg["metadata"]), analysis["phylogeny"]["lineage"])
+                                   absolute(root, args.metadata or cfg["metadata"]), analysis["phylogeny"]["lineage"],
+                                   excluded_runs=read_exclusions(cfg["excluded_accessions"]))
             print(json.dumps({"registered": sum(r["status"] == "registered" for r in rows),
-                              "no_cds": [r["species"] for r in rows if r["status"] == "no_cds"]}, indent=2))
+                              "no_cds": [r["species"] for r in rows if r["status"] == "no_cds"],
+                              "excluded": [r for r in rows if r["status"] == "excluded"]}, indent=2))
     elif args.command == "status":
         report = status(args.dataset)
         print(json.dumps(report, indent=2))
         return int(any(r["assembly"] == "conflict" for r in report))
-    elif args.command == "submit": submit(args.dataset, args.until, args.species_list, args.dry_run)
+    elif args.command == "submit": submit(args.dataset, args.until, args.species_list, args.dry_run, args.resources)
     elif args.command == "materialize": print(materialize(args.dataset))
     elif args.command == "worker": worker(args.dataset, args.stage, args.task_id)
-    else: downstream(args.dataset, args.until)
+    elif args.command == "complete":
+        from build_products import complete
+        print(complete(args.dataset))
+    else: run_mapping(args.dataset, execution=args.execution)
     return 0
 
 
@@ -638,5 +658,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
-        print(f"dataset: {error}", file=sys.stderr)
+        print(f"build: {error}", file=sys.stderr)
         sys.exit(1)

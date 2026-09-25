@@ -1,3 +1,5 @@
-run_name: pilot  # Output subdirectory under results/, work/, logs/.
+# Partial analysis override; set the name/build with run_analysis.sh prepare.
 selection:
-  species_list: true  # Create input/species_list.txt with one candidate species ID per line.
+  species_list: true
+inputs:
+  species_list: input/species_list.txt

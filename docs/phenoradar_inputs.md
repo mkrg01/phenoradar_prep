@@ -12,7 +12,7 @@ format and links the other completed results. Keep linked source files available
 After running the desired analyses:
 
 ```bash
-./run_pipeline.sh --cores 1 --resources mem_gb=4 -- phenoradar_inputs
+./run_pipeline.sh --cores 1 --resources mem_gb=4 --configfile analyses/analysis001/pipeline.yaml -- phenoradar_inputs
 ```
 
 Collection requires `metadata/samples.tsv` and `metadata/species_metadata.tsv`;

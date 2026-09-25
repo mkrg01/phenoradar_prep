@@ -8,7 +8,7 @@ KEGG Orthology (KO), independently of ODB mapping.
 ## Run the branch
 
 ```bash
-./run_pipeline.sh --cores 24 --resources mem_gb=128 -- kegg
+./run_pipeline.sh --cores 24 --resources mem_gb=128 --configfile analyses/analysis001/pipeline.yaml -- kegg
 ```
 
 Set `kegg.enabled: true` to include KEGG in `all`; the explicit target works

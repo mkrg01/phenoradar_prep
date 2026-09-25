@@ -2,45 +2,51 @@
 
 [Documentation](index.md) · [Input formats](inputs.md)
 
-Edit [config/config.yaml](../config/config.yaml) directly. Keep existing settings
-when resuming an analysis; see [running the workflow](running.md) for execution.
+Edit [build.yaml](../config/build.yaml) for reusable species products and
+[analysis.yaml](../config/analysis.yaml) for analyses of a completed build.
+Keep local copies as `config/build.local.yaml` and `config/analysis.local.yaml`.
+See the [two-phase guide](datasets.md) for preparation, submission, and migration.
 
 ## Loading settings and paths
 
-Run from the repository root. Dataset paths default to `input/`;
-`input_root` selects the same layout in a frozen [dataset snapshot](datasets.md).
-See the [file layout](inputs.md#file-formats).
-`config/config.yaml` loads automatically. Supply an override with
-`--configfile path/to/override.yaml`; unspecified settings retain their defaults
-from the main file. [Optional treePL overrides](dating.md#optional-overrides) use
-the workflow's internal defaults when omitted. See the [pilot example](running.md#pilot-run).
+Paths are relative to the repository root. Build settings are frozen by
+`run_build.sh prepare --name <build>`. Analysis settings and auxiliary inputs
+are frozen by `run_analysis.sh prepare --name <analysis>`; an analysis config can
+be a partial override of `config/analysis.yaml`. Execution uses generated
+`builds/<id>/pipeline.yaml` or `analyses/<id>/pipeline.yaml` files.
+`workflow/pipeline_defaults.yaml` is an internal compatibility schema for
+Snakemake, not a third user configuration.
 
-`run_name` selects subdirectories under `results/`, `work/`, and `logs/`.
-Use a new name to retain an earlier analysis. The container image matches
-[VERSION](../VERSION); see [container setup](containers.md).
+Scientific changes require a new build or analysis ID. Retry CPU, memory, time,
+and concurrency changes use `submit --resources <yaml>` and are recorded per
+submission. The workflow container follows [VERSION](../VERSION);
+GeneGalleon source/SIF pins belong to build settings.
 
-## Core settings
+## Settings by phase
 
-| Setting | Default | Use |
-| --- | --- | --- |
-| `run_name` | `run001` | Directory name: letters, digits, underscores, dots, hyphens; starts with a letter/digit |
-| `selection.busco_threshold` | `0.5` | Minimum complete BUSCO fraction |
-| `selection.species_list` | `false` | Use `input/species_list.txt` when true; [selection rules](inputs.md#species-selection) |
-| `translation.table` | `1` | Genetic code for CDS translation |
-| `tpm.multimap` | `error` | Ambiguous gene assignments; [TPM policies](outputs.md#tpm-interpretation) |
-| `seed` | `12345` | Tree inference, dating, representative selection, and contrast pairs |
-| `trait` | `carnivory` | Shared trait column for species selection, pairs, and metadata |
+| Build settings | Analysis settings |
+| --- | --- |
+| `metadata`, `excluded_accessions`, `store` | Completed `build` |
+| `genegalleon` source, SIF and assembly/quant settings | `inputs` for traits, species list and calibrations |
+| `busco.lineage`, `translation.table` | `selection.busco_threshold`, `exclude_species` |
+| `odb.node`, `existing_results`, `cache_dir`, `chunk_size` | `trait`, `seed`, `tpm`, optional analysis branches |
+| Build `slurm` resources | Analysis `slurm` resources |
 
-## OrthoDB settings
+Build always computes full BUSCO tables for every included metadata species.
+`excluded_accessions` applies manual run-level exclusions before scheduling;
+see [failure recovery and exclusions](datasets.md#failure-and-recovery-behavior). Acceptance
+thresholds apply only in analysis. Genetic code and lineage are inherited from
+the completed build and cannot be overridden by analysis.
 
-`odb.node` defaults to `3193` (Embryophyta). Choose a supported OrthoDB v12 level
-covering all your species; see [node selection](references.md#choosing-an-orthodb-node).
-`odb.existing_results` defaults to `null` (new mapping); set a snapshot directory
-to [reuse existing annotations](references.md#reusing-existing-odb-results).
-`odb.incremental: true` combines existing snapshots with new mapping and caches
-completed batches under `odb.cache_dir`; `odb.chunk_size` controls the maximum
-species per new mapping job. See [incremental mapping](datasets.md#incremental-odb-outside-the-dataset-interface).
-CPU/memory settings use [launcher and rule overrides](running.md#resource-budgets).
+`odb.node` defaults to OrthoDB v12 taxid `3193` (Embryophyta). Build always uses
+incremental mapping: matching imported/native snapshots are reused and missing
+species are mapped in chunks (default 20). See [reference configuration](references.md).
+
+`selection.busco_threshold` defaults to `0.5`. `selection.species_list: true`
+enables `inputs.species_list`. `exclude_species` removes listed IDs before any
+analysis. Set `inputs.species_trait: null` when no trait table is needed;
+trait-based tree settings require an actual table. `tpm.multimap` remains
+`error` by default; `drop` and `split` are also supported.
 
 ## Optional analyses and exports
 
@@ -52,7 +58,7 @@ CPU/memory settings use [launcher and rule overrides](running.md#resource-budget
 | `phylogeny.dating` | [Calibrations and treePL dating](dating.md) |
 | `phylogeny.contrast_pairs` | [Trait contrast pairs](contrast_pairs.md) |
 | `phylogeny.taxonomy_check` | [MonoPhy review](taxonomy_check.md) |
-| `exclude_species` | [Manual species exclusion](species_filter.md) |
+| `exclude_species` | [Species selection](datasets.md#run-an-analysis) |
 
 See [targets](running.md#targets) for requesting analyses.
 [PhenoRadar input collection](phenoradar_inputs.md) needs no configuration section.
