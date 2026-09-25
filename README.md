@@ -11,7 +11,7 @@ Adding or removing species reuses completed species products and mappings.
 ## Requirements
 
 - [Workflow environment](environment.yaml), including Snakemake and its Slurm executor
-- [Apptainer / Singularity](docs/containers.md)
+- [Apptainer / Singularity](docs/running.md#installation-and-normal-execution)
 - Slurm
 
 ## Quick start

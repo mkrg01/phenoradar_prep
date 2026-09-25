@@ -4,9 +4,20 @@
 
 ## Installation and normal execution
 
-Use Linux/Bash with the [requirements](../README.md#requirements) and
-[container setup](containers.md). Follow the [build/analysis commands](datasets.md)
-from manually curated metadata through completed outputs.
+Use Linux x86-64/Bash with the [requirements](../README.md#requirements).
+Compute nodes need host Snakemake and `singularity` on `PATH`; Apptainer must
+provide its `singularity` compatibility command.
+
+The workflow image follows [VERSION](../VERSION). Use a published release and
+prepare its image before the first mapping/analysis job or DAG dry-run:
+
+```bash
+./run_pipeline.sh --prepare-container --cores 1 --resources mem_gb=4
+```
+
+Repeat after changing releases; cached images are reused. The repository is
+mounted automatically, so keep imported products inside it. Then follow the
+[build/analysis commands](datasets.md) from metadata through completed outputs.
 
 `plan` and `prepare` run locally. `submit` validates inputs, submits Slurm jobs,
 and returns without waiting for completion; `submit --dry-run` writes/previews
@@ -121,3 +132,5 @@ The low-level launcher accepts `mem_mb` or whole decimal `mem_gb`. Inside a dire
 Slurm allocation it derives the CPU/memory budget from Slurm and reserves 4 GB;
 request one node, one task, and finite memory. Local runs should leave memory
 outside the budget for the controller and other processes.
+
+For host Conda execution, add `--software-deployment-method conda` to the low-level launcher.

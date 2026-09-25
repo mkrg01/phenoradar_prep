@@ -1,6 +1,6 @@
 # Releasing a version
 
-[Documentation](index.md) · [Container setup](containers.md)
+[Documentation](index.md) · [Development](development.md)
 
 ## Maintainer steps
 

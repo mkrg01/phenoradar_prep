@@ -48,6 +48,8 @@ file is saved as `container-recipe`, not tracked in Git. Manual runs and release
 build that recipe and run
 [smoke checks](../tests/container_smoke.py) with real tools;
 [tests/container/Snakefile](../tests/container/Snakefile) checks Apptainer activation.
+For local image builds, first run `python workflow/scripts/generate_container.py`
+in the pinned workflow environment; the generated Dockerfile is not committed.
 
 Release tests use temporary Git repositories and simulated GitHub/registry
 responses. Slurm tests simulate allocations without submitting jobs. Use a real

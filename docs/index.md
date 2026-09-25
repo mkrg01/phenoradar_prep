@@ -3,7 +3,7 @@
 ## Start from metadata
 
 1. Prepare [metadata and auxiliary inputs](inputs.md).
-2. Edit [build/analysis settings](configuration.md) and set up [containers](containers.md).
+2. Edit [build/analysis settings](configuration.md) and complete [initial setup](running.md#installation-and-normal-execution).
 3. [Build through ODB mapping, then run analysis](datasets.md).
 4. Review [outputs and QC](outputs.md) and use the [PhenoRadar inputs](phenoradar_inputs.md).
 
@@ -32,7 +32,6 @@ For exclusions, normally prepare a new analysis with `exclude_species`;
 
 ## Maintenance
 
-[Container setup](containers.md) · [Releasing a version](releases.md) ·
-[Development and tests](development.md)
+[Releasing a version](releases.md) · [Development and tests](development.md)
 
 [Project README](../README.md)

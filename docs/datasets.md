@@ -16,7 +16,7 @@ local-read paths. Keep known unusable runs in the
 Edit `config/build.yaml` and `config/analysis.yaml` directly. These are the default
 configs; `prepare` freezes settings and inputs for each named run. Install the
 [workflow environment](../environment.yaml) and prepare the
-[container](containers.md) before submitting mapping or analysis jobs.
+[workflow image](running.md#installation-and-normal-execution) before submitting mapping or analysis jobs.
 
 ## Pinned GeneGalleon source and SIF
 
@@ -28,8 +28,8 @@ Missing software is fetched only when assembly, BUSCO, or quantification is need
 ./run_build.sh fetch-software
 ```
 
-See [container setup](containers.md#genegalleon-for-incremental-datasets) for cache
-and override settings. Incompatible product conditions are reported as conflicts;
+Software is cached under `genegalleon.cache_dir`; `repository` and `image` allow
+local overrides. Incompatible product conditions are reported as conflicts;
 use a separate `store` for a deliberate rebuild with different conditions.
 
 ## Build through mapping
