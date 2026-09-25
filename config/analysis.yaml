@@ -44,7 +44,7 @@ phylogeny:
     collapse_monophyletic: true
 exclude_species: []
 slurm:
-  partition: epyc
+  partition: null  # Use the cluster default; set a name when required.
   account: null
   jobs: 10
   default_resources:

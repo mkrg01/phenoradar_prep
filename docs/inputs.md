@@ -10,16 +10,22 @@ Completed products go in **`builds/<build>/products/`**, not top-level `input/`.
 
 ### Files you prepare
 
-Build selects metadata and exclusions; analysis auxiliary paths are under `inputs`
-in `analysis.yaml`. Optional paths must be set explicitly.
+Metadata is required for a new build. The other files are optional, depending on
+which species you want to include and which analyses you run. Build selects metadata
+and exclusions; analysis auxiliary paths are under `inputs` in `analysis.yaml`.
 
-| File | Format and use |
-| --- | --- |
-| `input/metadata.tsv` | TSV: `scientific_name`, `run`, positive NCBI `taxid`; one run per species |
-| `config/excluded_accessions.tsv` | TSV: `accession`, optional `reason`; default `excluded_accessions` path in build settings |
-| `input/species_trait.tsv` | TSV: `species` and chosen trait column; `inputs.species_trait` |
-| `input/species_list.txt` | Species IDs, one per line; set `inputs.species_list` and `selection.species_list: true` |
-| `input/calibrations.tsv` | [Manual dating](dating.md#manual-calibrations) bounds; set `inputs.calibrations` and calibration source `file` |
+| File | When to use | Format and settings |
+| --- | --- | --- |
+| `input/metadata.tsv` | **Required:** define the species and RNA-seq runs to build. | TSV: `scientific_name`, `run`, positive NCBI `taxid`; one run per species |
+| `config/excluded_accessions.tsv` | **Optional:** exclude unusable or misidentified runs from builds while retaining their metadata. | TSV: `accession`, optional `reason`; `excluded_accessions` in build settings |
+| `input/species_trait.tsv` | **Optional:** provide traits for PhenoRadar; required for phenotyped/representative trees and contrast pairs. | TSV: `species` and chosen trait column; `inputs.species_trait` and `trait` |
+| `input/species_list.txt` | **Optional:** restrict an analysis to a chosen set of candidate species; BUSCO filtering still applies. | Species IDs, one per line; `inputs.species_list` and `selection.species_list: true` |
+| `input/calibrations.tsv` | **Optional:** supply your own age bounds for [dating](dating.md#manual-calibrations) instead of TimeTree calibrations. | TSV: `taxa`, `min_age_ma`, `max_age_ma`, `source`; `inputs.calibrations` and `phylogeny.dating.calibration_source: file` |
+
+Optional files with a configured path must exist; set unused paths to `null`.
+Without a species list, use `selection.species_list: false`; without traits,
+disable trait-dependent analyses. The supplied configs already specify paths
+for the exclusion list and trait table.
 
 Use [AMALGKIT-compatible metadata](https://github.com/kfuku52/amalgkit/wiki/amalgkit-metadata);
 additional columns pass through to GeneGalleon. For local reads, also provide

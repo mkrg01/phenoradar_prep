@@ -71,6 +71,9 @@ Edit the relevant config's `slurm` section:
 | `jobs` | Concurrent Snakemake worker jobs |
 | `rules.<rule>` | Per-rule `cpus`, `mem_mb`, and `runtime` in minutes |
 
+`partition: null` uses the cluster default. Check available names with `sinfo`
+before choosing an explicit partition.
+
 `array_size` must be below the site's `MaxArraySize`. For example, increase assembly
 memory/time or change ODB job sizing in `build.yaml`:
 
