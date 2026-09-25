@@ -10,6 +10,7 @@ The existing prepared-input workflow remains available unchanged.
 
 ## Storage and identity
 
+- `resources/software/genegalleon/`: version-pinned source, SIF files, and download receipts, shared across datasets.
 - `resources/dataset_assets/`: receipts binding CDS, BUSCO, and quantification to
   a species, CDS SHA256, and run. Legacy files are registered in place; retain
   their original files. New native GeneGalleon outputs remain in their dataset
@@ -38,9 +39,9 @@ path if that environment is not activated.
 Copy [config/dataset.yaml](../config/dataset.yaml) to a local configuration,
 then set:
 
-- `genegalleon.repository`: an existing GeneGalleon checkout with the transcriptome
-  entrypoint and scoped `GG_TRANSCRIPTOME_*` overrides;
-- `genegalleon.image`: its SIF image (default `<repository>/genegalleon.sif`);
+- `genegalleon.version`, `revision`, and `image_uri`: the pinned upstream version,
+  full source commit SHA, and matching OCI digest. The defaults select GeneGalleon
+  0.7.77; leave `repository` and `image` null for automatic retrieval;
 - `analysis_config`: an optional override to the main downstream configuration;
   use `config/reuse_odb.local.yaml` for the local tlight snapshot when available;
 - Slurm partition/account, per-stage CPUs/memory/time, concurrency, and the
@@ -53,6 +54,66 @@ Upstream mapping/quantification must use the CDS retained for this reference.
 GeneGalleon stage flags, metadata mode, reference selection, and cleanup are
 managed by the adapter. Other scalar settings can be set in
 `genegalleon.settings`; they are frozen and recorded.
+
+## Pinned GeneGalleon source and SIF
+
+`prepare` automatically fetches missing GeneGalleon dependencies when assembly,
+BUSCO, or quantification remains pending. It does not fetch anything for a dataset
+that can reuse all upstream products. `plan`, `register`, and `submit --dry-run`
+do not download software. Workers use the paths frozen by `prepare`, so every
+array task uses the same source and SIF without repeating downloads.
+
+The default pins correspond to the published
+[GeneGalleon 0.7.77 source](https://github.com/kfuku52/genegalleon/tree/3a6460e8a8201ab1293db1fec445fd7de063e46e)
+and its matching multi-architecture image:
+
+```yaml
+genegalleon:
+  version: "0.7.77"
+  revision: 3a6460e8a8201ab1293db1fec445fd7de063e46e
+  image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:df357fc1857c737df1cdfe17fc12b7e1fcb891353e9bac9e534fb4155b98aff3
+  image_sha256: null
+  cache_dir: resources/software/genegalleon
+  repository: null
+  image: null
+```
+
+Source archives are fetched by full commit SHA and checked against `VERSION`.
+Apptainer (or Singularity) pulls the pinned OCI digest and converts it to a SIF
+for the host architecture. This first conversion can require substantial time,
+memory, and temporary disk space. Fetch dependencies ahead of dataset preparation
+on a suitable node/allocation with:
+
+```bash
+./run_dataset.sh fetch-software --config config/dataset.local.yaml
+```
+
+This command needs no RNA-seq metadata and submits no analysis jobs. Network
+access is needed only for missing dependencies. The source, image, and runtime
+blob cache are stored under `genegalleon.cache_dir`, which must be inside the
+project. Successfully published caches can be reused offline. Concurrent fetches
+are protected by file locks; if another preparation holds the lock, retry after
+it finishes. Failed or interrupted downloads never become completed cache entries.
+
+An HTTPS URL for a directly distributed SIF is also supported, with its mandatory
+`image_sha256`. OCI tags such as `latest` are rejected: use an immutable digest.
+The final SIF checksum, architecture, source commit, source archive checksum,
+and available OCI labels are recorded in `dataset.json` under `software_lock`.
+Image/source revision and version labels are checked when the image provides them.
+OCI-to-SIF conversion may produce different SIF bytes with a different runtime;
+each prepared dataset remains bound to its original SIF checksum. Keep its cache
+while the dataset is in use. Changed cached files are reported as conflicts.
+
+For an existing checkout/container, set `repository` and `image` to local paths.
+If only `repository` is set and `<repository>/genegalleon.sif` exists, it is reused.
+These are explicit local overrides; their actual files are fingerprinted rather
+than claimed to match the default pins. Without a local SIF, automatic image
+retrieval requires the local checkout's `VERSION` to match the configured version.
+
+Update `version`, `revision`, and `image_uri` together when selecting a new release.
+Each dependency identity gets a separate cache entry. Existing datasets retain
+their frozen paths and fingerprints, and changing software pins does not by itself
+rerun completed species products.
 
 ## Register completed work
 
@@ -95,9 +156,9 @@ implicit interpretation of AMALGKIT exclusion columns.
 ```
 
 `plan` reports reuse, pending work, explicit exclusions, and conflicts without
-submitting jobs or acquiring metadata. `prepare` freezes the dataset and hashes
-new private read inputs and the configured GeneGalleon code/image when upstream
-work is needed. It does not launch analyses. Use a new dataset name when changing
+submitting jobs or acquiring metadata. `prepare` freezes the dataset, hashes
+new private read inputs, and resolves/fingerprints the pinned GeneGalleon code/image
+when upstream work is needed. It does not launch analyses. Use a new dataset name when changing
 the species/run selection; existing names and existing result directories cannot
 be overwritten. An optional `reference_id` column chooses a registered CDS SHA256
 when a species has multiple imported references. No automatic reassembly follows

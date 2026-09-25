@@ -26,6 +26,15 @@ cannot be pulled. A cached image still permits offline runs.
 The launcher mounts the repository automatically. Keep dataset files in `input/`
 and references in `resources/`; no additional bind settings are needed.
 
+## GeneGalleon for incremental datasets
+
+The upstream GeneGalleon dependency is pinned separately in
+[config/dataset.yaml](../config/dataset.yaml). Dataset preparation fetches its
+source and SIF only when upstream work is missing. Use
+`./run_dataset.sh fetch-software --config config/dataset.local.yaml` to prepare
+these dependencies in advance. See [pinned GeneGalleon source and SIF](datasets.md#pinned-genegalleon-source-and-sif)
+for cache reuse, local overrides, and updating the pins.
+
 ## Native execution
 
 To create/use workflow environments with host Conda:

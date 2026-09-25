@@ -5,8 +5,15 @@ analysis_config: null  # Optional override, e.g. config/reuse_odb.local.yaml.
 odb_chunk_size: 20
 
 genegalleon:
-  repository: null  # Absolute path to an existing GeneGalleon checkout.
-  image: null       # Absolute SIF path; defaults to <repository>/genegalleon.sif.
+  # Published GeneGalleon 0.7.77 source and matching multi-architecture OCI image.
+  # Update version, revision, and image_uri together; never follow latest.
+  version: "0.7.77"
+  revision: 3a6460e8a8201ab1293db1fec445fd7de063e46e
+  image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:df357fc1857c737df1cdfe17fc12b7e1fcb891353e9bac9e534fb4155b98aff3
+  image_sha256: null  # Required for an HTTPS SIF URL; optional for OCI pulls/local SIFs.
+  cache_dir: resources/software/genegalleon
+  repository: null  # Optional local checkout override; otherwise fetch the pinned source.
+  image: null       # Optional local SIF override; reuse <repository>/genegalleon.sif if present.
   settings:
     assembly_method: rnaSPAdes
     amalgkit_rrna_filter: "yes"

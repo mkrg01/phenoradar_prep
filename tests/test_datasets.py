@@ -64,6 +64,7 @@ def test_legacy_import_and_changed_metadata_only_reuses_products(dataset_project
     assert submit(path, until="quant", dry_run=True) == []
     assert not (path / "genegalleon").exists()
     assert load(path)["analysis"]["odb"]["incremental"] is True
+    assert load(path)["software_lock"] is None  # Reuse-only preparation does not acquire software.
 
 
 def test_removal_readdition_and_frozen_membership(dataset_project):
@@ -347,3 +348,42 @@ def test_extra_native_metadata_file_cannot_shift_species_array_index(dataset_pro
     with pytest.raises(ValueError, match="metadata file set changed"):
         worker(path, "assembly", 1)
     assert not (path / "genegalleon/events.jsonl").exists()
+
+
+def test_prepare_resolves_automatic_dependencies_once_and_freezes_the_lock(dataset_project, monkeypatch):
+    import dataset_software
+    root = dataset_project
+    repository = fake_genegalleon(root)
+    config_path = root / "config/dataset.yaml"
+    cfg = yaml.safe_load(config_path.read_text())
+    cfg["genegalleon"]["repository"] = None
+    cfg["genegalleon"]["image"] = None
+    config_path.write_text(yaml.safe_dump(cfg))
+    fields = ["scientific_name", "run", "taxid"]
+    write_tsv(root / "input/automatic.tsv", fields, [dict(zip(fields, ["New plant", "SRR1", "42"]))])
+    calls = []
+    def source(config):
+        calls.append("source")
+        return repository, {"kind": "downloaded_source", "identity": {"revision": config["revision"]},
+                            "files": dataset_software.source_records(repository)}
+    def image(config):
+        calls.append("image")
+        path = repository / "genegalleon.sif"
+        return path, {"kind": "downloaded_image", "identity": {"uri": config["image_uri"]},
+                      "files": [dataset_software.record(path)]}
+    monkeypatch.setattr(dataset_software, "fetch_source", source)
+    monkeypatch.setattr(dataset_software, "fetch_image", image)
+    # Planning must not fetch dependencies even when every upstream stage is missing.
+    assert plan(root, config_path, "input/automatic.tsv")[-1][0]["assembly"] == "pending"
+    assert calls == []
+    path = prepare(root, "automatic", config_path, "input/automatic.tsv")
+    manifest = load(path, check_code=True)
+    assert calls == ["source", "image"]
+    assert manifest["config"]["genegalleon"]["repository"] == str(repository)
+    assert manifest["software_lock"]["source"]["identity"]["revision"] == cfg["genegalleon"]["revision"]
+    cfg["genegalleon"]["revision"] = "f" * 40
+    config_path.write_text(yaml.safe_dump(cfg))
+    submit(path, until="assembly", dry_run=True)
+    worker(path, "assembly", 1)
+    assert calls == ["source", "image"]
+    assert load(path)["software_lock"] == manifest["software_lock"]

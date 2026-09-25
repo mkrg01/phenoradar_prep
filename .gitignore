@@ -235,3 +235,6 @@ __marimo__/
 /datasets/
 /resources/dataset_assets/
 /resources/odb_cache/
+
+# Version-pinned upstream source, containers, and runtime download cache.
+/resources/software/

@@ -12,7 +12,8 @@ See [input preparation and formats](docs/inputs.md) for upstream data from
 To add RNA-seq species incrementally, use the [dataset interface](docs/datasets.md):
 manual metadata, reuse of completed products, staged GeneGalleon Slurm arrays,
 and ODB mapping of missing species only. Removing metadata rows removes species
-from the next dataset output while retaining reusable products.
+from the next dataset output while retaining reusable products. Missing pinned
+GeneGalleon source and SIF dependencies are acquired automatically before new work.
 
 ## Requirements
 

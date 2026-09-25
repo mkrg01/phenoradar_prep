@@ -17,6 +17,7 @@ import yaml
 
 from common import atomic_writer, file_record, now, read_tsv, write_json, write_tsv
 from configuration import validate_analysis, validate_keys
+from dataset_software import resolve as resolve_software, validate as validate_software
 from dataset_assets import (COUNTS, SAFE, digest, identities, import_existing, link_file, locked,
                             normalize_private_paths, record, register_busco, register_quant, register_reference, resolve, verify)
 
@@ -64,8 +65,7 @@ def settings(root, config, analysis_config=None):
     if type(cfg.get("odb_chunk_size", 20)) is not int or cfg.get("odb_chunk_size", 20) < 1:
         raise ValueError("odb_chunk_size must be a positive integer")
     gg = cfg["genegalleon"]
-    if set(gg) - {"repository", "image", "settings"}:
-        raise ValueError("unknown genegalleon setting")
+    validate_software(gg)
     for key, value in gg.get("settings", {}).items():
         if not re.fullmatch(r"[a-z][a-z0-9_]*", key) or key.startswith("run_") or key in MANAGED:
             raise ValueError(f"managed/invalid GeneGalleon setting: {key}")
@@ -86,9 +86,9 @@ def settings(root, config, analysis_config=None):
             raise ValueError(f"invalid Slurm time: {stage}")
     cfg["store"] = str(inside(root, absolute(root, cfg["store"])))
     cfg["slurm"]["downstream_profile"] = str(absolute(root, slurm["downstream_profile"]))
-    if gg.get("repository"):
-        gg["repository"] = str(absolute(root, gg["repository"]))
-        gg["image"] = str(absolute(root, gg.get("image") or str(Path(gg["repository"]) / "genegalleon.sif")))
+    gg["cache_dir"] = str(inside(root, absolute(root, gg.get("cache_dir", "resources/software/genegalleon"))))
+    for key in ("repository", "image"):
+        if gg.get(key): gg[key] = str(absolute(root, gg[key]))
     return cfg, analysis
 
 
@@ -168,18 +168,8 @@ def prepare(root, name, config, metadata=None, analysis_config=None):
                     if not row.get(key): raise ValueError(f"private run requires {key}")
                     row[key] = str(absolute(metadata.parent, row[key]))
         write_tsv(frozen, fields, [i["row"] for i in items])
-        gg = cfg["genegalleon"]
-        gg_records = []
+        gg_records, software_lock = [], None
         needs_upstream = any(r[s] == "pending" for r in report for s in STAGES)
-        if gg.get("repository") and needs_upstream:
-            repo = Path(gg["repository"])
-            gg_records = [record(p) for p in sorted((repo / "workflow").rglob("*"))
-                          if p.is_file() and p.suffix in {".sh", ".py", ".r", ".R"}]
-            if not (repo / "workflow/gg_transcriptome_generation_entrypoint.sh").is_file():
-                raise ValueError("GeneGalleon transcriptome entrypoint not found")
-            gg_records.append(record(gg["image"]))
-        elif needs_upstream:
-            raise ValueError("configure genegalleon.repository and image for pending upstream work")
         # Pin chosen references so a later import cannot change this dataset's reference.
         for item, state in zip(items, report):
             item["reference_id"] = state["reference_id"]
@@ -213,12 +203,14 @@ def prepare(root, name, config, metadata=None, analysis_config=None):
         (staging / "slurm/config.yaml").write_text(yaml.safe_dump(profile, sort_keys=False))
         cfg["slurm"]["downstream_profile"] = str(target / "slurm")
         auxiliary["slurm/config.yaml"] = dict(record(staging / "slurm/config.yaml"), path=str(target / "slurm/config.yaml"))
+        if needs_upstream:
+            cfg["genegalleon"], gg_records, software_lock = resolve_software(cfg["genegalleon"])
         manifest = {"schema_version": 1, "name": name, "created_at": now(), "root": str(root),
                     "config": cfg, "analysis": analysis, "selection_analysis": original_analysis,
                     "requested_species": requested, "fields": fields, "items": items,
                     "metadata": dict(record(frozen), path=str(target / "metadata.tsv")),
                     "auxiliary": auxiliary, "raw_inputs": raw_records, "implementation": implementation(root),
-                    "genegalleon": gg_records}
+                    "genegalleon": gg_records, "software_lock": software_lock}
         write_json(staging / "dataset.json", manifest)
         write_tsv(staging / "plan.tsv", list(report[0]), report)
         with (staging / "analysis.yaml").open("w") as handle:
@@ -590,11 +582,11 @@ def submit(path, until="all", species=None, dry_run=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("plan", "prepare", "register"):
+    for name in ("plan", "prepare", "register", "fetch-software"):
         command = sub.add_parser(name)
         command.add_argument("--root", default=".")
         command.add_argument("--config", default="config/dataset.yaml")
-        command.add_argument("--metadata")
+        if name != "fetch-software": command.add_argument("--metadata")
         command.add_argument("--analysis-config")
         if name == "prepare": command.add_argument("--name", required=True)
         if name == "register": command.add_argument("--input-dir", default="input")
@@ -609,7 +601,7 @@ def main():
             command.add_argument("--stage", choices=STAGES, required=True)
             command.add_argument("--task-id", type=int, required=True)
     args = parser.parse_args()
-    if args.command in {"plan", "prepare", "register"}:
+    if args.command in {"plan", "prepare", "register", "fetch-software"}:
         root = Path(args.root).resolve()
         config = absolute(root, args.config)
         if args.command == "plan":
@@ -619,6 +611,12 @@ def main():
             return int(any(r["assembly"] == "conflict" for r in report))
         if args.command == "prepare":
             print(prepare(root, args.name, config, args.metadata, args.analysis_config))
+        elif args.command == "fetch-software":
+            cfg, _ = settings(root, config, args.analysis_config)
+            resolved, _, software_lock = resolve_software(cfg["genegalleon"])
+            print(json.dumps({"repository": resolved["repository"], "image": resolved["image"],
+                              "source": software_lock["source"].get("identity", {"kind": "local_source"}),
+                              "container": software_lock["container"].get("identity", {"kind": "local_image"})}, indent=2))
         else:
             cfg, analysis = settings(root, config, args.analysis_config)
             rows = import_existing(cfg["store"], absolute(root, args.input_dir),
