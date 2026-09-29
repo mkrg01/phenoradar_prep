@@ -2,15 +2,18 @@
 
 [Documentation](index.md)
 
-Missing references are prepared automatically under `resources/`. Completed
-snapshots are shared across builds and downstream runs without automatic updates. Keep their
+Missing shared taxonomy, OrthoDB, and KEGG references are prepared automatically
+under `resources/` when a requested stage needs them. GeneGalleon manages its own
+upstream references, including BUSCO data. Completed shared snapshots are reused
+across builds and downstream runs without automatic updates. Keep their
 provenance with results. TimeTree has a separate [response cache](dating.md#timetree-calibrations).
 
 ## Taxonomy reference
 
-Analysis metadata preparation creates `resources/taxonomy/taxa.sqlite` from NCBI
-taxonomy when absent, with a provenance/checksum sidecar. To refresh, archive
-`resources/taxonomy/` and prepare a new analysis.
+Build mapping and downstream metadata preparation use
+`resources/taxonomy/taxa.sqlite`, created from NCBI taxonomy when absent, with a
+provenance/checksum sidecar. To refresh, archive `resources/taxonomy/` and prepare
+a new build or analysis as appropriate.
 
 ## OrthoDB reference
 

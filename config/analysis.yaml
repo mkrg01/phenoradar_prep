@@ -1,12 +1,13 @@
 # Downstream conditions for a completed database; outputs: results/<build>/downstream/<name>/.
 # BUSCO selection is applied here, after all build samples have been mapped.
-build: results/angiosperm_leaf_20260928_samples
+# Use --name <trait>_<YYYYMMDD>, e.g. c4_photosynthesis_20260929 for trait: C4.
+build: results/angiosperm_leaf_20260928
 inputs:
   species_trait: input/species_trait.tsv
   species_list: null
   calibrations: null
 seed: 12345
-trait: carnivory
+trait: carnivory  # Trait-table column; use C4 when a C4 column is provided.
 selection:
   species_list: false
   busco_threshold: 0.5

@@ -17,7 +17,7 @@ Before [preparing analysis](datasets.md#run-an-analysis), set
 Prepare and review calibrations before dating; missing tree inference is included:
 
 ```bash
-./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --target phylogeny_calibrations
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929 --target phylogeny_calibrations
 ```
 
 Inspect `results/<build>/downstream/<analysis>/phylogeny/<set>/timetree/`: `calibrations.tsv` has bounds,
@@ -31,7 +31,7 @@ does not establish quality. Missing/conflicting calibrations stop dating.
 After that job finishes and the results are reviewed:
 
 ```bash
-./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --target timetree
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929 --target timetree
 ```
 
 `timetree` prepares missing calibrations too. Enabled dating is included in `all`;

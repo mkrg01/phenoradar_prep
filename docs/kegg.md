@@ -8,7 +8,7 @@ KEGG Orthology (KO). It uses build proteins, with assignments independent of ODB
 ## Run the branch
 
 ```bash
-./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --target kegg
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929 --target kegg
 ```
 
 Set `kegg.enabled: true` before [preparing analysis](datasets.md#run-an-analysis)

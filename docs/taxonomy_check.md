@@ -21,7 +21,7 @@ phylogeny:
 ```
 
 ```bash
-./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --target taxonomy_check
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929 --target taxonomy_check
 ```
 
 The enabled flag is required and includes reports in `all`. The target follows
@@ -44,8 +44,9 @@ for their own monophyly, and some non-monophyletic groups yield no outliers.
 There is no branch-support filter or probability of mislabeling.
 
 Flags or their absence do not verify identity: sampling, taxonomy, paralogy,
-and tree error can explain conflicts. Species-level results cannot identify a
-responsible RNA-seq run without further sequence analysis.
+and tree error can explain conflicts. Each flagged sample tip is linked to its
+RNA-seq run; establishing misidentification or contamination requires further
+sequence analysis.
 
 ## Outputs and figures
 

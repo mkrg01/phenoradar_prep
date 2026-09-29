@@ -12,7 +12,7 @@ and links other results. Keep linked source files available.
 After additional branches finish, collect again:
 
 ```bash
-./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --target phenoradar_inputs
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929 --target phenoradar_inputs
 ```
 
 The collector starts no analyses or downloads. It requires `metadata/samples.tsv`
@@ -50,7 +50,7 @@ For OG expression in PhenoRadar:
 
 ```yaml
 data:
-  tpm_path: results/angiosperm_leaf_20260925/downstream/analysis001/phenoradar_inputs/tpm.tsv
+  tpm_path: results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929/phenoradar_inputs/tpm.tsv
   species_col: species
   feature_col: orthogroup
   value_col: tpm

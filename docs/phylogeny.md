@@ -1,9 +1,11 @@
-# BUSCO trees of independent samples
+# BUSCO trees of separately assembled samples
 
 [Documentation](index.md) · [Dating](dating.md)
 
-`phylogeny` infers rooted species trees from the completed build's BUSCO full
-tables and CDS. Tree inference does not use ODB/KEGG assignments:
+`phylogeny` infers rooted trees from the completed build's BUSCO full tables and
+CDS, with one tip per analysis sample. Multiple samples of one biological species
+remain separate tips; they are not additional species or independent evolutionary
+origins. Tree inference does not use ODB/KEGG assignments:
 
 ```text
 BUSCO markers -> cdskit -> FAMSA -> trimAl/QC -> VeryFastTree -> ASTRAL-IV/CASTLES-II
@@ -30,18 +32,18 @@ original IDs fail extraction.
 Set options before [preparing analysis](datasets.md#run-an-analysis):
 
 ```yaml
-trait: carnivory
+trait: C4
 phylogeny:
   trees: [representatives]
   contrast_pairs:
     enabled: false
 ```
 
-| Tree | Inference species | Output under `results/<build>/downstream/<analysis>/` |
+| Tree | Inference samples | Output under `results/<build>/downstream/<analysis>/` |
 | --- | --- | --- |
-| `all` | All species passing input selection | `phylogeny/all/` |
-| `phenotyped` | Selected species with a nonmissing `trait` | `phylogeny/phenotyped/` |
-| `representatives` | Known-trait species compressed on the NCBI guide | `phylogeny/representatives/` |
+| `all` | All samples passing input selection | `phylogeny/all/` |
+| `phenotyped` | Selected samples whose biological species has a nonmissing `trait` | `phylogeny/phenotyped/` |
+| `representatives` | Known-trait samples compressed on the NCBI guide | `phylogeny/representatives/` |
 
 Use `trees: []` to disable inference, or list multiple trees to infer them
 independently. Each tree gets its own markers, alignments, roots, and diagnostics.
@@ -57,10 +59,10 @@ a nonempty `trees` list. Dating and taxonomy checks reject representative trees.
 
 ```bash
 # Optional input audit, marker plan, and outgroup check.
-./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --target phylogeny_prepare
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929 --target phylogeny_prepare
 
 # After that job finishes and the audit is reviewed:
-./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --target phylogeny
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929 --target phylogeny
 ```
 
 `phylogeny` includes missing preparation steps and stops at inference.
@@ -124,7 +126,7 @@ rescaling), with SH-like local supports and no bootstrap or support filtering.
 ASTRAL-IV combines gene trees, reporting local posterior probabilities and
 CASTLES-II substitution lengths. Both use the top-level `seed`.
 
-Every species must occur in a retained gene tree; review `species_coverage.tsv`.
+Every selected sample must occur in a retained gene tree; review `species_coverage.tsv`.
 Missing data, gene-tree error, paralogy, and model assumptions affect estimates.
 
 ## Resources
@@ -150,7 +152,7 @@ Under `results/<build>/downstream/<analysis>/phylogeny/<set>/`:
 | `markers/`, `alignments/raw/` | Marker inputs and raw alignments |
 | `alignments/*.faa`, `*.json`, `*.columns.tsv` | Trimmed alignments, QC, and 1-based final-to-raw columns |
 | `gene_trees/`, `gene_trees.nwk`, `gene_trees.json` | Individual/merged gene trees and diagnostics |
-| `species_coverage.tsv` | Retained locus counts per species |
+| `species_coverage.tsv` | Retained locus counts per analysis sample |
 | `species_tree.nwk`, `species_tree.json` | Rooted species tree and inference provenance |
 
 Logs/benchmarks are under `results/<build>/logs/downstream/<analysis>/phylogeny/`. Optional dating, taxonomy
@@ -165,8 +167,3 @@ review, and contrast-pair outputs live beside their source tree.
 [VeryFastTree](https://github.com/citiususc/veryfasttree) ·
 [FastTree models/support](https://morgannprice.github.io/fasttree/) ·
 [ASTRAL-IV/CASTLES-II](https://github.com/chaoszhang/ASTER/blob/master/tutorial/astral4.md)
-
-Repeated samples of the basal species can make automatic single-tip rooting
-unavailable; select an explicit sample outgroup or adjust the tree selection.
-Trees with sample tips represent sample lineages; multiple samples are not
-additional species or independent evolutionary origins.

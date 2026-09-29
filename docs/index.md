@@ -4,7 +4,7 @@
 
 1. Prepare [metadata and auxiliary inputs](inputs.md).
 2. Edit [build/analysis settings](configuration.md) and complete [initial setup](running.md#installation-and-normal-execution).
-3. [Build through ODB mapping, then run analysis](datasets.md).
+3. [Build through ODB mapping and OG expression, then run analysis](datasets.md).
 4. Review [outputs and QC](outputs.md) and use the [PhenoRadar inputs](phenoradar_inputs.md).
 
 [Slurm, retries, and targets](running.md) · [Reference data](references.md)

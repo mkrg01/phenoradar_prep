@@ -55,7 +55,7 @@ upstream species products. Edit branch settings before the first submission, inc
 
 | Analysis target | Work requested |
 | --- | --- |
-| `all` (default) | OG expression/QC and enabled branches, followed by PhenoRadar collection |
+| `all` (default) | Merge saved OG expression/QC and run enabled branches, then collect PhenoRadar inputs |
 | `alignments` | [All-copy OG alignments](alignments.md) |
 | `kegg` | [KO annotation and original-TPM sums](kegg.md) |
 | `phylogeny_prepare` | BUSCO input audit, outgroup, and marker plan |
@@ -68,6 +68,8 @@ upstream species products. Edit branch settings before the first submission, inc
 
 Phylogeny postprocessing targets require their enabled flag. Explicit `alignments`
 and `kegg` targets work without enabling their inclusion in `all`.
+For legacy bundles without saved OG expression, analysis computes it from the
+build's quantification and mappings; see [legacy outputs](outputs.md#directory-layout).
 Build endpoints are documented [separately](datasets.md#build-a-reusable-database).
 
 ## Resource budgets
@@ -77,8 +79,8 @@ Edit the relevant config's `slurm` section:
 | Setting | Controls |
 | --- | --- |
 | `partition`, `account` | Site allocation |
-| `concurrency`, `array_size` (build only) | Concurrent species tasks and array batch size |
-| `stages.assembly`, `.busco`, `.quant` (build only) | Per-species `cpus`, `mem_mb`, and Slurm `time` |
+| `concurrency`, `array_size` (build only) | Concurrent sample tasks and array batch size |
+| `stages.assembly`, `.busco`, `.quant` (build only) | Per-sample `cpus`, `mem_mb`, and Slurm `time` |
 | `stages.controller` | Controller `cpus`, `mem_mb`, and `time` |
 | `jobs` | Maximum outstanding Snakemake worker jobs (default 64), including queued jobs |
 | `rules.<rule>` | Per-rule `cpus`, `mem_mb`, and `runtime` in minutes |
@@ -100,7 +102,7 @@ Apply resource edits to an existing preparation explicitly:
 
 ```bash
 ./run_build.sh submit --build results/angiosperm_leaf_20260925 --resources config/build.yaml
-./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --resources config/analysis.yaml
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929 --resources config/analysis.yaml
 ```
 
 Only resources change; scientific settings remain frozen. See
@@ -113,7 +115,7 @@ Completed work is reused; failed or missing work is retried. Active or unresolve
 submissions block retries. A timed-out controller may leave workers running;
 inspect those too.
 
-New build IDs can reuse registered species products and ODB caches. New analysis
+New build IDs can reuse registered sample products and ODB caches. New analysis
 IDs share build products and reference caches, but do not automatically reuse
 optional alignment, KO, or tree results from another analysis.
 See [build failures](datasets.md#failure-and-recovery-behavior) and

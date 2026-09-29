@@ -2,8 +2,11 @@
 
 [Documentation](index.md) · [Configuration](configuration.md)
 
-Start with manually curated AMALGKIT metadata, one run per independent sample (multiple samples per species are allowed). Build obtains
-NCBI or local reads and uses GeneGalleon to generate CDS, BUSCO, and quantification.
+Start with manually curated AMALGKIT metadata, one run per separately processed
+sample (multiple samples per species are allowed). Build stages the metadata and
+any local FASTQs, then launches GeneGalleon for each sample. GeneGalleon retrieves
+public reads through AMALGKIT `getfastq` or processes the staged local reads,
+then performs assembly, longest-CDS extraction, BUSCO, and quantification.
 Completed products go in **`results/<build>/database/`**, not top-level `input/`.
 
 ## File formats
@@ -16,7 +19,7 @@ and exclusions; analysis auxiliary paths are under `inputs` in `analysis.yaml`.
 
 | File | When to use | Format and settings |
 | --- | --- | --- |
-| `input/metadata.tsv` | **Required:** define the species and RNA-seq runs to build. | TSV: `scientific_name`, `run`, positive NCBI `taxid`; one run per independent sample (multiple samples per species are allowed) |
+| `input/metadata.tsv` | **Required:** define the species and RNA-seq runs to build. | TSV: `scientific_name`, `run`, positive NCBI `taxid`; one run per separately processed sample (multiple samples per species are allowed) |
 | `config/excluded_accessions.tsv` | **Optional:** exclude unusable or misidentified runs from builds while retaining their metadata. | TSV: `accession`, optional `reason`; `excluded_accessions` in build settings |
 | `input/species_trait.tsv` | **Optional:** provide traits for PhenoRadar; required for phenotyped/representative trees and contrast pairs. | TSV: `species` and chosen trait column; `inputs.species_trait` and `trait` |
 | `input/species_list.txt` | **Optional:** restrict an analysis to a chosen set of candidate species; BUSCO filtering still applies. | Biological species IDs or exact analysis sample IDs, one per line; `inputs.species_list` and `selection.species_list: true` |
@@ -82,11 +85,11 @@ independent biological replicates.
 
 ## Species selection
 
-Build must complete all included species; missing products do not automatically
+Build must complete all included samples; missing products do not automatically
 exclude them. Remove unwanted runs with the
 [manual accession list](datasets.md#manually-excluding-unusable-accessions) or metadata edits.
 
-Analysis applies the optional species list, `exclude_species`, and BUSCO threshold
+Analysis applies the optional species list, `exclude_species`, and a per-sample BUSCO threshold
 `(single + duplicated) / total >= selection.busco_threshold` (default `0.5`).
 Unknown species IDs, invalid counts, duplicate identities, or an empty selection
 are errors. Metadata columns such as `exclusion` do not filter species.
@@ -101,7 +104,7 @@ Review `results/<build>/downstream/<analysis>/metadata/selection.json`, `samples
 `inputs.species_trait` supplies traits; trait columns in sample metadata are ignored.
 
 ```tsv
-species	carnivory
+species	C4
 Plant alpha	0
 Plant beta	1
 Plant gamma	NA

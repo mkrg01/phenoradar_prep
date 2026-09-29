@@ -3,8 +3,10 @@
 [![Snakemake](https://img.shields.io/badge/snakemake-≥9.0.0-brightgreen.svg)](https://snakemake.github.io)
 
 Prepare [PhenoRadar](https://github.com/mkrg01/phenoradar) inputs from [AMALGKIT](https://github.com/kfuku52/amalgkit) RNA-seq metadata.
-[GeneGalleon](https://github.com/kfuku52/genegalleon) handles assembly, BUSCO, and
-quantification; Snakemake maps CDS to OrthoDB and runs downstream analyses.
+[GeneGalleon](https://github.com/kfuku52/genegalleon) retrieves reads through AMALGKIT
+and handles assembly, longest-CDS extraction, BUSCO, and quantification.
+Snakemake translates CDS, maps proteins to OrthoDB, aggregates OG expression,
+and runs downstream analyses.
 Adding or removing samples reuses completed sample data, mappings, and OG expression.
 
 ## Requirements
@@ -16,10 +18,11 @@ Adding or removing samples reuses completed sample data, mappings, and OG expres
 ## Quick start
 
 Prepare `input/metadata.tsv` using [AMALGKIT](https://github.com/kfuku52/amalgkit).
-Edit [build.yaml](config/build.yaml) and [analysis.yaml](config/analysis.yaml)
-directly. See the [initial setup](docs/running.md#installation-and-normal-execution) and
+Edit [build.yaml](config/build.yaml) and [analysis.yaml](config/analysis.yaml).
+For the C4 analysis example below, set `trait: C4` in `analysis.yaml` and provide
+a `C4` column in the configured trait table; the supplied config uses `carnivory`.
+See the [initial setup](docs/running.md#installation-and-normal-execution) and
 [build and analysis guide](docs/datasets.md).
-Use the `name` from `config/build.yaml` in the build paths below.
 
 ```bash
 # From the repository root: create once, activate each session.
@@ -34,10 +37,10 @@ mkdir -p results
 ./run_build.sh plan > results/build_plan.tsv
 
 # Save inputs and settings, then submit the build through OG expression.
-./run_build.sh submit
+./run_build.sh submit --name angiosperm_leaf_20260925
 
 # After the build finishes, save conditions and submit downstream analyses.
-./run_analysis.sh submit --build results/angiosperm_leaf_20260925 --name analysis001
+./run_analysis.sh submit --build results/angiosperm_leaf_20260925 --name c4_photosynthesis_20260929
 ```
 
 Under `results/<name>/`, `database/` holds reusable sample data,

@@ -27,9 +27,9 @@ it does not expand biological species IDs. Invoke the low-level launcher:
 
 ```bash
 ./run_pipeline.sh --cores 1 --resources mem_gb=8 \
-  --configfile results/angiosperm_leaf_20260925/downstream/analysis001/pipeline.yaml config/export_exclusions.yaml -- filter_species
+  --configfile results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929/pipeline.yaml config/export_exclusions.yaml -- filter_species
 ./run_pipeline.sh --cores 1 --resources mem_gb=4 \
-  --configfile results/angiosperm_leaf_20260925/downstream/analysis001/pipeline.yaml config/export_exclusions.yaml -- phenoradar_inputs
+  --configfile results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929/pipeline.yaml config/export_exclusions.yaml -- phenoradar_inputs
 ```
 
 Use the same override for both commands; do not edit the frozen `pipeline.yaml`.
