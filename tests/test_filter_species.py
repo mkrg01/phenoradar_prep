@@ -17,7 +17,8 @@ from filter_species_phylogeny import read_tree
 
 ROOT = Path(__file__).resolve().parents[1]
 SPECIES = ["Plant_A", "Plant_B-x", "Plant_C", "Plant_D", "Plant_E"]
-TREE = "((Plant_A:1,Plant_B-x:2)0.9:3,(Plant_C:4,(Plant_D:5,Plant_E:6)0.8:7)0.7:8);"
+# Root on Plant_A to match species_tree.json, preserving tip-to-tip distances.
+TREE = "(Plant_A:0.5,(Plant_B-x:2,(Plant_C:4,(Plant_D:5,Plant_E:6)0.8:7)0.7:11)0.9:0.5);"
 
 
 @pytest.fixture
