@@ -18,7 +18,7 @@ phylogeny:
 ```
 
 ```bash
-./run_analysis.sh submit --analysis analyses/analysis001 --target contrast_pairs
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --target contrast_pairs
 ```
 
 The same target works for `trees: [all]`, `[phenotyped]`, `[representatives]`, or
@@ -63,7 +63,7 @@ representative results or replace inference on a newly selected species set.
 
 ## Outputs
 
-Each `results/<analysis>/phylogeny/<tree>/contrast/` directory contains:
+Each `results/<build>/downstream/<analysis>/phylogeny/<tree>/contrast/` directory contains:
 
 | Output | Contents |
 | --- | --- |

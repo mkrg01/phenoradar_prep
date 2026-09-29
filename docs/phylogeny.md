@@ -13,7 +13,7 @@ Branch lengths are substitutions/site; absolute ages require [dating](dating.md)
 
 ## Inputs
 
-CDS and full tables are staged automatically from `builds/<build>/products/`.
+CDS and full tables are staged automatically from `results/<build>/database/`.
 Analysis inherits `busco.lineage` from build settings (default `embryophyta_odb12`).
 
 Full tables need `Busco id`, `Status`, `Sequence`, `Score`, and `Length` columns,
@@ -37,7 +37,7 @@ phylogeny:
     enabled: false
 ```
 
-| Tree | Inference species | Output under `results/<analysis>/` |
+| Tree | Inference species | Output under `results/<build>/downstream/<analysis>/` |
 | --- | --- | --- |
 | `all` | All species passing input selection | `phylogeny/all/` |
 | `phenotyped` | Selected species with a nonmissing `trait` | `phylogeny/phenotyped/` |
@@ -57,10 +57,10 @@ a nonempty `trees` list. Dating and taxonomy checks reject representative trees.
 
 ```bash
 # Optional input audit, marker plan, and outgroup check.
-./run_analysis.sh submit --analysis analyses/analysis001 --target phylogeny_prepare
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --target phylogeny_prepare
 
 # After that job finishes and the audit is reviewed:
-./run_analysis.sh submit --analysis analyses/analysis001 --target phylogeny
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --target phylogeny
 ```
 
 `phylogeny` includes missing preparation steps and stops at inference.
@@ -140,7 +140,7 @@ Preparation/QC steps generally use 1 CPU/4 GB; [dating](dating.md#resources) req
 
 ## Outputs
 
-Under `results/<analysis>/phylogeny/<set>/`:
+Under `results/<build>/downstream/<analysis>/phylogeny/<set>/`:
 
 | Output | Contents |
 | --- | --- |
@@ -153,7 +153,7 @@ Under `results/<analysis>/phylogeny/<set>/`:
 | `species_coverage.tsv` | Retained locus counts per species |
 | `species_tree.nwk`, `species_tree.json` | Rooted species tree and inference provenance |
 
-Logs/benchmarks are under `logs/<analysis>/phylogeny/`. Optional dating, taxonomy
+Logs/benchmarks are under `results/<build>/logs/downstream/<analysis>/phylogeny/`. Optional dating, taxonomy
 review, and contrast-pair outputs live beside their source tree.
 
 ## Methods and source documentation

@@ -21,7 +21,7 @@ phylogeny:
 ```
 
 ```bash
-./run_analysis.sh submit --analysis analyses/analysis001 --target taxonomy_check
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --target taxonomy_check
 ```
 
 The enabled flag is required and includes reports in `all`. The target follows
@@ -49,7 +49,7 @@ responsible RNA-seq run without further sequence analysis.
 
 ## Outputs and figures
 
-Under `results/<analysis>/phylogeny/<set>/taxonomy_check/`:
+Under `results/<build>/downstream/<analysis>/phylogeny/<set>/taxonomy_check/`:
 
 | File | Use |
 | --- | --- |

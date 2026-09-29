@@ -1,4 +1,4 @@
-# Partial analysis override; set the name/build with run_analysis.sh prepare.
+# Partial analysis override; set the name/build with run_analysis.sh submit.
 selection:
   species_list: true
 inputs:

@@ -8,9 +8,10 @@ load these files by default. See the [build/analysis guide](datasets.md) for com
 
 ## Loading settings and paths
 
-Paths are relative to the repository root. `prepare` freezes settings and inputs
-under `builds/<build>/` or `analyses/<analysis>/`. Later source edits affect new
-preparations only; scientific changes require a new name. Do not edit generated
+Paths are relative to the repository root. The first `submit` freezes settings
+and inputs under `results/<build>/` or `results/<build>/downstream/<analysis>/`.
+Submitting the same name reuses those conditions, including after `--dry-run`.
+Later source edits affect new runs only; scientific changes require a new name. Do not edit generated
 `pipeline.yaml` files. `workflow/pipeline_defaults.yaml` is an internal schema.
 
 For retries with different CPU, memory, time, or concurrency, edit the phase
@@ -27,16 +28,16 @@ GeneGalleon source/image pins belong to build settings.
 
 | Build (`build.yaml`) | Analysis (`analysis.yaml`) |
 | --- | --- |
-| `name` (overridden by `prepare --name`), `metadata`, `excluded_accessions`, `store` | Completed `build` or copied `products/` bundle |
+| `name` (overridden by `submit --name`), `metadata`, `excluded_accessions`, `store` | Completed `build` or copied `database/` bundle |
 | `genegalleon` software and assembly/quant settings | `inputs` for traits, species list, and calibrations |
 | `busco.lineage`, `translation.table` | `selection.busco_threshold`, `exclude_species` |
-| `odb.node`, `odb.cache_dir`, `odb.chunk_size` | `trait`, `seed`, `tpm`, optional branches |
+| `odb.node`, `odb.cache_dir`, `odb.chunk_size`, `tpm.multimap` | `trait`, `seed`, optional branches |
 | Build `slurm` resources | Analysis `slurm` resources |
 
 Build requires complete products for every included species. The manual
 [accession list](datasets.md#manually-excluding-unusable-accessions) excludes runs
 before scheduling; BUSCO acceptance thresholds apply only in analysis.
-Analysis inherits lineage, genetic code, and ODB node from its build.
+Downstream inherits lineage, genetic code, ODB node, and TPM ambiguity policy from its database.
 
 Build always disables AMALGKIT rRNA and contamination filtering; these are not
 configurable GeneGalleon settings.
@@ -48,13 +49,17 @@ Retain the configured cache to reuse completed mappings; see [references](refere
 Analysis uses BUSCO completeness `>= selection.busco_threshold` (default `0.5`).
 `selection.species_list: true` enables `inputs.species_list`; `exclude_species`
 removes exact IDs before computation. Set `inputs.species_trait: null` when traits
-are unused. `tpm.multimap` defaults to `error`; [OG expression](outputs.md#tpm-interpretation)
-also supports `drop` and `split`.
+are unused. Build setting `tpm.multimap` defaults to `error`; [OG expression](outputs.md#tpm-interpretation)
+also supports `drop` and `split`. Set it in `config/build.yaml` before preparation;
+it is not a downstream override. Changing the policy recomputes affected expression
+products but reuses assembly, quantification, and mappings. Expression caches are
+stored under `<store>/.expression/`, keyed by sample identity, abundance content,
+mapping content, policy, and aggregation implementation.
 
 ## Optional analyses and exports
 
-Set options **before preparing the analysis**. Target examples in the guides
-assume an already prepared `analyses/analysis001`.
+Set options **before the first analysis submission**, including `--dry-run`. Target examples in the guides
+assume an already prepared `results/angiosperm_leaf_20260925/downstream/analysis001`.
 
 | Configuration section | Guide |
 | --- | --- |

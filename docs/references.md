@@ -3,7 +3,7 @@
 [Documentation](index.md)
 
 Missing references are prepared automatically under `resources/`. Completed
-snapshots are shared across builds/analyses without automatic updates. Keep their
+snapshots are shared across builds and downstream runs without automatic updates. Keep their
 provenance with results. TimeTree has a separate [response cache](dating.md#timetree-calibrations).
 
 ## Taxonomy reference
@@ -49,7 +49,7 @@ Build prepares `resources/orthodb/v12_<node>/` automatically. For separate setup
 use a prepared build's resolved config:
 
 ```bash
-sbatch --cpus-per-task=1 --mem=40G run_pipeline.sh --configfile builds/angiosperm_leaf_20260925/pipeline.yaml -- references
+sbatch --cpus-per-task=1 --mem=40G run_pipeline.sh --configfile results/angiosperm_leaf_20260925/pipeline.yaml -- references
 python workflow/scripts/verify_odb_reference.py \
   --reference resources/orthodb/v12_3193/reference.json
 ```

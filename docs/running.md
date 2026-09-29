@@ -8,6 +8,19 @@ Use Slurm on Linux x86-64/Bash with the [requirements](../README.md#requirements
 Compute nodes need host Snakemake and `singularity` on `PATH`; Apptainer must
 provide its `singularity` compatibility command.
 
+From the repository root, create the host environment once, then activate it in
+each session before running or submitting workflow commands:
+
+```bash
+conda env create -n phenoradar_prep -f environment.yaml
+conda activate phenoradar_prep
+```
+
+The launchers use Python and Snakemake from the active environment; they do not
+activate it automatically. `run_pipeline.sh` uses `snakemake` on `PATH` unless
+`SNAKEMAKE_BIN` is set. Analysis tools run inside the workflow container.
+Apptainer/Singularity and Slurm must also be available on the host.
+
 Use a published release and prepare the workflow image matching [VERSION](../VERSION)
 before the first mapping or analysis job:
 
@@ -23,9 +36,11 @@ image cache; otherwise the cached image is reused. GeneGalleon's separate
 Follow the [build/analysis commands](datasets.md) for normal execution.
 Keep imported products inside the repository, which is mounted automatically.
 
-`plan` and `prepare` run locally; `submit` validates inputs, submits Slurm jobs,
-and returns without waiting for completion. `submit --dry-run` previews submission
-scripts without submitting jobs; it does not check the full Snakemake DAG.
+`plan` previews locally. The first `submit` saves inputs and settings, validates
+them, submits Slurm jobs, and returns without waiting for completion. Submitting
+the same name uses saved conditions. `submit --dry-run` saves those conditions
+and previews job scripts without submitting; it does not check the full Snakemake
+DAG. The optional `prepare` command saves inputs and settings without job scripts.
 Use `status`, `squeue`, and the prepared run's `jobs/logs/` to inspect progress.
 
 Assembly, BUSCO, and quantification use sample arrays with `afterok` dependencies.
@@ -34,9 +49,9 @@ Each array task, controller, and worker has its own resource and time limits.
 
 ## Targets
 
-Use `run_analysis.sh submit --analysis analyses/<analysis> --target <target>`.
+Use `run_analysis.sh submit --analysis results/<build>/downstream/<analysis> --target <target>`.
 Targets include missing prerequisites within the analysis; they never rebuild
-upstream species products. Edit branch settings before `prepare`.
+upstream species products. Edit branch settings before the first submission, including `--dry-run`.
 
 | Analysis target | Work requested |
 | --- | --- |
@@ -53,7 +68,7 @@ upstream species products. Edit branch settings before `prepare`.
 
 Phylogeny postprocessing targets require their enabled flag. Explicit `alignments`
 and `kegg` targets work without enabling their inclusion in `all`.
-Build endpoints are documented [separately](datasets.md#build-through-mapping).
+Build endpoints are documented [separately](datasets.md#build-a-reusable-database).
 
 ## Resource budgets
 
@@ -84,8 +99,8 @@ slurm:
 Apply resource edits to an existing preparation explicitly:
 
 ```bash
-./run_build.sh submit --build builds/angiosperm_leaf_20260925 --resources config/build.yaml
-./run_analysis.sh submit --analysis analyses/analysis001 --resources config/analysis.yaml
+./run_build.sh submit --build results/angiosperm_leaf_20260925 --resources config/build.yaml
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --resources config/analysis.yaml
 ```
 
 Only resources change; scientific settings remain frozen. See

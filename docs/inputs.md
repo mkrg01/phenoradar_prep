@@ -4,7 +4,7 @@
 
 Start with manually curated AMALGKIT metadata, one run per independent sample (multiple samples per species are allowed). Build obtains
 NCBI or local reads and uses GeneGalleon to generate CDS, BUSCO, and quantification.
-Completed products go in **`builds/<build>/products/`**, not top-level `input/`.
+Completed products go in **`results/<build>/database/`**, not top-level `input/`.
 
 ## File formats
 
@@ -35,13 +35,15 @@ against the metadata directory; use a new run ID when read content changes.
 
 ### Generated products
 
-| Path under `builds/<build>/products/` | Format |
+| Path under `results/<build>/database/` | Format |
 | --- | --- |
 | `metadata.tsv` | Frozen metadata after run exclusions |
 | `busco/summary.tsv` | TSV: `Species` (analysis sample ID), `busco_cds_single`, `busco_cds_duplicated`, `busco_cds_fragmented`, `busco_cds_missing`, `busco_cds_total` |
 | `busco/full/{species}.busco.full.tsv` | Full BUSCO table with lineage header, for every build sample |
 | `cds/{species}_longestCDS.fa.gz` | Gzip FASTA, one per sample |
 | `quant/{species}/{run}/{run}_abundance.tsv` | TSV: `target_id`, `tpm` |
+| `expression/runs/{run}.tsv` | TSV: `species`, `run`, `orthogroup`, `tpm_sum`, `tpm` |
+| `expression/runs/{run}.qc.json` | Mapping/TPM QC, policy, and input checksums |
 | `proteins/{odb_species}_protein.fa` | Translated protein FASTA |
 | `odb/` | `snapshot.json` and verified per-species `species/*.tsv.gz` gene/OG tables |
 
@@ -91,7 +93,7 @@ are errors. Metadata columns such as `exclusion` do not filter species.
 Unresolved taxids fail unless `selection.missing_taxonomy: allow`; missing
 individual ranks are allowed.
 
-Review `results/<analysis>/metadata/selection.json`, `samples.tsv`, and
+Review `results/<build>/downstream/<analysis>/metadata/selection.json`, `samples.tsv`, and
 `busco_completeness.svg` for selection reasons, sample paths, and BUSCO QC.
 
 ## Traits

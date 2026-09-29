@@ -27,13 +27,13 @@ it does not expand biological species IDs. Invoke the low-level launcher:
 
 ```bash
 ./run_pipeline.sh --cores 1 --resources mem_gb=8 \
-  --configfile analyses/analysis001/pipeline.yaml config/export_exclusions.yaml -- filter_species
+  --configfile results/angiosperm_leaf_20260925/downstream/analysis001/pipeline.yaml config/export_exclusions.yaml -- filter_species
 ./run_pipeline.sh --cores 1 --resources mem_gb=4 \
-  --configfile analyses/analysis001/pipeline.yaml config/export_exclusions.yaml -- phenoradar_inputs
+  --configfile results/angiosperm_leaf_20260925/downstream/analysis001/pipeline.yaml config/export_exclusions.yaml -- phenoradar_inputs
 ```
 
 Use the same override for both commands; do not edit the frozen `pipeline.yaml`.
-Filtering writes `results/<analysis>/filtered/`, preserves the original analysis,
+Filtering writes `results/<build>/downstream/<analysis>/filtered/`, preserves the original analysis,
 and never starts producer jobs. It validates completed branches and reports
 missing/incomplete ones in `manifest.json`. Rerunning refreshes from the originals;
 removing an exclusion restores that species. To recreate deleted export files,

@@ -4,30 +4,41 @@
 
 ## Directory layout
 
-Build `name` in `config/build.yaml` (or `prepare --name`) and analysis
-`prepare --name` determine these directories:
+Build `name` in `config/build.yaml` (or `submit --name`) and analysis
+`submit --name` determine these directories:
 
 | Path | Contents |
 | --- | --- |
 | `input/` | User-maintained metadata, traits, and other auxiliary inputs |
-| `builds/<build>/` | Frozen build settings/metadata, GeneGalleon workspace, and job records |
-| `builds/<build>/products/` | Completed portable CDS/BUSCO/quant, proteins, mappings, and provenance |
-| `results/build_<build>/` | Build translation and mapping outputs |
-| `analyses/<analysis>/` | Frozen analysis settings/inputs and job records |
-| `results/<analysis>/` | Downstream results |
-| `work/<run>/`, `logs/<run>/` | Retained work and rule logs; run is `build_<build>` or `<analysis>` |
+| `results/<build>/` | Frozen build settings/metadata, completion and job records |
+| `results/<build>/database/` | Portable CDS/BUSCO/quant, proteins, mappings, per-sample OG expression, and provenance |
+| `results/<build>/work/` | Staged inputs, GeneGalleon workspace, translation/mapping/expression computation, and downstream work |
+| `results/<build>/downstream/<analysis>/` | Frozen conditions/inputs, job records, and downstream results |
+| `results/<build>/logs/{database,downstream/<analysis>}/` | Rule logs and benchmarks |
 | `resources/` | Shared reference/software caches and species-product registry |
 
 New CDS/BUSCO/quant files originate in the build's
-`genegalleon/output/transcriptome_assembly/` workspace. Phase-local `input/`
+`work/genegalleon/<sample>/output/transcriptome_assembly/` workspace. Staged input
 directories contain staged links/copies; they are separate from top-level `input/`.
 Copy the [completed products bundle](datasets.md#copying-a-completed-build-to-another-project)
-for reuse elsewhere. Treat generated products as immutable.
+for reuse elsewhere. Treat generated products as immutable. The database stores
+`expression/runs/<run>.tsv` (both `tpm_sum` and normalized `tpm`) and
+`expression/runs/<run>.qc.json`. Downstream selects and merges these saved values;
+it does not recompute them. Proteins and mapping tables are staged only when a
+requested downstream branch needs them.
+
+The new layout applies to newly prepared builds and downstream runs. Existing
+`builds/`, `analyses/`, and old top-level `results/<run>/`, `work/`, and `logs/`
+are not moved automatically. Frozen records and caches can reference those paths.
+Old schema-3/4 `products/` bundles remain readable; downstream computes their
+missing OG expression with the default `error` ambiguity policy. Prepare a new
+build to publish a database with a different policy. Resume old frozen jobs with
+their original workflow checkout; code verification still applies.
 
 ## Result files
 
 ```text
-results/<analysis>/
+results/<build>/downstream/<analysis>/
   run.json                          # Configuration and provenance
   metadata/                         # Selection, samples, traits, BUSCO QC
   proteins/                         # Proteins reused from the build
@@ -68,7 +79,7 @@ are zero. Each row is an independent sample; multiple samples may belong to the 
 - `tpm`: retained OG values rescaled to one million per run, describing relative
   expression within the retained OG set.
 
-Duplicate gene/OG pairs count once. `tpm.multimap` controls genes mapped to
+Duplicate gene/OG pairs count once. `tpm.multimap` in **config/build.yaml** controls genes mapped to
 multiple OGs:
 
 | Policy | Behavior |

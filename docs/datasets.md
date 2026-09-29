@@ -2,9 +2,16 @@
 
 [Documentation](index.md) · [Configuration](configuration.md)
 
-`run_build.sh` prepares reusable sample products through ODB mapping.
+`run_build.sh` prepares a reusable sample database through ODB mapping and OG expression.
 `run_analysis.sh` selects samples from a completed build and produces expression,
-alignment, phylogeny, and PhenoRadar outputs.
+alignment, phylogeny, and PhenoRadar outputs under `results/<build>/downstream/<name>/`.
+
+The boundary separates sample-independent work from work on a chosen sample set.
+Assembly, BUSCO, quantification, mapping, and OG expression can be reused when
+samples are added or removed. Selecting samples, combining tables, aligning genes,
+and inferring trees belong to downstream conditions. A changed BUSCO threshold or
+trait therefore needs a new downstream name, while retaining the same database.
+`run_build.sh` and `run_analysis.sh` remain the command names.
 
 ## Prepare a manually curated dataset
 
@@ -14,7 +21,7 @@ local-read paths. Keep known unusable runs in the
 [manual exclusion list](#manually-excluding-unusable-accessions).
 
 Edit `config/build.yaml` and `config/analysis.yaml` directly. These are the default
-configs; `prepare` freezes settings and inputs for each named run. Install the
+configs; the first `submit` freezes settings and inputs for each named run. Install the
 [workflow environment](../environment.yaml) and prepare the
 [workflow image](running.md#installation-and-normal-execution) before submitting mapping or analysis jobs.
 
@@ -32,38 +39,42 @@ Software is cached under `genegalleon.cache_dir`; `repository` and `image` allow
 local overrides. Incompatible product conditions are reported as conflicts;
 use a separate `store` for a deliberate rebuild with different conditions.
 
-## Build through mapping
+## Build a reusable database
 
 Set `name` in `config/build.yaml`, for example `angiosperm_leaf_20260925`.
-Use a new name for each build; `prepare --name NAME` overrides the config.
+Use a new name for changed inputs or settings; `submit --name NAME` overrides the config.
 Names are literal: update the date yourself, adding `_v2` for same-day revisions.
 
 ```bash
-./run_build.sh plan
-./run_build.sh prepare
-./run_build.sh submit --build builds/angiosperm_leaf_20260925 --until busco --dry-run
-./run_build.sh submit --build builds/angiosperm_leaf_20260925 --until busco
-./run_build.sh status --build builds/angiosperm_leaf_20260925
+mkdir -p results
+./run_build.sh plan > results/build_plan.tsv
+./run_build.sh submit
+./run_build.sh status --build results/angiosperm_leaf_20260925
 
-# After inspection, finish the build:
-./run_build.sh submit --build builds/angiosperm_leaf_20260925 --until mapping
+# To stop a new build at BUSCO for inspection:
+./run_build.sh submit --name busco_check --until busco
+# After inspection, finish that build:
+./run_build.sh submit --name busco_check --until database
 ```
 
-Endpoints are `assembly`, `busco`, `quant`, and `mapping` (default). Each includes
+Endpoints are `assembly`, `busco`, `quant`, and `database` (default).
+`mapping` remains a compatibility alias for the full database endpoint. Each includes
 missing prerequisites; assembly includes longest-CDS generation. Every sample
-remaining after run exclusions must finish CDS, full BUSCO, quantification, and
-mapping. BUSCO acceptance thresholds apply later, in analysis.
+remaining after run exclusions must finish CDS, full BUSCO, quantification,
+mapping, and per-sample OG expression. BUSCO acceptance thresholds apply later, in downstream selection.
 
-The plan reports `reuse`, `pending`, or `conflict`. ODB reuse is confirmed after
+Review `results/build_plan.tsv` before submission (for example, with
+`less -S results/build_plan.tsv`). The plan reports `reuse`, `pending`, or `conflict`.
+ODB reuse is confirmed after
 translation provides protein hashes. Conflicts stop preparation/submission.
 For a pilot, add `--species-list pilot.txt` to `submit`; later submit without it
 to finish all species. An incomplete pilot does not start mapping or publish a
 completed build.
 
-After successful mapping and validation, build publishes
-**`builds/<id>/products/`** and `completed.json`. New CDS/BUSCO/quant files are not
+After successful mapping, OG expression, and validation, build publishes
+**`results/<id>/database/`** and `completed.json`. New CDS/BUSCO/quant files are not
 written to the top-level `input/`; see the [output layout](outputs.md#directory-layout).
-If mapping was run separately, `run_build.sh complete --build builds/<id>`
+If the low-level `database` target was run separately, `run_build.sh complete --build results/<id>`
 validates and publishes it. Normal submission does this automatically.
 
 ## Run an analysis
@@ -72,30 +83,45 @@ In `analysis.yaml`, choose the BUSCO threshold, species selection, traits, and
 optional branches. Set `build` there or pass `--build`:
 
 ```bash
-./run_analysis.sh plan --build builds/angiosperm_leaf_20260925
-./run_analysis.sh prepare --build builds/angiosperm_leaf_20260925 --name analysis001
-./run_analysis.sh submit --analysis analyses/analysis001 --dry-run
-./run_analysis.sh submit --analysis analyses/analysis001
-./run_analysis.sh status --analysis analyses/analysis001
+./run_analysis.sh plan --build results/angiosperm_leaf_20260925
+./run_analysis.sh submit --build results/angiosperm_leaf_20260925 --name analysis001
+./run_analysis.sh status --analysis results/angiosperm_leaf_20260925/downstream/analysis001
 ```
 
-Analysis reuses verified proteins and mappings; it never runs assembly, BUSCO,
-CDS translation, or ODB-mapper. Missing or modified build products cause an error.
+Downstream reuses verified proteins, mappings, and per-sample OG expression;
+it never runs assembly, BUSCO, CDS translation, or ODB-mapper. Missing or modified build products cause an error.
 Multiple analyses can share one build, inheriting its lineage, genetic code, and
 ODB node. Optional analysis outputs are not automatically shared across analysis IDs.
 
 `exclude_species` accepts biological `species_id` values (all samples of that species) or exact analysis sample IDs **before computation**.
 `inputs.species_trait` supplies traits (`null` when unused); other auxiliary inputs
 are described in [configuration](configuration.md). Changed inputs or scientific
-settings require a new analysis name. Names beginning with `build_` are reserved.
+settings require a new downstream name within the collection. Different collections
+may use the same downstream name.
 
-The default target `all` collects `results/<analysis>/phenoradar_inputs/` on success.
+The default target `all` collects `results/<build>/downstream/<analysis>/phenoradar_inputs/` on success.
 Use `submit --target phylogeny` or another [analysis target](running.md#targets)
 for partial execution; collect again after additional branches finish.
 
 ## Slurm and retries
 
-`submit` validates inputs, submits jobs, and returns without waiting for completion.
+The first `submit` saves inputs and settings, validates them, submits jobs, and
+returns without waiting for completion. Repeating the same command reuses saved
+conditions. Source edits require a new build or downstream name; resource changes
+can be applied with `--resources`.
+
+Add `--dry-run` to save the conditions and preview job scripts without submitting.
+This also fixes the conditions for that name; remove `--dry-run` to submit them.
+To save inputs without generating job scripts, the optional `prepare` command is
+still available. `plan` previews current inputs and settings without saving a run.
+
+Existing runs can also be submitted directly, without their source configs:
+
+```bash
+./run_build.sh submit --build results/angiosperm_leaf_20260925
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001
+```
+
 CDS translations are cached by CDS content and genetic code and reused automatically.
 
 Assembly/BUSCO/quant use sample arrays; mapping and analysis use Snakemake
@@ -155,7 +181,7 @@ absent from current metadata too, so future metadata preparation can avoid them.
 Edit metadata and prepare a **new build ID**. Added species run missing work;
 removed species leave the new outputs. Historical builds and caches remain.
 Changing a run creates a new sample ID and requires its own assembly, BUSCO,
-quantification, and mapping. Existing samples reuse their own completed products.
+quantification, mapping, and OG expression. Existing samples reuse their own completed products.
 Mappings are stored per sample; updating membership links only the selected tables.
 There is no combined mapping database to rebuild.
 
@@ -166,18 +192,21 @@ whether their contents are temporary; the current store and cache paths under
 
 ## Copying a completed build to another project
 
-Copy **`builds/<id>/products/` as a unit**, including its manifest, metadata,
-CDS/BUSCO/quant, proteins, ODB mappings, and provenance. Put it inside the destination
-project, for example `imports/baseline/`:
+Copy **`results/<id>/database/` as a unit**, including its manifest, metadata,
+CDS/BUSCO/quant, proteins, ODB mappings, OG expression, and provenance. Put it inside the destination
+project, for example `results/baseline/database/`:
 
 ```bash
-./run_analysis.sh prepare --build imports/baseline --name analysis001
-./run_analysis.sh submit --analysis analyses/analysis001
+./run_analysis.sh submit --build results/baseline --name analysis001
 ```
 
 Analysis needs no registration or original reads/workspaces. The destination
 supplies analysis settings, traits, software, and shared reference resources.
-Both `builds/<id>/` and its `products/` directory are valid build arguments.
+Both `results/<id>/` and its `database/` directory are valid build arguments.
+A renamed local database uses the destination collection name for downstream
+outputs. Bundles elsewhere inside the project are also accepted; downstream goes
+to `results/<manifest-build-id>/downstream/`. If that ID conflicts with a local
+build, copy the bundle under a unique `results/<name>/database/` first.
 Products are immutable; publication may use hard links, so never edit them in place.
 
 

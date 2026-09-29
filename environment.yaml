@@ -1,4 +1,4 @@
-# Minimal environment for container generation; tests use tests/environment.yaml.
+# Host environment for workflow execution and container generation; tests use tests/environment.yaml.
 # Workflow users may install Snakemake by any supported method.
 channels:
   - conda-forge

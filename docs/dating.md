@@ -17,10 +17,10 @@ Before [preparing analysis](datasets.md#run-an-analysis), set
 Prepare and review calibrations before dating; missing tree inference is included:
 
 ```bash
-./run_analysis.sh submit --analysis analyses/analysis001 --target phylogeny_calibrations
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --target phylogeny_calibrations
 ```
 
-Inspect `results/<analysis>/phylogeny/<set>/timetree/`: `calibrations.tsv` has bounds,
+Inspect `results/<build>/downstream/<analysis>/phylogeny/<set>/timetree/`: `calibrations.tsv` has bounds,
 `candidates.tsv` explains selection, and `studies.tsv` lists sources. Check
 `provenance.json` for `status: ready` and review the ancestors and supporting studies.
 
@@ -31,7 +31,7 @@ does not establish quality. Missing/conflicting calibrations stop dating.
 After that job finishes and the results are reviewed:
 
 ```bash
-./run_analysis.sh submit --analysis analyses/analysis001 --target timetree
+./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/analysis001 --target timetree
 ```
 
 `timetree` prepares missing calibrations too. Enabled dating is included in `all`;
@@ -83,7 +83,7 @@ LSD2 does not correct upstream topology or substitution-length errors.
 
 ## Check the results
 
-Under `results/<analysis>/phylogeny/<set>/dating/`:
+Under `results/<build>/downstream/<analysis>/phylogeny/<set>/dating/`:
 
 | File | Use |
 | --- | --- |
@@ -136,7 +136,7 @@ left intact; new runs publish only LSD2 outputs as declared workflow products.
 ## Resources
 
 `date_busco_species_tree` requires **one CPU** and defaults to **4 GB per species set**.
-Check `logs/<analysis>/phylogeny/<set>/benchmarks/dating.tsv` and adjust memory/time
+Check `results/<build>/logs/downstream/<analysis>/phylogeny/<set>/benchmarks/dating.tsv` and adjust memory/time
 with [rule overrides](running.md#resource-budgets). Known basal-edge optimization
 avoids an all-edge root search. Actual runtime depends on the tree and constraints.
 
