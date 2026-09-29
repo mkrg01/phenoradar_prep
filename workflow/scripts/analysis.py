@@ -13,6 +13,7 @@ from pathlib import Path
 import yaml
 from build_products import load_complete
 from portable_build import completion_path, input_entries
+from sample_identity import select_samples
 from common import now, read_tsv, write_json
 from configuration import validate_analysis, validate_keys
 from dataset import absolute, implementation, inside, load_execution
@@ -48,17 +49,19 @@ def settings(root, config, build=None):
     if type(threshold) not in (int,float) or not 0 <= threshold <= 1: raise ValueError('selection.busco_threshold must be between 0 and 1')
     names = set(completed['products'])
     requested = names
+    sample_rows = [dict(p['row'], species=name) for name, p in completed['products'].items()]
     inputs = cfg['inputs']
     if resolved['selection']['species_list']:
         if not inputs.get('species_list'): raise ValueError('selection.species_list requires inputs.species_list')
         values = absolute(root, inputs['species_list']).read_text().splitlines()
-        if not values or len(values) != len(set(values)) or set(values) - names:
+        if not values or len(values) != len(set(values)):
             raise ValueError('species list must contain unique species from the completed build')
-        requested = set(values)
+        requested = select_samples(sample_rows, values)
     exclusions = resolved['exclude_species']
-    if not isinstance(exclusions,list) or any(not isinstance(s,str) for s in exclusions) or len(exclusions) != len(set(exclusions)) or set(exclusions) - names:
+    if not isinstance(exclusions,list) or any(not isinstance(s,str) for s in exclusions) or len(exclusions) != len(set(exclusions)):
         raise ValueError('exclude_species must contain unique species from the completed build')
-    requested = requested - set(exclusions)
+    exclusions = select_samples(sample_rows, exclusions)
+    requested = requested - exclusions
     report = []
     for name, product in sorted(completed['products'].items()):
         counts = product['counts']

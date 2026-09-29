@@ -42,6 +42,9 @@ def ncbi_tree(samples, taxonomy_db, output, taxids):
         if db.execute("SELECT version FROM stats").fetchone()[0] != DB_VERSION:
             raise ValueError("taxonomy snapshot schema differs from ETE; prepare a compatible snapshot")
     rows = species_rows(samples)
+    groups = {}
+    for name, row in rows.items():
+        groups.setdefault(row["taxid"], []).append(name)
     write_tsv(taxids, ["leaf_name", "taxid"],
               [{"leaf_name": name, "taxid": row["taxid"]} for name, row in rows.items()])
     Path(output).parent.mkdir(parents=True, exist_ok=True)
@@ -49,12 +52,20 @@ def ncbi_tree(samples, taxonomy_db, output, taxids):
         cache = Path(tmp) / "ete4"
         cache.mkdir()
         (cache / "taxa.sqlite").symlink_to(database)
-        args = SimpleNamespace(taxid_tsv=str(taxids), species_list=None, backbone="ncbi", rank="no",
+        unique = Path(tmp) / "unique_taxids.tsv"
+        write_tsv(unique, ["leaf_name", "taxid"], [{"leaf_name": names[0], "taxid": tid} for tid, names in groups.items()])
+        args = SimpleNamespace(taxid_tsv=str(unique), species_list=None, backbone="ncbi", rank="no",
                                download_dir=tmp, outfile=str(Path(tmp) / "tree.nwk"), collapse=False,
                                outformat=9, quoted_node_names=False)
         constrain_main(args)
         from ete4 import Tree
         tree = Tree(Path(args.outfile).read_text(), parser=9)
+        for leaf in list(tree.leaves()):
+            names = groups[rows[leaf.name]["taxid"]]
+            if len(names) > 1:
+                leaf.name = ""
+                for name in names:
+                    leaf.add_child(name=name)
         if set(tree.leaf_names()) != set(rows):
             raise ValueError("NCBI guide tree lost or added species; check taxids")
         with atomic_writer(output) as handle:

@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 
 from common import file_record, now, read_tsv, write_json, write_tsv
+from sample_identity import species_id, traits_for_samples
 
 
 def read_species_traits(path, column="C4"):
@@ -30,19 +31,21 @@ def read_species_traits(path, column="C4"):
 
 
 def select_phenotyped(samples, traits, outdir, trait="C4", min_taxa=4):
-    """Keep every selected species with an observed trait, including state zero."""
+    """Keep every sample of species with an observed trait, including state zero."""
     rows = read_tsv(samples)
-    annotation = read_species_traits(traits, trait)
+    annotation = traits_for_samples(rows, read_species_traits(traits, trait))
     species = {r["species"] for r in rows}
     eligible = {n for n in species if annotation.get(n, "") != ""}
-    if len(eligible) < min_taxa:
-        raise ValueError(f"phylogeny requires at least {min_taxa} phenotyped species; found {len(eligible)} for {trait}")
+    taxa = {species_id(r) for r in rows if r["species"] in eligible}
+    if len(taxa) < min_taxa:
+        raise ValueError(f"phylogeny requires at least {min_taxa} phenotyped species; found {len(taxa)} for {trait}")
     out = Path(outdir)
     write_tsv(out / "samples.tsv", list(rows[0]), [r for r in rows if r["species"] in eligible])
     write_json(out / "selection.json", {
         "created_at": now(), "samples": file_record(samples), "species_trait": file_record(traits),
-        "trait": trait, "min_taxa": min_taxa, "dataset_species": len(species),
-        "inference_species": len(eligible), "missing_trait_species": sorted(species - eligible),
+        "trait": trait, "min_taxa": min_taxa,
+        "dataset_species": len({species_id(r) for r in rows}), "dataset_samples": len(species),
+        "inference_species": len(taxa), "inference_samples": len(eligible), "missing_trait_species": sorted(species - eligible),
         "missing_trait_rows": sorted(species - set(annotation)),
     })
 

@@ -13,7 +13,7 @@ def load_complete(path, verify_files=True):
     from portable_build import completion_path, load_products
     path = completion_path(path)
     data = json.loads(path.read_text())
-    if data.get('kind') != 'completed_build' or data.get('schema_version') != 3:
+    if data.get('kind') != 'completed_build' or data.get('schema_version') not in (3, 4):
         raise ValueError('legacy build products: register their input files and ODB snapshot to prepare a new build')
     if digest({k:v for k,v in data.items() if k != 'sha256'}) != data.get('sha256'):
         raise ValueError('build completion record changed')
@@ -71,7 +71,7 @@ def complete(path):
         files.extend(manifest['auxiliary'].values())
         files.extend(record(path / n) for n in ('build.json','pipeline.yaml','checksums.json','metadata.tsv'))
         for p in products.values(): files.extend([p['protein'], p['translation']])
-        data = {'schema_version':3, 'kind':'completed_build', 'build_id':manifest['name'], 'created_at':now(),
+        data = {'schema_version':4, 'kind':'completed_build', 'build_id':manifest['name'], 'created_at':now(),
                 'input':str(inputs), 'fields':manifest['fields'],
                 'translation':manifest['analysis']['translation'], 'lineage':manifest['analysis']['phylogeny']['lineage'],
                 'odb':{'version':'v12','node':manifest['analysis']['odb']['node']},

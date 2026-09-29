@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from common import atomic_writer, file_record, now, read_tsv, write_json, write_tsv
 from phylogeny_root import nwkit_backend, species_rows
 from species_traits import read_species_traits
+from sample_identity import species_id, traits_for_samples
 
 
 def skim(tree, rows, prefix, seed, contrastive=False, topology_only=False):
@@ -51,7 +52,7 @@ def skim(tree, rows, prefix, seed, contrastive=False, topology_only=False):
 def prepare(samples, metadata, traits, tree, outdir, trait="C4", seed=12345):
     from ete4 import Tree
     rows = species_rows(samples)
-    annotation = read_species_traits(traits, trait)
+    annotation = traits_for_samples(rows.values(), read_species_traits(traits, trait))
     scores = {r["species"]: float(r["busco_percent"]) for r in read_tsv(metadata)}
     eligible = {n for n in rows if annotation.get(n, "") != ""}
     states = sorted({annotation[n] for n in eligible})
@@ -68,16 +69,19 @@ def prepare(samples, metadata, traits, tree, outdir, trait="C4", seed=12345):
     skim_rows = [{"leaf_name": n, "trait": annotation[n], "busco_percent": scores[n]} for n in sorted(eligible)]
     all_rows, sampled = skim(guide, skim_rows, out / "ncbi_skim", seed, topology_only=True)
     representatives = {r["leaf_name"] for r in sampled}
-    if len(representatives) < 4:
+    if len({species_id(rows[n]) for n in representatives}) < 4:
         raise ValueError("fewer than four representative species; BUSCO inference requires four")
     write_tsv(out / "samples.tsv", list(next(iter(rows.values()))), [rows[n] for n in sorted(representatives)])
-    write_tsv(out / "traits.tsv", ["species", "trait", "busco_percent", "role"],
-              [{"species": n, "trait": annotation.get(n, ""), "busco_percent": scores[n],
+    write_tsv(out / "traits.tsv", ["species", "species_id", "trait", "busco_percent", "role"],
+              [{"species": n, "species_id": species_id(rows[n]), "trait": annotation.get(n, ""), "busco_percent": scores[n],
                 "role": "observed" if n in eligible else "missing_trait"}
                for n in rows])
     write_json(out / "selection.json", {"created_at": now(), "species_trait": file_record(traits),
-               "trait": trait, "states": states, "dataset_species": len(rows),
-               "observed_species": len(eligible), "inference_species": len(representatives),
+               "trait": trait, "states": states,
+               "dataset_species": len({species_id(r) for r in rows.values()}), "dataset_samples": len(rows),
+               "observed_species": len({species_id(rows[n]) for n in eligible}), "observed_samples": len(eligible),
+               "inference_species": len({species_id(rows[n]) for n in representatives}),
+               "inference_samples": len(representatives),
                "missing_trait_rows": sorted(set(rows) - set(annotation)), "seed": seed,
                "nwkit": "0.27.0", "ncbi_tree": file_record(tree)})
 
@@ -148,7 +152,9 @@ def summarize_tree(inferred, rows, all_traits, tip_for_species, outdir, trait, s
     second_group = {r["leaf_name"]: r["group"] for r in second_all}
     final_reps = {r["group"]: r["leaf_name"] for r in second_reps}
     members = {name: second_group[tip] for name, tip in tip_for_species.items()}
-    counts = Counter(members.values())
+    sample_counts = Counter(members.values())
+    taxa = {r["species"]: r.get("species_id", r["species"]) for r in all_traits}
+    counts = {g: len({taxa[n] for n, group in members.items() if group == g}) for g in sample_counts}
     candidates = {}
     for row in contrast_reps:
         candidates.setdefault(int(row["contrastive_clade"]), []).append(row)
@@ -168,24 +174,27 @@ def summarize_tree(inferred, rows, all_traits, tip_for_species, outdir, trait, s
         pairs.append({"contrast_pair_id": pair_id, "state_a": left["trait"], "state_b": right["trait"],
                       "representative_a": left["leaf_name"], "representative_b": right["leaf_name"],
                       "group_a": groups[0], "group_b": groups[1],
-                      "n_species_a": counts[groups[0]], "n_species_b": counts[groups[1]]})
+                      "n_species_a": counts[groups[0]], "n_species_b": counts[groups[1]],
+                      "n_samples_a": sample_counts[groups[0]], "n_samples_b": sample_counts[groups[1]]})
     metadata = []
     for row in all_traits:
         name = row["species"]
         group = members.get(name, "")
-        metadata.append({"species": name, trait: row["trait"],
+        metadata.append({"species": name, "species_id": taxa[name], trait: row["trait"],
                          "role": "outgroup" if name == outgroup else row["role"],
                          "group": group, "representative": final_reps.get(group, ""),
                          "is_representative": int(final_reps.get(group) == name),
                          "n_species_in_group": counts.get(group, ""),
+                         "n_samples_in_group": sample_counts.get(group, ""),
                          "contrast_pair_id": paired_groups.get(group, "")})
     fields = ["contrast_pair_id", "state_a", "state_b", "representative_a", "representative_b",
-              "group_a", "group_b", "n_species_a", "n_species_b"]
+              "group_a", "group_b", "n_species_a", "n_species_b", "n_samples_a", "n_samples_b"]
     write_tsv(out / "contrast_pairs.tsv", fields, pairs)
-    write_tsv(out / "species_metadata.tsv", ["species", trait, "role", "group", "representative",
-              "is_representative", "n_species_in_group", "contrast_pair_id"], metadata)
+    write_tsv(out / "species_metadata.tsv", ["species", "species_id", trait, "role", "group", "representative",
+              "is_representative", "n_species_in_group", "n_samples_in_group", "contrast_pair_id"], metadata)
     report = {"created_at": now(), "trait": trait, "nwkit": "0.27.0", "outgroup": outgroup,
-               "summary_species": len(second_reps), "contrast_pairs": len(pairs), "seed": seed,
+               "summary_species": len({taxa[r["leaf_name"]] for r in second_reps}),
+               "summary_samples": len(second_reps), "contrast_pairs": len(pairs), "seed": seed,
                "unresolved_contrastive_clades": unresolved, **provenance}
     write_json(out / "summary.json", report)
     return report
@@ -198,17 +207,19 @@ def from_tree(tree, tree_qc, samples, metadata, traits, outdir, trait="C4", seed
     if len(set(exclude_species)) != len(exclude_species):
         raise ValueError("duplicate excluded species IDs")
     if not isinstance(trait, str) or not trait.strip() or trait in {
-            "species", "role", "group", "representative", "is_representative", "n_species_in_group", "contrast_pair_id"}:
+            "species", "species_id", "role", "group", "representative", "is_representative",
+            "n_species_in_group", "n_samples_in_group", "contrast_pair_id"}:
         raise ValueError("trait must name a non-reserved phenotype column")
     if type(seed) is not int or seed <= 0:
         raise ValueError("seed must be a positive integer")
-    names = {r["species"] for r in read_tsv(samples)}
+    sample_rows = read_tsv(samples)
+    names = {r["species"] for r in sample_rows}
     qc = json.loads(Path(tree_qc).read_text())
     if qc.get("species") != len(names):
         raise ValueError("species-tree QC differs from species manifest")
     outgroup = qc.get("outgroup")
     inferred = rooted_tree(tree, names, outgroup)
-    annotation = read_species_traits(traits, trait)
+    annotation = traits_for_samples(sample_rows, read_species_traits(traits, trait))
     retained = names - set(exclude_species)
     eligible = {n for n in retained if annotation.get(n, "") != ""}
     states = sorted({annotation[n] for n in eligible})
@@ -234,14 +245,17 @@ def from_tree(tree, tree_qc, samples, metadata, traits, outdir, trait="C4", seed
             inferred.prune(sorted(eligible), preserve_branch_length=True)
             handle.write(inferred.write(parser=0) + "\n")
     rows = [{"leaf_name": n, "trait": annotation[n], "busco_percent": scores[n]} for n in sorted(eligible)]
-    all_traits = [{"species": n, "trait": annotation.get(n, ""),
+    taxa = {r["species"]: species_id(r) for r in sample_rows}
+    all_traits = [{"species": n, "species_id": taxa[n], "trait": annotation.get(n, ""),
                    "role": "observed" if n in eligible else "missing_trait"} for n in sorted(retained)]
     return summarize_tree(inferred, rows, all_traits, {n: n for n in eligible}, out, trait, seed, outgroup,
                           {"mode": "inferred_tree", "inferred_tree": file_record(tree),
                            "tree_qc": file_record(tree_qc), "samples": file_record(samples),
                            "metadata": file_record(metadata), "species_trait": file_record(traits),
-                           "source_species": len(names), "retained_species": len(retained),
-                           "observed_species": len(eligible), "states": states,
+                           "source_species": len(set(taxa.values())), "source_samples": len(names),
+                           "retained_species": len({taxa[n] for n in retained}), "retained_samples": len(retained),
+                           "observed_species": len({taxa[n] for n in eligible}), "observed_samples": len(eligible),
+                           "states": states,
                            "excluded_species": sorted(names - retained),
                            "missing_trait_species": sorted(retained - eligible),
                            "rooting": "source_root_inherited", "outgroup_in_observed_tree": outgroup in eligible,

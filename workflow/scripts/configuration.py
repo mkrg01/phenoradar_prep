@@ -52,7 +52,7 @@ def validate_keys(config):
         if not isinstance(trait, str) or not trait.strip():
             raise ValueError("trait must name a column in input/species_trait.tsv")
         if trait in {"species", "role", "group", "representative", "is_representative",
-                     "n_species_in_group", "contrast_pair_id"}:
+                     "n_species_in_group", "n_samples_in_group", "species_id", "contrast_pair_id"}:
             raise ValueError("trait conflicts with a reserved output column")
     phylogeny = config.get("phylogeny", {})
     if "trees" in phylogeny:

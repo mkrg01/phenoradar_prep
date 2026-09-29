@@ -17,7 +17,7 @@ defaults to 4 CPUs/8 GB; see [resource overrides](running.md#resource-budgets).
 
 ## Input requirements
 
-Gene IDs must be `{species}_g{number}`: exact metadata species ID and nonnegative
+Gene IDs must be `{analysis_sample_id}_g{number}`: exact computational sample ID and nonnegative
 integer. Proteins must be nonempty and ungapped (A–Z and `*`). Invalid inputs or
 altered ungapped residues fail validation.
 

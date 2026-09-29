@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Reuse BUSCO full tables and selected samples' CDS, with cdskit preparation."""
 import argparse
+from sample_identity import species_id
 from collections import Counter, OrderedDict, defaultdict
 from functools import lru_cache
 import gzip
@@ -175,7 +176,7 @@ def unique_species(samples):
         if species in result and row["cds"] != result[species]["cds"]:
             raise ValueError(f"conflicting CDS inputs for {species}")
         result[species] = row
-    if len(result) < 4:
+    if len({species_id(r) for r in result.values()}) < 4:
         raise ValueError("phylogeny requires at least four selected species")
     return dict(sorted(result.items()))
 
@@ -187,6 +188,8 @@ def plan(samples, outdir, settings, outgroup_file=None):
     if settings["outgroup"] not in species:
         raise ValueError("phylogeny.outgroup must name a selected species; it is required for CASTLES-II branch lengths")
     counts, lengths = Counter(), Counter()
+    represented = defaultdict(set)
+    taxa = {species_id(r) for r in species.values()}
     manifest, universe = [], None
     for name, row in species.items():
         table = busco_full_path(settings["busco_full_dir"], name, settings["lineage"])
@@ -199,16 +202,17 @@ def plan(samples, outdir, settings, outgroup_file=None):
             raise ValueError(f"missing sequence input: {sequence}")
         for marker, hit in complete.items():
             counts[marker] += 1
+            represented[marker].add(species_id(row))
             lengths[marker] += hit[3]
-        manifest.append({"species": name, "busco_table": str(table.resolve()),
+        manifest.append({"species": name, "species_id": species_id(row), "busco_table": str(table.resolve()),
                          "sequences": str(sequence.resolve()),
                          "single_copy_hits": len(complete), "busco_sha256": file_record(table)["sha256"]})
     stats = []
     for marker in sorted(universe):
-        occupancy = counts[marker] / len(species)
+        occupancy = len(represented[marker]) / len(taxa)
         mean_length = lengths[marker] / counts[marker] if counts[marker] else 0
-        eligible = counts[marker] >= settings["min_taxa"]
-        stats.append({"marker": marker, "species": counts[marker], "occupancy": occupancy,
+        eligible = len(represented[marker]) >= settings["min_taxa"]
+        stats.append({"marker": marker, "species": len(represented[marker]), "samples": counts[marker], "occupancy": occupancy,
                       "mean_busco_length": mean_length,
                       "eligible": eligible, "selection_rank": "", "selected": False})
     # Coverage is the only biological ranking criterion. Break ties by ID for

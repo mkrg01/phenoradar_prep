@@ -212,7 +212,7 @@ def test_multiple_runs_per_species_reject_export_and_preserve_previous_collectio
         rows = read_tsv(path)
         rows.append({**rows[0], "run": "Replicate"})
         write_tsv(path, list(rows[0]), rows)
-    with pytest.raises(ValueError, match="multiple runs per species.*Plant_A"):
+    with pytest.raises(ValueError, match="multiple runs per sample key.*Plant_A"):
         export(snapshot, out)
     assert (out / "tpm.tsv").read_bytes() == previous_tpm
 

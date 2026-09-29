@@ -60,9 +60,9 @@ reused without rebuilding a global database.
 
 ## TPM interpretation
 
-Long tables contain `species`, `run`, `orthogroup`, and `tpm_sum` or `tpm`.
+Long tables contain `species` (analysis sample ID), `run`, `orthogroup`, and `tpm_sum` or `tpm`.
 Wide tables have one row per run and one column per OG; missing combinations
-are zero. Build currently requires one run per species.
+are zero. Each row is an independent sample; multiple samples may belong to the same biological species.
 
 - `tpm_sum`: original TPM summed by OG, excluding unmapped genes.
 - `tpm`: retained OG values rescaled to one million per run, describing relative
@@ -83,6 +83,5 @@ aggregation. [KO expression](kegg.md#outputs) uses different normalization and
 missing-value rules.
 
 The [collector](phenoradar_inputs.md) creates `phenoradar_inputs/tpm.tsv` with
-exactly `species`, `orthogroup`, and `tpm`, preserving source values. It rejects
-multiple runs per species rather than averaging them; run-level tables remain
+exactly `species`, `orthogroup`, and `tpm`, preserving source values. Each sample ID must identify exactly one run; it never averages biological samples; run-level tables remain
 available for QC.

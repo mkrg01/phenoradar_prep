@@ -254,8 +254,10 @@ class Export:
         self.counts[relative] = dict(before=before, after=after)
 
     def metadata(self, trait="C4"):
+        from sample_identity import species_id
         self.input(self.source / "metadata/samples.tsv")
         retained = [r for r in self.rows if r["species"] in self.keep]
+        retained_taxa = {species_id(r) for r in retained}
         write_tsv(self.stage / "metadata/samples.tsv", self.fields, retained)
         write_tsv(self.stage / "excluded_samples.tsv", ["species", "run", "scientific_name", "taxid"],
                   [{k: r[k] for k in ["species", "run", "scientific_name", "taxid"]}
@@ -276,7 +278,7 @@ class Export:
                 if name in seen:
                     raise ValueError("duplicate normalized species in phenotype table: " + name)
                 seen.add(name)
-                if name in self.keep:
+                if name in retained_taxa:
                     rows.append({**row, "species": name})
             write_tsv(self.stage / "metadata/species_trait.tsv", fields, rows)
         selected = self.stage / "metadata/metadata_high_busco.tsv"
@@ -485,7 +487,7 @@ def export(source, exclusions, outdir=None, traits=None, contrast_trait="C4", se
                    "contrast": {"trait": contrast_trait, "seed": seed},
                    "code": [file_record(Path(__file__).with_name(name)) for name in
                             ["filter_species.py", "filter_species_phylogeny.py", "contrast_pairs.py",
-                             "plot_contrast_tree.py", "species_traits.py", "phylogeny_root.py",
+                             "plot_contrast_tree.py", "species_traits.py", "sample_identity.py", "phylogeny_root.py",
                              "phenoradar_metadata.py", "layout.py", "common.py"]],
                    "policies": {"sequence_inference_recomputed": False,
                                 "contrast_pairs": "recomputed from completed molecular trees after exclusions; NCBI representative analysis untouched",

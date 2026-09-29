@@ -13,6 +13,7 @@ from pathlib import Path
 
 from common import file_record, read_tsv, sha256, write_json
 from translate_cds import fasta_ids
+from sample_identity import annotate
 
 COUNTS = ["busco_cds_single", "busco_cds_duplicated", "busco_cds_fragmented", "busco_cds_missing", "busco_cds_total"]
 SAFE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
@@ -31,24 +32,30 @@ def identities(metadata):
         rows = list(reader)
     if not rows:
         raise ValueError("metadata must contain at least one species")
-    species, runs, odb_names = set(), set(), set()
+    species, runs, odb_names, taxids = set(), set(), set(), {}
     result = []
     for row in rows:
         if None in row or any(v is None for v in row.values()):
             raise ValueError("malformed metadata row")
         name = row["scientific_name"]
-        label = name.replace(" ", "_")
+        row = annotate(row)
+        label = row["analysis_sample_id"]
         odb = label.replace("-", "_")
         if not SAFE.fullmatch(label) or not SAFE.fullmatch(row["run"]):
             raise ValueError(f"unsafe species/run: {name!r}, {row['run']!r}")
         if label in species or row["run"] in runs or odb in odb_names:
-            raise ValueError("dataset metadata requires one row/run per species and unique normalized identities")
+            raise ValueError("dataset metadata requires unique runs and normalized sample identities")
         if not row["taxid"].isdigit() or int(row["taxid"]) < 1:
             raise ValueError(f"positive taxid required: {name}")
+        taxon = row["species_id"]
+        if taxon in taxids and taxids[taxon] != row["taxid"]:
+            raise ValueError(f"conflicting taxids for the same species: {name}")
+        taxids[taxon] = row["taxid"]
         if row.get("reference_id") and not re.fullmatch(r"[0-9a-f]{64}", row["reference_id"]):
             raise ValueError("reference_id must be a registered CDS SHA256")
         species.add(label); runs.add(row["run"]); odb_names.add(odb)
         result.append({"species": label, "odb_species": odb, "row": row})
+    fields = list(fields) + [k for k in ("species_id", "analysis_sample_id") if k not in fields]
     return fields, sorted(result, key=lambda r: r["species"])
 
 
@@ -179,8 +186,11 @@ def register_reference(store, item, cds, provenance=None):
             verify(ref["cds"])
             if ref["taxid"] != item["row"]["taxid"]:
                 raise ValueError("registered species taxid differs from metadata")
+            if ref.get("schema_version", 1) >= 2 and any(ref[k] != item["row"][k] for k in ("species_id", "run")):
+                raise ValueError("registered sample identity differs from metadata")
         else:
-            ref = {"schema_version": 1, "species": item["species"], "taxid": item["row"]["taxid"],
+            ref = {"schema_version": 2, "species": item["species"], "taxid": item["row"]["taxid"],
+                   "species_id": item["row"]["species_id"], "run": item["row"]["run"],
                    "reference_id": entry["sha256"], "cds": entry, "provenance": provenance or {"source": "legacy"}}
             write_json(path, ref)
     return ref
@@ -241,6 +251,8 @@ def resolve(store, item, lineage, need_full=False):
     ref = json.loads(candidates[0].read_text())
     if ref["taxid"] != item["row"]["taxid"] or ref["species"] != item["species"]:
         raise ValueError(f"registered identity differs: {item['species']}")
+    if ref.get("schema_version", 1) >= 2 and any(ref[k] != item["row"][k] for k in ("species_id", "run")):
+        raise ValueError("registered sample identity differs from metadata")
     verify(ref["cds"])
     bus = candidates[0].parent / "busco.json"
     bus = json.loads(bus.read_text()) if bus.exists() else None
@@ -286,6 +298,9 @@ def import_existing(store, input_dir, metadata, lineage="embryophyta_odb12", exc
             result.append({"species": species, "run": run, "status": "excluded"}); continue
         cds = root / "cds" / f"{species}_longestCDS.fa.gz"
         if not cds.is_file():
+            legacy = root / "cds" / f"{item["row"]["species_id"]}_longestCDS.fa.gz"
+            if legacy.is_file():
+                raise ValueError("legacy species-only products require migrate_sample_ids.py")
             result.append({"species": species, "status": "no_cds"}); continue
         ref = register_reference(store, item, cds)
         fulls = [p for p in (root / "busco/full").glob(f"{species}*full*") if p.is_file()]
@@ -293,7 +308,7 @@ def import_existing(store, input_dir, metadata, lineage="embryophyta_odb12", exc
         fulls = [p for p in fulls if p.name in {f"{species}.busco.full.tsv", f"{species}_busco.full.tsv", f"{species}.busco.full.tsv.gz", f"{species}_busco.full.tsv.gz"}]
         if len(fulls) > 1:
             raise ValueError(f"multiple legacy BUSCO full tables: {species}")
-        summary = summaries.get(item["row"]["scientific_name"])
+        summary = summaries.get(species)
         if summary or fulls:
             register_busco(store, ref, summary, fulls[0] if fulls else None, lineage=lineage)
         abundance = root / "quant" / species / run / f"{run}_abundance.tsv"

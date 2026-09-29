@@ -42,7 +42,7 @@ descriptions are not downloaded.
 ## Data checks and downstream use
 
 Collection validates identities, values, checksums, alignments, and tree tips.
-The OG export requires one run per species and never averages runs. It removes
+The OG export requires one run per sample ID and never averages runs. It removes
 the `run` column while preserving source TPM values, already rescaled to one
 million per run. See [TPM interpretation](outputs.md#tpm-interpretation).
 
@@ -69,3 +69,9 @@ Normal `analysis.yaml` exclusions apply before analysis; collection needs no ext
 filtering. For a [post hoc export](species_filter.md), run `filter_species` first
 and collect with the same low-level override. Collection then requires the matching
 `filtered/` snapshot and does not mix it with unfiltered results.
+
+The historical `species` column carries the analysis sample ID everywhere in
+the export, including expression, metadata, tree tips and gene prefixes.
+`metadata/samples.tsv` supplies the sample-to-biological-species mapping.
+Multiple samples of one species remain separate observations with inherited
+species traits; consumers should use that mapping when grouping biological species.

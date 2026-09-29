@@ -49,7 +49,7 @@ if "representatives" in PHY["trees"]:
             traits=INPUTS["species_trait"],
             tree=f"{ROOTING}/ncbi_tree.nwk",
             code=f"{SCRIPTS}/contrast_pairs.py",
-            helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/phylogeny_root.py"]
+            helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/phylogeny_root.py", f"{SCRIPTS}/sample_identity.py"]
         output:
             samples=f"{REPRESENTATIVES}/selection/samples.tsv",
             traits=f"{REPRESENTATIVES}/selection/traits.tsv",
@@ -75,7 +75,7 @@ if "representatives" in PHY["trees"]:
                 outgroup=f"{REPRESENTATIVES}/rooting/outgroup.txt",
                 selection=rules.select_contrast_representatives.output,
                 code=f"{SCRIPTS}/contrast_pairs.py",
-                helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/phylogeny_root.py"]
+                helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/phylogeny_root.py", f"{SCRIPTS}/sample_identity.py"]
             output:
                 tree=f"{CONTRAST}/summary_tree.nwk",
                 all=f"{CONTRAST}/summary_tree.all.tsv",
@@ -124,7 +124,7 @@ rule identify_phylogeny_contrast_pairs:
         metadata=f"{META}/metadata_high_busco.tsv",
         traits=INPUTS["species_trait"],
         code=f"{SCRIPTS}/contrast_pairs.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/phylogeny_root.py"]
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/phylogeny_root.py", f"{SCRIPTS}/sample_identity.py"]
     output:
         observed=f"{PHYLO_RUN}/contrast/observed_tree.nwk",
         tree=f"{PHYLO_RUN}/contrast/summary_tree.nwk",

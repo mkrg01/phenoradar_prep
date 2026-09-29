@@ -82,3 +82,7 @@ Pairs describe sampled trait contrasts, not independent evolutionary origins.
 NCBI-inherited membership is not molecularly tested for every species, and
 assignments have no branch-support filter. Pair IDs belong to each result and
 can change with species membership or exclusions.
+
+Traits are looked up by biological `species_id` and inherited by every sample.
+Pair membership and representatives use analysis sample IDs. `n_species_*`
+counts distinct biological species, while `n_samples_*` counts sample tips.

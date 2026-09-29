@@ -224,7 +224,7 @@ def test_snakemake_reuses_species_tree_without_gene_inputs(check_inputs, workflo
     cfg = {"run_name": "test", "phylogeny": {"trees": ["all"], "taxonomy_check": {"enabled": True, "ranks": ["family"]}}}
     environment = command_environment({"python": sys.executable})
     wrapper = project / "workflow/CheckSnakefile"
-    wrapper.parent.mkdir()
+    wrapper.parent.mkdir(exist_ok=True)
     for name in ["scripts", "rules", "envs"]:
         (wrapper.parent / name).symlink_to(ROOT / "workflow" / name, target_is_directory=True)
     wrapper.write_text("\n".join(line for line in (ROOT / "workflow/Snakefile").read_text().splitlines()

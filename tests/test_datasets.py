@@ -24,6 +24,12 @@ def dataset_project(tmp_path, tiny_inputs):
     root = tmp_path / "project"
     root.mkdir()
     shutil.copytree(ROOT / "config", root / "config")
+    # Keep synthetic stores independent of the active dataset's cutover paths.
+    build_config = root / "config/build.yaml"
+    cfg = yaml.safe_load(build_config.read_text())
+    cfg["store"] = "resources/dataset_assets"
+    cfg["odb"]["cache_dir"] = "resources/odb_cache"
+    build_config.write_text(yaml.safe_dump(cfg))
     shutil.copytree(ROOT / "profiles", root / "profiles")
     shutil.copytree(ROOT / "workflow", root / "workflow", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy2(ROOT / "run_pipeline.sh", root / "run_pipeline.sh")
@@ -40,7 +46,26 @@ def dataset_project(tmp_path, tiny_inputs):
             statuses.extend([state] * int(row[key]))
         (full / f"{species}.busco.full.tsv").write_text("# The lineage dataset is: embryophyta_odb12\n" + "".join(
             f"M{i}\t{state}\t{species}_g1\t100\t3\n" for i,state in enumerate(statuses)))
+    # New builds consume sample-prefixed products; low-level legacy fixtures remain separate.
+    from relabel_sample import relabel
+    from sample_identity import annotate
+    original_rows = read_tsv(metadata)
+    summaries = {r["Species"]: r for r in read_tsv(root / "input/busco/summary.tsv")}
+    upgraded = []
+    for raw in original_rows:
+        row = annotate(raw)
+        old, new, run = row["species_id"], row["analysis_sample_id"], row["run"]
+        relabel(root / "input/cds" / f"{old}_longestCDS.fa.gz", root / "input/cds" / f"{new}_longestCDS.fa.gz", old, new)
+        relabel(full / f"{old}.busco.full.tsv", full / f"{new}.busco.full.tsv", old, new, "busco")
+        relabel(root / "input/quant" / old / run / f"{run}_abundance.tsv", root / "input/quant" / new / run / f"{run}_abundance.tsv", old, new, "quant")
+        upgraded.append(dict(summaries[raw["scientific_name"]], Species=new))
+    write_tsv(root / "input/busco/summary.tsv", list(upgraded[0]), upgraded)
     return root
+
+
+def native_events(build):
+    return [json.loads(line) for p in sorted((build / "genegalleon").glob("*/events.jsonl"))
+            for line in p.read_text().splitlines()]
 
 
 def imported(root):
@@ -103,13 +128,14 @@ def test_prepare_rejects_invalid_config_name(dataset_project, name):
     assert not (root / "builds").exists()
 
 
-def test_manual_metadata_unique_species_and_normalized_collisions(tmp_path):
+def test_manual_metadata_allows_multiple_runs_with_unique_sample_identities(tmp_path):
     path = tmp_path / "metadata.tsv"
     fields = ["scientific_name", "run", "taxid"]
-    for names in (("Alpha plant", "Alpha plant"), ("Beta sp-X", "Beta sp_X")):
-        write_tsv(path, fields, [dict(zip(fields, [name, f"R{i}", "42"])) for i, name in enumerate(names)])
-        with pytest.raises(ValueError, match="one row/run per species"):
-            identities(path)
+    write_tsv(path, fields, [dict(zip(fields, ["Alpha plant", f"R{i}", "42"])) for i in range(2)])
+    assert len(identities(path)[1]) == 2
+    write_tsv(path, fields, [dict(zip(fields, ["Alpha plant", "R1", "42"]))] * 2)
+    with pytest.raises(ValueError, match="unique runs"):
+        identities(path)
 
 
 def test_legacy_import_and_changed_metadata_only_reuses_products(dataset_project):
@@ -141,9 +167,9 @@ def test_removal_readdition_and_frozen_membership(dataset_project):
     second = prepare(root, "removed", cfg)
     second_input = materialize(second)
     assert [r["scientific_name"] for r in read_tsv(second_input / "metadata.tsv")] == ["Alpha plant"]
-    assert not (second_input / "cds/Beta_sp-X_longestCDS.fa.gz").exists()
-    assert [p.name for p in (second_input / "quant").iterdir()] == ["Alpha_plant"]
-    assert (store / "Beta_sp-X").exists()
+    assert not (second_input / "cds/Beta_sp-X_B1_longestCDS.fa.gz").exists()
+    assert [p.name for p in (second_input / "quant").iterdir()] == ["Alpha_plant_A1"]
+    assert (store / "Beta_sp-X_B1").exists()
     write_tsv(metadata, list(original[0]), original)
     third = prepare(root, "restored", cfg)
     assert submit(third, until="quant", dry_run=True) == []
@@ -151,7 +177,7 @@ def test_removal_readdition_and_frozen_membership(dataset_project):
     assert len(read_tsv(first_input / "metadata.tsv")) == 3
 
 
-def test_changed_run_only_requires_quant_and_missing_is_not_silently_dropped(dataset_project):
+def test_changed_run_requires_independent_assembly_and_missing_is_not_silently_dropped(dataset_project):
     root = dataset_project
     imported(root)
     metadata = root / "input/metadata.tsv"
@@ -159,10 +185,10 @@ def test_changed_run_only_requires_quant_and_missing_is_not_silently_dropped(dat
     rows[0]["run"] = "Anew"
     write_tsv(metadata, list(rows[0]), rows)
     report = plan(root, root / "config/build.yaml")[-1]
-    assert [report[0][s] for s in ("assembly", "busco", "quant")] == ["reuse", "reuse", "pending"]
+    assert [report[0][s] for s in ("assembly", "busco", "quant")] == ["pending", "pending", "pending"]
     fake_genegalleon(root)
     path = prepare(root, "newrun", root / "config/build.yaml")
-    with pytest.raises(ValueError, match="dataset incomplete: Alpha_plant: quant"):
+    with pytest.raises(ValueError, match="dataset incomplete: Alpha_plant_Anew: reference, busco, quant"):
         materialize(path)
     assert not (path / "input").exists()
 
@@ -170,8 +196,8 @@ def test_changed_run_only_requires_quant_and_missing_is_not_silently_dropped(dat
 def test_modified_registered_cds_is_a_conflict(dataset_project):
     root = dataset_project
     imported(root)
-    cds = root / "input/cds/Alpha_plant_longestCDS.fa.gz"
-    with gzip.open(cds, "wt") as handle: handle.write(">Alpha_plant_g1\nATGCCC\n")
+    cds = root / "input/cds/Alpha_plant_A1_longestCDS.fa.gz"
+    with gzip.open(cds, "wt") as handle: handle.write(">Alpha_plant_A1_g1\nATGCCC\n")
     report = plan(root, root / "config/build.yaml")[-1]
     assert report[0]["assembly"] == "conflict"
     assert "registered file changed" in report[0]["reason"]
@@ -270,14 +296,14 @@ def test_staged_workers_reuse_and_native_array_filename_order(dataset_project, m
     assert "--dependency=afterok:JOB_ID_assembly" in commands[1]
     for stage in ("assembly", "busco", "quant"):
         for index in (1, 2): worker(path, stage, index)
-    events = [json.loads(line) for line in (path / "genegalleon/events.jsonl").read_text().splitlines()]
-    assert [e["species"] for e in events] == ["New_plant", "New_plant_alba"] * 3
+    events = native_events(path)
+    assert sorted(e["species"] for e in events) == sorted(["New_plant", "New_plant_alba"] * 3)
     for event in events:
         assert event["env"]["GG_TRANSCRIPTOME_AMALGKIT_RRNA_FILTER"] == "no"
         assert event["env"]["GG_TRANSCRIPTOME_AMALGKIT_CONTAM_FILTER"] == "no"
     assert all(r["quant"] == "reuse" for r in status(path))
     worker(path, "assembly", 1)
-    assert len((path / "genegalleon/events.jsonl").read_text().splitlines()) == 6
+    assert len(native_events(path)) == 6
     assert submit(path, until="quant", dry_run=True) == []
     assert len(read_tsv(materialize(path) / "metadata.tsv")) == 2
 
@@ -291,7 +317,7 @@ def test_failed_stage_is_not_registered_and_retry_is_limited(dataset_project, mo
     monkeypatch.delenv("FAKE_GG_FAIL_ASSEMBLY")
     worker(path, "assembly", 1)
     assert status(path)[0]["assembly"] == "reuse"
-    assert list((path / "jobs/incomplete/New_plant/assembly").rglob("*.gz"))
+    assert list((path / "jobs/incomplete/New_plant_SRR1/assembly").rglob("*.gz"))
     worker(path, "busco", 1)
     monkeypatch.setenv("FAKE_GG_INCOMPLETE_MERGE", "1")
     with pytest.raises(ValueError, match="quant/merge did not finish"): worker(path, "quant", 1)
@@ -357,9 +383,9 @@ def test_private_relative_reads_are_frozen_and_reuse_detects_changed_bytes(datas
     cfg = root / "config/build.yaml"
     path = prepare(root, "private", cfg, "input/private.tsv")
     submit(path, until="quant", dry_run=True)
-    staged = path / "genegalleon/input/reads/Private_plant/read1_path.fastq"
+    staged = path / "genegalleon/Private_plant_LOCAL1/input/reads/Private_plant_LOCAL1/read1_path.fastq"
     assert staged.read_bytes() == reads.read_bytes()
-    assert read_tsv(path / "genegalleon/input/amalgkit_metadata/Private_plant_metadata.tsv")[0]["read1_path"] == "/workspace/input/reads/Private_plant/read1_path.fastq"
+    assert read_tsv(path / "genegalleon/Private_plant_LOCAL1/input/amalgkit_metadata/Private_plant_metadata.tsv")[0]["read1_path"] == "/workspace/input/reads/Private_plant_LOCAL1/read1_path.fastq"
     original = reads.read_bytes()
     reads.write_text("changed after submission")
     with pytest.raises(ValueError, match="registered file changed"):
@@ -384,7 +410,7 @@ def test_retry_quarantine_does_not_touch_another_species_with_same_prefix(datase
     with pytest.raises(subprocess.CalledProcessError): worker(path, "assembly", 1)
     monkeypatch.delenv("FAKE_GG_FAIL_ASSEMBLY")
     worker(path, "assembly", 2)
-    other = path / "genegalleon/output/transcriptome_assembly/assembled_transcripts_with_isoforms/New_plant_alba_isoform.fa.gz"
+    other = path / "genegalleon/New_plant_alba_SRR2/output/transcriptome_assembly/assembled_transcripts_with_isoforms/New_plant_alba_isoform.fa.gz"
     other.parent.mkdir(parents=True, exist_ok=True)
     other.write_bytes(b"completed output of another species")
     worker(path, "assembly", 1)
@@ -421,10 +447,10 @@ def test_split_slurm_arrays_preserve_species_identity_and_bound_concurrency(data
 def test_extra_native_metadata_file_cannot_shift_species_array_index(dataset_project):
     path = new_dataset(dataset_project)
     submit(path, until="assembly", dry_run=True)
-    (path / "genegalleon/input/amalgkit_metadata/Aardvark_backup.tsv").write_text("unexpected metadata")
+    (path / "genegalleon/New_plant_SRR1/input/amalgkit_metadata/Aardvark_backup.tsv").write_text("unexpected metadata")
     with pytest.raises(ValueError, match="metadata file set changed"):
         worker(path, "assembly", 1)
-    assert not (path / "genegalleon/events.jsonl").exists()
+    assert not native_events(path)
 
 
 def test_prepare_resolves_automatic_dependencies_once_and_freezes_the_lock(dataset_project, monkeypatch):

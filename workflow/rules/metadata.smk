@@ -4,7 +4,7 @@ if not Path(TAXONOMY_DB).exists():
     rule prepare_taxonomy:
         input:
             code=f"{SCRIPTS}/prepare_taxonomy.py",
-            helpers=[f"{SCRIPTS}/snapshot_taxonomy.py", f"{SCRIPTS}/common.py"]
+            helpers=[f"{SCRIPTS}/snapshot_taxonomy.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
         output:
             database=TAXONOMY_DB,
             provenance=f"{TAXONOMY_DB}.json"
@@ -24,7 +24,7 @@ checkpoint select_metadata:
         taxonomy=TAXONOMY_DB,
         subset=[SPECIES_LIST] if config["selection"]["species_list"] else [],
         code=f"{SCRIPTS}/prepare_metadata.py",
-        common=f"{SCRIPTS}/common.py"
+        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
     output:
         samples=f"{META}/samples.tsv",
         all_metadata=f"{META}/metadata_all.tsv",
@@ -59,7 +59,7 @@ rule prepare_phenoradar_metadata:
         metadata=f"{META}/metadata_high_busco.tsv",
         traits=[PHENORADAR_TRAITS] if PHENORADAR_TRAITS else [],
         code=f"{SCRIPTS}/phenoradar_metadata.py",
-        helpers=[f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/common.py"]
+        helpers=[f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
     output: f"{META}/species_metadata.tsv"
     params:
         trait=config["trait"],

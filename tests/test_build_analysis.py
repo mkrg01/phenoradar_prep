@@ -89,14 +89,14 @@ def test_complete_build_multiple_analyses_and_species_updates(dataset_project,fa
     receipt = complete(build)
     original = receipt.read_bytes()
     assert dataset.submit(build,dry_run=True) == []
-    assert set(load_complete(build)['products']) == {'Alpha_plant','Beta_sp-X','Gamma_plant'}
+    assert set(load_complete(build)['products']) == {'Alpha_plant_A1','Beta_sp-X_B1','Gamma_plant_G1'}
     assert len(events.read_text().splitlines()) == 1
     # Both analyses use the same completed proteins/mappings, with no mapper or translator rules.
     cfg = yaml.safe_load((root/'config/analysis.yaml').read_text())
     cfg['inputs']['species_trait'] = None
     cfg['phylogeny']['trees'] = []; cfg['phylogeny']['contrast_pairs']['enabled'] = False
     config = root/'analysis.local.yaml'
-    for name,threshold,expected in [('loose',0.5,{'Alpha_plant','Beta_sp-X'}),('strict',0.7,{'Alpha_plant'})]:
+    for name,threshold,expected in [('loose',0.5,{'Alpha_plant_A1','Beta_sp-X_B1'}),('strict',0.7,{'Alpha_plant_A1'})]:
         cfg['selection']['busco_threshold'] = threshold
         config.write_text(yaml.safe_dump(cfg))
         run = analysis.prepare(root,name,config,build)
@@ -128,16 +128,16 @@ def test_complete_build_multiple_analyses_and_species_updates(dataset_project,fa
         updated = dataset.prepare(root,name,root/'config/build.yaml')
         assert dataset.submit(updated,until='quant',dry_run=True) == []
         dataset.materialize(updated); execute(updated,'mapping',mapping=True); complete(updated)
-        assert set(load_complete(updated)['products']) == {r['scientific_name'].replace(' ','_') for r in rows}
+        assert set(load_complete(updated)['products']) == {r['scientific_name'].replace(' ','_')+'_'+r['run'] for r in rows}
         assert len(events.read_text().splitlines()) == 1
         assert [r['run'] for r in load_complete(updated)['excluded_runs']] == [r['run'] for r in blocked]
         if name == 'removed':
             subset = analysis.prepare(root,'without_excluded',config,updated)
             execute(subset,'all'); execute(subset,'phenoradar_inputs')
-            assert {r['species'] for r in read_tsv(root/'results/without_excluded/phenoradar_inputs/tpm.tsv')} == {'Alpha_plant'}
+            assert {r['species'] for r in read_tsv(root/'results/without_excluded/phenoradar_inputs/tpm.tsv')} == {'Alpha_plant_A1'}
             assert len(events.read_text().splitlines()) == 1
     # A completion record never legitimizes changed or deleted artifacts.
-    protein = Path(load_complete(build)['products']['Alpha_plant']['protein']['path'])
+    protein = Path(load_complete(build)['products']['Alpha_plant_A1']['protein']['path'])
     protein.write_text('changed\n')
     with pytest.raises(ValueError,match='registered file changed'):
         analysis.load(run)

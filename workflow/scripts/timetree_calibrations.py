@@ -73,10 +73,12 @@ def cached_response(taxids, cache_dir, delay=REQUEST_DELAY_SECONDS, backend=None
 def species_taxids(metadata, database, names):
     """Resolve input/merged/subspecies taxids to species using the local snapshot."""
     identifiers = defaultdict(set)
+    biological = {}
     with open(metadata, newline="") as handle:
         for row in csv.DictReader(handle, delimiter="\t"):
             if row.get("species") in names and row.get("taxid", "").isdigit():
                 identifiers[row["species"]].add(int(row["taxid"]))
+                biological[row["species"]] = row.get("species_id", row["species"])
     mapping, report = {}, []
     with sqlite3.connect(Path(database).resolve().as_uri() + "?mode=ro", uri=True) as db:
         for name in sorted(names):
@@ -101,9 +103,11 @@ def species_taxids(metadata, database, names):
                            "species_taxid": mapping.get(name, ""),
                            "ncbi_name": next(iter(resolved))[1] if len(resolved) == 1 else "",
                            "status": "resolved" if len(resolved) == 1 else "unresolved_or_conflicting"})
-    duplicates = {taxid for taxid, count in Counter(mapping.values()).items() if count > 1}
+    by_taxid = defaultdict(set)
+    for name, taxid in mapping.items():
+        by_taxid[taxid].add(biological[name])
     for row in report:
-        if row["species_taxid"] in duplicates:
+        if len(by_taxid[row["species_taxid"]]) > 1:
             mapping.pop(row["species"], None)
             row["status"] = "duplicate_species_taxid"
     return mapping, report
@@ -156,7 +160,7 @@ def study_records(payload):
 def interpret_response(payload, query, mapping):
     """Require observed taxa on every child lineage, finite bounds and studies."""
     row = {**query, "status": "excluded", "reason": "", "mrca_id": "", "studies": 0,
-           "query_taxids": sorted(mapping[s] for s in query["query_taxa"]),
+           "query_taxids": sorted({mapping[s] for s in query["query_taxa"]}),
            "used_taxa": [], "used_taxids": [], "missing_taxids": [], "study_records": [],
            "min_age_ma": None, "age_ma": None, "max_age_ma": None,
            "url": "", "retrieved_at": "", "cache": None}
@@ -260,6 +264,12 @@ def prepare(tree, metadata, taxonomy_db, outdir, cache_dir):
     for node, query in node_queries(tree, mapping):
         if not all(query["children"]):
             candidates.append(interpret_response(None, query, mapping))
+            continue
+        child_taxids = [{mapping[s] for s in child} for child in query["children"]]
+        if any(a & b for i, a in enumerate(child_taxids) for b in child_taxids[i + 1:]):
+            row = interpret_response(None, query, mapping)
+            row["reason"] = "shared_species_between_children"
+            candidates.append(row)
             continue
         payload, raw, path = cached_response([mapping[s] for s in query["query_taxa"]], cache_dir)
         queries += 1

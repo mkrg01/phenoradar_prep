@@ -2,14 +2,14 @@
 
 [Documentation](index.md) · [Configuration](configuration.md)
 
-`run_build.sh` prepares reusable species products through ODB mapping.
-`run_analysis.sh` selects species from a completed build and produces expression,
+`run_build.sh` prepares reusable sample products through ODB mapping.
+`run_analysis.sh` selects samples from a completed build and produces expression,
 alignment, phylogeny, and PhenoRadar outputs.
 
 ## Prepare a manually curated dataset
 
-Maintain `input/metadata.tsv` with **all desired species**, one run per species,
-from NCBI or local FASTQs. See [input formats](inputs.md) for required columns and
+Maintain `input/metadata.tsv` with **all desired samples**, one run per row,
+from NCBI or local FASTQs. Multiple samples may share a biological species. See [input formats](inputs.md) for required columns and
 local-read paths. Keep known unusable runs in the
 [manual exclusion list](#manually-excluding-unusable-accessions).
 
@@ -50,7 +50,7 @@ Names are literal: update the date yourself, adding `_v2` for same-day revisions
 ```
 
 Endpoints are `assembly`, `busco`, `quant`, and `mapping` (default). Each includes
-missing prerequisites; assembly includes longest-CDS generation. Every species
+missing prerequisites; assembly includes longest-CDS generation. Every sample
 remaining after run exclusions must finish CDS, full BUSCO, quantification, and
 mapping. BUSCO acceptance thresholds apply later, in analysis.
 
@@ -84,7 +84,7 @@ CDS translation, or ODB-mapper. Missing or modified build products cause an erro
 Multiple analyses can share one build, inheriting its lineage, genetic code, and
 ODB node. Optional analysis outputs are not automatically shared across analysis IDs.
 
-`exclude_species` removes exact species IDs **before computation**.
+`exclude_species` accepts biological `species_id` values (all samples of that species) or exact analysis sample IDs **before computation**.
 `inputs.species_trait` supplies traits (`null` when unused); other auxiliary inputs
 are described in [configuration](configuration.md). Changed inputs or scientific
 settings require a new analysis name. Names beginning with `build_` are reserved.
@@ -99,7 +99,7 @@ for partial execution; collect again after additional branches finish.
 CDS translations are cached by CDS content and genetic code; `register --products`
 also imports the bundle's verified translations.
 
-Assembly/BUSCO/quant use species arrays; mapping and analysis use Snakemake
+Assembly/BUSCO/quant use sample arrays; mapping and analysis use Snakemake
 controllers with separate rule jobs. See [execution and resources](running.md)
 for concurrency, time limits, and resource overrides.
 
@@ -155,12 +155,14 @@ absent from current metadata too, so future metadata preparation can avoid them.
 
 Edit metadata and prepare a **new build ID**. Added species run missing work;
 removed species leave the new outputs. Historical builds and caches remain.
-Changing only a run can reuse CDS/BUSCO/mapping and quantify the new run.
-Mappings are stored per species; updating membership links only the selected tables.
+Changing a run creates a new sample ID and requires its own assembly, BUSCO,
+quantification, and mapping. Existing samples reuse their own completed products.
+Mappings are stored per sample; updating membership links only the selected tables.
 There is no combined mapping database to rebuild.
 
-**Fresh builds need no registration.** To import legacy CDS/BUSCO/quant files,
-use the [import layout](inputs.md#importing-existing-products):
+**Fresh builds need no registration.** To import existing CDS/BUSCO/quant files
+that already use sample IDs, use the [import layout](inputs.md#importing-existing-products).
+Species-only products require [ID migration](sample_migration.md) first:
 
 ```bash
 ./run_build.sh register --input-dir imports/legacy --metadata input/metadata.tsv
@@ -206,16 +208,10 @@ lineage, genetic code, and ODB node settings. Destination run exclusions apply.
 Registered translations and species mapping tables are reused by new builds.
 Copying products does not resume an interrupted build.
 
-Legacy bundles containing an ODB SQLite database can be imported without using
-that database:
-
-```bash
-./run_build.sh register --input-dir imports/legacy --metadata imports/legacy/metadata.tsv \
-  --odb-results imports/legacy/odb
-```
-
-Prepare a new build afterward. Legacy annotations are split and validated once;
-subsequent builds reuse the species tables.
+ODB imports use annotations and provenance rather than a legacy SQLite database.
+Their gene prefixes and protein hashes must match the new sample IDs. Renaming
+only directories or snapshot keys is insufficient; use the one-time migration
+for a schema-3 species-only bundle.
 
 ## Migrating old configurations
 

@@ -245,3 +245,6 @@ __marimo__/
 # Frozen reusable builds and independent analyses.
 /builds/
 /analyses/
+
+# One-time local data migrations (large, immutable artifacts).
+migrations/

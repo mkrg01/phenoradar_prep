@@ -11,7 +11,9 @@ from pathlib import Path
 
 
 def species_from_gene_id(gene_id):
-    """Recover the exact metadata species ID from a {species}_g{number} ID."""
+    """Recover the computational sample key from a {sample}_g{number} ID.
+
+    The function name is retained for existing consumers; this is not taxonomy."""
     match = re.fullmatch(r"([A-Za-z0-9][A-Za-z0-9_.-]*)_g[0-9]+", gene_id)
     if match is None:
         raise ValueError(f"gene ID must use {{species}}_g{{number}}: {gene_id!r}")

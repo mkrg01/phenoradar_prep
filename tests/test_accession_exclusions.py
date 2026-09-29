@@ -1,3 +1,4 @@
+from test_datasets import native_events
 """Run exclusions select new builds without changing old snapshots or caches."""
 import json
 import subprocess
@@ -46,11 +47,11 @@ def test_new_build_filters_before_inspecting_cached_or_private_inputs(dataset_pr
     for row in rows: row.update(private_file='', lib_layout='', read1_path='')
     rows[0].update(private_file='yes', lib_layout='single', read1_path='missing.fastq')
     write_tsv(metadata, fields, rows)
-    (root/'input/cds/Alpha_plant_longestCDS.fa.gz').write_bytes(b'invalid cached bytes')
+    (root/'input/cds/Alpha_plant_A1_longestCDS.fa.gz').write_bytes(b'invalid cached bytes')
     policy = root/'config/excluded_accessions.tsv'
     policy.write_text('accession\treason\nA1\tunusable_run\nSRR999\tprevious_failure\n')
     report = plan(root,root/'config/build.yaml')[-1]
-    assert [r['species'] for r in report] == ['Beta_sp-X','Gamma_plant','Alpha_plant']
+    assert [r['species'] for r in report] == ['Beta_sp-X_B1','Gamma_plant_G1','Alpha_plant_A1']
     assert report[-1]['assembly'] == report[-1]['mapping'] == 'excluded'
     assert report[-1]['reason'] == 'excluded_accession: unusable_run'
     build = prepare(root,'excluded',root/'config/build.yaml')
@@ -58,12 +59,12 @@ def test_new_build_filters_before_inspecting_cached_or_private_inputs(dataset_pr
     assert load(build)['software_lock'] is None
     assert (build/'source_metadata.tsv').read_bytes() == metadata.read_bytes()
     assert (build/'excluded_accessions.tsv').read_bytes() == policy.read_bytes()
-    assert read_tsv(build/'excluded_runs.tsv') == [{'species':'Alpha_plant','run':'A1','reason':'unusable_run'}]
+    assert read_tsv(build/'excluded_runs.tsv') == [{'species':'Alpha_plant_A1','run':'A1','reason':'unusable_run'}]
     assert submit(build,until='quant',dry_run=True) == []
     inputs = materialize(build)
     assert [r['run'] for r in read_tsv(inputs/'metadata.tsv')] == ['B1','G1']
-    assert not (inputs/'cds/Alpha_plant_longestCDS.fa.gz').exists()
-    assert (store/'Alpha_plant').is_dir()  # Policy does not delete any source product.
+    assert not (inputs/'cds/Alpha_plant_A1_longestCDS.fa.gz').exists()
+    assert (store/'Alpha_plant_A1').is_dir()  # Policy does not delete any source product.
     # Edits to the source policy do not alter the frozen build.
     policy.write_text('accession\treason\nB1\tnew_decision\n')
     assert status(build)[-1]['run'] == 'A1'
@@ -104,17 +105,17 @@ def test_excluded_species_never_receive_array_indices(dataset_project):
     commands = submit(build,until='assembly',dry_run=True)
     assert len(commands) == 1 and '--array=1,2%5' in commands[0]
     for index in (1,2): worker(build,'assembly',index)
-    events = [json.loads(line)['species'] for line in (build/'genegalleon/events.jsonl').read_text().splitlines()]
+    events = [e['species'] for e in native_events(build)]
     assert events == ['Beta_sp-X','Gamma_plant']
-    assert not (build/'genegalleon/input/amalgkit_metadata/Alpha_plant_metadata.tsv').exists()
+    assert not (build/'genegalleon/Alpha_plant_A1/input/amalgkit_metadata/Alpha_plant_metadata.tsv').exists()
     assert status(build)[-1]['assembly'] == 'excluded'
 
 
 def test_legacy_registration_respects_run_exclusions(dataset_project):
     root = dataset_project
     result = import_existing(root/'resources/dataset_assets',root/'input',root/'input/metadata.tsv',excluded_runs={'A1'})
-    assert result[0] == {'species':'Alpha_plant','run':'A1','status':'excluded'}
-    assert not (root/'resources/dataset_assets/Alpha_plant').exists()
+    assert result[0] == {'species':'Alpha_plant_A1','run':'A1','status':'excluded'}
+    assert not (root/'resources/dataset_assets/Alpha_plant_A1').exists()
     assert result[1]['status'] == 'registered'
 
 
@@ -123,10 +124,10 @@ def test_download_failure_is_retried_without_rerunning_completed_species(dataset
     build = new_dataset(root,('New plant','Other plant'))
     submit(build,until='assembly',dry_run=True)
     worker(build,'assembly',2)
-    raw = build/'genegalleon/downloads/SRR1.partial'; raw.write_text('retained resumable download')
+    raw = build/'genegalleon/New_plant_SRR1/downloads/SRR1.partial'; raw.write_text('retained resumable download')
     monkeypatch.setenv('FAKE_GG_FAIL_DOWNLOAD','1')
     with pytest.raises(subprocess.CalledProcessError): worker(build,'assembly',1)
-    receipt = json.loads((build/'jobs/status/New_plant.assembly.json').read_text())
+    receipt = json.loads((build/'jobs/status/New_plant_SRR1.assembly.json').read_text())
     assert receipt['state'] == 'failed' and receipt['run'] == 'SRR1' and receipt['stage'] == 'assembly'
     assert [r['assembly'] for r in status(build)] == ['pending','reuse']
     assert '--array=1%5' in submit(build,until='assembly',dry_run=True)[0]
@@ -140,10 +141,10 @@ def test_download_failure_is_retried_without_rerunning_completed_species(dataset
 def test_interrupted_worker_running_receipt_does_not_block_retry(dataset_project):
     build = new_dataset(dataset_project)
     submit(build,until='assembly',dry_run=True)
-    partial = build/'genegalleon/output/transcriptome_assembly/longest_cds/New_plant_longestCDS.fa.gz'
+    partial = build/'genegalleon/New_plant_SRR1/output/transcriptome_assembly/longest_cds/New_plant_longestCDS.fa.gz'
     partial.parent.mkdir(parents=True); partial.write_bytes(b'incomplete output before timeout')
-    write_json(build/'jobs/status/New_plant.assembly.json', {'state':'running','run':'SRR1'})
+    write_json(build/'jobs/status/New_plant_SRR1.assembly.json', {'state':'running','run':'SRR1'})
     assert status(build)[0]['assembly'] == 'pending'
     worker(build,'assembly',1)
     assert status(build)[0]['assembly'] == 'reuse'
-    assert list((build/'jobs/incomplete/New_plant/assembly').rglob('*longestCDS.fa.gz'))
+    assert list((build/'jobs/incomplete/New_plant_SRR1/assembly').rglob('*longestCDS.fa.gz'))

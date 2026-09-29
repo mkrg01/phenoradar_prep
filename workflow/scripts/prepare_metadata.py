@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from common import atomic_writer, file_record, now, write_json, write_tsv
+from sample_identity import annotate, select_samples
 
 RANKS = ["kingdom", "phylum", "class", "order", "family", "genus"]
 COUNTS = ["busco_cds_single", "busco_cds_duplicated", "busco_cds_fragmented",
@@ -36,11 +37,21 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
     reserved = {"species", "odb_species", "busco_percent", *RANKS, *COUNTS, "busco_cds_summary"}
     if reserved.intersection(meta.columns):
         raise ValueError(f"metadata contains derived columns: {sorted(reserved.intersection(meta.columns))}")
-    meta["species"] = meta["scientific_name"].str.replace(" ", "_", regex=False)
+    sample_mode = "analysis_sample_id" in meta.columns
+    if sample_mode:
+        meta = pd.DataFrame([annotate(r) for r in meta.to_dict("records")])
+        meta["species"] = meta["analysis_sample_id"]
+        if (meta.groupby("species_id")["taxid"].nunique() > 1).any():
+            raise ValueError("metadata: conflicting taxids for the same normalized species")
+    else:
+        # Read-only compatibility for historical, already prepared analyses.
+        meta["species"] = meta["scientific_name"].str.replace(" ", "_", regex=False)
     meta["odb_species"] = meta["species"].str.replace("-", "_", regex=False)
     for column in ["species", "run"]:
         if not meta[column].map(lambda value: bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", value))).all():
             raise ValueError(f"metadata: unsafe {column} label")
+    if sample_mode and meta["odb_species"].duplicated().any():
+        raise ValueError("sample IDs collide after space/hyphen normalization")
     if meta[["scientific_name", "odb_species"]].drop_duplicates()["odb_species"].duplicated().any():
         raise ValueError("species names collide after space/hyphen normalization")
     requested = None
@@ -48,18 +59,20 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
         requested = Path(species_list).read_text().splitlines()
         if not requested or any(not value for value in requested) or len(set(requested)) != len(requested):
             raise ValueError("species list must contain unique nonempty species IDs")
-        absent = set(requested) - set(meta["species"])
-        if absent:
-            raise ValueError(f"requested species absent from metadata: {sorted(absent)}")
+        try:
+            requested = sorted(select_samples(meta.to_dict("records"), requested))
+        except ValueError as error:
+            raise ValueError(f"requested species absent from metadata: {error}") from error
     for column in COUNTS:
         bus[column] = pd.to_numeric(bus[column], errors="raise")
         if ((bus[column] < 0) | (bus[column] % 1 != 0)).any():
             raise ValueError(f"BUSCO: invalid counts in {column}")
     if (bus["busco_cds_total"] <= 0).any() or not bus[COUNTS[:-1]].sum(axis=1).eq(bus[COUNTS[-1]]).all():
         raise ValueError("BUSCO: counts must sum to a positive total")
-    missing_busco = sorted(set(meta["scientific_name"]) - set(bus["Species"]))
-    joined = meta.merge(bus.rename(columns={"Species": "scientific_name"}),
-                        on="scientific_name", how="left", validate="many_to_one")
+    busco_key = "species" if sample_mode else "scientific_name"
+    missing_busco = sorted(set(meta[busco_key]) - set(bus["Species"]))
+    joined = meta.merge(bus.rename(columns={"Species": busco_key}),
+                        on=busco_key, how="left", validate="many_to_one")
     joined["busco_percent"] = (joined[COUNTS[0]] + joined[COUNTS[1]]) / joined[COUNTS[-1]] * 100
     joined["selected"] = True if requested is None else joined["species"].isin(requested)
     # Missing BUSCO counts stay NaN, so even a zero threshold cannot select them.
@@ -106,6 +119,7 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
             if not path.is_file() or not path.stat().st_size:
                 raise ValueError(f"input missing or empty: {path}")
         samples.append({key: row[key] for key in ["scientific_name", "species", "odb_species", "run", "taxid"]}
+                       | ({key: row[key] for key in ["analysis_sample_id", "species_id"]} if sample_mode else {})
                        | {"cds": str(cds), "abundance": str(abundance)})
     out = Path(outdir)
     out.mkdir(parents=True, exist_ok=True)
@@ -128,10 +142,12 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
     fig.tight_layout()
     fig.savefig(out / "busco_completeness.svg")
     plt.close(fig)
-    report = {"created_at": now(), "input_runs": len(meta), "input_species": meta["species"].nunique(),
-              "selected_runs": len(selected), "selected_species": selected["species"].nunique(),
+    taxon_key = "species_id" if sample_mode else "species"
+    report = {"created_at": now(), "input_runs": len(meta), "input_species": meta[taxon_key].nunique(),
+              "selected_runs": len(selected), "selected_species": selected[taxon_key].nunique(),
+              "selected_samples": selected["species"].nunique(),
               "missing_busco_species": missing_busco,
-              "missing_busco_runs": int(meta["scientific_name"].isin(missing_busco).sum()),
+              "missing_busco_runs": int(meta[busco_key].isin(missing_busco).sum()),
               "busco_threshold": threshold, "requested_species": requested, "unknown_taxids": unknown,
               "metadata": file_record(metadata), "busco": file_record(busco),
               "taxonomy": file_record(taxonomy_db)}

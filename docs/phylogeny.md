@@ -1,4 +1,4 @@
-# BUSCO species trees
+# BUSCO trees of independent samples
 
 [Documentation](index.md) · [Dating](dating.md)
 
@@ -22,7 +22,7 @@ genome-mode tables are unsupported. For existing external results, follow the
 [registration layout](inputs.md#importing-existing-products).
 
 Original CDS must be oriented, in-frame, and match the BUSCO hits.
-IDs such as `Species_g123:60-698` resolve to `Species_g123`; the full CDS is
+IDs such as `Species_accession_g123:60-698` resolve to `Species_accession_g123`; the full CDS is
 translated, without reconstructing BUSCO-predicted peptides. Missing or ambiguous
 original IDs fail extraction.
 
@@ -69,7 +69,7 @@ a nonempty `trees` list. Dating and taxonomy checks reject representative trees.
 
 ## Rooting
 
-`phylogeny.outgroup` accepts `auto` or an exact species ID in every requested set.
+`phylogeny.outgroup` accepts `auto` or an exact analysis sample ID in every requested set.
 Automatic selection uses NCBI taxonomy, with nwkit's APG IV order tree as an
 angiosperm fallback. It chooses within each set; supply an outgroup if it fails.
 
@@ -80,7 +80,10 @@ length estimation; the taxonomy guide does not constrain molecular topology.
 
 Only unambiguous single-copy `Complete` hits are eligible. Duplicated, fragmented,
 missing, multiply reported hits, and genes assigned to multiple markers are
-omitted. Coverage counts species, not expression runs.
+omitted. Each eligible sample contributes its own marker sequence and tree tip. Coverage
+and `min_taxa` count distinct biological `species_id` values, including after
+alignment QC; extra samples do not inflate species coverage. NCBI guide trees
+expand a shared taxid to multiple sample tips without assigning biological branch lengths.
 
 | Setting under `phylogeny` | Default | Use |
 | --- | --- | --- |
@@ -147,3 +150,8 @@ review, and contrast-pair outputs live beside their source tree.
 [VeryFastTree](https://github.com/citiususc/veryfasttree) ·
 [FastTree models/support](https://morgannprice.github.io/fasttree/) ·
 [ASTRAL-IV/CASTLES-II](https://github.com/chaoszhang/ASTER/blob/master/tutorial/astral4.md)
+
+Repeated samples of the basal species can make automatic single-tip rooting
+unavailable; select an explicit sample outgroup or adjust the tree selection.
+Trees with sample tips represent sample lineages; multiple samples are not
+additional species or independent evolutionary origins.

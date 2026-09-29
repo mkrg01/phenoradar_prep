@@ -102,3 +102,8 @@ CV grid or smoothing, retained site count, and seed for reporting Methods.
 [treePL options](https://github.com/blackrim/treePL/wiki/Run-Options) ·
 [treePL method](https://doi.org/10.1093/bioinformatics/bts492) ·
 [Coalescent branch lengths and dating](https://doi.org/10.1093/sysbio/syag038)
+
+Multiple samples sharing one biological `species_id` and taxid are retained.
+TimeTree requests deduplicate taxids; nodes whose child lineages share a species
+are excluded from calibration rather than treated as a species divergence.
+Conflicting biological species mapped to the same species taxid remain excluded.

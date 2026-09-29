@@ -19,6 +19,7 @@ from common import file_record, now, read_tsv, write_json, write_tsv
 from configuration import validate_analysis, validate_keys
 from accession_exclusions import partition, read_exclusions
 from phase_config import read_yaml
+from sample_identity import select_samples
 from dataset_software import resolve as resolve_software, validate as validate_software
 from dataset_assets import (COUNTS, SAFE, digest, identities, import_existing, link_file, locked,
                             normalize_private_paths, record, register_busco, register_quant, register_reference, resolve, verify)
@@ -286,23 +287,24 @@ def status(path):
     return report + excluded_report(manifest.get("excluded", []))
 
 
-def workspace(path):
-    return Path(path) / "genegalleon"
+def workspace(path, item=None):
+    base = Path(path) / "genegalleon"
+    return base / item["species"] if item else base
 
 
 def stage_workspace(path, manifest):
-    work = workspace(path)
-    for directory in ("input/amalgkit_metadata", "input/species_cds", "output", "downloads"):
-        (work / directory).mkdir(parents=True, exist_ok=True)
-    # Keep the complete ordered list fixed for every array and retry.
+    # GeneGalleon owns species-named files. Isolate every run before invoking it.
     for item in manifest["items"]:
+        work = workspace(path, item)
+        for directory in ("input/amalgkit_metadata", "input/species_cds", "output", "downloads"):
+            (work / directory).mkdir(parents=True, exist_ok=True)
         row = workspace_metadata(work, item, manifest["raw_inputs"].get(item["species"], {}), create=True)
-        destination = work / "input/amalgkit_metadata" / (item["species"] + "_metadata.tsv")
+        destination = work / "input/amalgkit_metadata" / (item["row"]["species_id"] + "_metadata.tsv")
         if destination.exists():
             if read_tsv(destination) != [row]: raise ValueError("staged GeneGalleon metadata changed")
         else:
             write_tsv(destination, manifest["fields"], [row])
-    return work
+    return workspace(path)
 
 
 def workspace_metadata(work, item, raw_inputs, create=False):
@@ -357,6 +359,8 @@ def worker(path, stage, task_id):
     if stage not in STAGES or not 1 <= task_id <= len(manifest["items"]): raise ValueError("invalid stage/task index")
     item = manifest["items"][task_id - 1]
     species = item["species"]
+    native = item["row"]["species_id"]
+    from relabel_sample import relabel
     receipt_dir = path / "jobs/status"
     receipt_path = receipt_dir / f"{species}.{stage}.json"
     # Serialize all work on a species, including jobs accidentally submitted twice.
@@ -366,23 +370,25 @@ def worker(path, stage, task_id):
         if products[key]:
             write_json(receipt_path, {"state": "reused", "at": now()})
             return
-        work = workspace(path)
-        if not (work / "input/amalgkit_metadata" / f"{species}_metadata.tsv").is_file():
+        work = workspace(path, item)
+        if not (work / "input/amalgkit_metadata" / f"{native}_metadata.tsv").is_file():
             raise ValueError("prepare job workspace with submit --dry-run or submit before running workers")
         expected_row = workspace_metadata(work, item, manifest["raw_inputs"].get(species, {}))
-        if read_tsv(work / "input/amalgkit_metadata" / f"{species}_metadata.tsv") != [expected_row]:
+        if read_tsv(work / "input/amalgkit_metadata" / f"{native}_metadata.tsv") != [expected_row]:
             raise ValueError("staged GeneGalleon metadata changed")
         ref = products["reference"]
         if stage != "assembly" and not ref: raise ValueError(f"assembly prerequisite incomplete: {species}")
         out = work / "output/transcriptome_assembly"
         if ref:
-            link_file(verify(ref["cds"]), out / "longest_cds" / f"{species}_longestCDS.fa.gz")
-            link_file(verify(ref["cds"]), work / "input/species_cds" / f"{species}_longestCDS.fa.gz")
+            # Native tools retain biological names inside this isolated workspace.
+            cds_native = out / "longest_cds" / f"{native}_longestCDS.fa.gz"
+            relabel(verify(ref["cds"]), cds_native, species, native)
+            link_file(cds_native, work / "input/species_cds" / f"{native}_longestCDS.fa.gz")
         # Incomplete native outputs must not satisfy GeneGalleon's existence checks.
         # Preserve them for diagnosis, and rerun only this unfinished stage.
-        patterns = {"assembly": [("assembled_transcripts_with_isoforms", f"{species}_isoform.fa.gz"), ("corset_clusters", f"{species}_corset.clusters.tsv"), ("corset_counts", f"{species}_corset.counts.tsv"), ("assembly_stat", f"{species}_assembly_stat.tsv"), ("longest_cds", f"{species}_longestCDS.fa.gz"), ("longest_cds_transcript", f"{species}_longestCDS.transcript.fa.gz")],
-                    "busco": [("busco_full_longest_cds", f"{species}_busco.full.tsv"), ("busco_short_longest_cds", f"{species}_busco.short.txt")],
-                    "quant": [("amalgkit_quant", species), ("amalgkit_merge", species)]}
+        patterns = {"assembly": [("assembled_transcripts_with_isoforms", f"{native}_isoform.fa.gz"), ("corset_clusters", f"{native}_corset.clusters.tsv"), ("corset_counts", f"{native}_corset.counts.tsv"), ("assembly_stat", f"{native}_assembly_stat.tsv"), ("longest_cds", f"{native}_longestCDS.fa.gz"), ("longest_cds_transcript", f"{native}_longestCDS.transcript.fa.gz")],
+                    "busco": [("busco_full_longest_cds", f"{native}_busco.full.tsv"), ("busco_short_longest_cds", f"{native}_busco.short.txt")],
+                    "quant": [("amalgkit_quant", native), ("amalgkit_merge", native)]}
         previous = receipt_path.exists()
         if previous and json.loads(receipt_path.read_text())["state"] in {"running", "failed"}:
             quarantine = path / "jobs/incomplete" / species / stage / str(len(list((path / "jobs/incomplete" / species / stage).glob("*"))))
@@ -390,15 +396,22 @@ def worker(path, stage, task_id):
                 for source in (out / directory).glob(pattern):
                     quarantine.mkdir(parents=True, exist_ok=True)
                     source.rename(quarantine / (directory + "-" + source.name))
+            # A failed registration can leave a relabelled file from this attempt.
+            published_name = {"assembly": f"{species}_longestCDS.fa.gz",
+                              "busco": f"{species}.busco.full.tsv",
+                              "quant": f"{item['row']['run']}_abundance.tsv"}[stage]
+            published_file = work / "products" / published_name
+            if published_file.exists():
+                quarantine.mkdir(parents=True, exist_ok=True)
+                published_file.rename(quarantine / ("products-" + published_name))
         write_json(receipt_path, {"state": "running", "started_at": now(), "species": species, "run": item["row"]["run"],
                                       "stage": stage, "job_id": os.environ.get("SLURM_JOB_ID")})
         try:
-            ordered = sorted(i["species"] + "_metadata.tsv" for i in manifest["items"])
             actual = sorted(p.name for p in (work / "input/amalgkit_metadata").iterdir()
                             if p.is_file() and not p.name.startswith("."))
-            if actual != ordered: raise ValueError("staged GeneGalleon metadata file set changed")
-            gg_index = ordered.index(species + "_metadata.tsv") + 1
-            env = gg_environment(manifest, item, products, stage, work, gg_index)
+            if actual != [native + "_metadata.tsv"]:
+                raise ValueError("staged GeneGalleon metadata file set changed")
+            env = gg_environment(manifest, item, products, stage, work, 1)
             repository = Path(manifest["config"]["genegalleon"]["repository"])
             command = ["bash", str(repository / "workflow/gg_transcriptome_generation_entrypoint.sh")]
             subprocess.run(command, cwd=repository, env=env, check=True)
@@ -408,19 +421,25 @@ def worker(path, stage, task_id):
                           "raw_inputs": manifest["raw_inputs"].get(species, {}),
                           "condition": manifest["config"]["conditions"][stage]}
             store = manifest["config"]["store"]
+            published = work / "products"
             if stage == "assembly":
-                ref = register_reference(store, item, out / "longest_cds" / f"{species}_longestCDS.fa.gz", provenance)
+                cds = published / f"{species}_longestCDS.fa.gz"
+                provenance["relabel"] = relabel(out / "longest_cds" / f"{native}_longestCDS.fa.gz", cds, native, species)
+                ref = register_reference(store, item, cds, provenance)
             elif stage == "busco":
-                register_busco(store, ref, full=out / "busco_full_longest_cds" / f"{species}_busco.full.tsv",
-                               short=out / "busco_short_longest_cds" / f"{species}_busco.short.txt",
+                full = published / f"{species}.busco.full.tsv"
+                provenance["relabel"] = relabel(out / "busco_full_longest_cds" / f"{native}_busco.full.tsv", full, native, species, 'busco')
+                register_busco(store, ref, full=full,
+                               short=out / "busco_short_longest_cds" / f"{native}_busco.short.txt",
                                lineage=manifest["analysis"]["phylogeny"]["lineage"], provenance=provenance)
             else:
                 run = item["row"]["run"]
-                abundance = out / "amalgkit_quant" / species / run / f"{run}_abundance.tsv"
-                # Native counts, effective lengths, H5/JSON and merged tables remain in this persistent workspace.
+                abundance = published / f"{run}_abundance.tsv"
                 for suffix in ("eff_length", "est_counts", "tpm", "metadata"):
-                    p = out / "amalgkit_merge" / species / f"{species}_{suffix}.tsv"
+                    p = out / "amalgkit_merge" / native / f"{native}_{suffix}.tsv"
                     if not p.is_file() or not p.stat().st_size: raise ValueError(f"quant/merge did not finish: {p}")
+                provenance["relabel"] = relabel(out / "amalgkit_quant" / native / run / f"{run}_abundance.tsv",
+                                               abundance, native, species, 'quant')
                 register_quant(store, ref, item, abundance, provenance)
             write_json(receipt_path, {"state": "complete", "finished_at": now(), "reference_id": ref["reference_id"],
                                       "job_id": os.environ.get("SLURM_JOB_ID")})
@@ -464,7 +483,7 @@ def materialize(path):
                         with gzip.open(source, "rb") as src, dest.open("wb") as dst: shutil.copyfileobj(src, dst)
                     else: link_file(source, dest)
                 rows.append(item["row"])
-                summaries.append({"Species": item["row"]["scientific_name"], **p["busco"]["counts"]})
+                summaries.append({"Species": species, **p["busco"]["counts"]})
             write_tsv(staging / "metadata.tsv", manifest["fields"], rows)
             write_tsv(staging / "busco/summary.tsv", ["Species", *COUNTS], summaries)
             if target.exists(): raise ValueError("unpublished input directory exists; inspect it before retrying")
@@ -502,8 +521,9 @@ def submit(path, until="mapping", species=None, dry_run=False, resources=None):
     path = Path(path).resolve()
     manifest = load(path, check_code=True)
     wanted = set(Path(species).read_text().splitlines()) if species else None
-    if wanted is not None and (not wanted or wanted - {i["species"] for i in manifest["items"]}):
-        raise ValueError("pilot species must be present in frozen metadata")
+    if wanted is not None:
+        if not wanted: raise ValueError("pilot species must be present in frozen metadata")
+        wanted = select_samples([dict(i["row"], species=i["species"]) for i in manifest["items"]], wanted)
     report = status(path)
     if (path / "completed.json").exists():
         print("Build already complete; all recorded products verified.")

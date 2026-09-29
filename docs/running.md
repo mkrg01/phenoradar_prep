@@ -24,7 +24,7 @@ and returns without waiting for completion; `submit --dry-run` writes/previews
 submission scripts without submitting jobs. It is not a full Snakemake DAG dry-run.
 Use `status`, `squeue`, and the prepared run's `jobs/logs/` to inspect progress.
 
-Assembly, BUSCO, and quantification use species arrays with `afterok` dependencies.
+Assembly, BUSCO, and quantification use sample arrays with `afterok` dependencies.
 Mapping and analysis each use a controller; Snakemake submits individual rules as
 separate workers. Each array task, controller, and worker has its own time limit.
 Status polling uses `squeue`, starting at 10 seconds; long-running jobs can increase

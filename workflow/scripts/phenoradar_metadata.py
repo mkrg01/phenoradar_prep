@@ -6,6 +6,7 @@ import re
 
 from common import write_tsv
 from species_traits import read_species_traits
+from sample_identity import traits_for_samples
 
 
 def fields(trait="C4"):
@@ -87,10 +88,10 @@ def with_pairs(rows, pairs, trait="C4"):
 
 
 def prepare(samples, metadata, traits, output, trait="C4", pairs=None):
-    """Create one species row, retaining missing traits and unpaired species.
+    """Create one row per computational sample key with biological species traits.
 
-    Multiple runs may describe a species when identity and taxonomy agree. Run
-    aggregation is a separate expression-input decision, not metadata selection.
+    Legacy manifests can repeat a key when identity and taxonomy agree; new
+    builds give each independently assembled run a distinct sample key.
     """
     columns = fields(trait)
     selected, runs = {}, {}
@@ -130,7 +131,7 @@ def prepare(samples, metadata, traits, output, trait="C4", pairs=None):
         raise ValueError("runs missing from selected taxonomy metadata: "
                          + ", ".join(sorted(set(runs) - metadata_runs)))
 
-    annotations = read_species_traits(traits, trait) if traits else {}
+    annotations = traits_for_samples(selected.values(), read_species_traits(traits, trait)) if traits else {}
     if not traits:
         print("PhenoRadar metadata: no phenotype source supplied; trait values are blank", flush=True)
     rows = [{"species": name, trait: _trait(annotations.get(name, ""), name),

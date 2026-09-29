@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 
 from busco_phylogeny import AMINO, fasta_records
+from sample_identity import species_id
 from common import atomic_writer, file_record, now, read_tsv, sha256, write_json, write_tsv
 
 
@@ -40,6 +41,17 @@ def read_tree(path, expected=None):
     return tree
 
 
+def biological_taxa(names, settings):
+    source = settings.get("sample_manifest")
+    if not source:
+        return len(set(names))
+    identities = {r["species"]: species_id(r) for r in read_tsv(source)}
+    unknown = set(names) - identities.keys()
+    if unknown:
+        raise ValueError(f"alignment samples absent from manifest: {sorted(unknown)}")
+    return len({identities[n] for n in names})
+
+
 def alignment_qc(records, settings):
     """After trimAl, drop short taxa and all-missing columns, without gap cutoffs."""
     import numpy as np
@@ -66,12 +78,13 @@ def alignment_qc(records, settings):
     variable = int((observed_states >= 2).sum())
     informative = int((repeated_states >= 2).sum())
     n, length = matrix.shape
-    status = ("too_few_taxa" if n < settings["min_taxa"] else
+    species_count = biological_taxa([names[i] for i in taxa], settings)
+    status = ("too_few_taxa" if species_count < settings["min_taxa"] else
               "no_variable_sites" if variable == 0 else "retained")
     output = [(names[i], row.tobytes().decode("ascii")) for i, row in zip(taxa, matrix)]
     retained_taxa = set(taxa.tolist())
     return output, {"status": status, "taxa_before": original_taxa, "sites_before": original_sites,
-                    "taxa": n, "sites": length, "variable_sites": variable, "informative_sites": informative,
+                    "taxa": n, "biological_species": species_count, "sites": length, "variable_sites": variable, "informative_sites": informative,
                     "retained_columns_0based": columns.tolist(),
                     "removed_species": [name for i, name in enumerate(names) if i not in retained_taxa]}
 
@@ -83,7 +96,7 @@ def align(fasta, output, qc, command, threads, settings):
     if len(names) != len(set(names)):
         raise ValueError("duplicated species in marker FASTA")
     argv = None
-    if len(names) >= settings["min_taxa"]:
+    if biological_taxa(names, settings) >= settings["min_taxa"]:
         Path(output).parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix=".famsa-", dir=Path(output).parent) as tmp:
             raw = Path(tmp) / "alignment.faa"

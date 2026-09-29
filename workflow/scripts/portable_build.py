@@ -66,7 +66,11 @@ def load_products(path, data, verify_files=True):
 
     bound['mapping'] = bind(bound['mapping'])
     for species, product in bound['products'].items():
-        if product['row']['scientific_name'].replace(' ', '_') != species:
+        if data['schema_version'] == 4:
+            from sample_identity import annotate
+            if annotate(product['row']) != product['row'] or product['row']['analysis_sample_id'] != species:
+                raise ValueError('product sample identity differs from metadata')
+        if product['row'].get('analysis_sample_id', product['row']['scientific_name'].replace(' ', '_')) != species:
             raise ValueError('product species differs from metadata')
         for key in PRODUCT_FILES: product[key] = bind(product[key])
     for required in ('metadata.tsv', 'busco/summary.tsv', 'excluded_accessions.tsv', 'excluded_runs.tsv'):
@@ -172,7 +176,7 @@ def publish_products(build, data):
         mapping = created('odb/snapshot.json')
         portable = {k:copy.deepcopy(data[k]) for k in
                     ('kind','build_id','created_at','fields','translation','lineage','odb','excluded_runs')}
-        portable.update(schema_version=3, products=products, mapping=mapping, files=list(files.values()))
+        portable.update(schema_version=data["schema_version"], products=products, mapping=mapping, files=list(files.values()))
         portable['sha256'] = digest(portable)
         write_json(staging / 'manifest.json', portable)
         load_complete(staging)
@@ -198,8 +202,8 @@ def register_products(source, store, cache_dir, lineage, translation, node, excl
     from incremental_odb import import_snapshot
     source = completion_path(source)
     completed = load_complete(source)
-    if completed['schema_version'] != 3:
-        raise ValueError('register --products requires a portable products directory')
+    if completed['schema_version'] != 4:
+        raise ValueError('legacy products require migrate_sample_ids.py before registration')
     if completed['lineage'] != lineage or completed['translation'] != translation or completed['odb'] != {'version':'v12','node':node}:
         raise ValueError('portable build lineage/translation/ODB settings differ from build.yaml')
     _, items = identities(Path(completed['input']) / 'metadata.tsv')

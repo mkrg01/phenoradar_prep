@@ -39,7 +39,7 @@ def test_multiple_runs_are_rejected_before_replacing_output(tables):
     rows.append(dict(species="Plant_A", run="A2"))
     write_tsv(samples, ["species", "run"], rows)
     output.write_text("previous result\n")
-    with pytest.raises(ValueError, match="multiple runs per species.*Plant_A"):
+    with pytest.raises(ValueError, match="multiple runs per sample key.*Plant_A"):
         export(*tables)
     assert output.read_text() == "previous result\n"
 

@@ -10,7 +10,7 @@ from common import read_tsv, write_tsv
 
 
 def export(samples, input, output):
-    """Require one run per species and preserve the original numeric text.
+    """Require one run per computational sample key and preserve numeric text.
 
     Input must have one contiguous block per run, as written by merge_tpm.
     Memory is bounded to one run's feature identifiers plus the manifest.
@@ -27,7 +27,7 @@ def export(samples, input, output):
     counts = Counter(runs.values())
     repeated = sorted(species for species, count in counts.items() if count > 1)
     if repeated:
-        raise ValueError("multiple runs per species; select exactly one run per species before "
+        raise ValueError("multiple runs per sample key; assign a unique Species_name_accession ID before "
                          "PhenoRadar export (no automatic aggregation): " + ", ".join(repeated[:10]))
 
     def rows():

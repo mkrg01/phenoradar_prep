@@ -4,7 +4,8 @@
 
 Normally, set `exclude_species` in `config/analysis.yaml` **before preparing a new
 analysis**. Those species are removed before any computation, including tree
-inference. Use exact species IDs from the build; unknown/duplicate IDs or an empty
+inference. A biological `species_id` excludes all its samples; an exact
+`analysis_sample_id` excludes only that sample. Unknown/duplicate IDs or an empty
 selection are errors. Taxonomy flags never exclude species automatically.
 
 ```yaml
@@ -19,8 +20,10 @@ To exclude an RNA-seq run from future builds as well, use the
 ## Execute after the source analysis
 
 Alternatively, `filter_species` exports a subset of completed results without
-repeating analysis. Save the YAML above as `config/export_exclusions.yaml`, using
-IDs from the source `metadata/samples.tsv`, and invoke the low-level launcher:
+repeating analysis. Save an `exclude_species` list as `config/export_exclusions.yaml`
+using exact computational IDs from the `species` column in the source
+`metadata/samples.tsv`. This low-level route requires listing every sample to exclude;
+it does not expand biological species IDs. Invoke the low-level launcher:
 
 ```bash
 ./run_pipeline.sh --cores 1 --resources mem_gb=8 \
