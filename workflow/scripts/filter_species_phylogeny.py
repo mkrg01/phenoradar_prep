@@ -5,6 +5,7 @@ import math
 
 from common import write_json, write_tsv
 from layout import PHYLOGENY_BRANCHES
+from phylogeny_outgroup import outgroup_ids, validate_root
 
 ALL_PHYLOGENY = PHYLOGENY_BRANCHES["all"]
 
@@ -85,10 +86,20 @@ def export_phylogeny(job):
     if len(markers) != len(set(markers)):
         raise ValueError("duplicate gene-tree markers")
     source_coverage, coverage, details = Counter(), Counter(), []
-    outgroup = original.get("outgroup")
-    rooting = "original_outgroup_retained" if outgroup in job.keep else "original_root_unverified"
-    if outgroup and outgroup not in job.keep:
-        rooting = "original_outgroup_removed_requires_review"
+    outgroup = outgroup_ids(original["outgroup"]) if original.get("outgroup") else []
+    if outgroup:
+        validate_root(tree, outgroup)
+    retained_outgroup = sorted(set(outgroup) & job.keep)
+    rooting = "original_root_unverified"
+    if outgroup:
+        if not retained_outgroup:
+            rooting = "original_outgroup_removed_requires_review"
+        elif not (job.keep - set(outgroup)):
+            rooting = "original_ingroup_removed_requires_review"
+        elif len(retained_outgroup) < len(outgroup):
+            rooting = "original_outgroup_partially_retained"
+        else:
+            rooting = "original_outgroup_retained"
     tree_text = prune(tree, job.keep)
     if tree_text:
         (out / "species_tree.pruned.nwk").write_text(tree_text)
@@ -147,11 +158,11 @@ def export_phylogeny(job):
         "branch_length_unit": original.get("branch_length_unit", "unspecified"),
         "branch_lengths": "sums along surviving paths; not reestimated",
         "internal_labels": "removed; source branch supports are not recomputed supports",
-        "source_outgroup": outgroup, "rooting": rooting, "dated_tree_written": dated,
+        "source_outgroup": outgroup, "retained_outgroup": retained_outgroup, "rooting": rooting, "dated_tree_written": dated,
         "dated_tree_note": "Source time-tree path lengths retained; calibrations and node ages were not refitted",
         "gene_trees": details,
         "limitations": ["Original inference can still reflect excluded sequences.",
-                        "Pruned trees are not new ASTRAL/CASTLES-II/treePL estimates.",
+                        "Pruned trees are not new ASTRAL/CASTLES-II/LSD2 estimates.",
                         "Trees with fewer than four tips are not suitable ASTRAL inputs.",
                         "No old calibration, support, node-age, or inference-QC tables are relabeled as filtered results."]})
     job.counts["phylogeny"] = dict(before=len(job.species), after=len(job.keep), gene_trees=used)

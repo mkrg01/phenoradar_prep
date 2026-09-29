@@ -49,30 +49,6 @@ Build creates or reuses these automatically. See [output layout](outputs.md#dire
 for intermediate workspaces and [portable builds](datasets.md#copying-a-completed-build-to-another-project)
 for copying the complete bundle.
 
-### Importing existing products
-
-Fresh RNA-seq builds need no registration. For existing products already using sample-prefixed IDs, use the CDS,
-BUSCO, and quant paths above relative to an import directory:
-
-```bash
-./run_build.sh register --input-dir imports/legacy --metadata input/metadata.tsv
-```
-
-BUSCO full tables also accept `{species}_busco.full.tsv`; either form may have
-`.gz`. A summary alone cannot complete BUSCO. Keep registered source files inside
-the project. Species-only legacy products require the [one-time migration](sample_migration.md).
-`register` accepts sample-prefixed products; directory names alone are insufficient
-if sequence IDs and tables still use species-only prefixes.
-
-Translation FASTAs with matching `_protein.json` provenance are also imported
-from `proteins/`. Without CDS/protein provenance, translations are verified by
-computing them once, then cached under the build store's `.proteins/` directory.
-Future builds reuse them by CDS hash and genetic code.
-
-Copied bundles use `register --products <directory>` to seed a new build;
-analysis consumes them directly. See [importing work](datasets.md#updating-species-and-importing-existing-work)
-for ODB snapshot registration.
-
 ## Identifiers
 
 Build assigns `analysis_sample_id = scientific_name.replace(" ", "_") + "_" + run`.

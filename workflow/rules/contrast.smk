@@ -6,7 +6,7 @@ rule prepare_ncbi_guide:
                             else checkpoints.select_metadata.get().output.samples),
         taxonomy=TAXONOMY_DB,
         code=f"{SCRIPTS}/phylogeny_root.py",
-        helpers=f"{SCRIPTS}/common.py"
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/phylogeny_outgroup.py", f"{SCRIPTS}/sample_identity.py"]
     output:
         tree=f"{OUT}/{{guide_branch}}/ncbi_tree.nwk",
         taxids=f"{OUT}/{{guide_branch}}/taxids.tsv"
@@ -25,19 +25,19 @@ rule prepare_phylogeny_outgroup:
         metadata=f"{META}/metadata_high_busco.tsv",
         tree=phylogeny_root_guide,
         code=f"{SCRIPTS}/phylogeny_root.py",
-        helpers=f"{SCRIPTS}/common.py"
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/phylogeny_outgroup.py", f"{SCRIPTS}/sample_identity.py"]
     output:
         outgroup=f"{PHYLO_RUN}/rooting/outgroup.txt",
         qc=f"{PHYLO_RUN}/rooting/outgroup.json"
     params:
-        outgroup=PHY["outgroup"],
+        outgroup=json.dumps(PHY["outgroup"]),
         tree_flag="--tree" if PHY["outgroup"] == "auto" else ""
     conda: "../envs/timetree.yaml"
     resources: mem_mb=4000
     log: f"{LOG}/{{phylo_branch}}/rooting/outgroup.log"
     shell:
         "{PYTHON:q} {input.code:q} prepare_root --samples {input.samples:q} --metadata {input.metadata:q} "
-        "--output {output.outgroup:q} --qc {output.qc:q} --outgroup {params.outgroup:q} --taxonomy-db {input.taxonomy:q} "
+        "--output {output.outgroup:q} --qc {output.qc:q} --outgroup-json {params.outgroup:q} --taxonomy-db {input.taxonomy:q} "
         "{params.tree_flag} {input.tree:q} > {log:q} 2>&1"
 
 
@@ -103,7 +103,7 @@ rule plot_contrast_tree:
         metadata=f"{OUT}/{{contrast_branch}}/species_metadata.tsv",
         summary=f"{OUT}/{{contrast_branch}}/summary.json",
         code=f"{SCRIPTS}/plot_contrast_tree.py",
-        helpers=f"{SCRIPTS}/common.py"
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/phylogeny_outgroup.py", f"{SCRIPTS}/sample_identity.py"]
     output:
         pdf=f"{OUT}/{{contrast_branch}}/summary_tree.pdf", svg=f"{OUT}/{{contrast_branch}}/summary_tree.svg"
     params: outdir=f"{OUT}/{{contrast_branch}}"

@@ -43,8 +43,7 @@ configurable GeneGalleon settings.
 
 Build discovers matching ODB snapshots automatically and maps missing species
 in chunks (default 20). `odb.node` defaults to v12 taxid `3193` (Embryophyta).
-Import old mappings with `register --odb-results <snapshot> --odb-only`;
-see [references](references.md).
+Retain the configured cache to reuse completed mappings; see [references](references.md).
 
 Analysis uses BUSCO completeness `>= selection.busco_threshold` (default `0.5`).
 `selection.species_list: true` enables `inputs.species_list`; `exclude_species`

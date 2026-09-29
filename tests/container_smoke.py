@@ -24,24 +24,23 @@ def dating(work):
     tree = work / "tree.nwk"
     tree.write_text("((A:0.03,B:0.07):0.04,(C:0.03,D:0.07):0.04);\n")
     provenance = work / "tree.json"
-    write_json(provenance, {"branch_length_unit": "substitutions_per_site", "outgroup": "A",
+    write_json(provenance, {"branch_length_unit": "substitutions_per_site", "outgroup": ["A", "B"],
                            "total_gene_sites": 32000})
     bounds = work / "bounds.tsv"
     write_tsv(bounds, ["taxa", "min_age_ma", "max_age_ma", "source"], [
         {"taxa": "A,D", "min_age_ma": 100, "max_age_ma": 100, "source": "smoke root"},
         {"taxa": "C,D", "min_age_ma": 50, "max_age_ma": 60, "source": "smoke internal"}])
     output = work / "dating"
-    date(tree, provenance, bounds, output, "treePL",
-         {"cvstart": 10.0, "cvstop": 1.0})
+    date(tree, provenance, bounds, output, "lsd2")
     result = read_tree(output / "species_tree.dated.nwk", {"A", "B", "C", "D"})
-    assert all(math.isclose(result.get_distance(result, leaf), 100, abs_tol=2e-6)
+    assert all(math.isclose(result.get_distance(result, leaf), 100, abs_tol=2e-3)
                for leaf in result.leaves())
     age = 100 - result.get_distance(result, result.common_ancestor(["C", "D"]))
-    assert 50 - 2e-6 <= age <= 60 + 2e-6
+    assert 50 - 2e-3 <= age <= 60 + 2e-3
     report = json.loads((output / "provenance.json").read_text())
     assert report["topology_preserved"] and report["build"]["source_patch_applied"] is False
-    assert report["cv_method"] == "native leave-one-out" and report["numsites"] == 32000
-    assert report["native_time_branch_lengths_preserved"] and len(report["commands"]) == 2
+    assert report["root_position_reestimated"] and report["numsites"] == 32000
+    assert report["native_time_branch_lengths_preserved"] and len(report["commands"]) == 1
 
 
 def monophy(work):
@@ -108,7 +107,7 @@ def check_environment(name):
     commands = {"alignment": ["famsa"], "kofam": ["exec_annotation", "hmmsearch"],
                 "odb": ["ODB-mapper"], "seqkit": ["seqkit"],
                 "phylogeny": ["famsa", "trimal", "VeryFastTree"],
-                "dating": ["treePL"], "monophy": ["Rscript"]}
+                "dating": ["lsd2"], "monophy": ["Rscript"]}
     for module in imports.get(name, []):
         importlib.import_module(module)
     for command in commands.get(name, []):

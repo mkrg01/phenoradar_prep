@@ -83,7 +83,7 @@ def test_direct_membership_uses_molecular_tree_and_inherits_root(molecular_snaps
     assert meta["A2"]["contrast_pair_id"] == meta["B"]["contrast_pair_id"]
     assert meta["C"]["contrast_pair_id"] == ""
     assert all(meta[n]["contrast_pair_id"] == meta[n]["group"] == "" for n in ["O", "U"])
-    assert report["outgroup"] == "O" and report["outgroup_in_observed_tree"] is False
+    assert report["outgroup"] == ["O"] and report["outgroup_in_observed_tree"] is False
     assert report["rooting"] == "source_root_inherited" and report["reestimated"] is False
     old, new = Tree(TREE, parser=0), Tree((out / "observed_tree.nwk").read_text(), parser=0)
     assert set(new.leaf_names()) == set(KNOWN)

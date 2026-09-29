@@ -55,7 +55,7 @@ def test_rooting_uses_ncbi_split_and_rejects_multi_species_side(tmp_path):
     scores = dict.fromkeys("OABCD", 90)
     name, record = resolve_outgroup(Tree("(O,((A,B),(C,D)));", parser=9), scores,
                                    reference=lambda *a: pytest.fail("unnecessary reference lookup"))
-    assert name == "O" and record["source"] == "ncbi"
+    assert name == ["O"] and record["source"] == "ncbi"
     with pytest.raises(ValueError, match="multi-species"):
         resolve_outgroup(Tree("((A,B),(C,D));", parser=9), scores)
 
@@ -69,7 +69,7 @@ def test_rooting_reference_preserves_every_basal_lineage():
         calls.append(names)
         return Tree("(Out_species,(A_species,B_species));", parser=9), {"test": True}
     name, record = resolve_outgroup(tree, scores, reference)
-    assert name == "Out_species" and record["source"] == "nwkit_apgiv"
+    assert name == ["Out_species"] and record["source"] == "nwkit_apgiv"
     assert calls == [["A_species", "B_species", "Out_species"]]
 
 
@@ -226,7 +226,7 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     assert not (result / "phylogeny/all/species_tree.nwk").exists()
     assert not (result / "phylogeny/all/gene_trees.nwk").exists()
     assert (result / "phylogeny/representatives/rooting/outgroup.txt").read_text().strip() == species[1]
-    assert json.loads((result / "phylogeny/representatives/species_tree.json").read_text())["outgroup"] == species[1]
+    assert json.loads((result / "phylogeny/representatives/species_tree.json").read_text())["outgroup"] == [species[1]]
     selected = {r["species"] for r in read_tsv(result / "phylogeny/representatives/selection/samples.tsv")}
     for path in ["phylogeny/representatives/selection/selection.json", "phylogeny/representatives/contrast/summary.json"]:
         assert json.loads((result / path).read_text())["seed"] == 19
@@ -237,7 +237,7 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     config.write_text(yaml.safe_dump(cfg))
     run(["phylogeny"])
     assert (result / "phylogeny/all/rooting/outgroup.txt").read_text().strip() == species[0]
-    assert json.loads((result / "phylogeny/all/species_tree.json").read_text())["outgroup"] == species[0]
+    assert json.loads((result / "phylogeny/all/species_tree.json").read_text())["outgroup"] == [species[0]]
     full_tree = result / "phylogeny/all/species_tree.nwk"
     full_mtime = full_tree.stat().st_mtime_ns
     contrast_tree = result / "phylogeny/representatives/species_tree.nwk"
@@ -280,3 +280,47 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     run(["contrast_pairs", "phylogeny"])
     assert full_tree.stat().st_mtime_ns == full_mtime
     assert not (result / "orthogroups/expression").exists() and not (result / "orthogroups/mapping").exists()
+
+
+def test_auto_outgroup_keeps_all_samples_of_basal_species():
+    from ete4 import Tree
+    scores = {"O_r1": 90, "O_r2": 99, "A": 90, "B": 90, "C": 90}
+    taxa = {n: "O" if n.startswith("O_") else n for n in scores}
+    tips, detail = resolve_outgroup(Tree("((O_r1,O_r2),(A,(B,C)));", parser=9), scores, taxa=taxa)
+    assert tips == ["O_r1", "O_r2"] and detail["basal_species_counts"] == [1, 3]
+    def reference(names):
+        assert names == ["A", "B", "O_r2"]
+        return Tree("(O_r2,(A,B));", parser=9), {}
+    tips, detail = resolve_outgroup(Tree("((O_r1,O_r2),A,(B,C));", parser=9), scores, reference, taxa)
+    assert tips == ["O_r1", "O_r2"] and detail["source"] == "nwkit_apgiv"
+    with pytest.raises(ValueError, match="complete single-species"):
+        resolve_outgroup(Tree("(O_r1,O_r2,(A,B,C));", parser=9), scores, taxa=taxa)
+
+
+@pytest.mark.parametrize("selector", ["Out_species", "Out species", "Out_species_run_one", "auto"])
+def test_prepare_outgroup_expands_species_without_adding_samples(tmp_path, selector):
+    names = ["Out_species_run_one", "Out_species_run_two", "A", "B", "C"]
+    samples, metadata = tmp_path / "samples.tsv", tmp_path / "metadata.tsv"
+    write_tsv(samples, ["species", "species_id", "taxid", "cds"], [
+        dict(species=n, species_id="Out_species" if n.startswith("Out_") else n,
+             taxid=1 if n.startswith("Out_") else i, cds="unused") for i, n in enumerate(names, 2)])
+    write_tsv(metadata, ["species", "busco_percent"], [dict(species=n, busco_percent=90) for n in names])
+    guide = tmp_path / "guide.nwk"
+    guide.write_text("((Out_species_run_one,Out_species_run_two),(A,(B,C)));")
+    output, qc = tmp_path / "outgroup.txt", tmp_path / "outgroup.json"
+    prepare_root(samples, metadata, output, qc, selector, guide)
+    assert output.read_text().splitlines() == names[:2]
+    report = json.loads(qc.read_text())
+    assert report["outgroup"] == names[:2] and report["outgroup_species"] == ["Out_species"]
+    assert report["candidate_species_count"] == 4 and report["candidate_sample_count"] == 5
+
+
+def test_root_validator_accepts_complete_clade_and_rejects_nonmonophyly(tmp_path):
+    from contrast_pairs import rooted_tree
+    path = tmp_path / "tree.nwk"
+    names = ["O1", "O2", "A", "B", "C"]
+    path.write_text("((O1:1,O2:2)1:3,(A:1,(B:1,C:1)1:1)1:3);")
+    rooted_tree(path, names, ["O1", "O2"])
+    for invalid in (["O1"], ["O1", "A"], names, ["O1", "missing"]):
+        with pytest.raises(ValueError, match="outgroup"):
+            rooted_tree(path, names, invalid)

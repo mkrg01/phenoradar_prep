@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""NCBI guide trees and conservative single-outgroup selection for both runs."""
+"""NCBI guide trees and conservative outgroup-species selection for both runs."""
 import argparse
+import json
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
 from common import atomic_writer, file_record, now, read_tsv, write_json, write_tsv
+from sample_identity import species_id
+from phylogeny_outgroup import outgroup_ids, validate_outgroup
 
 
 def nwkit_backend():
@@ -100,26 +103,34 @@ def apg_reference(representatives, taxids, taxonomy_db):
     return tree, file_record(source)
 
 
-def resolve_outgroup(tree, scores, reference=None):
-    """Accept only a singleton basal lineage, never one tip of a larger clade.
+def resolve_outgroup(tree, scores, reference=None, taxa=None):
+    """Select one complete basal species, retaining all its sample tips.
 
-    If the NCBI root is unresolved, a reference callback receives one species
-    per basal lineage. The production callback uses the bundled APG IV tree.
+    Reference resolution receives one representative per basal lineage. A
+    multi-species lineage or a fraction of one species is never selected.
     """
     nwkit_backend()
     while len(tree.children) == 1:
         tree = tree.children[0]
+    names = set(tree.leaf_names())
+    taxa = taxa or {n: n for n in names}
     children = [set(child.leaf_names()) for child in tree.children]
     if len(children) < 2:
-        raise ValueError("at least two basal lineages are required for automatic rooting")
-    singletons = {next(iter(names)) for names in children if len(names) == 1}
-    detail = {"source": "ncbi", "basal_clade_sizes": sorted(map(len, children))}
+        raise ValueError("NCBI root has fewer than two basal lineages")
+    rank = lambda n: (-scores[n], n)
+    singletons = {}
+    for tips in children:
+        species = {taxa[n] for n in tips}
+        if len(species) == 1 and tips == {n for n in names if taxa[n] in species}:
+            singletons[min(tips, key=rank)] = sorted(tips)
+    detail = {"source": "ncbi", "basal_clade_sizes": sorted(map(len, children)),
+              "basal_species_counts": sorted(len({taxa[n] for n in tips}) for tips in children)}
     if len(children) == 2:
         if not singletons:
             raise ValueError("NCBI root has two multi-species clades; specify phylogeny.outgroup explicitly")
-        return min(singletons, key=lambda n: (-scores[n], n)), detail
+        return singletons[min(singletons, key=rank)], detail
     if not singletons:
-        raise ValueError("no singleton basal lineage; specify phylogeny.outgroup explicitly")
+        raise ValueError("no complete single-species basal lineage; specify phylogeny.outgroup explicitly")
     representatives = sorted(min(names, key=lambda n: (-scores[n], n)) for names in children)
     if reference is None:
         raise ValueError("NCBI root is unresolved; a rooted reference or explicit phylogeny.outgroup is required")
@@ -133,17 +144,27 @@ def resolve_outgroup(tree, scores, reference=None):
         raise ValueError("reference does not define a single-species outgroup; specify phylogeny.outgroup")
     detail.update(source="nwkit_apgiv", reference=source, representatives=representatives,
                   reference_tree=guide.write(parser=9))
-    return candidates[0], detail
+    return singletons[candidates[0]], detail
 
 
 def prepare_root(samples, metadata, output, qc, outgroup="auto", tree=None,
                  taxonomy_db=None):
-    if not isinstance(outgroup, str) or not outgroup.strip():
-        raise ValueError("outgroup must be auto or an exact inference species label; use auto instead of null")
+    if not (isinstance(outgroup, str) and outgroup.strip() or
+            isinstance(outgroup, list) and outgroup and all(isinstance(n, str) and n.strip() for n in outgroup)):
+        raise ValueError("outgroup must be auto, a species/sample ID or a nonempty list of IDs")
     rows = species_rows(samples)
+    taxa = {n: species_id(r) for n, r in rows.items()}
+    requested = outgroup
     if outgroup != "auto":
-        if outgroup not in rows:
-            raise ValueError(f"outgroup is absent from inference species; no species will be added: {outgroup}")
+        requested_ids = [outgroup] if isinstance(outgroup, str) else outgroup
+        selected = set()
+        for value in requested_ids:
+            taxon = taxa.get(value, value.replace(" ", "_"))
+            found = {n for n in rows if taxa[n] == taxon}
+            if not found:
+                raise ValueError(f"outgroup is absent from inference species; no samples will be added: {value}")
+            selected.update(found)
+        outgroup = sorted(selected)
         detail = {"source": "explicit"}
     else:
         from ete4 import Tree
@@ -152,12 +173,16 @@ def prepare_root(samples, metadata, output, qc, outgroup="auto", tree=None,
         if set(guide.leaf_names()) != set(rows):
             raise ValueError("rooting guide species differ from selected dataset")
         outgroup, detail = resolve_outgroup(guide, scores,
-            reference=lambda names: apg_reference(names, {n: r["taxid"] for n, r in rows.items()}, taxonomy_db))
+            reference=lambda names: apg_reference(names, {n: r["taxid"] for n, r in rows.items()}, taxonomy_db),
+            taxa=taxa)
         detail["guide"] = file_record(tree)
+    outgroup = outgroup_ids(outgroup)
+    validate_outgroup(rows, outgroup)
     with atomic_writer(output) as handle:
-        handle.write(outgroup + "\n")
-    write_json(qc, {"outgroup": outgroup, **detail, "samples": file_record(samples),
-                    "selection_scope": "inference_species", "candidate_species_count": len(rows),
+        handle.write("\n".join(outgroup) + "\n")
+    write_json(qc, {"outgroup": outgroup, "outgroup_species": sorted({taxa[n] for n in outgroup}),
+               "requested": requested, **detail, "samples": file_record(samples),
+                    "selection_scope": "inference_species", "candidate_species_count": len(set(taxa.values())), "candidate_sample_count": len(rows),
                     "created_at": now()})
 
 
@@ -171,6 +196,7 @@ if __name__ == "__main__":
     for name in ["samples", "metadata", "output", "qc"]:
         p.add_argument("--" + name, required=True)
     p.add_argument("--outgroup", default="auto")
+    p.add_argument("--outgroup-json", dest="outgroup", type=json.loads, default=argparse.SUPPRESS)
     p.add_argument("--tree")
     p.add_argument("--taxonomy-db")
     args = vars(parser.parse_args())

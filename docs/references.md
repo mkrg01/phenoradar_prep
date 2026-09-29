@@ -59,17 +59,11 @@ prepare a new build, reviewing the compatibility of retained mapping caches.
 
 ### Reusing existing ODB results
 
-Import a legacy annotation snapshot or a completed build's `odb/` directory once:
-
-```bash
-./run_build.sh register --odb-results imports/old_odb --odb-only
-```
-
-The snapshot records v12/node, protein hashes, and mapping checksums.
-Registration validates it and copies/hard-links it into
-`odb.cache_dir/v12_<node>/`, preserving the source. Subsequent builds discover
-matching species automatically, map missing ones, and omit excluded species.
-Changed protein inputs require new mappings; abundance-only changes reuse them.
+Completed builds publish reusable mapping snapshots under
+`odb.cache_dir/v12_<node>/`. Each snapshot records the ODB version/node, protein
+hashes and mapping checksums. Subsequent builds discover matching samples
+there automatically, map missing ones, and omit excluded samples. Changed
+protein inputs require new mappings; abundance-only changes reuse them.
 
 Legacy `annotations.tsv` files are split into species tables once. Build and
 analysis reuse verified translations and species mapping tables; no combined

@@ -11,8 +11,8 @@ KEYS = {
     "phylogeny": "trees lineage "
         "outgroup max_markers min_protein_length max_unknown_fraction "
         "min_taxa trimal_mode dating contrast_pairs taxonomy_check",
-    "phylogeny.dating": "enabled calibration_source treepl",
-    "phylogeny.dating.treepl": "smooth cvstart cvstop cvmultstep lfiter pliter cviter thorough",
+    "phylogeny.dating": "enabled calibration_source lsd2",
+    "phylogeny.dating.lsd2": "variance variance_parameter",
     "phylogeny.contrast_pairs": "enabled",
     "phylogeny.taxonomy_check": "enabled ranks outlierlevel collapse_monophyletic",
 }
@@ -61,6 +61,12 @@ def validate_keys(config):
                 or any(not isinstance(t, str) or t not in {"all", "phenotyped", "representatives"} for t in trees)
                 or len(trees) != len(set(trees))):
             raise ValueError("phylogeny.trees must be a list of all, phenotyped, representatives, without duplicates; [] disables inference")
+    if "outgroup" in phylogeny:
+        value = phylogeny["outgroup"]
+        if not (isinstance(value, str) and value.strip() or isinstance(value, list) and value
+                and all(isinstance(n, str) and n.strip() and n != "auto" for n in value)
+                and len(value) == len(set(value))):
+            raise ValueError("phylogeny.outgroup must be auto, an ID or a nonempty list of distinct IDs")
     for name in ["contrast_pairs", "dating", "taxonomy_check"]:
         if "enabled" in phylogeny.get(name, {}) and type(phylogeny[name]["enabled"]) is not bool:
             raise ValueError(f"phylogeny.{name}.enabled must be true or false")

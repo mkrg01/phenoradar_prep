@@ -19,9 +19,14 @@ Adding or removing species reuses completed species products and mappings.
 Prepare `input/metadata.tsv` with one run per independent sample (multiple samples per species are allowed), from NCBI or local FASTQ
 files. Edit [build.yaml](config/build.yaml) and [analysis.yaml](config/analysis.yaml)
 directly. Set `name` in build settings (e.g. `angiosperm_leaf_20260925`);
-`prepare --name` overrides it. See the [build and analysis guide](docs/datasets.md).
+`prepare --name` overrides it. Use a published release; see the
+[initial setup](docs/running.md#installation-and-normal-execution) and
+[build and analysis guide](docs/datasets.md).
 
 ```bash
+# Before the first run; repeat after changing releases or clearing the image cache:
+./run_pipeline.sh --prepare-container --cores 1 --resources mem_gb=4
+
 ./run_build.sh plan
 ./run_build.sh prepare
 ./run_build.sh submit --build builds/angiosperm_leaf_20260925 --until mapping

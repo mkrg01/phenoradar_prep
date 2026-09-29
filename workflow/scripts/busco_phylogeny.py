@@ -2,6 +2,7 @@
 """Reuse BUSCO full tables and selected samples' CDS, with cdskit preparation."""
 import argparse
 from sample_identity import species_id
+from phylogeny_outgroup import outgroup_ids, read_outgroup, validate_outgroup
 from collections import Counter, OrderedDict, defaultdict
 from functools import lru_cache
 import gzip
@@ -183,10 +184,10 @@ def unique_species(samples):
 
 def plan(samples, outdir, settings, outgroup_file=None):
     if outgroup_file:
-        settings = dict(settings, outgroup=Path(outgroup_file).read_text().strip())
+        settings = dict(settings, outgroup=read_outgroup(outgroup_file))
     species = unique_species(samples)
-    if settings["outgroup"] not in species:
-        raise ValueError("phylogeny.outgroup must name a selected species; it is required for CASTLES-II branch lengths")
+    settings = dict(settings, outgroup=outgroup_ids(settings["outgroup"]))
+    validate_outgroup(species, settings["outgroup"])
     counts, lengths = Counter(), Counter()
     represented = defaultdict(set)
     taxa = {species_id(r) for r in species.values()}

@@ -13,7 +13,7 @@ import yaml
 
 from common import read_tsv, write_json, write_tsv
 from dataset import (gg_environment, load, materialize, plan, prepare, status, submit, worker)
-from dataset_assets import (COUNTS, identities, import_existing, register_busco, register_quant,
+from dataset_assets import (COUNTS, identities, register_busco, register_quant,
                             register_reference, resolve)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -70,7 +70,20 @@ def native_events(build):
 
 def imported(root):
     store = root / "resources/dataset_assets"
-    import_existing(store, root / "input", root / "input/metadata.tsv")
+    # Seed completed worker products through the normal stage registry API.
+    _, items = identities(root / "input/metadata.tsv")
+    summaries = {r["Species"]: r for r in read_tsv(root / "input/busco/summary.tsv")}
+    for item in items:
+        name, run = item["species"], item["row"]["run"]
+        cds = root / "input/cds" / f"{name}_longestCDS.fa.gz"
+        if not cds.exists():
+            continue
+        ref = register_reference(store, item, cds)
+        full = root / "input/busco/full" / f"{name}.busco.full.tsv"
+        register_busco(store, ref, summaries[name], full=full if full.exists() else None)
+        abundance = root / "input/quant" / name / run / f"{run}_abundance.tsv"
+        if abundance.exists():
+            register_quant(store, ref, item, abundance)
     return store
 
 

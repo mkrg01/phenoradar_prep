@@ -96,8 +96,7 @@ for partial execution; collect again after additional branches finish.
 ## Slurm and retries
 
 `submit` validates inputs, submits jobs, and returns without waiting for completion.
-CDS translations are cached by CDS content and genetic code; `register --products`
-also imports the bundle's verified translations.
+CDS translations are cached by CDS content and genetic code and reused automatically.
 
 Assembly/BUSCO/quant use sample arrays; mapping and analysis use Snakemake
 controllers with separate rule jobs. See [execution and resources](running.md)
@@ -151,7 +150,7 @@ Each build preserves `source_metadata.tsv`, the exclusion list, effective
 `metadata.tsv`, and `excluded_runs.tsv` with reasons. Keep decisions for accessions
 absent from current metadata too, so future metadata preparation can avoid them.
 
-## Updating species and importing existing work
+## Updating samples
 
 Edit metadata and prepare a **new build ID**. Added species run missing work;
 removed species leave the new outputs. Historical builds and caches remain.
@@ -160,23 +159,10 @@ quantification, and mapping. Existing samples reuse their own completed products
 Mappings are stored per sample; updating membership links only the selected tables.
 There is no combined mapping database to rebuild.
 
-**Fresh builds need no registration.** To import existing CDS/BUSCO/quant files
-that already use sample IDs, use the [import layout](inputs.md#importing-existing-products).
-Species-only products require [ID migration](sample_migration.md) first:
-
-```bash
-./run_build.sh register --input-dir imports/legacy --metadata input/metadata.tsv
-./run_build.sh register --odb-results imports/old_odb --odb-only
-```
-
-Registration validates existing work without recomputation. Missing full BUSCO
-tables or quantification remain pending; a BUSCO summary alone is insufficient.
-Keep source files referenced by the species store. With multiple CDS references,
-select `reference_id` in metadata explicitly.
-
-ODB registration copies or hard-links a validated snapshot into the automatic
-cache, preserving its source. Repeat `--odb-results` for multiple snapshots.
-No `odb.existing_results` setting is needed. See [ODB imports](references.md#reusing-existing-odb-results).
+Keep the configured product store and ODB cache: later builds discover matching
+completed samples there automatically. The directory names do not indicate
+whether their contents are temporary; the current store and cache paths under
+`migrations/` contain active products and must be retained.
 
 ## Copying a completed build to another project
 
@@ -194,24 +180,6 @@ supplies analysis settings, traits, software, and shared reference resources.
 Both `builds/<id>/` and its `products/` directory are valid build arguments.
 Products are immutable; publication may use hard links, so never edit them in place.
 
-To seed a **new build with additional species**, register the copied bundle once:
-
-```bash
-./run_build.sh register --products imports/baseline
-./run_build.sh plan
-./run_build.sh prepare --name expansion001
-./run_build.sh submit --build builds/expansion001 --until mapping
-```
-
-Keep the copied bundle: species registration references it. Use compatible
-lineage, genetic code, and ODB node settings. Destination run exclusions apply.
-Registered translations and species mapping tables are reused by new builds.
-Copying products does not resume an interrupted build.
-
-ODB imports use annotations and provenance rather than a legacy SQLite database.
-Their gene prefixes and protein hashes must match the new sample IDs. Renaming
-only directories or snapshot keys is insufficient; use the one-time migration
-for a schema-3 species-only bundle.
 
 ## Migrating old configurations
 

@@ -12,6 +12,7 @@ import tempfile
 
 from busco_phylogeny import AMINO, fasta_records
 from sample_identity import species_id
+from phylogeny_outgroup import outgroup_ids, read_outgroup, validate_outgroup, root_on_outgroup, validate_root
 from common import atomic_writer, file_record, now, read_tsv, sha256, write_json, write_tsv
 
 
@@ -247,7 +248,7 @@ def merge(manifest, markers, tree_dir, output, coverage, qc):
 
 def astral(trees, merge_qc, manifest, output, qc, command, outgroup, threads, seed, outgroup_file=None):
     if outgroup_file:
-        outgroup = Path(outgroup_file).read_text().strip()
+        outgroup = read_outgroup(outgroup_file)
     command = executable(command)
     # A filename alone cannot demonstrate a LARGE_DATA build.
     expected = {r["species"] for r in read_tsv(manifest)}
@@ -262,8 +263,11 @@ def astral(trees, merge_qc, manifest, output, qc, command, outgroup, threads, se
         if (build.get("source") != SOURCES["aster"] or "LARGE_DATA" not in build.get("command", [])
                 or build.get("executable", {}).get("sha256") != sha256(command)):
             raise ValueError("int128 build provenance/checksum mismatch; run prepare_phylogeny_tools.py")
-    if outgroup not in expected:
-        raise ValueError("ASTRAL outgroup is absent from the selected species")
+    outgroup = outgroup_ids(outgroup)
+    validate_outgroup(expected, outgroup)
+    # Upstream ASTRAL-IV accepts one anchor label, even when the basal clade
+    # has several tips. Keep every tip and orient the returned split afterward.
+    anchor = outgroup[0]
     report = json.loads(Path(merge_qc).read_text())
     if report.get("status") != "retained":
         raise ValueError(f"insufficient gene-tree coverage: no retained trees or species absent from all retained trees; "
@@ -272,16 +276,30 @@ def astral(trees, merge_qc, manifest, output, qc, command, outgroup, threads, se
     with tempfile.TemporaryDirectory(prefix=".astral-", dir=Path(output).parent) as tmp:
         raw = Path(tmp) / "species_tree.nwk"
         argv = [command, "-i", str(Path(trees).resolve()), "-o", str(raw), "-t", str(threads),
-                "--root", outgroup, "--seed", str(seed), "--length", "SULength",
+                "--root", anchor, "--seed", str(seed), "--length", "SULength",
                 "--genelength", str(report["mean_gene_length"]), "-u", "1"]
         subprocess.run(argv, check=True)
         tree = read_tree(raw, expected)
-        if len(tree.children) != 2 or not any(c.is_leaf and c.name == outgroup for c in tree.children):
-            raise ValueError("ASTRAL did not return the requested rooted species tree")
+        validate_root(tree, [anchor])
+        if len(outgroup) > 1:
+            # Numeric ASTRAL labels are edge supports; carry them with edges.
+            for node in tree.traverse():
+                if not node.is_leaf and not node.is_root and node.name:
+                    node.support = float(node.name)
+                    node.name = ""
+            root_on_outgroup(tree, outgroup)
+            for node in tree.traverse():
+                if not node.is_leaf:
+                    node.name = "" if node.is_root or node.support is None else str(node.support)
+        from ete4.parser.newick import make_parser
         with atomic_writer(output) as handle:
-            handle.write(raw.read_text().strip() + "\n")
+            handle.write(tree.write(parser=make_parser(1, dist="%.17g")) + "\n")
     write_json(qc, {"created_at": now(), "command": argv, "executable": file_record(command),
                    "input": file_record(trees), "species": len(expected), "outgroup": outgroup,
+                   "astral_root_anchor": anchor, "all_samples_retained": True,
+                   "root_edge": "selected basal clade", "root_split": "serialization midpoint; not independently estimated",
+                   "branch_length_rooting": "CASTLES-II with single anchor; post-oriented to basal split",
+                   "multi_sample_basal_branch_length_validation": "not independently benchmarked" if len(outgroup) > 1 else "not applicable",
                    "branch_length_unit": "substitutions_per_site", "branch_length_method": "CASTLES-II",
                    "support_type": "ASTRAL local posterior probability",
                    "mean_gene_length": report["mean_gene_length"],

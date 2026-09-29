@@ -61,17 +61,15 @@ if PHY["trimal_mode"] not in {"gappyout", "automated1"}:
     raise WorkflowError("phylogeny.trimal_mode must be gappyout or automated1")
 if PHY["min_taxa"] < 4:
     raise WorkflowError("phylogeny requires min_taxa >= 4")
-if not isinstance(PHY["outgroup"], str) or not PHY["outgroup"].strip():
-    raise WorkflowError("phylogeny.outgroup must be auto or an exact inference species label; use auto instead of null")
 if not isinstance(PHY["lineage"], str) or not PHY["lineage"].strip():
     raise WorkflowError("phylogeny.lineage must be a nonempty string")
 if type(PHY["dating"]["enabled"]) is not bool:
     raise WorkflowError("phylogeny.dating.enabled must be true or false")
 if PHY["dating"]["calibration_source"] not in {"file", "timetree"}:
     raise WorkflowError("phylogeny.dating.calibration_source must be file or timetree")
-from date_phylogeny import validate_settings as validate_treepl_settings
+from date_phylogeny import validate_settings as validate_lsd2_settings
 try:
-    PHY["dating"]["treepl"] = validate_treepl_settings(PHY["dating"].get("treepl", {}))
+    PHY["dating"]["lsd2"] = validate_lsd2_settings(PHY["dating"].get("lsd2", {}))
 except ValueError as error:
     raise WorkflowError(str(error))
 

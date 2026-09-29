@@ -1,12 +1,13 @@
 """Mapping reuse is species-local, bounded in memory, and independent of SQLite."""
 import gzip
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 
 from common import write_tsv
-from incremental_odb import import_snapshot, plan
+from incremental_odb import plan
 from mapping_tables import collect, load_tables, read_species, write_tables
 from test_incremental_odb import snapshot
 
@@ -54,7 +55,7 @@ def test_corrupt_species_cache_is_rejected(inputs, tmp_path):
 
 def test_changed_protein_maps_only_changed_species(inputs, tmp_path):
     proteins,old,samples,names=inputs
-    cache=tmp_path/'cache';import_snapshot(old,cache)
+    cache=tmp_path/'cache';shutil.copytree(old,cache/'v12_3193/completed')
     path=proteins/f'{names[0]}_protein.fa';path.write_text(path.read_text().replace('MK','ML'))
     result=plan(samples,proteins,tmp_path/'plan',cache)
     assert result['mapped_species'] == [names[0]]

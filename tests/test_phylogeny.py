@@ -320,25 +320,25 @@ def test_renamed_binary_cannot_pass_int128_check(tmp_path):
         astral("unused", "unused", manifest, "unused", "unused", str(binary), "s0", 1, 1)
 
 
-def test_real_treepl_outputs_time_units_and_honors_calibration(tmp_path):
-    treepl = os.environ.get("TREEPL_BIN") or shutil.which("treePL")
-    if not treepl:
-        pytest.skip("set TREEPL_BIN for real dating integration")
+def test_real_lsd2_outputs_time_units_and_honors_calibration(tmp_path):
+    lsd2 = os.environ.get("LSD2_BIN") or shutil.which("lsd2")
+    if not lsd2:
+        pytest.skip("set LSD2_BIN for real dating integration")
     tree, provenance = tmp_path / "input.nwk", tmp_path / "input.json"
     tree.write_text("(A:0.1,(B:0.08,(C:0.04,D:0.04):0.04):0.02);\n")
     write_json(provenance, {"branch_length_unit": "substitutions_per_site", "outgroup": "A", "mean_gene_length": 250, "total_gene_sites": 750})
     calibrations = tmp_path / "calibrations.tsv"
     write_tsv(calibrations, ["taxa", "min_age_ma", "max_age_ma", "source"],
               [{"taxa": "A,B", "min_age_ma": 100, "max_age_ma": 100, "source": "synthetic test only"}])
-    date(tree, provenance, calibrations, tmp_path / "dated", treepl, seed=2147483647)
+    date(tree, provenance, calibrations, tmp_path / "dated", lsd2)
     dated = read_tree(tmp_path / "dated/species_tree.dated.nwk")
     assert dated.get_distance("A", "B") == pytest.approx(200)
     assert dated.get_distance("C", "D") == pytest.approx(80, rel=0.01)
     report = json.loads((tmp_path / "dated/provenance.json").read_text())
     assert report["root_age_ma"] == pytest.approx(100)
     assert report["concatenation_used"] is False
-    seeds = [command["seed"] for command in report["commands"]]
-    assert seeds == [2147483647, 2147483647]
+    assert len(report["commands"]) == 1
+    assert report["root_position_reestimated"]
 
 
 def phylogeny_inputs(tmp_path):
@@ -388,10 +388,10 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
     if not all([snakemake, famsa, vft]) or not astral4.is_file():
         pytest.skip("set phylogeny tool paths and run prepare_phylogeny_tools.py for workflow integration")
     trimal = trimal_binary()
-    treepl = os.environ.get("TREEPL_BIN") or shutil.which("treePL")
+    lsd2 = os.environ.get("LSD2_BIN") or shutil.which("lsd2")
     commands = {"python": sys.executable, "famsa": famsa, "trimal": trimal, "VeryFastTree": vft}
-    if treepl:
-        commands["treePL"] = treepl
+    if lsd2:
+        commands["lsd2"] = lsd2
     env = command_environment(commands)
     source, species = phylogeny_inputs(tmp_path)
     # Real inference accepts mixed standard layouts and compression without overrides.
@@ -475,7 +475,7 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
     timestamp = (out / "species_tree.nwk").stat().st_mtime_ns
     assert "Nothing to be done" in run()
     # The dating target reuses the inferred species tree and does not restart loci.
-    if treepl:
+    if lsd2:
         calibrations = source / "calibrations.tsv"
         write_tsv(calibrations, ["taxa", "min_age_ma", "max_age_ma", "source"],
                   [{"taxa": ",".join(species[:2]), "min_age_ma": 100, "max_age_ma": 100,
@@ -496,22 +496,20 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
         assert all(p.stat().st_mtime_ns == stamp for p, stamp in retained.items())
         dating_report = json.loads((out / "dating/provenance.json").read_text())
         tree_report = json.loads((out / "species_tree.json").read_text())
-        assert dating_report["method"] == "treePL penalized likelihood"
+        assert dating_report["method"] == "LSD2 least squares"
         assert dating_report["numsites"] == tree_report["total_gene_sites"]
         assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
-        # Changing only smoothing reruns dating and bypasses CV, preserving inference.
+        # Changing variance weighting reruns dating while preserving inference.
         dated_timestamp = (out / "dating/species_tree.dated.nwk").stat().st_mtime_ns
-        cfg["phylogeny"]["dating"]["treepl"] = {"smooth": 0.5}
+        cfg["phylogeny"]["dating"]["lsd2"] = {"variance": 2}
         config.write_text(yaml.safe_dump(cfg))
         run()
         assert (out / "dating/species_tree.dated.nwk").stat().st_mtime_ns != dated_timestamp
         assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
         assert all(p.stat().st_mtime_ns == stamp for p, stamp in retained.items())
         dating_report = json.loads((out / "dating/provenance.json").read_text())
-        assert dating_report["cv_method"] == "fixed smoothing" and dating_report["smoothing"] == 0.5
-        assert not read_tsv(out / "dating/cross_validation.tsv")
-        assert "\ncv\n" not in (out / "dating/treepl.config.txt").read_text()
-        assert len(dating_report["commands"]) == 2
+        assert dating_report["settings"]["variance"] == 2
+        assert len(dating_report["commands"]) == 1
         assert "Nothing to be done" in run()
         # Removing the override selects the default automatic TimeTree branch. Exercise
         # the full rule graph offline with a recorded synthetic API response.

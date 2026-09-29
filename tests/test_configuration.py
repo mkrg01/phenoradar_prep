@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from configuration import KEYS, validate_keys
-from date_phylogeny import validate_settings as validate_treepl_settings
+from date_phylogeny import validate_settings as validate_lsd2_settings
 from versioning import IMAGE_REPOSITORY, read_version, resolve_container_image
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_config_and_optional_tool_defaults_cover_supported_keys():
     config = yaml.safe_load((ROOT / "workflow/pipeline_defaults.yaml").read_text())
     validate_keys(config)
-    assert "treepl" not in config["phylogeny"]["dating"]
-    config["phylogeny"]["dating"]["treepl"] = validate_treepl_settings({})
+    assert "lsd2" not in config["phylogeny"]["dating"]
+    config["phylogeny"]["dating"]["lsd2"] = validate_lsd2_settings({})
     for section, keys in KEYS.items():
         values = config
         for part in section.split(".") if section else []:
@@ -30,6 +30,7 @@ def test_config_and_optional_tool_defaults_cover_supported_keys():
 
 @pytest.mark.parametrize("config,path", [
     ({"unknown": {}}, "unknown"),
+    ({"phylogeny": {"dating": {"treepl": {}}}}, "phylogeny.dating.treepl"),
     ({"container_image": "auto"}, "container_image"),
     ({"inputs": {"metadata": "elsewhere/metadata.tsv"}}, "inputs"),
     ({"phylogeny": {"busco_full_dir": "elsewhere/busco"}}, "phylogeny.busco_full_dir"),
@@ -222,3 +223,14 @@ def test_output_targets_cannot_schedule_unselected_trees_or_disabled_steps(workf
     output = result.stdout + result.stderr
     assert result.returncode != 0 and "MissingRuleException" in output, output
     assert not (workflow_project / "results").exists()
+
+
+@pytest.mark.parametrize("value", ["auto", "Basal_species", ["Basal_A", "Basal_B"]])
+def test_basal_group_settings(value):
+    validate_keys({"phylogeny": {"outgroup": value}})
+
+
+@pytest.mark.parametrize("value", [None, [], ["A", "A"], ["auto"], ["A", None]])
+def test_invalid_basal_group_settings(value):
+    with pytest.raises(ValueError, match="phylogeny.outgroup"):
+        validate_keys({"phylogeny": {"outgroup": value}})

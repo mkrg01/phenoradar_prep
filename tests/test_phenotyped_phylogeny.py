@@ -73,10 +73,10 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
     vft = os.environ.get("VERYFASTTREE_BIN") or shutil.which("VeryFastTree")
     if not all([snakemake, famsa, vft]) or not (ROOT / "resources/phylogeny_tools/bin/astral4_int128").exists():
         pytest.skip("real inference tools required")
-    treepl = os.environ.get("TREEPL_BIN") or shutil.which("treePL")
+    lsd2 = os.environ.get("LSD2_BIN") or shutil.which("lsd2")
     commands = {"python": sys.executable, "famsa": famsa, "trimal": trimal_binary(), "VeryFastTree": vft}
-    if treepl:
-        commands["treePL"] = treepl
+    if lsd2:
+        commands["lsd2"] = lsd2
     env = command_environment(commands)
     source, species = phylogeny_inputs(tmp_path)
     # Removing the unobserved basal species must select a different outgroup.
@@ -160,7 +160,7 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
     assert {r["species"] for r in read_tsv(full / "timetree/taxa.tsv")} == set(species)
     assert {r["species"] for r in read_tsv(observed / "timetree/taxa.tsv")} == set(species[1:])
 
-    if treepl:
+    if lsd2:
         run(["phenotyped"], "timetree")
         read_tree(observed / "dating/species_tree.dated.nwk", species[1:])
         assert not (full / "dating").exists()

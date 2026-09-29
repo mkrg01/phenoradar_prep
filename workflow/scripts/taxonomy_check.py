@@ -7,6 +7,8 @@ import json
 import math
 import os
 from pathlib import Path
+
+from phylogeny_outgroup import outgroup_ids, validate_root
 import shutil
 import sqlite3
 import subprocess
@@ -140,11 +142,8 @@ def check(tree, tree_qc, samples, taxonomy, outdir, settings=None):
     tree_report = json.loads(inputs["tree_qc"].read_text())
     if tree_report.get("species") != len(names):
         raise ValueError("species-tree QC disagrees with its leaf count")
-    outgroup = tree_report.get("outgroup")
-    if not isinstance(outgroup, str) or outgroup not in species:
-        raise ValueError("species-tree QC must record an outgroup present in the sample manifest")
-    if len(source.children) != 2 or not any(n.is_leaf and n.name == outgroup for n in source.children):
-        raise ValueError("species-tree root does not match the recorded single-species outgroup")
+    outgroup = outgroup_ids(tree_report.get("outgroup"))
+    validate_root(source, outgroup)
     records = {key: file_record(path) for key, path in inputs.items()}
     tax = Taxonomy(taxonomy)
     try:

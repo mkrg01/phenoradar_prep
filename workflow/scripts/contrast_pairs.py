@@ -5,6 +5,8 @@ import json
 import math
 from collections import Counter
 from pathlib import Path
+
+from phylogeny_outgroup import outgroup_ids, read_outgroup, validate_root
 from types import SimpleNamespace
 
 from common import atomic_writer, file_record, now, read_tsv, write_json, write_tsv
@@ -96,10 +98,7 @@ def rooted_tree(path, names, outgroup):
     tips = list(tree.leaf_names())
     if len(tips) != len(set(tips)) or set(tips) != set(names):
         raise ValueError("inferred tree tips differ from species manifest")
-    if outgroup not in names:
-        raise ValueError("outgroup is absent from the species manifest")
-    if len(tree.children) != 2 or not any(c.is_leaf and c.name == outgroup for c in tree.children):
-        raise ValueError("inferred tree is not rooted with the selected outgroup")
+    validate_root(tree, outgroup)
     if any(n.dist is None or not math.isfinite(n.dist) or n.dist < 0
            for n in tree.traverse() if not n.is_root):
         raise ValueError("inferred tree requires finite nonnegative branch lengths")
@@ -113,9 +112,7 @@ def summarize(tree, selection_dir, outgroup_file, outdir, seed=12345):
     first_all = read_tsv(selection / "ncbi_skim.all.tsv")
     first_reps = read_tsv(selection / "ncbi_skim.sampled.tsv")
     names = {r["leaf_name"] for r in first_reps}
-    outgroup = Path(outgroup_file).read_text().strip()
-    if outgroup not in names:
-        raise ValueError("outgroup is absent from the selected representatives")
+    outgroup = read_outgroup(outgroup_file)
     inferred = rooted_tree(tree, names, outgroup)
     rows = [{"leaf_name": r["leaf_name"], "trait": r["trait"], "busco_percent": float(r["busco_percent"])}
             for r in first_reps]
@@ -130,6 +127,7 @@ def summarize(tree, selection_dir, outgroup_file, outdir, seed=12345):
 def summarize_tree(inferred, rows, all_traits, tip_for_species, outdir, trait, seed, outgroup, provenance):
     """Shared molecular skim, pair assignment and export for both input routes."""
     from ete4 import Tree
+    outgroup = outgroup_ids(outgroup)
     out = Path(outdir)
     out.mkdir(parents=True, exist_ok=True)
     if rows:
@@ -181,7 +179,7 @@ def summarize_tree(inferred, rows, all_traits, tip_for_species, outdir, trait, s
         name = row["species"]
         group = members.get(name, "")
         metadata.append({"species": name, "species_id": taxa[name], trait: row["trait"],
-                         "role": "outgroup" if name == outgroup else row["role"],
+                         "role": "outgroup" if name in outgroup else row["role"],
                          "group": group, "representative": final_reps.get(group, ""),
                          "is_representative": int(final_reps.get(group) == name),
                          "n_species_in_group": counts.get(group, ""),
@@ -217,7 +215,7 @@ def from_tree(tree, tree_qc, samples, metadata, traits, outdir, trait="C4", seed
     qc = json.loads(Path(tree_qc).read_text())
     if qc.get("species") != len(names):
         raise ValueError("species-tree QC differs from species manifest")
-    outgroup = qc.get("outgroup")
+    outgroup = outgroup_ids(qc.get("outgroup"))
     inferred = rooted_tree(tree, names, outgroup)
     annotation = traits_for_samples(sample_rows, read_species_traits(traits, trait))
     retained = names - set(exclude_species)
@@ -258,7 +256,8 @@ def from_tree(tree, tree_qc, samples, metadata, traits, outdir, trait="C4", seed
                            "states": states,
                            "excluded_species": sorted(names - retained),
                            "missing_trait_species": sorted(retained - eligible),
-                           "rooting": "source_root_inherited", "outgroup_in_observed_tree": outgroup in eligible,
+                           "rooting": "source_root_inherited", "outgroup_in_observed_tree": bool(set(outgroup) & eligible),
+                           "retained_outgroup": sorted(set(outgroup) & eligible),
                            "reestimated": False,
                            "assignment": "membership on the observed-species subtree of the input molecular tree"})
 

@@ -14,7 +14,7 @@ def load_complete(path, verify_files=True):
     path = completion_path(path)
     data = json.loads(path.read_text())
     if data.get('kind') != 'completed_build' or data.get('schema_version') not in (3, 4):
-        raise ValueError('legacy build products: register their input files and ODB snapshot to prepare a new build')
+        raise ValueError('unsupported completed products: use a schema-3 or schema-4 products bundle, or prepare a new build from metadata')
     if digest({k:v for k,v in data.items() if k != 'sha256'}) != data.get('sha256'):
         raise ValueError('build completion record changed')
     return load_products(path, data, verify_files=verify_files)

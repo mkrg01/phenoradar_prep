@@ -10,7 +10,6 @@ import yaml
 from accession_exclusions import read_exclusions
 from common import read_tsv, write_json, write_tsv
 from dataset import load, materialize, plan, prepare, status, submit, worker
-from dataset_assets import import_existing
 from test_datasets import dataset_project, fake_genegalleon, imported, new_dataset
 
 
@@ -109,14 +108,6 @@ def test_excluded_species_never_receive_array_indices(dataset_project):
     assert events == ['Beta_sp-X','Gamma_plant']
     assert not (build/'genegalleon/Alpha_plant_A1/input/amalgkit_metadata/Alpha_plant_metadata.tsv').exists()
     assert status(build)[-1]['assembly'] == 'excluded'
-
-
-def test_legacy_registration_respects_run_exclusions(dataset_project):
-    root = dataset_project
-    result = import_existing(root/'resources/dataset_assets',root/'input',root/'input/metadata.tsv',excluded_runs={'A1'})
-    assert result[0] == {'species':'Alpha_plant_A1','run':'A1','status':'excluded'}
-    assert not (root/'resources/dataset_assets/Alpha_plant_A1').exists()
-    assert result[1]['status'] == 'registered'
 
 
 def test_download_failure_is_retried_without_rerunning_completed_species(dataset_project, monkeypatch):

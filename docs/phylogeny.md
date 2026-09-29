@@ -18,8 +18,7 @@ Analysis inherits `busco.lineage` from build settings (default `embryophyta_odb1
 
 Full tables need `Busco id`, `Status`, `Sequence`, `Score`, and `Length` columns,
 a lineage header, and the same complete marker-ID set. Counts-only summaries and
-genome-mode tables are unsupported. For existing external results, follow the
-[registration layout](inputs.md#importing-existing-products).
+genome-mode tables are unsupported. Complete the build before starting analysis.
 
 Original CDS must be oriented, in-frame, and match the BUSCO hits.
 IDs such as `Species_accession_g123:60-698` resolve to `Species_accession_g123`; the full CDS is
@@ -69,12 +68,28 @@ a nonempty `trees` list. Dating and taxonomy checks reject representative trees.
 
 ## Rooting
 
-`phylogeny.outgroup` accepts `auto` or an exact analysis sample ID in every requested set.
-Automatic selection uses NCBI taxonomy, with nwkit's APG IV order tree as an
-angiosperm fallback. It chooses within each set; supply an outgroup if it fails.
+`phylogeny.outgroup` accepts `auto`, a biological species ID, a sample ID, or a
+list such as `[Basal_species_A, Basal_species_B]`. An explicit species/sample
+selector expands to every selected sample of that biological species. The whole
+basal group must form one side of a split in the molecular tree. All samples are
+retained; a nonmonophyletic group stops inference instead of pruning taxa.
 
-Review `rooting/outgroup.json`. The outgroup is supplied before CASTLES-II
-length estimation; the taxonomy guide does not constrain molecular topology.
+Automatic selection conservatively chooses a complete single-species basal
+lineage using NCBI taxonomy, with nwkit's APG IV order tree as an angiosperm
+fallback. It retains all samples of that species. Specify a list explicitly for
+a basal group containing several species. No extra species are added.
+
+Review `rooting/outgroup.json`. ASTRAL-IV accepts only one root label: the first
+sample ID in the sorted basal group is used as a reproducible anchor during
+CASTLES-II estimation. The resulting tree is then oriented on the complete
+basal split, preserving tips and unrooted edges. Numeric supports follow their
+edges. The taxonomy guide does not constrain molecular topology.
+
+Root placement along the selected edge is a midpoint convention in the
+substitution tree. [LSD2 dating](dating.md) re-estimates that placement while
+keeping the edge and topology fixed. The effect of ASTRAL's single-anchor
+branch estimation with a multi-tip basal clade has not been independently
+benchmarked here; this limitation is recorded in species-tree provenance.
 
 ## Marker and sequence selection
 

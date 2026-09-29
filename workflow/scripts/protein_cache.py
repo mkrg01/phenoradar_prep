@@ -55,25 +55,6 @@ def publish(path, cds, protein, provenance):
     return data
 
 
-def register_translation(cds, protein, provenance, cache_dir, table=1):
-    """Import a translation only when its recorded input and output hashes match."""
-    cds = record(cds)
-    info = json.loads(Path(provenance).read_text())
-    if info['translation_table'] != table:
-        raise ValueError('translation table differs from imported protein')
-    if info['cds']['sha256'] != cds['sha256'] or info['protein']['sha256'] != file_record(protein)['sha256']:
-        raise ValueError('translation provenance differs from CDS/protein')
-    path = cache_path(cache_dir, cds, table)
-    with cache_lock(path.with_suffix('.lock')):
-        if path.exists():
-            data = load_cached(path, cds, table)
-            if data['protein']['sha256'] != info['protein']['sha256']:
-                raise ValueError('conflicting translation for registered CDS/genetic code')
-        else:
-            publish(path, cds, protein, provenance)
-    return path
-
-
 def cached_translate(cds, output, provenance, cache_dir, seqkit='seqkit', table=1, threads=1):
     cds = record(cds)
     path = cache_path(cache_dir, cds, table)

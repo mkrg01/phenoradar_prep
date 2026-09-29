@@ -11,7 +11,6 @@ import protein_cache
 from common import write_tsv
 from phase_config import write_profile
 from sample_table import sample_table
-from translate_cds import translate
 
 
 @pytest.fixture
@@ -60,20 +59,6 @@ def test_different_cds_or_genetic_code_cannot_reuse(tmp_path, cds, seqkit, monke
     with pytest.raises(AssertionError, match='must not invoke'):
         protein_cache.cached_translate(cds, out, provenance, cache)
     assert len(list(cache.glob('*/table_*/receipt.json'))) == 1
-
-
-def test_imported_translation_is_independent_and_checks_provenance(tmp_path, cds, seqkit, monkeypatch):
-    old, provenance, cache = tmp_path/'old.fa', tmp_path/'old.json', tmp_path/'cache'
-    translate(str(cds), old, provenance, seqkit)
-    info = json.loads(provenance.read_text())
-    info['cds']['sha256'] = '0' * 64
-    wrong = tmp_path/'wrong.json'; wrong.write_text(json.dumps(info))
-    with pytest.raises(ValueError, match='provenance differs'):
-        protein_cache.register_translation(cds, old, wrong, cache)
-    protein_cache.register_translation(cds, old, provenance, cache)
-    old.unlink(); provenance.unlink()
-    monkeypatch.setattr(protein_cache, 'translate', forbidden)
-    assert protein_cache.cached_translate(cds, tmp_path/'new.fa', tmp_path/'new.json', cache)
 
 
 def test_sample_index_refreshes_after_checkpoint_replacement(tmp_path):

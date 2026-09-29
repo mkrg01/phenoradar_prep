@@ -19,7 +19,7 @@ its target separately; missing prerequisites are included automatically.
 | Annotate proteins and quantify KO features | [KO expression](kegg.md) |
 | Align mapped orthogroups, retaining all copies | [OG alignments](alignments.md) |
 | Infer trees from independently assembled BUSCO samples | [Phylogeny](phylogeny.md) |
-| Estimate divergence ages with treePL | [Dating](dating.md) |
+| Estimate divergence ages with LSD2 | [Dating](dating.md) |
 | Review placements against NCBI taxonomy | [Taxonomic review](taxonomy_check.md) |
 | Select trait contrast pairs | [Contrast pairs](contrast_pairs.md) |
 
@@ -32,6 +32,6 @@ For exclusions, normally prepare a new analysis with `exclude_species`;
 
 ## Maintenance
 
-[One-time sample ID migration](sample_migration.md) · [Releasing a version](releases.md) · [Development and tests](development.md)
+[Releasing a version](releases.md) · [Development and tests](development.md)
 
 [Project README](../README.md)

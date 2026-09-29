@@ -66,7 +66,7 @@ checkpoint select_phenotyped_species:
         samples=f"{META}/samples.tsv",
         traits=INPUTS["species_trait"],
         code=f"{SCRIPTS}/species_traits.py",
-        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
+        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
     output:
         samples=f"{PHENOTYPED}/selection/samples.tsv",
         qc=f"{PHENOTYPED}/selection/selection.json"
@@ -86,7 +86,7 @@ checkpoint plan_phylogeny:
         outgroup=f"{PHYLO_RUN}/rooting/outgroup.txt",
         tables=phylogeny_tables,
         code=f"{SCRIPTS}/busco_phylogeny.py",
-        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
+        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
     output:
         species=f"{PHYLO_RUN}/plan/species.tsv",
         markers=f"{PHYLO_RUN}/plan/markers.tsv",
@@ -110,7 +110,7 @@ rule extract_busco_proteins:
         table=lambda wc: phylogeny_species_row(wc)["busco_table"],
         sequences=lambda wc: phylogeny_species_row(wc)["sequences"],
         code=f"{SCRIPTS}/busco_phylogeny.py",
-        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
+        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
     output:
         proteins=f"{PHYLO_RUN}/species/{{species}}.faa",
         qc=f"{PHYLO_RUN}/species/{{species}}.json"
@@ -133,7 +133,7 @@ rule collect_busco_markers:
         proteins=lambda wc: [f'{OUT}/{wc.phylo_branch}/species/{r["species"]}.faa' for r in phylogeny_plan_rows(wc, "species")],
         reports=lambda wc: [f'{OUT}/{wc.phylo_branch}/species/{r["species"]}.json' for r in phylogeny_plan_rows(wc, "species")],
         code=f"{SCRIPTS}/busco_phylogeny.py",
-        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
+        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
     output: fasta=directory(f"{PHYLO_RUN}/markers")
     params: species_dir=f"{PHYLO_RUN}/species"
     conda: "../envs/phylogeny.yaml"
@@ -150,7 +150,7 @@ rule align_busco_marker:
         markers=rules.collect_busco_markers.output.fasta,
         sample_manifest=f"{PHYLO_RUN}/plan/species.tsv",
         code=f"{SCRIPTS}/infer_phylogeny.py",
-        helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
+        helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
     output:
         alignment=f"{PHYLO_RUN}/alignments/raw/{{marker}}.faa",
         qc=f"{PHYLO_RUN}/alignments/raw/{{marker}}.json"
@@ -176,7 +176,7 @@ rule trim_busco_marker:
         raw_qc=f"{PHYLO_RUN}/alignments/raw/{{marker}}.json",
         sample_manifest=f"{PHYLO_RUN}/plan/species.tsv",
         code=f"{SCRIPTS}/infer_phylogeny.py",
-        helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
+        helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
     output:
         alignment=f"{PHYLO_RUN}/alignments/{{marker}}.faa",
         qc=f"{PHYLO_RUN}/alignments/{{marker}}.json",
@@ -200,7 +200,7 @@ rule infer_busco_gene_tree:
         alignment=f"{PHYLO_RUN}/alignments/{{marker}}.faa",
         alignment_qc=f"{PHYLO_RUN}/alignments/{{marker}}.json",
         code=f"{SCRIPTS}/infer_phylogeny.py",
-        helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
+        helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
     output:
         tree=f"{PHYLO_RUN}/gene_trees/{{marker}}.nwk",
         qc=f"{PHYLO_RUN}/gene_trees/{{marker}}.json"
@@ -223,7 +223,7 @@ rule merge_busco_gene_trees:
         trees=lambda wc: phylogeny_marker_files(wc, "nwk"),
         reports=lambda wc: phylogeny_marker_files(wc, "json"),
         code=f"{SCRIPTS}/infer_phylogeny.py",
-        helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
+        helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
     output:
         trees=f"{PHYLO_RUN}/gene_trees.nwk",
         coverage=f"{PHYLO_RUN}/species_coverage.tsv",
@@ -245,7 +245,7 @@ if not Path(ASTRAL).is_file() or not Path(ASTRAL).parent.parent.joinpath("aster.
     rule prepare_astral:
         input:
             code=f"{SCRIPTS}/prepare_phylogeny_tools.py",
-            common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
+            common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
         output:
             binary=ASTRAL,
             provenance=str(Path(ASTRAL).parent.parent / "aster.json")
@@ -264,7 +264,7 @@ rule infer_busco_species_tree:
         merge_qc=f"{PHYLO_RUN}/gene_trees.json",
         manifest=f"{PHYLO_RUN}/plan/species.tsv",
         code=f"{SCRIPTS}/infer_phylogeny.py",
-        helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/prepare_phylogeny_tools.py"],
+        helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/prepare_phylogeny_tools.py", f"{SCRIPTS}/phylogeny_outgroup.py"],
         build_provenance=str(Path(ASTRAL).parent.parent / "aster.json"),
         binary=ASTRAL,
         outgroup=f"{PHYLO_RUN}/rooting/outgroup.txt"
@@ -289,7 +289,7 @@ rule prepare_timetree_calibrations:
         metadata=f"{META}/metadata_high_busco.tsv",
         taxonomy=TAXONOMY_DB,
         code=f"{SCRIPTS}/timetree_calibrations.py",
-        helpers=[f"{SCRIPTS}/date_phylogeny.py", f"{SCRIPTS}/infer_phylogeny.py", f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
+        helpers=[f"{SCRIPTS}/date_phylogeny.py", f"{SCRIPTS}/infer_phylogeny.py", f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
     output:
         calibrations=f"{PHYLO_RUN}/timetree/calibrations.tsv",
         candidates=f"{PHYLO_RUN}/timetree/candidates.tsv",
@@ -317,25 +317,26 @@ rule date_busco_species_tree:
         provenance=f"{PHYLO_RUN}/species_tree.json",
         calibrations=dating_calibrations,
         code=f"{SCRIPTS}/date_phylogeny.py",
-        helpers=[f"{SCRIPTS}/infer_phylogeny.py", f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
+        helpers=[f"{SCRIPTS}/infer_phylogeny.py", f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
     output:
         tree=f"{PHYLO_RUN}/dating/species_tree.dated.nwk",
         provenance=f"{PHYLO_RUN}/dating/provenance.json",
         ages=f"{PHYLO_RUN}/dating/node_ages.tsv",
         calibrations=f"{PHYLO_RUN}/dating/calibrations.resolved.tsv",
-        raw=f"{PHYLO_RUN}/dating/treepl.dated.nwk",
-        report=f"{PHYLO_RUN}/dating/treepl.log",
-        config=f"{PHYLO_RUN}/dating/treepl.config.txt",
-        prime_config=f"{PHYLO_RUN}/dating/treepl.prime.config.txt",
-        prime_log=f"{PHYLO_RUN}/dating/treepl.prime.log",
-        input_tree=f"{PHYLO_RUN}/dating/treepl.input.nwk",
-        cv=f"{PHYLO_RUN}/dating/cross_validation.tsv",
-        native_cv=f"{PHYLO_RUN}/dating/treepl.cv.out",
-        floors=f"{PHYLO_RUN}/dating/branch_length_adjustments.tsv"
-        # Keep treepl_runs undeclared so native diagnostics survive a failed job.
+        raw=f"{PHYLO_RUN}/dating/lsd2.dated.nwk",
+        report=f"{PHYLO_RUN}/dating/lsd2.result",
+        native_nexus=f"{PHYLO_RUN}/dating/lsd2.result.date.nexus",
+        native_substitutions=f"{PHYLO_RUN}/dating/lsd2.result.nwk",
+        native_log=f"{PHYLO_RUN}/dating/lsd2.log",
+        command=f"{PHYLO_RUN}/dating/lsd2.command.json",
+        input_tree=f"{PHYLO_RUN}/dating/lsd2.input.nwk",
+        input_dates=f"{PHYLO_RUN}/dating/lsd2.dates.txt",
+        outgroups=f"{PHYLO_RUN}/dating/lsd2.outgroups.txt",
+        zeros=f"{PHYLO_RUN}/dating/numerical_zero_adjustments.tsv"
+        # Keep lsd2_runs undeclared so native diagnostics survive a failed job.
     params:
-        outdir=f"{PHYLO_RUN}/dating", command="treePL", seed=config["seed"],
-        settings=json.dumps(PHY["dating"]["treepl"], sort_keys=True)
+        outdir=f"{PHYLO_RUN}/dating", command="lsd2",
+        settings=json.dumps(PHY["dating"]["lsd2"], sort_keys=True)
     conda: "../envs/dating.yaml"
     threads: 1
     resources: mem_mb=4000
@@ -344,4 +345,4 @@ rule date_busco_species_tree:
     shell:
         "{PYTHON:q} {input.code:q} --tree {input.tree:q} --provenance {input.provenance:q} "
         "--calibrations {input.calibrations:q} --outdir {params.outdir:q} --command {params.command:q} "
-        "--threads {threads} --seed {params.seed} --settings {params.settings:q} > {log:q} 2>&1"
+        "--threads {threads} --settings {params.settings:q} > {log:q} 2>&1"
