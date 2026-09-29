@@ -1,6 +1,10 @@
 # Internal defaults for resolved Snakemake configurations; edit config/build.yaml or config/analysis.yaml.
 input_root: input
 run_name: run001
+output_root: null
+work_root: null
+log_root: null
+expression_cache: null
 seed: 12345
 trait: carnivory
 selection:

@@ -19,6 +19,13 @@ def input_layout(root="input"):
     inputs = {key: str(root / Path(value).relative_to("input")) for key, value in INPUTS.items()}
     return inputs, str(root / "busco/full"), str(root / "species_list.txt"), str(root / "calibrations.tsv")
 
+def run_layout(config):
+    """Explicit phase paths for new runs; retain old frozen configurations."""
+    from pathlib import Path
+    return tuple(str(config.get(key) or Path(directory) / config["run_name"])
+                 for key, directory in (("output_root", "results"), ("work_root", "work"), ("log_root", "logs")))
+
+
 ORTHOGROUP_MAPPING = "orthogroups/mapping"
 ORTHOGROUP_EXPRESSION = "orthogroups/expression"
 ORTHOGROUP_ALIGNMENTS = "orthogroups/alignments"

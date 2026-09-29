@@ -3,14 +3,18 @@
 import argparse
 import csv
 import math
+import json
+import os
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 
 from common import file_record, now, read_tsv, species_from_gene_id, write_json, write_tsv
-from mapping_tables import read_species
+from mapping_tables import read_species, load_tables, relative_file, lock
+from dataset_assets import digest, link_file, record, verify
 
 
-def aggregate(samples, run, mapping, output, qc, multimap="error"):
+def _aggregate(samples, run, mapping, output, qc, multimap="error"):
     if multimap not in {"error", "drop", "split"}:
         raise ValueError("unknown multimap policy")
     rows = [row for row in read_tsv(samples) if row["run"] == run]
@@ -37,6 +41,7 @@ def aggregate(samples, run, mapping, output, qc, multimap="error"):
     foreign = next((gene for gene in values if species_from_gene_id(gene) != sample['species']), None)
     if foreign:
         raise ValueError(f"{run}: target ID belongs to a different species: {foreign}")
+    table_record = file_record(relative_file(Path(mapping).parent, entry['table'])['path'])
     mapping = {gene:groups for gene,groups in genes.items() if groups and gene in values}
     protein_genes = len(genes)
     quantified_proteins = len(genes.keys() & values.keys())
@@ -63,7 +68,38 @@ def aggregate(samples, run, mapping, output, qc, multimap="error"):
                     "mapped_targets": len(mapping), "ambiguous_targets": len(ambiguous), "retained_targets": len(included),
                     "total_tpm": total, "mapped_tpm": matched_tpm, "mapped_tpm_fraction": matched_tpm / total,
                     "retained_tpm": included_tpm, "retained_tpm_fraction": included_tpm / total,
-                    "orthogroups": len(result), "abundance": file_record(sample["abundance"])})
+                    "orthogroups": len(result), "abundance": file_record(sample["abundance"]),
+                    "mapping_table": table_record, "expression": file_record(output)})
+
+
+def aggregate(samples, run, mapping, output, qc, multimap="error", cache_dir=None):
+    if not cache_dir:
+        return _aggregate(samples, run, mapping, output, qc, multimap)
+    rows = [row for row in read_tsv(samples) if row['run'] == run]
+    if len(rows) != 1: raise ValueError(f'expected exactly one manifest row for run {run}')
+    sample = rows[0]
+    abundance = record(sample['abundance'])
+    entry = load_tables(mapping, verify_files=False)['tables'][sample['species']]
+    table = relative_file(Path(mapping).parent, entry['table'])
+    verify(table)
+    identity = digest([sample['species'], run, abundance['sha256'], table['sha256'], multimap,
+                       [file_record(Path(__file__).with_name(name))['sha256']
+                        for name in ('aggregate_tpm.py', 'mapping_tables.py', 'common.py')]])
+    cache = Path(cache_dir) / identity
+    with lock(cache.with_suffix('.lock')):
+        if not (cache / 'receipt.json').is_file():
+            with tempfile.TemporaryDirectory(prefix='.expression-', dir=cache.parent) as tmp:
+                staging = Path(tmp)
+                _aggregate(samples, run, mapping, staging / 'tpm.tsv', staging / 'qc.json', multimap)
+                verify(abundance); verify(table)
+                files = {name:dict(record(staging / name), path=name) for name in ('tpm.tsv', 'qc.json')}
+                write_json(staging / 'receipt.json', {'identity':identity, 'files':files})
+                os.rename(staging, cache)
+        receipt = json.loads((cache / 'receipt.json').read_text())
+        if receipt['identity'] != identity: raise ValueError('expression cache identity differs')
+        for name, target in (('tpm.tsv', output), ('qc.json', qc)):
+            source = verify(dict(receipt['files'][name], path=str(cache / name)))
+            link_file(source, target)
 
 
 if __name__ == "__main__":
@@ -71,4 +107,5 @@ if __name__ == "__main__":
     for flag in ["samples", "run", "mapping", "output", "qc"]:
         parser.add_argument(f"--{flag}", required=True)
     parser.add_argument("--multimap", choices=["error", "drop", "split"], default="error")
+    parser.add_argument("--cache-dir")
     aggregate(**vars(parser.parse_args()))

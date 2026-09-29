@@ -1,9 +1,12 @@
-# Reusable sample products through ODB mapping. Paths are relative to the project root.
+# Reusable sample database, including OG expression, under results/<name>/.
+# Paths are relative to the project root.
 # GeneGalleon version, revision and image digest must be updated together.
-name: angiosperm_leaf_20260928_samples  # A new name for each build; prepare --name overrides.
+name: angiosperm_leaf_20260928_samples  # A new name for each build; submit --name overrides.
 metadata: input/metadata.tsv
 excluded_accessions: config/excluded_accessions.tsv  # Manual run exclusions; null disables.
 store: migrations/sample_ids_20260928/dataset_assets
+tpm:
+  multimap: error  # Policy for genes mapped to multiple OGs: error, drop, split.
 translation:
   table: 1
 busco:

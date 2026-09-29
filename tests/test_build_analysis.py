@@ -23,9 +23,7 @@ def test_analysis_requires_completed_build_and_rejects_build_settings(dataset_pr
     build = dataset.prepare(root,'incomplete',root/'config/build.yaml')
     with pytest.raises(ValueError,match='build is incomplete'):
         analysis.prepare(root,'test',root/'config/analysis.yaml',build)
-    assert not (root/'analyses/test').exists()
-    with pytest.raises(ValueError,match='reserved for build outputs'):
-        analysis.prepare(root,'build_incomplete',root/'config/analysis.yaml',build)
+    assert not (build/'downstream').exists()
     bad = root/'bad.yaml'; bad.write_text('odb:\n  node: 1\n')
     with pytest.raises(ValueError,match='unknown analysis settings'):
         analysis.settings(root,bad,build)
@@ -81,11 +79,16 @@ def test_complete_build_multiple_analyses_and_species_updates(dataset_project,fa
                '--cores','2','--resources','mem_mb=16000']
         if mapping: cmd += ['--set-threads','odb_map=1','--set-resources','odb_map:mem_mb=3000']
         result = subprocess.run([*cmd,'--',target],cwd=root,env=env,capture_output=True,text=True,timeout=120)
-        logs = '\n'.join(str(p)+': '+p.read_text()[-2000:] for p in (root/'logs').rglob('*.log'))
+        logs = '\n'.join(str(p)+': '+p.read_text()[-2000:] for p in (root/'results').rglob('*.log'))
         assert result.returncode == 0, result.stdout+result.stderr+logs
     build = dataset.prepare(root,'base',root/'config/build.yaml')
     dataset.materialize(build)
     execute(build,'mapping',mapping=True)
+    with pytest.raises(ValueError, match='expression incomplete'):
+        complete(build)
+    execute(build,'database',mapping=True)
+    assert (build/'work/database/orthogroups/expression/runs/A1.tsv').is_file()
+    assert not (root/'builds').exists()
     receipt = complete(build)
     original = receipt.read_bytes()
     assert dataset.submit(build,dry_run=True) == []
@@ -102,9 +105,16 @@ def test_complete_build_multiple_analyses_and_species_updates(dataset_project,fa
         run = analysis.prepare(root,name,config,build)
         execute(run,'all')
         execute(run,'phenoradar_inputs')
-        output = root/'results'/name
+        assert run == build/'downstream'/name
+        output = run
+        assert analysis.load(run)['pipeline']['tpm'] == load_complete(build)['tpm']
+        assert (output/'orthogroups/expression/runs/A1.tsv').samefile(build/'database/expression/runs/A1.tsv')
         assert {r['species'] for r in read_tsv(output/'orthogroups/expression/tpm.tsv')} == expected
         assert {r['species'] for r in read_tsv(output/'phenoradar_inputs/tpm.tsv')} == expected
+        # Expression-only downstream runs do not even stage proteins or mappings.
+        assert not (output/'orthogroups/mapping').exists()
+        assert not (output/'proteins').exists()
+        execute(run,'mapping')
         qc = json.loads((output/'orthogroups/mapping/snapshot.json').read_text())['qc']
         assert qc['mode'] == 'existing' and qc['mapped_species'] == 0
         assert len(events.read_text().splitlines()) == 1
@@ -127,15 +137,20 @@ def test_complete_build_multiple_analyses_and_species_updates(dataset_project,fa
         write_tsv(policy,['accession','reason'],[{'accession':r['run'],'reason':'manual_failure_decision'} for r in blocked])
         updated = dataset.prepare(root,name,root/'config/build.yaml')
         assert dataset.submit(updated,until='quant',dry_run=True) == []
-        dataset.materialize(updated); execute(updated,'mapping',mapping=True); complete(updated)
+        dataset.materialize(updated); execute(updated,'database',mapping=True); complete(updated)
         assert set(load_complete(updated)['products']) == {r['scientific_name'].replace(' ','_')+'_'+r['run'] for r in rows}
         assert len(events.read_text().splitlines()) == 1
         assert [r['run'] for r in load_complete(updated)['excluded_runs']] == [r['run'] for r in blocked]
         if name == 'removed':
             subset = analysis.prepare(root,'without_excluded',config,updated)
             execute(subset,'all'); execute(subset,'phenoradar_inputs')
-            assert {r['species'] for r in read_tsv(root/'results/without_excluded/phenoradar_inputs/tpm.tsv')} == {'Alpha_plant_A1'}
+            assert {r['species'] for r in read_tsv(subset/'phenoradar_inputs/tpm.tsv')} == {'Alpha_plant_A1'}
             assert len(events.read_text().splitlines()) == 1
+        assert (updated/'database/expression/runs/A1.tsv').samefile(build/'database/expression/runs/A1.tsv')
+        assert analysis.prepare(root,'loose',config,updated) == updated/'downstream/loose'
+    assert not (root/'analyses').exists()
+    assert not (root/'work').exists()
+    assert not (root/'logs').exists()
     # A completion record never legitimizes changed or deleted artifacts.
     protein = Path(load_complete(build)['products']['Alpha_plant_A1']['protein']['path'])
     protein.write_text('changed\n')
@@ -158,12 +173,15 @@ def test_migration_preserves_caches_scientific_settings_and_never_overwrites(dat
     flat = yaml.safe_load((root/'workflow/pipeline_defaults.yaml').read_text())
     flat['selection']['busco_threshold'] = 0.75
     flat['translation']['table'] = 4
+    flat['tpm']['multimap'] = 'split'
     flat['odb']['existing_results'] = 'resources/odb_existing/tlight'
     old_flat = root/'old-config.yaml'; old_flat.write_text(yaml.safe_dump(flat))
     outputs = migrate(root,old_path,old_flat)
     build, lower = [yaml.safe_load(p.read_text()) for p in outputs]
     assert build['store'] == cfg['store']
     assert build['translation']['table'] == 4
+    assert build['tpm']['multimap'] == 'split'
+    assert 'tpm' not in lower
     assert build['odb']['chunk_size'] == 7
     assert build['odb']['existing_results'] == 'resources/odb_existing/tlight'
     assert lower['selection']['busco_threshold'] == 0.75

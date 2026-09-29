@@ -1,7 +1,7 @@
 """Accepted configuration keys, including optional tool-specific overrides."""
 KEYS = {
     "": "run_name selection translation odb tpm alignment kegg phylogeny "
-        "trait exclude_species seed input_root build_manifest translation_cache",
+        "trait exclude_species seed input_root build_manifest translation_cache expression_cache output_root work_root log_root",
     "selection": "busco_threshold species_list missing_taxonomy",
     "translation": "table",
     "odb": "existing_results node incremental cache_dir chunk_size",
@@ -37,6 +37,10 @@ def validate_keys(config):
         raise ValueError("odb.existing_results must be null or a snapshot directory")
     if "input_root" in config and (not isinstance(config["input_root"], str) or not config["input_root"].strip()):
         raise ValueError("input_root must be a directory")
+    for key in ("output_root", "work_root", "log_root", "expression_cache"):
+        value = config.get(key)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ValueError(f"{key} must be null or a directory")
     odb = config.get("odb", {})
     if type(odb.get("incremental", False)) is not bool:
         raise ValueError("odb.incremental must be true or false")

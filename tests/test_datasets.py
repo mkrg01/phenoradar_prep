@@ -64,7 +64,7 @@ def dataset_project(tmp_path, tiny_inputs):
 
 
 def native_events(build):
-    return [json.loads(line) for p in sorted((build / "genegalleon").glob("*/events.jsonl"))
+    return [json.loads(line) for p in sorted((build / "work/genegalleon").glob("*/events.jsonl"))
             for line in p.read_text().splitlines()]
 
 
@@ -102,11 +102,12 @@ def test_prepare_cli_uses_config_name_with_optional_override(dataset_project, ov
     result = subprocess.run(command, cwd=root, text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
     name = override or cfg["name"]
-    path = root / "builds" / name
+    path = root / "results" / name
     assert result.stdout.strip() == str(path)
     frozen = load(path, check_code=True)
     assert frozen["name"] == frozen["config"]["name"] == name
-    assert frozen["analysis"]["run_name"] == "build_" + name
+    assert frozen["analysis"]["run_name"] == name
+    assert frozen["analysis"]["output_root"] == f"results/{name}/work/database"
     assert {row["assembly"] for row in status(path)} == {"reuse"}
     # Renaming in the source config cannot rename an existing preparation.
     cfg["name"] = "angiosperm_leaf_20260926"
@@ -138,7 +139,7 @@ def test_prepare_rejects_invalid_config_name(dataset_project, name):
     config.write_text(yaml.safe_dump(cfg))
     with pytest.raises(ValueError, match="build name must be a simple directory name"):
         prepare(root, None, config)
-    assert not (root / "builds").exists()
+    assert not (root / "results").exists()
 
 
 def test_manual_metadata_allows_multiple_runs_with_unique_sample_identities(tmp_path):
@@ -160,7 +161,7 @@ def test_legacy_import_and_changed_metadata_only_reuses_products(dataset_project
         ("reuse", "reuse", "reuse"), ("reuse", "reuse", "reuse"), ("reuse", "reuse", "reuse")]
     path = prepare(root, "base", cfg)
     assert submit(path, until="quant", dry_run=True) == []
-    assert not (path / "genegalleon").exists()
+    assert not (path / "work/genegalleon").exists()
     assert load(path)["analysis"]["odb"]["incremental"] is True
     assert load(path)["software_lock"] is None  # Reuse-only preparation does not acquire software.
 
@@ -203,7 +204,7 @@ def test_changed_run_requires_independent_assembly_and_missing_is_not_silently_d
     path = prepare(root, "newrun", root / "config/build.yaml")
     with pytest.raises(ValueError, match="dataset incomplete: Alpha_plant_Anew: reference, busco, quant"):
         materialize(path)
-    assert not (path / "input").exists()
+    assert not (path / "work/input").exists()
 
 
 def test_modified_registered_cds_is_a_conflict(dataset_project):
@@ -396,9 +397,9 @@ def test_private_relative_reads_are_frozen_and_reuse_detects_changed_bytes(datas
     cfg = root / "config/build.yaml"
     path = prepare(root, "private", cfg, "input/private.tsv")
     submit(path, until="quant", dry_run=True)
-    staged = path / "genegalleon/Private_plant_LOCAL1/input/reads/Private_plant_LOCAL1/read1_path.fastq"
+    staged = path / "work/genegalleon/Private_plant_LOCAL1/input/reads/Private_plant_LOCAL1/read1_path.fastq"
     assert staged.read_bytes() == reads.read_bytes()
-    assert read_tsv(path / "genegalleon/Private_plant_LOCAL1/input/amalgkit_metadata/Private_plant_metadata.tsv")[0]["read1_path"] == "/workspace/input/reads/Private_plant_LOCAL1/read1_path.fastq"
+    assert read_tsv(path / "work/genegalleon/Private_plant_LOCAL1/input/amalgkit_metadata/Private_plant_metadata.tsv")[0]["read1_path"] == "/workspace/input/reads/Private_plant_LOCAL1/read1_path.fastq"
     original = reads.read_bytes()
     reads.write_text("changed after submission")
     with pytest.raises(ValueError, match="registered file changed"):
@@ -423,7 +424,7 @@ def test_retry_quarantine_does_not_touch_another_species_with_same_prefix(datase
     with pytest.raises(subprocess.CalledProcessError): worker(path, "assembly", 1)
     monkeypatch.delenv("FAKE_GG_FAIL_ASSEMBLY")
     worker(path, "assembly", 2)
-    other = path / "genegalleon/New_plant_alba_SRR2/output/transcriptome_assembly/assembled_transcripts_with_isoforms/New_plant_alba_isoform.fa.gz"
+    other = path / "work/genegalleon/New_plant_alba_SRR2/output/transcriptome_assembly/assembled_transcripts_with_isoforms/New_plant_alba_isoform.fa.gz"
     other.parent.mkdir(parents=True, exist_ok=True)
     other.write_bytes(b"completed output of another species")
     worker(path, "assembly", 1)
@@ -460,7 +461,7 @@ def test_split_slurm_arrays_preserve_species_identity_and_bound_concurrency(data
 def test_extra_native_metadata_file_cannot_shift_species_array_index(dataset_project):
     path = new_dataset(dataset_project)
     submit(path, until="assembly", dry_run=True)
-    (path / "genegalleon/New_plant_SRR1/input/amalgkit_metadata/Aardvark_backup.tsv").write_text("unexpected metadata")
+    (path / "work/genegalleon/New_plant_SRR1/input/amalgkit_metadata/Aardvark_backup.tsv").write_text("unexpected metadata")
     with pytest.raises(ValueError, match="metadata file set changed"):
         worker(path, "assembly", 1)
     assert not native_events(path)
@@ -503,3 +504,17 @@ def test_prepare_resolves_automatic_dependencies_once_and_freezes_the_lock(datas
     worker(path, "assembly", 1)
     assert calls == ["source", "image"]
     assert load(path)["software_lock"] == manifest["software_lock"]
+
+
+def test_database_controller_finishes_expression_before_publication(dataset_project, monkeypatch):
+    import build_products
+    import dataset
+    root = dataset_project
+    imported(root)
+    build = prepare(root, 'controller', root / 'config/build.yaml')
+    calls = []
+    monkeypatch.setattr(dataset.subprocess, 'run', lambda command, **kwargs: calls.append(command))
+    monkeypatch.setattr(build_products, 'complete', lambda path: calls.append(path))
+    dataset.run_mapping(build)
+    assert calls[0][-2:] == ['--', 'database']
+    assert calls[1] == build

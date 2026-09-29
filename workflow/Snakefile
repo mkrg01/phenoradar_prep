@@ -12,7 +12,7 @@ ROOT = str(Path(workflow.basedir).parent)
 SCRIPTS = str(Path(workflow.basedir) / "scripts")
 sys.path.insert(0, SCRIPTS)
 from configuration import validate_keys, validate_analysis
-from layout import input_layout
+from layout import input_layout, run_layout
 INPUTS, BUSCO_FULL, SPECIES_LIST, CALIBRATIONS = input_layout(config.get("input_root", "input"))
 from versioning import resolve_container_image
 USE_CONTAINER = DeploymentMethod.APPTAINER in workflow.deployment_settings.deployment_method
@@ -88,9 +88,7 @@ try:
     EXCLUDE_SPECIES = validate_exclusions(config["exclude_species"])
 except ValueError as error:
     raise WorkflowError(str(error))
-OUT = f'results/{config["run_name"]}'
-WORK = f'work/{config["run_name"]}'
-LOG = f'logs/{config["run_name"]}'
+OUT, WORK, LOG = run_layout(config)
 PROTEINS = str(Path(f"{OUT}/proteins").resolve())
 META = f"{OUT}/metadata"
 MAPPING = f"{OUT}/{ORTHOGROUP_MAPPING}"
@@ -303,6 +301,14 @@ rule mapping:
     input:
         f"{MAPPING}/snapshot.json",
         f"{MAPPING}/species"
+
+
+rule database:
+    input:
+        f"{MAPPING}/snapshot.json",
+        f"{MAPPING}/species",
+        lambda wc: run_outputs(wc, "tsv"),
+        lambda wc: run_outputs(wc, "qc.json")
 
 
 rule kegg:

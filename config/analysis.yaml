@@ -1,6 +1,6 @@
-# One analysis of a completed build; use a new analysis name for changed conditions.
+# Downstream conditions for a completed database; outputs: results/<build>/downstream/<name>/.
 # BUSCO selection is applied here, after all build samples have been mapped.
-build: builds/angiosperm_leaf_20260928_samples
+build: results/angiosperm_leaf_20260928_samples
 inputs:
   species_trait: input/species_trait.tsv
   species_list: null
@@ -11,8 +11,6 @@ selection:
   species_list: false
   busco_threshold: 0.5
   missing_taxonomy: error
-tpm:
-  multimap: error
 alignment:
   enabled: false
 kegg:

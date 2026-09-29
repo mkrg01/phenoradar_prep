@@ -19,13 +19,14 @@ from common import file_record, now, read_tsv, write_json, write_tsv
 from configuration import validate_analysis, validate_keys
 from accession_exclusions import partition, read_exclusions
 from phase_config import read_yaml
+from layout import run_layout
 from sample_identity import select_samples
 from dataset_software import resolve as resolve_software, validate as validate_software
 from dataset_assets import (COUNTS, SAFE, digest, identities, link_file, locked,
                             normalize_private_paths, record, register_busco, register_quant, register_reference, resolve, verify)
 
 STAGES = ("assembly", "busco", "quant")
-UNTIL = (*STAGES, "mapping")
+UNTIL = (*STAGES, "mapping", "database")
 FIXED_GENEGALLEON_SETTINGS = {"amalgkit_rrna_filter": "no", "amalgkit_contam_filter": "no"}
 MANAGED = {"mode_transcriptome_assembly", "kallisto_reference", "remove_amalgkit_fastq_after_completion", "delete_tmp_dir"} | FIXED_GENEGALLEON_SETTINGS.keys()
 
@@ -48,7 +49,7 @@ def settings(root, config, analysis_config=None):
     cfg = read_yaml(config)
     if analysis_config is not None:
         raise ValueError("build does not accept analysis overrides; use run_analysis.sh")
-    unknown = set(cfg) - {"name", "metadata", "store", "translation", "busco", "odb", "genegalleon", "slurm", "excluded_accessions"}
+    unknown = set(cfg) - {"name", "metadata", "store", "translation", "busco", "odb", "genegalleon", "slurm", "excluded_accessions", "tpm"}
     if unknown: raise ValueError(f"unknown build settings: {sorted(unknown)}; migrate old dataset/config files first")
     excluded = cfg.get("excluded_accessions")
     if excluded is not None and (not isinstance(excluded, str) or not excluded.strip()):
@@ -56,6 +57,10 @@ def settings(root, config, analysis_config=None):
     cfg["excluded_accessions"] = str(absolute(root, excluded)) if excluded is not None else None
     analysis = read_yaml(root / "workflow/pipeline_defaults.yaml")
     analysis["translation"] = cfg["translation"]
+    cfg.setdefault("tpm", {"multimap": "error"})
+    if not isinstance(cfg["tpm"], dict) or set(cfg["tpm"]) != {"multimap"} or not isinstance(cfg["tpm"]["multimap"], str) or cfg["tpm"]["multimap"] not in {"error", "drop", "split"}:
+        raise ValueError("build tpm.multimap must be error, drop, or split")
+    analysis["tpm"] = copy.deepcopy(cfg["tpm"])
     if set(cfg["busco"]) != {"lineage"} or not isinstance(cfg["busco"]["lineage"], str) or not cfg["busco"]["lineage"].strip():
         raise ValueError("busco.lineage must be a nonempty string")
     if set(cfg["odb"]) - {"node", "cache_dir", "existing_results", "chunk_size"}:
@@ -82,6 +87,7 @@ def settings(root, config, analysis_config=None):
     validate_slurm(cfg["slurm"])
     cfg["store"] = str(inside(root, absolute(root, cfg["store"])))
     analysis["translation_cache"] = str(Path(cfg["store"]) / ".proteins")
+    analysis["expression_cache"] = str(Path(cfg["store"]) / ".expression")
     gg["cache_dir"] = str(inside(root, absolute(root, gg.get("cache_dir", "resources/software/genegalleon"))))
     for key in ("repository", "image"):
         if gg.get(key): gg[key] = str(absolute(root, gg[key]))
@@ -160,7 +166,7 @@ def implementation(root):
     return [record(p) for p in sorted(paths)]
 
 
-def prepare(root, name, config, metadata=None, analysis_config=None):
+def build_directory(root, name, config):
     root = Path(root).resolve()
     if name is None:
         name = read_yaml(config).get("name")
@@ -168,8 +174,14 @@ def prepare(root, name, config, metadata=None, analysis_config=None):
         raise ValueError("build name is required: set name in build config or pass --name")
     if not isinstance(name, str) or not SAFE.fullmatch(name):
         raise ValueError("build name must be a simple directory name")
-    target = root / "builds" / name
-    if target.exists() or (root / "results" / ("build_" + name)).exists():
+    return root / "results" / name
+
+
+def prepare(root, name, config, metadata=None, analysis_config=None):
+    root = Path(root).resolve()
+    target = build_directory(root, name, config)
+    name = target.name
+    if target.exists():
         raise ValueError("dataset/run name already exists; resume it or choose a new name")
     cfg, analysis, metadata, fields, items, selection, report = plan(root, config, metadata, analysis_config)
     cfg["name"] = name
@@ -210,8 +222,12 @@ def prepare(root, name, config, metadata=None, analysis_config=None):
         write_tsv(staging / "excluded_runs.tsv", ["species", "run", "reason"], selection["excluded"])
         auxiliary["excluded_runs.tsv"] = dict(record(staging / "excluded_runs.tsv"), path=str(target / "excluded_runs.tsv"))
         if cfg["excluded_accessions"]: cfg["excluded_accessions"] = str(target / "excluded_accessions.tsv")
-        analysis["run_name"] = "build_" + name
-        analysis["input_root"] = str(target / "input")
+        analysis["run_name"] = name
+        relative = target.relative_to(root)
+        analysis["output_root"] = str(relative / "work/database")
+        analysis["work_root"] = str(relative / "work/mapping")
+        analysis["log_root"] = str(relative / "logs/database")
+        analysis["input_root"] = str(target / "work/input")
         analysis["odb"]["cache_dir"] = str(inside(root, absolute(root, analysis["odb"]["cache_dir"])))
         if analysis["odb"]["existing_results"]:
             analysis["odb"]["existing_results"] = str(absolute(root, analysis["odb"]["existing_results"]))
@@ -278,7 +294,7 @@ def status(path):
         load_complete(completion)
         for row in report: row["mapping"] = "reuse"
     else:
-        mapping_plan = Path(manifest["root"]) / "results" / manifest["analysis"]["run_name"] / "orthogroups/mapping/incremental_plan/plan.json"
+        mapping_plan = Path(manifest["root"]) / run_layout(manifest["analysis"])[0] / "orthogroups/mapping/incremental_plan/plan.json"
         if mapping_plan.exists():
             planned = json.loads(mapping_plan.read_text())
             for row in report:
@@ -287,15 +303,15 @@ def status(path):
     return report + excluded_report(manifest.get("excluded", []))
 
 
-def workspace(path, item=None):
-    base = Path(path) / "genegalleon"
+def workspace(path, manifest, item=None):
+    base = Path(path) / ("work/genegalleon" if manifest["analysis"].get("output_root") else "genegalleon")
     return base / item["species"] if item else base
 
 
 def stage_workspace(path, manifest):
     # GeneGalleon owns species-named files. Isolate every run before invoking it.
     for item in manifest["items"]:
-        work = workspace(path, item)
+        work = workspace(path, manifest, item)
         for directory in ("input/amalgkit_metadata", "input/species_cds", "output", "downloads"):
             (work / directory).mkdir(parents=True, exist_ok=True)
         row = workspace_metadata(work, item, manifest["raw_inputs"].get(item["species"], {}), create=True)
@@ -304,7 +320,7 @@ def stage_workspace(path, manifest):
             if read_tsv(destination) != [row]: raise ValueError("staged GeneGalleon metadata changed")
         else:
             write_tsv(destination, manifest["fields"], [row])
-    return workspace(path)
+    return workspace(path, manifest)
 
 
 def workspace_metadata(work, item, raw_inputs, create=False):
@@ -370,7 +386,7 @@ def worker(path, stage, task_id):
         if products[key]:
             write_json(receipt_path, {"state": "reused", "at": now()})
             return
-        work = workspace(path, item)
+        work = workspace(path, manifest, item)
         if not (work / "input/amalgkit_metadata" / f"{native}_metadata.tsv").is_file():
             raise ValueError("prepare job workspace with submit --dry-run or submit before running workers")
         expected_row = workspace_metadata(work, item, manifest["raw_inputs"].get(species, {}))
@@ -452,7 +468,7 @@ def worker(path, stage, task_id):
 def materialize(path):
     path = Path(path).resolve()
     manifest = load(path, check_code=True)
-    target = path / "input"
+    target = Path(manifest["analysis"]["input_root"])
     with locked(path / ".materialize.lock"):
         if (path / "input_receipt.json").exists():
             receipt = json.loads((path / "input_receipt.json").read_text())
@@ -467,7 +483,8 @@ def materialize(path):
             if missing: raise ValueError(f"dataset incomplete: {item['species']}: {', '.join(missing)}")
             selected.append(item); products[item["species"]] = p
         if not selected: raise ValueError("build metadata has no species")
-        staging = Path(tempfile.mkdtemp(prefix=".input-", dir=path))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=".input-", dir=target.parent))
         try:
             for item in selected:
                 species, run = item["species"], item["row"]["run"]
@@ -507,7 +524,7 @@ def run_mapping(path, execution=None):
     profile = write_profile(path / "jobs" / (Path(execution).stem if execution else "local") / "profile", slurm)
     command = [str(root / "run_pipeline.sh"), "--slurm", "--profile", str(profile),
                "--jobs", str(slurm["jobs"]), "--configfile", str(path / "pipeline.yaml")]
-    subprocess.run([*command, "--", "mapping"], cwd=root, check=True)
+    subprocess.run([*command, "--", "database" if manifest["analysis"].get("output_root") else "mapping"], cwd=root, check=True)
     complete(path)
 
 
@@ -517,7 +534,7 @@ def load_execution(path):
     return wrapper["slurm"]
 
 
-def submit(path, until="mapping", species=None, dry_run=False, resources=None):
+def submit(path, until="database", species=None, dry_run=False, resources=None):
     path = Path(path).resolve()
     manifest = load(path, check_code=True)
     wanted = set(Path(species).read_text().splitlines()) if species else None
@@ -565,7 +582,7 @@ def submit(path, until="mapping", species=None, dry_run=False, resources=None):
         for stage, indices in pending.items():
             for offset in sorted({((i - 1) // array_size) * array_size for i in indices}):
                 scheduled.append((stage, [i for i in indices if offset < i <= offset + array_size], offset))
-        if until == "mapping" and wanted is None:
+        if until in {"mapping", "database"} and wanted is None:
             scheduled.append(("mapping", None, 0))
         for stage, indices, offset in scheduled:
             job_resources = slurm["stages"]["controller" if stage == "mapping" else stage]
@@ -622,6 +639,23 @@ def submit(path, until="mapping", species=None, dry_run=False, resources=None):
         return commands
 
 
+def submit_named(root, name=None, config=None, metadata=None, until="database", species=None, dry_run=False, resources=None):
+    """Freeze a new build, or submit an existing name with its saved conditions."""
+    root = Path(root).resolve()
+    config = absolute(root, config or "config/build.yaml")
+    target = build_directory(root, name, config)
+    with locked(target.parent / f".{target.name}.prepare.lock"):
+        if target.exists():
+            if not (target / "build.json").is_file():
+                raise ValueError(f"existing path is not a prepared build: {target}; choose a new name")
+            print(f"Using saved build: {target}. Source edits require a new name.", flush=True)
+        else:
+            target = prepare(root, target.name, config, metadata)
+            print(f"Prepared build: {target}", flush=True)
+    return submit(target, until, absolute(root, species) if species else None, dry_run,
+                  absolute(root, resources) if resources else None)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -633,10 +667,15 @@ def main():
         if name == "prepare": command.add_argument("--name", help="Override name from the build config")
     for name in ("status", "submit", "materialize", "worker", "mapping", "complete"):
         command = sub.add_parser(name)
-        command.add_argument("--build", "--dataset", dest="dataset", required=True)
-        if name == "submit": command.add_argument("--until", choices=UNTIL, default="mapping")
+        command.add_argument("--build", "--dataset", dest="dataset", required=name != "submit",
+                             help="Path to an already prepared build")
+        if name == "submit": command.add_argument("--until", choices=UNTIL, default="database")
         if name == "mapping": command.add_argument("--execution")
         if name == "submit":
+            command.add_argument("--root", default=".")
+            command.add_argument("--config", help="Settings for a new build; default: config/build.yaml")
+            command.add_argument("--name", help="Build name; defaults to name in the build config")
+            command.add_argument("--metadata", help="Metadata for a new build")
             command.add_argument("--resources")
             command.add_argument("--species-list")
             command.add_argument("--dry-run", action="store_true")
@@ -664,7 +703,16 @@ def main():
         report = status(args.dataset)
         print(json.dumps(report, indent=2))
         return int(any(r["assembly"] == "conflict" for r in report))
-    elif args.command == "submit": submit(args.dataset, args.until, args.species_list, args.dry_run, args.resources)
+    elif args.command == "submit":
+        if args.dataset:
+            if any(value is not None for value in (args.name, args.config, args.metadata)):
+                parser.error("--build cannot be combined with --name, --config, or --metadata; use --resources for retry resources")
+            submit(absolute(args.root, args.dataset), args.until,
+                   absolute(args.root, args.species_list) if args.species_list else None, args.dry_run,
+                   absolute(args.root, args.resources) if args.resources else None)
+        else:
+            submit_named(args.root, args.name, args.config, args.metadata, args.until,
+                         args.species_list, args.dry_run, args.resources)
     elif args.command == "materialize": print(materialize(args.dataset))
     elif args.command == "worker": worker(args.dataset, args.stage, args.task_id)
     elif args.command == "complete":

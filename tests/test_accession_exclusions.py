@@ -93,7 +93,7 @@ def test_all_excluded_can_be_planned_but_cannot_start_empty_build(dataset_projec
     assert all(r['assembly'] == 'excluded' for r in plan(root,root/'config/build.yaml')[-1])
     with pytest.raises(ValueError,match='all metadata runs are excluded'):
         prepare(root,'empty',root/'config/build.yaml')
-    assert not (root/'builds/empty').exists()
+    assert not (root/'results/empty').exists()
     assert not (root/'resources/software').exists()
 
 
@@ -106,7 +106,7 @@ def test_excluded_species_never_receive_array_indices(dataset_project):
     for index in (1,2): worker(build,'assembly',index)
     events = [e['species'] for e in native_events(build)]
     assert events == ['Beta_sp-X','Gamma_plant']
-    assert not (build/'genegalleon/Alpha_plant_A1/input/amalgkit_metadata/Alpha_plant_metadata.tsv').exists()
+    assert not (build/'work/genegalleon/Alpha_plant_A1/input/amalgkit_metadata/Alpha_plant_metadata.tsv').exists()
     assert status(build)[-1]['assembly'] == 'excluded'
 
 
@@ -115,7 +115,7 @@ def test_download_failure_is_retried_without_rerunning_completed_species(dataset
     build = new_dataset(root,('New plant','Other plant'))
     submit(build,until='assembly',dry_run=True)
     worker(build,'assembly',2)
-    raw = build/'genegalleon/New_plant_SRR1/downloads/SRR1.partial'; raw.write_text('retained resumable download')
+    raw = build/'work/genegalleon/New_plant_SRR1/downloads/SRR1.partial'; raw.write_text('retained resumable download')
     monkeypatch.setenv('FAKE_GG_FAIL_DOWNLOAD','1')
     with pytest.raises(subprocess.CalledProcessError): worker(build,'assembly',1)
     receipt = json.loads((build/'jobs/status/New_plant_SRR1.assembly.json').read_text())
@@ -132,7 +132,7 @@ def test_download_failure_is_retried_without_rerunning_completed_species(dataset
 def test_interrupted_worker_running_receipt_does_not_block_retry(dataset_project):
     build = new_dataset(dataset_project)
     submit(build,until='assembly',dry_run=True)
-    partial = build/'genegalleon/New_plant_SRR1/output/transcriptome_assembly/longest_cds/New_plant_longestCDS.fa.gz'
+    partial = build/'work/genegalleon/New_plant_SRR1/output/transcriptome_assembly/longest_cds/New_plant_longestCDS.fa.gz'
     partial.parent.mkdir(parents=True); partial.write_bytes(b'incomplete output before timeout')
     write_json(build/'jobs/status/New_plant_SRR1.assembly.json', {'state':'running','run':'SRR1'})
     assert status(build)[0]['assembly'] == 'pending'

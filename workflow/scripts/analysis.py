@@ -16,18 +16,20 @@ from portable_build import completion_path, input_entries
 from sample_identity import select_samples
 from common import now, read_tsv, write_json
 from configuration import validate_analysis, validate_keys
+from layout import run_layout
 from dataset import absolute, implementation, inside, load_execution
 from dataset_assets import SAFE, digest, link_file, locked, record, verify
 from phase_config import deep_merge, execution_settings, read_yaml, validate_slurm, write_profile
 
 TARGETS = ('all','alignments','kegg','phylogeny','phylogeny_prepare','taxonomy_check',
            'contrast_pairs','phylogeny_calibrations','timetree','phenoradar_inputs')
-ANALYSIS_KEYS = {'build','inputs','seed','trait','selection','tpm','alignment','kegg','phylogeny','exclude_species','slurm'}
+ANALYSIS_KEYS = {'build','inputs','seed','trait','selection','alignment','kegg','phylogeny','exclude_species','slurm'}
 
 
 def settings(root, config, build=None):
     root = Path(root).resolve()
     override = read_yaml(config)
+    if 'tpm' in override: raise ValueError('tpm settings belong to config/build.yaml; downstream inherits the database policy')
     if set(override) - ANALYSIS_KEYS: raise ValueError('unknown analysis settings: ' + ', '.join(sorted(set(override) - ANALYSIS_KEYS)))
     cfg = deep_merge(read_yaml(root / 'config/analysis.yaml'), override)
     if 'lineage' in cfg['phylogeny']: raise ValueError('BUSCO lineage belongs to build.yaml')
@@ -41,6 +43,7 @@ def settings(root, config, build=None):
     base = read_yaml(root / 'workflow/pipeline_defaults.yaml')
     resolved = deep_merge(base, {k:v for k,v in cfg.items() if k not in {'build','inputs','slurm'}})
     resolved['translation'] = completed['translation']
+    resolved['tpm'] = completed.get('tpm', base['tpm'])
     resolved['phylogeny']['lineage'] = completed['lineage']
     resolved['odb'].update(node=completed['odb']['node'], incremental=False, existing_results=None)
     resolved['build_manifest'] = str(source)
@@ -74,13 +77,30 @@ def settings(root, config, build=None):
     return cfg, resolved, source, completed, sorted(requested), report
 
 
+def downstream_parent(root, source, completed):
+    """Use the local collection name when a database has been copied or renamed."""
+    root = Path(root)
+    bundle = Path(source).parent
+    if bundle.name in {'database', 'products'} and bundle.parent.parent == root / 'results':
+        return bundle.parent / 'downstream'
+    build_id = completed['build_id']
+    if not isinstance(build_id, str) or not SAFE.fullmatch(build_id):
+        raise ValueError('database build ID must be a simple directory name')
+    home = root / 'results' / build_id
+    existing = home / 'database/manifest.json'
+    if existing.is_file() and load_complete(existing)['sha256'] != completed['sha256']:
+        raise ValueError('database ID conflicts with local results; copy it under results/<unique-name>/database first')
+    if (home / 'build.json').exists() and not existing.is_file():
+        raise ValueError('database ID conflicts with an unfinished build; copy it under results/<unique-name>/database first')
+    return home / 'downstream'
+
+
 def prepare(root, name, config, build=None):
     root = Path(root).resolve()
     if not SAFE.fullmatch(name): raise ValueError('analysis name must be a simple directory name')
-    if name.startswith('build_'): raise ValueError('analysis names beginning with build_ are reserved for build outputs')
-    target = root / 'analyses' / name
-    if target.exists() or (root / 'results' / name).exists(): raise ValueError('analysis/run name already exists; resume it or choose a new name')
     cfg, resolved, source, completed, requested, report = settings(root, config, build)
+    target = downstream_parent(root, source, completed) / name
+    if target.exists(): raise ValueError('downstream name already exists in this collection; resume it or choose a new name')
     target.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix='.prepare-', dir=target.parent))
     try:
@@ -94,6 +114,10 @@ def prepare(root, name, config, build=None):
         resolved['selection']['species_list'] = True
         resolved['exclude_species'] = []
         resolved['run_name'] = name
+        collection = target.parent.parent.relative_to(root)
+        resolved['output_root'] = str(target.relative_to(root))
+        resolved['work_root'] = str(collection / 'work/downstream' / name)
+        resolved['log_root'] = str(collection / 'logs/downstream' / name)
         resolved['input_root'] = str(target / 'input')
         (staging / 'pipeline.yaml').write_text(yaml.safe_dump(resolved, sort_keys=False))
         (staging / 'analysis.yaml').write_text(yaml.safe_dump(cfg, sort_keys=False))
@@ -147,9 +171,12 @@ def run(path, target='all', execution=None, local=False, cores=1, mem_mb=8000):
             subprocess.run([str(root/'run_pipeline.sh'),'--cores','1','--resources','mem_mb=4000',
                             '--configfile',str(path/'pipeline.yaml'),'--','phenoradar_inputs'], cwd=root, check=True,
                            env={k:v for k,v in os.environ.items() if not k.startswith('SLURM_')})
-            output = root/'results'/manifest['name']
+            output = root / run_layout(manifest['pipeline'])[0]
+            generated = [output / name for name in ('run.json', 'metadata', 'proteins', 'orthogroups',
+                                                   'kegg', 'phylogeny', 'filtered', 'phenoradar_inputs')]
+            files = [p for part in generated for p in ([part] if part.is_file() else sorted(part.rglob('*'))) if p.is_file()]
             write_json(path/'completed.json', {'created_at':now(), 'build':manifest['build'],
-                       'files':[record(p) for p in sorted(output.rglob('*')) if p.is_file()]})
+                       'files':[record(p) for p in files]})
 
 
 def submit(path, target='all', dry_run=False, resources=None):
@@ -198,6 +225,32 @@ def submit(path, target='all', dry_run=False, resources=None):
         return cmd
 
 
+def submit_named(root, name, config=None, build=None, target='all', dry_run=False, resources=None):
+    """Save conditions once, then submit the same frozen downstream run on retries."""
+    root = Path(root).resolve()
+    if not isinstance(name, str) or not SAFE.fullmatch(name):
+        raise ValueError('submit requires --name with a simple downstream name, or --analysis with an existing path')
+    config = absolute(root, config or 'config/analysis.yaml')
+    if build is None:
+        cfg = deep_merge(read_yaml(root / 'config/analysis.yaml'), read_yaml(config))
+        build = cfg['build']
+    source = inside(root, completion_path(inside(root, absolute(root, build))))
+    completed = load_complete(source, verify_files=False)
+    path = downstream_parent(root, source, completed) / name
+    with locked(path.parent / f'.{name}.prepare.lock'):
+        if path.exists():
+            if not (path / 'analysis.json').is_file():
+                raise ValueError(f'existing path is not a prepared downstream run: {path}; choose a new name')
+            saved = json.loads((path / 'analysis.json').read_text())
+            if saved['build']['sha256'] != record(source)['sha256']:
+                raise ValueError('saved downstream run uses a different database; choose a new name')
+            print(f'Using saved downstream conditions: {path}. Source edits require a new name.', flush=True)
+        else:
+            path = prepare(root, name, config, source)
+            print(f'Prepared downstream conditions: {path}', flush=True)
+    return submit(path, target, dry_run, absolute(root, resources) if resources else None)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     sub=parser.add_subparsers(dest='command',required=True)
@@ -205,9 +258,11 @@ def main():
         p=sub.add_parser(name); p.add_argument('--root',default='.'); p.add_argument('--config',default='config/analysis.yaml'); p.add_argument('--build')
         if name=='prepare': p.add_argument('--name',required=True)
     for name in ('status','submit','run'):
-        p=sub.add_parser(name); p.add_argument('--analysis',required=True)
+        p=sub.add_parser(name); p.add_argument('--analysis',required=name != 'submit',help='Path to an already prepared downstream run')
         if name!='status': p.add_argument('--target',choices=TARGETS,default='all')
-        if name=='submit': p.add_argument('--dry-run',action='store_true'); p.add_argument('--resources')
+        if name=='submit':
+            p.add_argument('--root',default='.'); p.add_argument('--config'); p.add_argument('--build')
+            p.add_argument('--name',help='Downstream condition name'); p.add_argument('--dry-run',action='store_true'); p.add_argument('--resources')
         if name=='run':
             p.add_argument('--execution'); p.add_argument('--local',action='store_true'); p.add_argument('--cores',type=int,default=1); p.add_argument('--mem-mb',type=int,default=8000)
     args=parser.parse_args()
@@ -216,7 +271,14 @@ def main():
         if args.command=='plan': print(json.dumps(settings(root,config,args.build)[-1],indent=2))
         else: print(prepare(root,args.name,config,args.build))
     elif args.command=='status': print(json.dumps(status(args.analysis),indent=2))
-    elif args.command=='submit': submit(args.analysis,args.target,args.dry_run,args.resources)
+    elif args.command=='submit':
+        if args.analysis:
+            if any(value is not None for value in (args.name,args.config,args.build)):
+                parser.error('--analysis cannot be combined with --name, --config, or --build; use --resources for retry resources')
+            submit(absolute(args.root,args.analysis),args.target,args.dry_run,
+                   absolute(args.root,args.resources) if args.resources else None)
+        else:
+            submit_named(args.root,args.name,args.config,args.build,args.target,args.dry_run,args.resources)
     else: run(args.analysis,args.target,args.execution,args.local,args.cores,args.mem_mb)
 
 

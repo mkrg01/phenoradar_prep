@@ -26,6 +26,7 @@ def migrate(root, legacy_dataset, legacy_config=None, build_output='config/build
     build=read_yaml(root/'config/build.yaml')
     build['excluded_accessions']=cfg.get('excluded_accessions')
     build.update(metadata=str(metadata),store=cfg['store'],genegalleon=copy.deepcopy(cfg['genegalleon']),translation=pipeline['translation'],busco={'lineage':pipeline['phylogeny']['lineage']})
+    build['tpm']=copy.deepcopy(pipeline['tpm'])
     build['odb']={k:v for k,v in pipeline['odb'].items() if k!='incremental'}
     build['odb']['chunk_size']=cfg.get('odb_chunk_size',20)
     old=cfg['slurm']; slurm=build['slurm']
@@ -45,7 +46,7 @@ def migrate(root, legacy_dataset, legacy_config=None, build_output='config/build
             slurm['rules']=copy.deepcopy(profile.get('set-resources',{}))
             for rule,cpus in profile.get('set-threads',{}).items(): slurm['rules'].setdefault(rule,{})['cpus']=cpus
     analysis=read_yaml(root/'config/analysis.yaml')
-    for key in ('seed','trait','selection','tpm','alignment','kegg','phylogeny','exclude_species'):
+    for key in ('seed','trait','selection','alignment','kegg','phylogeny','exclude_species'):
         analysis[key]=copy.deepcopy(pipeline[key])
     analysis['phylogeny'].pop('lineage',None)
     inputs=path(pipeline.get('input_root','input'))
