@@ -43,7 +43,7 @@ phylogeny:
     collapse_monophyletic: true  # Collapse monophyletic groups in figures only.
 exclude_species: []  # Species IDs (all samples) or exact sample IDs to omit before analysis.
 slurm:
-  partition: null  # Use the cluster default; set a name when required.
+  partition: null  # null: cluster default; multiple: "epyc,rome,medium".
   total_limits:  # Per analysis; CPU/memory include the controller allocation.
     jobs: null  # No workflow job-count cap; Slurm and finite CPU/memory budgets still apply.
     cpus: null  # Total CPU request budget; null adds no workflow-wide limit.

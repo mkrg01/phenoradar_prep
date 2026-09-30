@@ -18,7 +18,7 @@ genegalleon:
   settings:
     assembly_method: rnaSPAdes  # Transcriptome assembler passed to GeneGalleon.
 slurm:
-  partition: null  # Use the cluster default; set a name when required.
+  partition: null  # null: cluster default; multiple: "epyc,rome,medium".
   array_size: 1000  # Sample index slots per array batch.
   total_limits:  # Per build; CPU/memory include the controller allocation.
     jobs: null  # No workflow job-count cap; Slurm and finite CPU/memory budgets still apply.
