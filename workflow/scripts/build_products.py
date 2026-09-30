@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from common import now, read_tsv, write_json
+from common import atomic_writer, now, read_tsv, write_json
 from dataset_assets import digest, link_file, locked, record, verify
 from mapping_tables import load_tables, protein_record, relative_file, subset
 from layout import run_layout
@@ -40,7 +40,7 @@ def complete(path):
         names = {i['species'] for i in manifest['items']}
         if len(samples) != len(names) or {r['species'] for r in samples} != names or set(tables['tables']) != names:
             raise ValueError('build mapping does not cover the complete metadata species set')
-        if tables['node'] != manifest['analysis']['odb']['node'] or tables['version'] != 'v12':
+        if tables['node'] != manifest['analysis']['odb']['ncbi_tax_id'] or tables['version'] != 'v12':
             raise ValueError('mapping reference differs from build')
         sample_map = {r['species']:r for r in samples}
         input_files = json.loads((path / 'input_receipt.json').read_text())['files']
@@ -64,6 +64,7 @@ def complete(path):
                 'odb_species':odb_species, 'counts':product['busco']['counts'],
                 'conditions':{stage:product[key].get('provenance', {}).get('condition')
                               for stage,key in [('assembly','reference'),('busco','busco'),('quant','quant')]},
+                'raw_inputs':product['quant'].get('provenance', {}).get('raw_inputs', {}),
                 'cds':inventory[str(inputs / 'cds' / f'{species}_longestCDS.fa.gz')],
                 'busco':inventory[str(inputs / 'busco/full' / f'{species}.busco.full.tsv')],
                 'abundance':inventory[str(inputs / 'quant' / species / run / f'{run}_abundance.tsv')],
@@ -77,7 +78,7 @@ def complete(path):
                 qc = json.loads(qc_path.read_text())
                 expected_table = tables['tables'][species]['table']
                 if (qc.get('species') != species or qc.get('run') != run or
-                    qc.get('multimap') != manifest['analysis']['tpm']['multimap'] or
+                    qc.get('multimap') != 'error' or
                     qc.get('abundance', {}).get('sha256') != products[species]['abundance']['sha256'] or
                     qc.get('mapping_table', {}).get('sha256') != expected_table['sha256'] or
                     qc.get('expression', {}).get('sha256') != expression_entry['sha256']):
@@ -91,11 +92,12 @@ def complete(path):
         data = {'schema_version':5 if with_expression else 4, 'kind':'completed_build', 'build_id':manifest['name'], 'created_at':now(),
                 'input':str(inputs), 'fields':manifest['fields'],
                 'translation':manifest['analysis']['translation'], 'lineage':manifest['analysis']['phylogeny']['lineage'],
-                'odb':{'version':'v12','node':manifest['analysis']['odb']['node']},
+                'odb':{'version':'v12','node':manifest['analysis']['odb']['ncbi_tax_id']},
                 'mapping':record(mapping), 'products':products, 'files':files,
                 'excluded_runs':manifest.get('excluded', [])}
         if with_expression:
-            data['tpm'] = manifest['analysis']['tpm']
+            # Preserve the schema-5 provenance field for existing bundles.
+            data['tpm'] = {'multimap': 'error'}
         return publish_pointer(path, publish_products(path, data))
 
 
@@ -104,7 +106,8 @@ def import_protein(completion, species, protein, provenance):
     selected = [p for p in data['products'].values() if p['odb_species'] == species]
     if len(selected) != 1: raise ValueError(f'protein absent from completed build: {species}')
     link_file(verify(selected[0]['protein']), protein)
-    link_file(verify(selected[0]['translation']), provenance)
+    with atomic_writer(provenance, 'wb') as handle:
+        handle.write(verify(selected[0]['translation']).read_bytes())
 
 
 def subset_mapping(completion, samples, outdir):
@@ -119,10 +122,10 @@ def subset_mapping(completion, samples, outdir):
     return subset(verify(data['mapping']), names, outdir)
 
 
-def import_expression(completion, samples, run, output, qc, multimap):
+def import_expression(completion, samples, run, output, qc):
     data = load_complete(completion, verify_files=False)
-    if data.get('tpm', {}).get('multimap') != multimap:
-        raise ValueError('downstream TPM policy differs from the database')
+    if data.get('tpm', {}).get('multimap') != 'error':
+        raise ValueError('database TPM policy must be error')
     rows = [row for row in read_tsv(samples) if row['run'] == run]
     if len(rows) != 1: raise ValueError(f'expected exactly one selected sample for {run}')
     row = rows[0]
@@ -130,16 +133,18 @@ def import_expression(completion, samples, run, output, qc, multimap):
     if product is None or product['row']['run'] != run:
         raise ValueError('expression sample is absent from the database')
     verify(dict(product['abundance'], path=row['abundance']))
-    for key, target in (('expression', output), ('expression_qc', qc)):
-        link_file(verify(product[key]), target)
+    link_file(verify(product['expression']), output)
+    # A separate small receipt prevents output touches from changing another input's mtime.
+    with atomic_writer(qc, 'wb') as handle:
+        handle.write(verify(product['expression_qc']).read_bytes())
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['protein','mapping','expression'])
     parser.add_argument('--completion', required=True)
-    for name in ('species','protein','provenance','samples','outdir','run','output','qc','multimap'): parser.add_argument('--' + name)
+    for name in ('species','protein','provenance','samples','outdir','run','output','qc'): parser.add_argument('--' + name)
     args = parser.parse_args()
     if args.action == 'protein': import_protein(args.completion,args.species,args.protein,args.provenance)
     elif args.action == 'mapping': subset_mapping(args.completion,args.samples,args.outdir)
-    else: import_expression(args.completion,args.samples,args.run,args.output,args.qc,args.multimap)
+    else: import_expression(args.completion,args.samples,args.run,args.output,args.qc)

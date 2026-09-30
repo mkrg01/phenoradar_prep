@@ -17,11 +17,8 @@ translation:
 odb:
   incremental: false
   cache_dir: resources/odb_cache
-  chunk_size: 100
-  existing_results: null
-  node: 3193
-tpm:
-  multimap: error
+  chunk_size: 50  # Maximum samples per ODB mapping chunk.
+  ncbi_tax_id: 3193  # NCBI Taxonomy ID of the OrthoDB mapping clade; Embryophyta.
 alignment:
   enabled: false
 kegg:

@@ -28,14 +28,12 @@ def load_snapshot(root, version, node):
     return record, proteins
 
 
-def plan(samples, protein_dir, outdir, cache_dir, existing=None, reference=None,
-         version="v12", node=3193, chunk_size=20):
+def plan(samples, protein_dir, outdir, cache_dir, reference=None,
+         version="v12", node=3193, chunk_size=50):
     rows = {r["species"]: r for r in read_tsv(samples)}
     from mapping_tables import checked, protein_record, relative_file
     inputs = {s: protein_record(Path(protein_dir) / f'{r["odb_species"]}_protein.fa') for s, r in rows.items()}
-    roots = [Path(existing)] if existing else []
-    roots += sorted((Path(cache_dir) / f"{version}_{node}").glob("*/snapshot.json"))
-    roots = [p.parent if p.name == "snapshot.json" else p for p in roots]
+    roots = [p.parent for p in sorted((Path(cache_dir) / f"{version}_{node}").glob("*/snapshot.json"))]
     roots = [p for p in roots if not p.name.startswith(".")]
     assigned, sources = {}, []
     reference_hash = sha256(reference) if reference and Path(reference).is_file() else None
@@ -44,8 +42,6 @@ def plan(samples, protein_dir, outdir, cache_dir, existing=None, reference=None,
         candidates = sorted(set(rows) & set(proteins))
         members = [name for name in candidates if proteins[name]['odb_species'] == rows[name]['odb_species']
                    and proteins[name]['sha256'] == inputs[name]['sha256']]
-        if existing and root.resolve() == Path(existing).resolve() and members != candidates:
-            raise ValueError('protein differs from existing ODB input; select a matching snapshot/cache')
         if not members: continue
         constraints = set(record.get('reference_sha256s', []))
         if record.get('reference_sha256'): constraints.add(record['reference_sha256'])
@@ -134,9 +130,8 @@ if __name__ == "__main__":
     p = sub.add_parser("plan")
     for name in ("samples", "protein-dir", "outdir", "cache-dir"):
         p.add_argument(f"--{name}", required=True)
-    p.add_argument("--existing")
     p.add_argument("--reference")
-    p.add_argument("--chunk-size", type=int, default=20)
+    p.add_argument("--chunk-size", type=int, default=50)
     q = sub.add_parser("publish")
     for name in ("samples", "chunk-dir", "protein-dir", "cache-dir", "label"):
         q.add_argument(f"--{name}", required=True)

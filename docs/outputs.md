@@ -16,12 +16,15 @@ Build `name` in `config/build.yaml` (or `submit --name`) and analysis
 | `results/<build>/downstream/<analysis>/` | Frozen conditions/inputs, job records, and downstream results |
 | `results/<build>/logs/{database,downstream/<analysis>}/` | Rule logs and benchmarks |
 | `resources/` | Shared reference and software caches |
-| Configured `store` | Registered sample products, cached CDS translations, and per-sample OG expression |
-| Configured `odb.cache_dir` | Reusable ODB mapping snapshots |
+| `results/<build>/work/cache/` | Internal stage receipts, translations, ODB mappings, and OG expression for this build |
+| `results/<build>/reuse.json` | Source database checksums and the source chosen for each reused sample |
 
-`store` and `odb.cache_dir` are set in `config/build.yaml`; the supplied config
-places them under `migrations/sample_ids_20260928/`. Retain these directories for
-reuse by future builds.
+`reuse_from` in `config/build.yaml` selects one or more completed databases.
+New builds stage matching products and compute missing ones inside their own
+`results/<build>/work/`; completed products are published in `database/`.
+`migrations/` is not a destination for new products. Existing historical files
+remain in place. A completed database can be reused without its original working
+caches, either by another build or by downstream analysis.
 
 New CDS/BUSCO/quant files originate in the build's
 `work/genegalleon/<sample>/output/transcriptome_assembly/` workspace. Staged input
@@ -33,15 +36,12 @@ for reuse elsewhere. Treat generated products as immutable. The database stores
 it does not recompute them. Proteins and mapping tables are staged only when a
 requested downstream branch needs them.
 
-The new layout applies to newly prepared builds and downstream runs. See the
-[database import procedure](datasets.md#importing-an-existing-database-into-the-current-output-layout)
-for migrating completed sample databases without scientific recomputation. Existing
+The layout applies to newly prepared builds and downstream runs. Existing
 `builds/`, `analyses/`, and old top-level `results/<run>/`, `work/`, and `logs/`
 are not moved automatically. Frozen records and caches can reference those paths.
 Old schema-3/4 `products/` bundles remain readable; downstream computes their
-missing OG expression with the default `error` ambiguity policy. Prepare a new
-build to publish a database with a different policy. Resume old frozen jobs with
-their original workflow checkout; code verification still applies.
+missing OG expression, rejecting genes mapped to multiple OGs. Resume old frozen
+jobs with their original workflow checkout; code verification still applies.
 
 ## Result files
 
@@ -87,14 +87,8 @@ are zero. Each row is a separately processed sample; multiple samples may belong
 - `tpm`: retained OG values rescaled to one million per run, describing relative
   expression within the retained OG set.
 
-Duplicate gene/OG pairs count once. `tpm.multimap` in **config/build.yaml** controls genes mapped to
-multiple OGs:
-
-| Policy | Behavior |
-| --- | --- |
-| `error` (default) | Stop and report ambiguous genes |
-| `drop` | Exclude multi-OG genes |
-| `split` | Divide TPM equally among assigned OGs |
+Duplicate gene/OG pairs count once. If a quantified gene maps to multiple OGs,
+aggregation always stops and reports the ambiguous genes. This behavior is not configurable.
 
 Review `mapping_qc.tsv` for mapped/retained TPM fractions and ambiguous targets.
 Duplicate targets, negative/nonfinite TPM, or no positive retained TPM stop

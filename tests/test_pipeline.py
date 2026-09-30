@@ -11,6 +11,7 @@ import pytest
 
 from aggregate_tpm import aggregate
 from common import file_record, read_tsv, write_json, write_tsv
+from incremental_odb import plan as plan_odb
 from make_manifests import make
 from mapping_tables import annotation_pairs, collect as collect_odb
 from mapping_fixtures import make_mapping, edit_mapping
@@ -241,10 +242,8 @@ def test_aggregation_ambiguity_and_run_preservation(tiny_inputs, tmp_path):
     edit_mapping(database, pairs=lambda rows: rows + [('Alpha_plant_g1','OG3')])
     with pytest.raises(ValueError, match="multiple OGs"):
         aggregate(meta / "samples.tsv", "A1", database, runs / "x.tsv", runs / "x.json")
-    aggregate(meta / "samples.tsv", "A1", database, runs / "split.tsv", runs / "split.json", "split")
-    assert sum(float(r["tpm_sum"]) for r in read_tsv(runs / "split.tsv")) == 50
-    aggregate(meta / "samples.tsv", "A1", database, runs / "drop.tsv", runs / "drop.json", "drop")
-    assert [r["orthogroup"] for r in read_tsv(runs / "drop.tsv")] == ["OG2"]
+    assert not (runs / "x.tsv").exists()
+    assert not (runs / "x.json").exists()
 
 
 def test_odb_resume_is_bound_to_input_contents(fake_odb, frozen_reference, tmp_path, monkeypatch):
@@ -322,9 +321,9 @@ def test_odb_reference_and_mapping_leave_storage_policy_to_user(fake_odb, tmp_pa
 
 
 @pytest.fixture
-def existing_odb(tmp_path):
-    root = tmp_path / "existing"
-    root.mkdir()
+def cached_odb(tmp_path):
+    root = tmp_path / "resources/odb_cache/v12_3193/completed"
+    root.mkdir(parents=True)
     proteins = tmp_path / "original_proteins"
     proteins.mkdir()
     records, annotations = [], ["#query\tODB_OG\n"]
@@ -343,19 +342,21 @@ def existing_odb(tmp_path):
 
 
 @pytest.mark.parametrize("problem,message", [
-    ("protein", "protein differs"), ("annotation", "result changed"),
+    ("protein", "protein changed after ODB planning"), ("annotation", "result changed"),
     ("node", "version/node differs"), ("version", "version/node differs"),
     ("schema_version", "schema/version/node differs"),
     ("species", "missing selected species"), ("duplicate", "duplicate or missing"),
     ("odb_species", "protein differs"), ("path", "must contain annotations.tsv"),
     ("query", "does not belong"),
 ])
-def test_existing_odb_rejects_incompatible_inputs(existing_odb, tmp_path, problem, message):
-    root, proteins = existing_odb
+def test_cached_odb_rejects_incompatible_inputs(cached_odb, tmp_path, problem, message):
+    root, proteins = cached_odb
     snapshot = json.loads((root / "snapshot.json").read_text())
     rows = [{k: r[k] for k in ["species", "odb_species"]} for r in snapshot["proteins"]]
     samples = tmp_path / "samples.tsv"
     write_tsv(samples, list(rows[0]), rows)
+    planned = tmp_path / "plan"
+    plan_odb(samples, proteins, planned, tmp_path / "resources/odb_cache")
     if problem == "protein":
         path = proteins / "Alpha_plant_protein.fa"
         path.write_text(path.read_text().replace("MK*", "MQ*"))
@@ -375,13 +376,17 @@ def test_existing_odb_rejects_incompatible_inputs(existing_odb, tmp_path, proble
     else:
         snapshot["proteins"].pop()
     write_json(root / "snapshot.json", snapshot)
+    # Check invalid snapshot contents even when the plan records their current hash.
+    source_plan = json.loads((planned / "plan.json").read_text())
+    source_plan["sources"][0]["snapshot_sha256"] = file_record(root / "snapshot.json")["sha256"]
+    write_json(planned / "plan.json", source_plan)
     with pytest.raises(ValueError, match=message):
-        collect_odb(samples, "unused", "unused", proteins, tmp_path / "mapping", tmp_path / "cache", existing=root)
+        collect_odb(samples, "unused", "unused", proteins, tmp_path / "mapping", tmp_path / "cache", source_plan=planned / "plan.json")
     assert not (tmp_path / "mapping/snapshot.json").exists()
 
 
 @pytest.mark.parametrize("reuse", [False, True])
-def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, frozen_reference, existing_odb, tmp_path, reuse, command_environment, workflow_project, seed_taxonomy):
+def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, frozen_reference, cached_odb, tmp_path, reuse, command_environment, workflow_project, seed_taxonomy):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     seqkit = os.environ.get("SEQKIT_BIN") or shutil.which("seqkit")
     if not snakemake or not seqkit:
@@ -395,8 +400,8 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     subset.write_text("Beta_sp-X\n")
     configfile = tmp_path / "config.yaml"
     if reuse:
-        config["odb"] = {"existing_results": str(existing_odb[0])}
-        # Import mode must work without the reference or ODB executable.
+        config["odb"] = {"incremental": True}
+        # Cache reuse must work without the reference or ODB executable.
     else:
         reference = workflow_project / "resources/orthodb/v12_3193"
         reference.parent.mkdir(parents=True)
@@ -417,6 +422,8 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
         return result.stdout
     # Resolve the selection checkpoint so the resource plan can be inspected.
     execute(["--", "results/test/metadata/samples.tsv"])
+    if reuse:
+        execute(["--", "results/test/orthogroups/mapping/incremental_plan"])
     defaults = subprocess.run(base[:base.index("--cores")] + [
         "--cores", "64", "--resources", "mem_mb=384000", "--dry-run", "--printshellcmds"],
         cwd=workflow_project, env=env, text=True, capture_output=True, timeout=60)
@@ -431,14 +438,21 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     assert plan.count("rule odb_map:") == (0 if reuse else 1)
     assert "rule prepare_odb_reference:" not in plan
     assert plan.count("mem_mb=3000") == (0 if reuse else 1)
-    assert not any("<TBD>" in line for line in plan.splitlines() if "input:" in line)
+    if reuse:
+        # Nested checkpoints can retain display placeholders during dry-run.
+        cached_plan = json.loads((workflow_project / "results/test/orthogroups/mapping/incremental_plan/plan.json").read_text())
+        assert cached_plan["mapped_species"] == []
+        assert cached_plan["reused_species"] == ["Alpha_plant", "Beta_sp-X"]
+    else:
+        assert not any("<TBD>" in line for line in plan.splitlines() if "input:" in line)
     execute()
     out = tmp_path / "results/test"
     run = json.loads((out / "run.json").read_text())
     assert run["container_image"] is None
     assert "container_image" not in run["config"]
     assert len(read_tsv(out / "metadata/species_metadata.tsv")) == 2
-    assert (out / "orthogroups/mapping/manifests/chunks.json").is_file()
+    manifest_dir = "incremental_plan" if reuse else "manifests"
+    assert (out / "orthogroups/mapping" / manifest_dir / "chunks.json").is_file()
     assert len(read_tsv(out / "orthogroups/expression/tpm_wide.tsv")) == 3
     events = tmp_path / "events.txt"
     assert (len(events.read_text().splitlines()) if events.exists() else 0) == (0 if reuse else 1)

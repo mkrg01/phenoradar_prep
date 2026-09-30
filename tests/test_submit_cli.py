@@ -50,7 +50,7 @@ def test_build_submit_prepares_and_retries_saved_inputs(dataset_project, schedul
     cfg['translation']['table'] = 2
     config.write_text(yaml.safe_dump(cfg))
     resources = root / 'retry.yaml'
-    resources.write_text('slurm:\n  stages:\n    controller:\n      mem_mb: 16000\n')
+    resources.write_text('slurm:\n  stages:\n    controller:\n      mem_gb: 16\n')
     invoke(monkeypatch, dataset, *command, '--resources', 'retry.yaml')
     assert len(scheduler['commands']) == 1
     assert '--mem=16000M' in scheduler['commands'][0]
@@ -93,7 +93,7 @@ def test_analysis_submit_prepares_and_retries_saved_conditions(completed_project
     assert json.loads((run / 'jobs/submission_0001.json').read_text())['state'] == 'submitted'
     cfg['selection']['busco_threshold'] = 2  # Invalid for a new run, irrelevant to this saved run.
     cfg_path.write_text(yaml.safe_dump(cfg))
-    resources = root / 'retry.yaml'; resources.write_text('slurm:\n  stages:\n    controller:\n      mem_mb: 12000\n')
+    resources = root / 'retry.yaml'; resources.write_text('slurm:\n  stages:\n    controller:\n      mem_gb: 12\n')
     invoke(monkeypatch, analysis, *command, '--dry-run', '--resources', 'retry.yaml')
     assert len(scheduler['commands']) == 1
     assert '--mem=12000M' in capsys.readouterr().out
@@ -141,3 +141,55 @@ def test_named_submit_does_not_replace_unrelated_directories(dataset_project, sc
         dataset.submit_named(root, 'existing')
     assert marker.read_text() == 'keep'
     assert scheduler['commands'] == []
+
+
+def test_public_budget_override_limits_arrays_and_preserves_saved_build(dataset_project, scheduler):
+    from test_datasets import new_dataset
+    root = dataset_project
+    build = new_dataset(root)
+    before = (build / 'build.json').read_bytes()
+    resources = root / 'retry.yaml'
+    resources.write_text(yaml.safe_dump({'slurm': {
+        'total_limits': {'jobs': 7, 'cpus': 16, 'mem_gb': 512},
+        'per_job_resources': {'assembly': {'cpus': 8}},
+    }}))
+    commands = dataset.submit(build, until='quant', resources=resources)
+    assert [next(a for a in cmd if a.startswith('--array=')) for cmd in commands] == [
+        '--array=1%2', '--array=1%4', '--array=1%4']
+    assert '--cpus-per-task=8' in commands[0]
+    assert '--mem=128000M' in commands[0]
+    assert '--dependency=afterok:1001' in commands[1]
+    assert (build / 'build.json').read_bytes() == before
+
+
+def test_impossible_budget_fails_before_any_slurm_submission(dataset_project, scheduler):
+    from test_datasets import new_dataset
+    root = dataset_project
+    build = new_dataset(root)
+    resources = root / 'retry.yaml'
+    resources.write_text('slurm:\n  total_limits:\n    mem_gb: 127\n')
+    with pytest.raises(ValueError, match='assembly requires.*total_limits.mem_gb'):
+        dataset.submit(build, resources=resources)
+    assert not scheduler['commands']
+    assert not list((build / 'jobs').glob('submission_*.json'))
+
+
+def test_analysis_partial_public_resource_override(completed_project, scheduler):
+    root, build, _, _ = completed_project
+    config = root / 'minimal.yaml'
+    config.write_text('inputs:\n  species_trait: null\nphylogeny:\n  trees: []\n  contrast_pairs:\n    enabled: false\n')
+    run = analysis.prepare(root, 'budget', config, build)
+    before = (run / 'analysis.json').read_bytes()
+    resources = root / 'retry.yaml'
+    resources.write_text(yaml.safe_dump({'slurm': {
+        'total_limits': {'jobs': 3, 'cpus': 9, 'mem_gb': 64},
+        'per_job_resources': {'controller': {'cpus': 2, 'mem_gb': 12}},
+    }}))
+    command = analysis.submit(run, resources=resources)
+    assert '--cpus-per-task=2' in command and '--mem=12000M' in command
+    execution = dataset.load_execution(run / 'jobs/submission_0001.resources.json')
+    from phase_config import write_profile
+    profile = yaml.safe_load((write_profile(run / 'test-profile', execution) / 'config.yaml').read_text())
+    assert profile['jobs'] == 3
+    assert profile['resources'] == {'workflow_cpus': 7, 'workflow_mem_mb': 52000}
+    assert (run / 'analysis.json').read_bytes() == before

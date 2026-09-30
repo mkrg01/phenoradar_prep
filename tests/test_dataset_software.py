@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import dataset_software as software
-from common import sha256
+from common import sha256, write_json
 
 REVISION = "a" * 40
 DIGEST = "b" * 64
@@ -21,7 +21,7 @@ VERSION = "1.2.3"
 def pins(tmp_path):
     return {"cache_dir": str(tmp_path / "software"), "version": VERSION,
             "revision": REVISION, "image_uri": "docker://ghcr.io/kfuku52/genegalleon@sha256:" + DIGEST,
-            "repository": None, "image": None, "image_sha256": None, "settings": {}}
+            "settings": {}}
 
 
 def archive(path, version=VERSION, unsafe=False):
@@ -83,8 +83,15 @@ def runtime(monkeypatch):
     ("version", "latest", "explicit"),
     ("revision", "main", "full 40-character"),
     ("image_uri", "docker://ghcr.io/kfuku52/genegalleon:latest", "OCI SHA256"),
-    ("image_uri", "https://example.org/genegalleon.sif", "require"),
-    ("image_sha256", "invalid", "checksum"),
+    ("image_uri", "docker://ghcr.io/kfuku52/genegalleon:0.7.77", "OCI SHA256"),
+    ("image_uri", "https://example.org/genegalleon.sif", "OCI SHA256"),
+    ("image_uri", None, "image_uri is required"),
+    ("image_uri", "", "image_uri is required"),
+    ("image_uri", 123, "OCI SHA256"),
+    ("image_uri", "docker://ghcr.io/kfuku52/genegalleon@sha256:" + "b" * 63, "OCI SHA256"),
+    ("image_uri", "docker://ghcr.io/kfuku52/genegalleon@sha256:" + "g" * 64, "OCI SHA256"),
+    ("image_sha256", None, "unknown genegalleon settings.*image_sha256"),
+    ("image_sha256", "b" * 64, "unknown genegalleon settings.*image_sha256"),
 ])
 def test_moving_or_unverifiable_sources_are_rejected(pins, key, value, message):
     pins[key] = value
@@ -159,15 +166,38 @@ def test_image_source_mismatch_is_rejected_before_and_after_caching(pins, runtim
     with pytest.raises(ValueError, match="image/source mismatch"): software.fetch_image(other)
 
 
-def test_direct_sif_requires_matching_file_checksum(pins, runtime, monkeypatch):
-    pins.update(image_uri="https://example.org/genegalleon.sif", image_sha256="0" * 64)
-    monkeypatch.setattr(software, "download", lambda url, path: Path(path).write_bytes(b"direct SIF"))
-    with pytest.raises(ValueError, match="SIF SHA256 mismatch"): software.fetch_image(pins)
-    import hashlib
-    pins["image_sha256"] = hashlib.sha256(b"direct SIF").hexdigest()
-    image, receipt = software.fetch_image(pins)
-    assert sha256(image) == pins["image_sha256"]
-    assert receipt["identity"]["expected_sha256"] == pins["image_sha256"]
+def test_missing_image_uri_is_rejected_before_acquisition(pins, monkeypatch):
+    del pins["image_uri"]
+    monkeypatch.setattr(software, "fetch_source", lambda *args: pytest.fail("source fetched before validation"))
+    with pytest.raises(ValueError, match="image_uri is required"):
+        software.resolve(pins)
+
+
+def test_direct_sif_is_rejected_before_download(pins, monkeypatch):
+    pins["image_uri"] = "https://example.org/genegalleon.sif"
+    monkeypatch.setattr(software, "download", lambda *args: pytest.fail("unexpected HTTPS SIF download"))
+    monkeypatch.setattr(software.shutil, "which", lambda *args: pytest.fail("runtime lookup before validation"))
+    with pytest.raises(ValueError, match="OCI SHA256"):
+        software.fetch_image(pins)
+
+
+def test_existing_oci_cache_with_null_checksum_is_reused(pins, monkeypatch):
+    identity = {"uri": pins["image_uri"], "architecture": "amd64", "expected_sha256": None}
+    destination = Path(pins["cache_dir"]) / "images" / software.digest(identity)
+    destination.mkdir(parents=True)
+    image = destination / "genegalleon.sif"
+    image.write_bytes(b"previously downloaded SIF")
+    receipt = {"schema_version": 1, "kind": "downloaded_image", "identity": identity,
+               "labels": {"org.opencontainers.image.version": VERSION,
+                          "org.opencontainers.image.revision": REVISION},
+               "files": [software.record(image)]}
+    write_json(destination / "receipt.json", receipt)
+    monkeypatch.setattr(software, "architecture", lambda: "amd64")
+    monkeypatch.setattr(software.shutil, "which", lambda *args: pytest.fail("runtime lookup on cache hit"))
+    assert software.fetch_image(pins) == (image, receipt)
+    image.write_bytes(b"damaged cached SIF")
+    with pytest.raises(ValueError, match="registered file changed"):
+        software.fetch_image(pins)
 
 
 def test_resolved_paths_and_receipts_bind_source_and_image(pins, source_download, runtime):

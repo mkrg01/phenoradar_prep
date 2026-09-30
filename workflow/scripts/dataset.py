@@ -43,27 +43,23 @@ def inside(root, path):
     return path
 
 
-def settings(root, config, analysis_config=None):
+def settings(root, config, analysis_config=None, name=None):
     from phase_config import validate_slurm
     root = Path(root).resolve()
     cfg = read_yaml(config)
     if analysis_config is not None:
         raise ValueError("build does not accept analysis overrides; use run_analysis.sh")
-    unknown = set(cfg) - {"name", "metadata", "store", "translation", "busco", "odb", "genegalleon", "slurm", "excluded_accessions", "tpm"}
-    if unknown: raise ValueError(f"unknown build settings: {sorted(unknown)}; migrate old dataset/config files first")
+    unknown = set(cfg) - {"name", "metadata", "reuse_from", "translation", "busco", "odb", "genegalleon", "slurm", "excluded_accessions"}
+    if unknown: raise ValueError(f"unknown build settings: {sorted(unknown)}; use config/build.yaml for build settings")
     excluded = cfg.get("excluded_accessions")
     if excluded is not None and (not isinstance(excluded, str) or not excluded.strip()):
         raise ValueError("excluded_accessions must be null or a TSV path")
     cfg["excluded_accessions"] = str(absolute(root, excluded)) if excluded is not None else None
     analysis = read_yaml(root / "workflow/pipeline_defaults.yaml")
     analysis["translation"] = cfg["translation"]
-    cfg.setdefault("tpm", {"multimap": "error"})
-    if not isinstance(cfg["tpm"], dict) or set(cfg["tpm"]) != {"multimap"} or not isinstance(cfg["tpm"]["multimap"], str) or cfg["tpm"]["multimap"] not in {"error", "drop", "split"}:
-        raise ValueError("build tpm.multimap must be error, drop, or split")
-    analysis["tpm"] = copy.deepcopy(cfg["tpm"])
     if set(cfg["busco"]) != {"lineage"} or not isinstance(cfg["busco"]["lineage"], str) or not cfg["busco"]["lineage"].strip():
         raise ValueError("busco.lineage must be a nonempty string")
-    if set(cfg["odb"]) - {"node", "cache_dir", "existing_results", "chunk_size"}:
+    if set(cfg["odb"]) - {"ncbi_tax_id", "chunk_size"}:
         raise ValueError("unknown build.odb settings")
     analysis["odb"].update(cfg["odb"], incremental=True)
     analysis["phylogeny"]["lineage"] = cfg["busco"]["lineage"]
@@ -75,8 +71,6 @@ def settings(root, config, analysis_config=None):
     validate_keys(analysis); validate_analysis(analysis)
     if type(analysis["translation"].get("table")) is not int or analysis["translation"]["table"] < 1:
         raise ValueError("translation.table must be a positive integer")
-    if type(analysis["odb"]["node"]) is not int or analysis["odb"]["node"] < 1:
-        raise ValueError("odb.node must be a positive integer")
     gg = cfg["genegalleon"]
     validate_software(gg)
     for key, value in gg.get("settings", {}).items():
@@ -84,10 +78,15 @@ def settings(root, config, analysis_config=None):
             raise ValueError(f"managed/invalid GeneGalleon setting: {key}")
         if not isinstance(value, (str, int, float, bool)):
             raise ValueError(f"GeneGalleon setting must be scalar: {key}")
-    validate_slurm(cfg["slurm"])
-    cfg["store"] = str(inside(root, absolute(root, cfg["store"])))
-    analysis["translation_cache"] = str(Path(cfg["store"]) / ".proteins")
-    analysis["expression_cache"] = str(Path(cfg["store"]) / ".expression")
+    cfg["slurm"] = validate_slurm(cfg["slurm"])
+    from database_reuse import normalize
+    cfg["reuse_from"] = normalize(root, cfg.get("reuse_from"))
+    build_name = name or cfg.get("name")
+    cache = build_directory(root, build_name, config) / "work/cache" if build_name else root / "results/.plan/work/cache"
+    cfg["store"] = str(cache / "products")  # Internal, frozen stage receipts; not a user setting.
+    analysis["translation_cache"] = str(cache / "proteins")
+    analysis["expression_cache"] = str(cache / "expression")
+    analysis["odb"]["cache_dir"] = str(cache / "odb")
     gg["cache_dir"] = str(inside(root, absolute(root, gg.get("cache_dir", "resources/software/genegalleon"))))
     for key in ("repository", "image"):
         if gg.get(key): gg[key] = str(absolute(root, gg[key]))
@@ -97,7 +96,9 @@ def settings(root, config, analysis_config=None):
 
 def stage_conditions(cfg):
     gg = cfg["genegalleon"]
-    software = {k: gg.get(k) for k in ("version", "revision", "image_uri", "image_sha256")}
+    software = {k: gg.get(k) for k in ("version", "revision", "image_uri")}
+    # Preserve condition hashes for products built with the former null setting.
+    software["image_sha256"] = None
     # Overrides are also bound by content, not merely their path.
     from dataset_software import source_records
     if gg.get("repository"):
@@ -116,13 +117,21 @@ def check_conditions(products, conditions):
         product = products[key]
         previous = product.get("provenance", {}).get("condition") if product else None
         if previous and previous != conditions[stage]:
-            raise ValueError(f"{stage} settings differ from registered product; choose a separate store for a deliberate rebuild")
+            raise ValueError(f"{stage} settings differ from registered product; set reuse_from: null and choose a new build name for a deliberate rebuild")
 
 
-def inspect_items(store, items, analysis, requested=None, conditions=None):
+def inspect_items(store, items, analysis, requested=None, conditions=None, reusable=None, errors=None):
     result = []
     for item in items:
         try:
+            if item["species"] in (errors or {}):
+                raise ValueError(errors[item["species"]])
+            if item["species"] in (reusable or {}):
+                product = reusable[item["species"]]['product']
+                result.append({"species": item["species"], "run": item["row"]["run"],
+                               **{stage: "reuse" for stage in STAGES}, "reason": "", "mapping": "reuse",
+                               "reference_id": product['cds']['sha256']})
+                continue
             products = resolve(store, item, analysis["phylogeny"]["lineage"], need_full=True)
             check_conditions(products, conditions)
             status = {stage: "reuse" if products[key] else "pending"
@@ -141,8 +150,8 @@ def excluded_report(excluded):
             for row in excluded]
 
 
-def plan(root, config, metadata=None, analysis_config=None):
-    cfg, analysis = settings(root, config, analysis_config)
+def plan(root, config, metadata=None, analysis_config=None, name=None):
+    cfg, analysis = settings(root, config, analysis_config, name)
     metadata = absolute(root, metadata or cfg["metadata"])
     source = record(metadata)
     policy_record = record(cfg["excluded_accessions"]) if cfg["excluded_accessions"] else None
@@ -152,8 +161,12 @@ def plan(root, config, metadata=None, analysis_config=None):
     normalize_private_paths(items, metadata)
     verify(source)
     if policy_record: verify(policy_record)
-    selection = {"source_metadata": source, "exclusion_policy": policy_record, "excluded": excluded}
-    report = inspect_items(cfg["store"], items, analysis, conditions=cfg["conditions"]) + excluded_report(excluded)
+    from database_reuse import select
+    reusable, errors, sources = select(cfg['reuse_from'], items, cfg)
+    selection = {"source_metadata": source, "exclusion_policy": policy_record, "excluded": excluded,
+                 "reusable": reusable, "reuse_sources": sources}
+    report = inspect_items(cfg["store"], items, analysis, conditions=cfg["conditions"],
+                           reusable=reusable, errors=errors) + excluded_report(excluded)
     return cfg, analysis, metadata, fields, items, selection, report
 
 
@@ -183,7 +196,7 @@ def prepare(root, name, config, metadata=None, analysis_config=None):
     name = target.name
     if target.exists():
         raise ValueError("dataset/run name already exists; resume it or choose a new name")
-    cfg, analysis, metadata, fields, items, selection, report = plan(root, config, metadata, analysis_config)
+    cfg, analysis, metadata, fields, items, selection, report = plan(root, config, metadata, analysis_config, name)
     cfg["name"] = name
     if not items: raise ValueError("all metadata runs are excluded; no build was prepared")
     conflicts = [r for r in report if r["assembly"] == "conflict"]
@@ -204,7 +217,7 @@ def prepare(root, name, config, metadata=None, analysis_config=None):
         write_tsv(frozen, fields, [i["row"] for i in items])
         gg_records, software_lock = [], None
         needs_upstream = any(r[s] == "pending" for r in report for s in STAGES)
-        # Pin chosen references so a later import cannot change this dataset's reference.
+        # Pin chosen references so later builds cannot change this dataset's reference.
         for item, state in zip(items, report):
             item["reference_id"] = state["reference_id"]
         raw_records = {}
@@ -228,9 +241,12 @@ def prepare(root, name, config, metadata=None, analysis_config=None):
         analysis["work_root"] = str(relative / "work/mapping")
         analysis["log_root"] = str(relative / "logs/database")
         analysis["input_root"] = str(target / "work/input")
-        analysis["odb"]["cache_dir"] = str(inside(root, absolute(root, analysis["odb"]["cache_dir"])))
-        if analysis["odb"]["existing_results"]:
-            analysis["odb"]["existing_results"] = str(absolute(root, analysis["odb"]["existing_results"]))
+        from database_reuse import stage
+        stage(staging, target, selection['reusable'], cfg)
+        reuse_receipt = {"sources": selection['reuse_sources'],
+                         "samples": {s: entry['source'] for s, entry in selection['reusable'].items()}}
+        write_json(staging / 'reuse.json', reuse_receipt)
+        auxiliary['reuse.json'] = dict(record(staging / 'reuse.json'), path=str(target / 'reuse.json'))
         if needs_upstream:
             cfg["genegalleon"], gg_records, software_lock = resolve_software(cfg["genegalleon"])
         manifest = {"schema_version": 2, "kind": "build", "name": name, "created_at": now(), "root": str(root),
@@ -515,15 +531,16 @@ def materialize(path):
 
 def run_mapping(path, execution=None):
     from build_products import complete
-    from phase_config import write_profile
+    from phase_config import validate_slurm, workflow_jobs, write_profile
     path = Path(path).resolve()
     manifest = load(path, check_code=True)
     materialize(path)
     root = Path(manifest["root"])
     slurm = load_execution(execution) if execution else manifest["config"]["slurm"]
+    slurm = validate_slurm(slurm)
     profile = write_profile(path / "jobs" / (Path(execution).stem if execution else "local") / "profile", slurm)
     command = [str(root / "run_pipeline.sh"), "--slurm", "--profile", str(profile),
-               "--jobs", str(slurm["jobs"]), "--configfile", str(path / "pipeline.yaml")]
+               "--jobs", str(workflow_jobs(slurm)), "--configfile", str(path / "pipeline.yaml")]
     subprocess.run([*command, "--", "database" if manifest["analysis"].get("output_root") else "mapping"], cwd=root, check=True)
     complete(path)
 
@@ -550,8 +567,10 @@ def submit(path, until="database", species=None, dry_run=False, resources=None):
     pending = {stage: [index for index, state in enumerate(report, 1)
                        if state[stage] == "pending" and (wanted is None or state["species"] in wanted)]
                for stage in STAGES[:stop + 1]}
-    from phase_config import execution_settings
+    from phase_config import array_concurrency, execution_settings, worker_budgets
     slurm = execution_settings(manifest["config"]["slurm"], resources)
+    caps = {stage: array_concurrency(slurm, stage) for stage, indices in pending.items() if indices}
+    if until in {"mapping", "database"} and wanted is None: worker_budgets(slurm)
     jobs = path / "jobs"
     jobs.mkdir(exist_ok=True)
     (jobs / "logs").mkdir(exist_ok=True)
@@ -600,12 +619,14 @@ def submit(path, until="database", species=None, dry_run=False, resources=None):
             script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + "exec " + invocation + "\n")
             script.chmod(0o755)
             cmd = ["sbatch", "--parsable", "--nodes=1", "--ntasks=1", f"--cpus-per-task={job_resources['cpus']}",
-                   f"--mem={job_resources['mem_mb']}M", f"--time={job_resources['time']}", "--chdir=" + manifest["root"],
+                   f"--mem={job_resources['mem_gb'] * 1000}M", f"--time={job_resources['time']}", "--chdir=" + manifest["root"],
                    f"--job-name={manifest['name']}_{label}", f"--output={jobs}/logs/{batch_number:04d}_{label}_%A_%a.out",
                    f"--error={jobs}/logs/{batch_number:04d}_{label}_%A_%a.err"]
-            for key in ("partition", "account"):
-                if slurm.get(key): cmd.append(f"--{key}={slurm[key]}")
-            if indices: cmd.append("--array=" + ",".join(str(i - offset) for i in indices) + "%" + str(slurm["concurrency"]))
+            if slurm.get("partition"): cmd.append(f"--partition={slurm['partition']}")
+            if indices:
+                array = ",".join(str(i - offset) for i in indices)
+                if caps[stage] is not None: array += "%" + str(caps[stage])
+                cmd.append("--array=" + array)
             if previous:
                 cmd.extend(["--dependency=afterok:" + previous, "--kill-on-invalid-dep=yes"])
             cmd.append(str(script))

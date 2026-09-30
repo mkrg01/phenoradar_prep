@@ -21,9 +21,10 @@ Gene IDs must be `{analysis_sample_id}_g{number}`: exact computational sample ID
 integer. Proteins must be nonempty and ungapped (A–Z and `*`). Invalid inputs or
 altered ungapped residues fail validation.
 
-Identical copies, singletons, and stops are kept. Multi-OG genes appear in each
-OG regardless of `tpm.multimap`. Each sample contributes its own assembled
-proteins, including when several samples share a biological species.
+Identical copies, singletons, and stops are kept. In the standalone alignment
+target, multi-OG genes appear in each OG; TPM aggregation rejects such assignments.
+Each sample contributes its own assembled proteins, including when several samples
+share a biological species.
 
 ## Outputs and PhenoRadar
 

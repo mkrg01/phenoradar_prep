@@ -28,8 +28,21 @@ def test_config_and_optional_tool_defaults_cover_supported_keys():
     validate_keys({"run_name": "c4_run1"})
 
 
+@pytest.mark.parametrize("value", [3193, 33090])
+def test_odb_ncbi_tax_id_accepts_integer_taxonomy_ids(value):
+    validate_keys({"odb": {"ncbi_tax_id": value}})
+
+
+@pytest.mark.parametrize("value", [None, True, False, 0, -1, 3193.0, "3193"])
+def test_odb_ncbi_tax_id_rejects_invalid_values(value):
+    with pytest.raises(ValueError, match="odb.ncbi_tax_id must be a positive integer"):
+        validate_keys({"odb": {"ncbi_tax_id": value}})
+
+
 @pytest.mark.parametrize("config,path", [
     ({"unknown": {}}, "unknown"),
+    ({"odb": {"node": 33090}}, "odb.node"),
+    ({"tpm": {"multimap": "split"}}, "tpm"),
     ({"phylogeny": {"dating": {"treepl": {}}}}, "phylogeny.dating.treepl"),
     ({"container_image": "auto"}, "container_image"),
     ({"inputs": {"metadata": "elsewhere/metadata.tsv"}}, "inputs"),
@@ -111,14 +124,9 @@ def test_missing_version_has_archive_instructions(tmp_path):
         resolve_container_image(tmp_path)
 
 
-@pytest.mark.parametrize("value", [None, "resources/odb_existing/tlight", "/data/snapshot"])
-def test_existing_odb_accepts_null_or_directory(value):
-    validate_keys({"odb": {"existing_results": value}})
-
-
-@pytest.mark.parametrize("value", ["", " ", False, True, 0, 1, [], {}])
-def test_existing_odb_rejects_invalid_settings(value):
-    with pytest.raises(ValueError, match="odb.existing_results must be null or a snapshot directory"):
+@pytest.mark.parametrize("value", [None, "resources/odb_existing/tlight", "/data/snapshot", False])
+def test_external_odb_import_setting_is_rejected(value):
+    with pytest.raises(ValueError, match="unknown configuration settings: odb.existing_results"):
         validate_keys({"odb": {"existing_results": value}})
 
 

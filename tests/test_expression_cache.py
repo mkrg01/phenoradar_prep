@@ -1,4 +1,4 @@
-"""Expression reuse is bound to the sample, abundance, mapping and policy."""
+"""Expression reuse is bound to the sample, abundance and mapping."""
 import json
 from pathlib import Path
 
@@ -10,17 +10,17 @@ from mapping_fixtures import make_mapping, edit_mapping
 from prepare_metadata import prepare
 
 
-@pytest.mark.parametrize('change', ['abundance', 'mapping', 'policy'])
+@pytest.mark.parametrize('change', ['abundance', 'mapping', 'ambiguous_mapping'])
 def test_expression_cache_reuse_and_invalidation(tiny_inputs, tmp_path, monkeypatch, change):
     meta = tmp_path / 'metadata'
     prepare(**tiny_inputs, outdir=meta)
     mapping = tmp_path / 'mapping/snapshot.json'
     genes = [(f'Alpha_plant_g{i}', 'Alpha_plant') for i in (1, 2, 3)]
-    make_mapping(mapping, genes, [('Alpha_plant_g1', 'OG1'), ('Alpha_plant_g1', 'OG3'), ('Alpha_plant_g2', 'OG2')])
+    make_mapping(mapping, genes, [('Alpha_plant_g1', 'OG1'), ('Alpha_plant_g2', 'OG2')])
     cache = tmp_path / 'cache'
-    def run(name, policy='split'):
+    def run(name):
         out = tmp_path / name
-        aggregate_tpm.aggregate(meta / 'samples.tsv', 'A1', mapping, out / 'tpm.tsv', out / 'qc.json', policy, cache)
+        aggregate_tpm.aggregate(meta / 'samples.tsv', 'A1', mapping, out / 'tpm.tsv', out / 'qc.json', cache_dir=cache)
         return out
     first = run('first')
     implementation = aggregate_tpm._aggregate
@@ -35,13 +35,20 @@ def test_expression_cache_reuse_and_invalidation(tiny_inputs, tmp_path, monkeypa
         rows = read_tsv(abundance); rows[0]['tpm'] = '80'
         write_tsv(abundance, list(rows[0]), rows)
     elif change == 'mapping':
-        edit_mapping(mapping, pairs=lambda rows: [(g, 'OG4' if og == 'OG3' else og) for g, og in rows])
-    third = run('third', 'drop' if change == 'policy' else 'split')
+        edit_mapping(mapping, pairs=lambda rows: [(g, 'OG4' if og == 'OG1' else og) for g, og in rows])
+    else:
+        edit_mapping(mapping, pairs=lambda rows: rows + [('Alpha_plant_g1', 'OG3')])
+        with pytest.raises(ValueError, match='A1: 1 genes map to multiple OGs; examples.*Alpha_plant_g1'):
+            run('third')
+        assert not (tmp_path / 'third/tpm.tsv').exists()
+        assert not (tmp_path / 'third/qc.json').exists()
+        assert len(list(cache.glob('*/receipt.json'))) == 1
+        return
+    third = run('third')
     assert not (first / 'tpm.tsv').samefile(third / 'tpm.tsv')
     assert (first / 'tpm.tsv').read_bytes() != (third / 'tpm.tsv').read_bytes()
     assert len(list(cache.glob('*/receipt.json'))) == 2
-    if change == 'policy':
-        assert json.loads((third / 'qc.json').read_text())['multimap'] == 'drop'
+    assert json.loads((third / 'qc.json').read_text())['multimap'] == 'error'
 
 
 def test_concurrent_builds_share_one_expression_calculation(tiny_inputs, tmp_path, monkeypatch):

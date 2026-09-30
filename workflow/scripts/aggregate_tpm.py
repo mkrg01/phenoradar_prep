@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sum OG TPM per run, with explicit ambiguity and renormalization semantics."""
+"""Sum and renormalize OG TPM per run, rejecting genes assigned to multiple OGs."""
 import argparse
 import csv
 import math
@@ -14,9 +14,7 @@ from mapping_tables import read_species, load_tables, relative_file, lock
 from dataset_assets import digest, link_file, record, verify
 
 
-def _aggregate(samples, run, mapping, output, qc, multimap="error"):
-    if multimap not in {"error", "drop", "split"}:
-        raise ValueError("unknown multimap policy")
+def _aggregate(samples, run, mapping, output, qc):
     rows = [row for row in read_tsv(samples) if row["run"] == run]
     if len(rows) != 1:
         raise ValueError(f"expected exactly one manifest row for run {run}")
@@ -46,24 +44,22 @@ def _aggregate(samples, run, mapping, output, qc, multimap="error"):
     protein_genes = len(genes)
     quantified_proteins = len(genes.keys() & values.keys())
     ambiguous = [gene for gene, groups in mapping.items() if len(groups) > 1]
-    if ambiguous and multimap == "error":
-        raise ValueError(f"{run}: {len(ambiguous)} genes map to multiple OGs; choose drop/split explicitly; examples {ambiguous[:5]}")
+    if ambiguous:
+        raise ValueError(f"{run}: {len(ambiguous)} genes map to multiple OGs; examples {ambiguous[:5]}")
     summed, included = defaultdict(float), set()
     for gene, groups in mapping.items():
-        if len(groups) > 1 and multimap == "drop":
-            continue
-        for group in groups:
-            summed[group] += values[gene] / len(groups)
+        group, = groups
+        summed[group] += values[gene]
         included.add(gene)
     matched_tpm = math.fsum(values[gene] for gene in mapping)
     included_tpm = math.fsum(values[gene] for gene in included)
     if included_tpm <= 0:
-        raise ValueError(f"{run}: no positive TPM maps to retained OGs; check FASTA/query IDs and ambiguity policy")
+        raise ValueError(f"{run}: no positive TPM maps to retained OGs; check FASTA/query IDs")
     result = [{"species": sample["species"], "run": run, "orthogroup": group,
                "tpm_sum": value, "tpm": value / included_tpm * 1e6}
               for group, value in sorted(summed.items())]
     write_tsv(output, ["species", "run", "orthogroup", "tpm_sum", "tpm"], result)
-    write_json(qc, {"created_at": now(), "species": sample["species"], "run": run, "multimap": multimap,
+    write_json(qc, {"created_at": now(), "species": sample["species"], "run": run, "multimap": "error",
                     "targets": len(values), "protein_genes": protein_genes, "quantified_proteins": quantified_proteins,
                     "mapped_targets": len(mapping), "ambiguous_targets": len(ambiguous), "retained_targets": len(included),
                     "total_tpm": total, "mapped_tpm": matched_tpm, "mapped_tpm_fraction": matched_tpm / total,
@@ -72,9 +68,15 @@ def _aggregate(samples, run, mapping, output, qc, multimap="error"):
                     "mapping_table": table_record, "expression": file_record(output)})
 
 
-def aggregate(samples, run, mapping, output, qc, multimap="error", cache_dir=None):
+def cache_identity(sample, abundance, table):
+    return digest([sample['species'], sample['run'], abundance['sha256'], table['sha256'], 'error',
+                   [file_record(Path(__file__).with_name(name))['sha256']
+                    for name in ('aggregate_tpm.py', 'mapping_tables.py', 'common.py')]])
+
+
+def aggregate(samples, run, mapping, output, qc, *, cache_dir=None):
     if not cache_dir:
-        return _aggregate(samples, run, mapping, output, qc, multimap)
+        return _aggregate(samples, run, mapping, output, qc)
     rows = [row for row in read_tsv(samples) if row['run'] == run]
     if len(rows) != 1: raise ValueError(f'expected exactly one manifest row for run {run}')
     sample = rows[0]
@@ -82,15 +84,13 @@ def aggregate(samples, run, mapping, output, qc, multimap="error", cache_dir=Non
     entry = load_tables(mapping, verify_files=False)['tables'][sample['species']]
     table = relative_file(Path(mapping).parent, entry['table'])
     verify(table)
-    identity = digest([sample['species'], run, abundance['sha256'], table['sha256'], multimap,
-                       [file_record(Path(__file__).with_name(name))['sha256']
-                        for name in ('aggregate_tpm.py', 'mapping_tables.py', 'common.py')]])
+    identity = cache_identity(sample, abundance, table)
     cache = Path(cache_dir) / identity
     with lock(cache.with_suffix('.lock')):
         if not (cache / 'receipt.json').is_file():
             with tempfile.TemporaryDirectory(prefix='.expression-', dir=cache.parent) as tmp:
                 staging = Path(tmp)
-                _aggregate(samples, run, mapping, staging / 'tpm.tsv', staging / 'qc.json', multimap)
+                _aggregate(samples, run, mapping, staging / 'tpm.tsv', staging / 'qc.json')
                 verify(abundance); verify(table)
                 files = {name:dict(record(staging / name), path=name) for name in ('tpm.tsv', 'qc.json')}
                 write_json(staging / 'receipt.json', {'identity':identity, 'files':files})
@@ -106,6 +106,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ["samples", "run", "mapping", "output", "qc"]:
         parser.add_argument(f"--{flag}", required=True)
-    parser.add_argument("--multimap", choices=["error", "drop", "split"], default="error")
     parser.add_argument("--cache-dir")
     aggregate(**vars(parser.parse_args()))

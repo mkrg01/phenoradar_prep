@@ -24,11 +24,10 @@ def dataset_project(tmp_path, tiny_inputs):
     root = tmp_path / "project"
     root.mkdir()
     shutil.copytree(ROOT / "config", root / "config")
-    # Keep synthetic stores independent of the active dataset's cutover paths.
+    # Tests start without any external database.
     build_config = root / "config/build.yaml"
     cfg = yaml.safe_load(build_config.read_text())
-    cfg["store"] = "resources/dataset_assets"
-    cfg["odb"]["cache_dir"] = "resources/odb_cache"
+    cfg["reuse_from"] = None
     build_config.write_text(yaml.safe_dump(cfg))
     shutil.copytree(ROOT / "profiles", root / "profiles")
     shutil.copytree(ROOT / "workflow", root / "workflow", ignore=shutil.ignore_patterns("__pycache__"))
@@ -63,6 +62,32 @@ def dataset_project(tmp_path, tiny_inputs):
     return root
 
 
+@pytest.mark.parametrize("ncbi_tax_id", [3193, 33090])
+def test_build_preserves_odb_ncbi_tax_id_in_frozen_configs(dataset_project, ncbi_tax_id):
+    root = dataset_project
+    fake_genegalleon(root)
+    config = root / "config/build.yaml"
+    cfg = yaml.safe_load(config.read_text())
+    cfg["odb"]["ncbi_tax_id"] = ncbi_tax_id
+    config.write_text(yaml.safe_dump(cfg))
+    build = prepare(root, "taxid_test", config)
+    manifest = load(build)
+    pipeline = yaml.safe_load((build / "pipeline.yaml").read_text())
+    for odb in (manifest["config"]["odb"], manifest["analysis"]["odb"], pipeline["odb"]):
+        assert odb["ncbi_tax_id"] == ncbi_tax_id
+        assert "node" not in odb
+
+
+@pytest.mark.parametrize("policy", ["error", "drop", "split"])
+def test_tpm_policy_is_not_a_build_setting(dataset_project, policy):
+    config = dataset_project / "config/build.yaml"
+    cfg = yaml.safe_load(config.read_text())
+    cfg["tpm"] = {"multimap": policy}
+    config.write_text(yaml.safe_dump(cfg))
+    with pytest.raises(ValueError, match="unknown build settings:.*tpm"):
+        plan(dataset_project, config)
+
+
 def native_events(build):
     return [json.loads(line) for p in sorted((build / "work/genegalleon").glob("*/events.jsonl"))
             for line in p.read_text().splitlines()]
@@ -84,7 +109,23 @@ def imported(root):
         abundance = root / "input/quant" / name / run / f"{run}_abundance.tsv"
         if abundance.exists():
             register_quant(store, ref, item, abundance)
-    return store
+    from database_fixtures import database_from_stages
+    database = database_from_stages(root, store, items)
+    config = root / 'config/build.yaml'
+    cfg = yaml.safe_load(config.read_text()); cfg['reuse_from'] = str(database)
+    config.write_text(yaml.safe_dump(cfg))
+    return database
+
+
+@pytest.mark.parametrize("value", [None, "resources/odb_existing/tlight"])
+def test_build_rejects_external_odb_import_setting(dataset_project, value):
+    root = dataset_project
+    config = root / "config/build.yaml"
+    cfg = yaml.safe_load(config.read_text())
+    cfg["odb"]["existing_results"] = value
+    config.write_text(yaml.safe_dump(cfg))
+    with pytest.raises(ValueError, match="unknown build.odb settings"):
+        plan(root, config)
 
 
 @pytest.mark.parametrize("override", [None, "pilot_20260925"])
@@ -152,7 +193,7 @@ def test_manual_metadata_allows_multiple_runs_with_unique_sample_identities(tmp_
         identities(path)
 
 
-def test_legacy_import_and_changed_metadata_only_reuses_products(dataset_project):
+def test_database_and_changed_metadata_only_reuses_products(dataset_project):
     root = dataset_project
     imported(root)
     cfg = root / "config/build.yaml"
@@ -183,7 +224,7 @@ def test_removal_readdition_and_frozen_membership(dataset_project):
     assert [r["scientific_name"] for r in read_tsv(second_input / "metadata.tsv")] == ["Alpha plant"]
     assert not (second_input / "cds/Beta_sp-X_B1_longestCDS.fa.gz").exists()
     assert [p.name for p in (second_input / "quant").iterdir()] == ["Alpha_plant_A1"]
-    assert (store / "Beta_sp-X_B1").exists()
+    assert (store / "cds/Beta_sp-X_B1_longestCDS.fa.gz").exists()
     write_tsv(metadata, list(original[0]), original)
     third = prepare(root, "restored", cfg)
     assert submit(third, until="quant", dry_run=True) == []
@@ -306,7 +347,7 @@ def test_staged_workers_reuse_and_native_array_filename_order(dataset_project, m
     path = new_dataset(root, ("New plant", "New plant alba"))
     commands = submit(path, until="busco", dry_run=True)
     assert len(commands) == 2
-    assert "--array=1,2%5" in commands[0]
+    assert "--array=1,2" in commands[0]
     assert "--dependency=afterok:JOB_ID_assembly" in commands[1]
     for stage in ("assembly", "busco", "quant"):
         for index in (1, 2): worker(path, stage, index)
@@ -346,7 +387,13 @@ def test_completed_new_species_reused_by_next_dataset(dataset_project):
     path = new_dataset(root)
     submit(path, until="quant", dry_run=True)
     for stage in ("assembly", "busco", "quant"): worker(path, stage, 1)
-    second = prepare(root, "next", root / "config/build.yaml", "input/new.tsv")
+    from database_fixtures import database_from_stages
+    frozen = load(path)
+    source = database_from_stages(root, frozen['config']['store'], frozen['items'], 'completed_source')
+    config = root/'config/build.yaml'
+    cfg = yaml.safe_load(config.read_text()); cfg['reuse_from'] = str(source)
+    config.write_text(yaml.safe_dump(cfg))
+    second = prepare(root, "next", config, "input/new.tsv")
     assert submit(second, until="quant", dry_run=True) == []
     assert read_tsv(materialize(second) / "metadata.tsv")[0]["run"] == "SRR1"
 
@@ -357,12 +404,12 @@ def test_partial_pilot_never_exports_incomplete_dataset(dataset_project):
     subset.write_text("Other_plant\n")
     commands = submit(path, until="mapping", species=subset, dry_run=True)
     assert len(commands) == 3
-    assert all("--array=2%5" in cmd for cmd in commands)
+    assert all("--array=2" in cmd for cmd in commands)
     assert not any("mapping" in cmd[-1] for cmd in commands)
     for stage in ("assembly", "busco", "quant"): worker(path, stage, 2)
     with pytest.raises(ValueError, match="dataset incomplete: New_plant"):
         materialize(path)
-    assert "--array=1%5" in submit(path, until="assembly", dry_run=True)[0]
+    assert "--array=1" in submit(path, until="assembly", dry_run=True)[0]
 
 
 def test_slurm_submission_dependencies_and_duplicate_submission_guard(dataset_project, monkeypatch):
@@ -406,6 +453,11 @@ def test_private_relative_reads_are_frozen_and_reuse_detects_changed_bytes(datas
         worker(path, "assembly", 1)
     reads.write_bytes(original)
     for stage in ("assembly", "busco", "quant"): worker(path, stage, 1)
+    from database_fixtures import database_from_stages
+    frozen = load(path)
+    source = database_from_stages(root, frozen['config']['store'], frozen['items'], 'private_source')
+    config = yaml.safe_load(cfg.read_text()); config['reuse_from'] = str(source)
+    cfg.write_text(yaml.safe_dump(config))
     assert plan(root, cfg, "input/private.tsv")[-1][0]["quant"] == "reuse"
     second = prepare(root, "private_reused", cfg, "input/private.tsv")
     assert submit(second, until="quant", dry_run=True) == []
@@ -436,8 +488,8 @@ def test_split_slurm_arrays_preserve_species_identity_and_bound_concurrency(data
     path = new_dataset(dataset_project, ("Alpha new", "Beta new", "Gamma new"), array_size=2)
     commands = submit(path, until="assembly", dry_run=True)
     assert len(commands) == 2
-    assert "--array=1,2%5" in commands[0]
-    assert "--array=1%5" in commands[1]
+    assert "--array=1,2" in commands[0]
+    assert "--array=1" in commands[1]
     assert "--dependency=afterok:JOB_ID_assembly" in commands[1]
     # Execute the generated high-index batch locally with the GeneGalleon double.
     # Local Slurm index 1 must select logical species 3, not species 1.
@@ -473,8 +525,8 @@ def test_prepare_resolves_automatic_dependencies_once_and_freezes_the_lock(datas
     repository = fake_genegalleon(root)
     config_path = root / "config/build.yaml"
     cfg = yaml.safe_load(config_path.read_text())
-    cfg["genegalleon"]["repository"] = None
-    cfg["genegalleon"]["image"] = None
+    cfg["genegalleon"].pop("repository", None)
+    cfg["genegalleon"].pop("image", None)
     config_path.write_text(yaml.safe_dump(cfg))
     fields = ["scientific_name", "run", "taxid"]
     write_tsv(root / "input/automatic.tsv", fields, [dict(zip(fields, ["New plant", "SRR1", "42"]))])

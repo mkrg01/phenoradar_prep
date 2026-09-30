@@ -17,13 +17,13 @@ a new build or analysis as appropriate.
 
 ## OrthoDB reference
 
-### Choosing an OrthoDB node
+### Choosing an OrthoDB mapping clade
 
-`odb.node` in `build.yaml` is an NCBI taxid supported as an OrthoDB v12 mapping level.
+`odb.ncbi_tax_id` in `build.yaml` is an NCBI Taxonomy ID supported as an OrthoDB v12 mapping level.
 Choose a clade containing all build species; narrower levels define finer OGs.
 It is independent of `busco.lineage`.
 
-| `odb.node` | Clade |
+| `odb.ncbi_tax_id` | Clade |
 | --- | --- |
 | `33090` | Viridiplantae |
 | `3193` (default) | Embryophyta |
@@ -48,7 +48,7 @@ Changing the node requires a new build and new mappings.
 
 ### Preparing and verifying the reference
 
-Build prepares `resources/orthodb/v12_<node>/` automatically. For separate setup,
+Build prepares `resources/orthodb/v12_<ncbi_tax_id>/` automatically. For separate setup,
 use a prepared build's resolved config:
 
 ```bash
@@ -62,16 +62,16 @@ prepare a new build, reviewing the compatibility of retained mapping caches.
 
 ### Reusing existing ODB results
 
-Completed builds publish reusable mapping snapshots under
-`odb.cache_dir/v12_<node>/`. Each snapshot records the ODB version/node, protein
-hashes and mapping checksums. Subsequent builds discover matching samples
-there automatically, map missing ones, and omit excluded samples. Changed
-protein inputs require new mappings; abundance-only changes reuse them.
+Completed databases contain `odb/snapshot.json` and per-sample mapping tables.
+Set `reuse_from` in `build.yaml` to one or more completed databases. Matching
+samples reuse their mappings; missing samples are mapped in chunks. The build
+manages intermediate snapshots under `results/<build>/work/cache/odb/`.
+Each snapshot records the ODB version/node, protein hashes, mapping checksums,
+and reference identity. Changing protein inputs requires new mappings.
 
-Legacy `annotations.tsv` files are split into species tables once. Build and
-analysis reuse verified translations and species mapping tables; no combined
-mapping database is created. `odb.existing_results` remains accepted
-for legacy configs but is unnecessary for normal builds.
+Build and analysis reuse verified translations and sample mapping tables; no
+combined mapping database is created. Downstream analysis reads mappings directly
+from its completed database. See [database reuse](datasets.md#reusing-completed-databases).
 
 ## KOfam and KEGG reference
 

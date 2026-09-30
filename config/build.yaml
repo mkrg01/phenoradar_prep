@@ -1,61 +1,51 @@
-# Reusable sample database, including OG expression, under results/<name>/.
+# Reusable sample database under results/<name>/.
 # Paths are relative to the project root.
-# GeneGalleon version, revision and image digest must be updated together.
-name: angiosperm_leaf_20260928  # A new name for each build; submit --name overrides.
-metadata: input/metadata.tsv
+name: angiosperm_leaf_20260930  # Build directory name under results/; --name overrides.
+metadata: input/metadata.tsv  # Input sample/run table (TSV).
 excluded_accessions: config/excluded_accessions.tsv  # Manual run exclusions; null disables.
-store: migrations/sample_ids_20260928/dataset_assets
-tpm:
-  multimap: error  # Policy for genes mapped to multiple OGs: error, drop, split.
+reuse_from: results/angiosperm_leaf_20260928/database  # Completed database path, a list of paths, or null for a fresh build.
 translation:
-  table: 1
+  table: 1  # NCBI genetic code for CDS translation; 1 = standard.
 busco:
-  lineage: embryophyta_odb12
+  lineage: embryophyta_odb12  # BUSCO lineage dataset for completeness and marker extraction.
 odb:
-  cache_dir: migrations/sample_ids_20260928/odb_cache
-  chunk_size: 20
-  node: 3193
+  chunk_size: 50  # Maximum samples per ODB mapping chunk.
+  ncbi_tax_id: 3193  # OrthoDB mapping clade: Embryophyta (land plants); NCBI Taxonomy ID.
 genegalleon:
-  version: 0.7.77
-  revision: 3a6460e8a8201ab1293db1fec445fd7de063e46e
-  image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:df357fc1857c737df1cdfe17fc12b7e1fcb891353e9bac9e534fb4155b98aff3
-  image_sha256: null
-  cache_dir: resources/software/genegalleon
-  repository: null
-  image: null
+  version: 0.7.77  # GeneGalleon release label.
+  revision: 3a6460e8a8201ab1293db1fec445fd7de063e46e  # Pinned source commit.
+  image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:df357fc1857c737df1cdfe17fc12b7e1fcb891353e9bac9e534fb4155b98aff3  # Container pinned by OCI digest.
   settings:
-    assembly_method: rnaSPAdes
+    assembly_method: rnaSPAdes  # Transcriptome assembler passed to GeneGalleon.
 slurm:
   partition: null  # Use the cluster default; set a name when required.
-  account: null
-  concurrency: 5
-  array_size: 1000
-  stages:
+  array_size: 1000  # Sample index slots per array batch.
+  total_limits:  # Per build; CPU/memory include the controller allocation.
+    jobs: null  # No workflow job-count cap; Slurm and finite CPU/memory budgets still apply.
+    cpus: null  # Total CPU request budget; null adds no workflow-wide limit.
+    mem_gb: null  # Total memory request budget in GB; null adds no workflow-wide limit.
+  per_job_resources:  # Per-job requests; cpus = CPU count, mem_gb = GB, time = days-HH:MM:SS.
     assembly:
       cpus: 4
-      mem_mb: 128000
-      time: 14-00:00:00
+      mem_gb: 128
+      time: "14-00:00:00"
     busco:
       cpus: 4
-      mem_mb: 32000
-      time: 1-00:00:00
+      mem_gb: 32
+      time: "1-00:00:00"
     quant:
       cpus: 4
-      mem_mb: 32000
-      time: 1-00:00:00
-    controller:
-      cpus: 1
-      mem_mb: 8000
-      time: 14-00:00:00
-  jobs: 64  # Submission ceiling; Slurm limits actual CPU/memory allocation.
-  default_resources:
-    mem_mb: 8000
-    runtime: 1440
-  rules:
+      mem_gb: 32
+      time: "1-00:00:00"
     odb_map:
       cpus: 16
-      mem_mb: 192000
-      runtime: 4320
+      mem_gb: 192
+      time: "7-00:00:00"
     prepare_odb_reference:
-      mem_mb: 32000
-      runtime: 1440
+      cpus: 1
+      mem_gb: 32
+      time: "1-00:00:00"
+    controller:  # Runs Snakemake and manages its worker jobs.
+      cpus: 1
+      mem_gb: 8
+      time: "14-00:00:00"

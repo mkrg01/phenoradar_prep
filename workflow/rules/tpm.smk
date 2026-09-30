@@ -1,6 +1,4 @@
 if config.get("build_manifest") and COMPLETED_BUILD['schema_version'] >= 5:
-    if config['tpm'] != COMPLETED_BUILD['tpm']:
-        raise WorkflowError('downstream TPM settings differ from the database')
     BUILD_RUNS = {p['row']['run']: p for p in COMPLETED_BUILD['products'].values()}
 
     rule import_build_expression:
@@ -14,13 +12,12 @@ if config.get("build_manifest") and COMPLETED_BUILD['schema_version'] >= 5:
         output:
             tpm=f"{TPM}/runs/{{run}}.tsv",
             qc=f"{TPM}/runs/{{run}}.qc.json"
-        params: multimap=config['tpm']['multimap']
         conda: "../envs/analysis.yaml"
         resources: mem_mb=2000
         shell:
             "{PYTHON:q} {input.code:q} expression --completion {input.completion:q} "
             "--samples {input.samples:q} --run {wildcards.run:q} --output {output.tpm:q} "
-            "--qc {output.qc:q} --multimap {params.multimap:q}"
+            "--qc {output.qc:q}"
 else:
     rule aggregate_tpm:
         input:
@@ -34,7 +31,6 @@ else:
             tpm=f"{TPM}/runs/{{run}}.tsv",
             qc=f"{TPM}/runs/{{run}}.qc.json"
         params:
-            multimap=config["tpm"]["multimap"],
             cache=config.get("expression_cache") or ""
         log: f"{LOG}/{ORTHOGROUP_EXPRESSION}/{{run}}.log"
         conda: "../envs/analysis.yaml"
@@ -42,7 +38,7 @@ else:
         shell:
             "{PYTHON:q} {input.code:q} --samples {input.samples:q} --run {wildcards.run:q} "
             "--mapping {input.mapping:q} --output {output.tpm:q} --qc {output.qc:q} "
-            "--multimap {params.multimap:q} --cache-dir={params.cache:q} > {log:q} 2>&1"
+            "--cache-dir={params.cache:q} > {log:q} 2>&1"
 
 
 rule merge_tpm:

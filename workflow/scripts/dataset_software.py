@@ -17,7 +17,7 @@ from dataset_assets import digest, locked, record, verify
 
 SOURCE_BASE = "https://codeload.github.com/kfuku52/genegalleon/tar.gz/"
 ENTRYPOINT = "workflow/gg_transcriptome_generation_entrypoint.sh"
-KEYS = {"repository", "image", "settings", "version", "revision", "image_uri", "image_sha256", "cache_dir"}
+KEYS = {"repository", "image", "settings", "version", "revision", "image_uri", "cache_dir"}
 
 
 def validate(config):
@@ -29,14 +29,9 @@ def validate(config):
     if config.get("revision") is not None and not re.fullmatch(r"[0-9a-f]{40}", str(config["revision"])):
         raise ValueError("genegalleon.revision must be a full 40-character commit SHA")
     uri = config.get("image_uri")
-    if uri is not None:
-        if not isinstance(uri, str) or not (re.fullmatch(r"docker://[A-Za-z0-9./:_-]+@sha256:[0-9a-f]{64}", uri)
-                                            or uri.startswith("https://")):
-            raise ValueError("genegalleon.image_uri must use an OCI SHA256 digest or an HTTPS SIF URL")
-        if uri.startswith("https://") and not config.get("image_sha256"):
-            raise ValueError("HTTPS SIF downloads require genegalleon.image_sha256")
-    if config.get("image_sha256") is not None and not re.fullmatch(r"[0-9a-f]{64}", str(config["image_sha256"])):
-        raise ValueError("genegalleon.image_sha256 must be a SHA256 checksum")
+    if not isinstance(uri, str) or not re.fullmatch(r"docker://[A-Za-z0-9./:_-]+@sha256:[0-9a-f]{64}", uri):
+        raise ValueError("genegalleon.image_uri is required and must use an OCI SHA256 digest "
+                         "(docker://<registry>/<image>@sha256:<64 lowercase hexadecimal characters>)")
 
 
 def progress(message):
@@ -130,17 +125,16 @@ def architecture():
 def inspect_image(runtime, path, config):
     data = json.loads(subprocess.check_output([runtime, "inspect", "--json", str(path)], text=True))
     labels = data.get("data", {}).get("attributes", {}).get("labels", {})
-    # OCI labels are retained by standard Apptainer pulls. Direct SIF downloads
-    # are additionally bound to the configured file checksum.
+    # OCI labels are retained by standard Apptainer pulls.
     check_image_labels(labels, config)
     return labels
 
 
 def fetch_image(config):
-    uri = config.get("image_uri")
-    if not uri:
-        raise ValueError("automatic GeneGalleon SIF retrieval requires image_uri")
-    identity = {"uri": uri, "architecture": architecture(), "expected_sha256": config.get("image_sha256")}
+    validate(config)
+    uri = config["image_uri"]
+    # Keep the legacy null field so existing OCI caches retain their paths and receipts.
+    identity = {"uri": uri, "architecture": architecture(), "expected_sha256": None}
     base = Path(config["cache_dir"]) / "images"
     key = digest(identity)
     destination = base / key
@@ -156,24 +150,19 @@ def fetch_image(config):
         try:
             image = staging / "genegalleon.sif"
             progress(f"fetching {uri} for {identity['architecture']} (first OCI pull converts to SIF)")
-            if uri.startswith("https://"):
-                download(uri, image)
-            else:
-                runtime_cache = Path(config["cache_dir"]) / "runtime-cache"
-                runtime_cache.mkdir(parents=True, exist_ok=True)
-                scratch = staging / "tmp"
-                scratch.mkdir()
-                env = dict(os.environ)
-                for prefix in ("APPTAINER", "SINGULARITY"):
-                    env[prefix + "_CACHEDIR"] = str(runtime_cache)
-                    env[prefix + "_TMPDIR"] = str(scratch)
-                env["TMPDIR"] = str(scratch)
-                subprocess.run([runtime, "pull", "--arch", identity["architecture"], str(image), uri], env=env, check=True)
-                shutil.rmtree(scratch)
+            runtime_cache = Path(config["cache_dir"]) / "runtime-cache"
+            runtime_cache.mkdir(parents=True, exist_ok=True)
+            scratch = staging / "tmp"
+            scratch.mkdir()
+            env = dict(os.environ)
+            for prefix in ("APPTAINER", "SINGULARITY"):
+                env[prefix + "_CACHEDIR"] = str(runtime_cache)
+                env[prefix + "_TMPDIR"] = str(scratch)
+            env["TMPDIR"] = str(scratch)
+            subprocess.run([runtime, "pull", "--arch", identity["architecture"], str(image), uri], env=env, check=True)
+            shutil.rmtree(scratch)
             entry = record(image)
             if not entry["bytes"]: raise ValueError("downloaded GeneGalleon SIF is empty")
-            if config.get("image_sha256") and entry["sha256"] != config["image_sha256"]:
-                raise ValueError("GeneGalleon SIF SHA256 mismatch")
             labels = inspect_image(runtime, image, config)
             receipt = {"schema_version": 1, "kind": "downloaded_image", "created_at": now(),
                        "identity": identity, "runtime": subprocess.check_output([runtime, "--version"], text=True).strip(),
@@ -209,8 +198,6 @@ def resolve(config):
     if local_image:
         image = Path(local_image)
         entry = record(image)
-        if cfg.get("image_sha256") and entry["sha256"] != cfg["image_sha256"]:
-            raise ValueError("local GeneGalleon SIF SHA256 mismatch")
         container = {"kind": "local_image", "files": [entry]}
     else:
         if source["kind"] == "local_source" and source.get("version") != cfg.get("version"):

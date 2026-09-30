@@ -1,4 +1,4 @@
-"""Mixed ODB imports map only missing species and survive dataset removal/readdition."""
+"""Cached ODB products map only missing species and survive dataset removal/readdition."""
 import json
 import os
 import shutil
@@ -27,18 +27,18 @@ def snapshot(root, proteins, species):
         "annotations": dict(file_record(annotation), path="annotations.tsv")})
 
 
-def test_plan_and_merge_do_not_leak_other_species_from_import(tmp_path):
+def test_plan_and_merge_do_not_leak_other_species_from_cache(tmp_path):
     proteins = tmp_path / "proteins"
     proteins.mkdir()
     names = ["Alpha_plant", "Beta_plant", "Removed_plant"]
     for s in names: (proteins / f"{s}_protein.fa").write_text(f">{s}_g1\nMK\n>{s}_g2\nMP\n")
-    old = tmp_path / "old"
+    old = tmp_path / "cache/v12_3193/completed"
     snapshot(old, proteins, names)
     samples = tmp_path / "samples.tsv"
     rows = [{"species": s, "odb_species": s} for s in names[:2]]
     write_tsv(samples, list(rows[0]), rows)
     out = tmp_path / "plan"
-    result = plan(samples, proteins, out, tmp_path / "cache", existing=old)
+    result = plan(samples, proteins, out, tmp_path / "cache")
     assert result["mapped_species"] == []
     collect(samples, out / 'chunks.json', tmp_path / 'chunks', proteins, tmp_path / 'mapping',
             tmp_path / 'cache', source_plan=out / 'plan.json')
@@ -59,7 +59,7 @@ def test_mixed_mapping_and_cross_run_reuse(tiny_inputs, fake_odb, frozen_referen
     original_proteins.mkdir()
     translate(str(Path(tiny_inputs["cds_dir"]) / "Alpha_plant_longestCDS.fa.gz"),
               original_proteins / "Alpha_plant_protein.fa", original_proteins / "Alpha_plant.json", seqkit=seqkit)
-    old = root / "existing"
+    old = root / "resources/odb_cache/v12_3193/completed"
     snapshot(old, original_proteins, ["Alpha_plant"])
     reference = root / "resources/orthodb/v12_3193"
     reference.parent.mkdir(parents=True)
@@ -67,7 +67,7 @@ def test_mixed_mapping_and_cross_run_reuse(tiny_inputs, fake_odb, frozen_referen
     events = root / "events.txt"
     env = command_environment({"python": sys.executable, "seqkit": seqkit, "ODB-mapper": fake_odb})
     env["FAKE_ODB_LOG"] = str(events)
-    config = {"run_name": "first", "odb": {"incremental": True, "existing_results": str(old), "chunk_size": 1}}
+    config = {"run_name": "first", "odb": {"incremental": True, "chunk_size": 1}}
     override = root / "override.yaml"
     def execute():
         override.write_text(yaml.safe_dump(config))
@@ -81,7 +81,7 @@ def test_mixed_mapping_and_cross_run_reuse(tiny_inputs, fake_odb, frozen_referen
     first = execute()
     assert len(events.read_text().splitlines()) == 1
     assert json.loads((first / "orthogroups/mapping/snapshot.json").read_text())["qc"]["mode"] == "mixed"
-    assert len(list((root / "resources/odb_cache/v12_3193").glob("*/snapshot.json"))) == 1
+    assert len(list((root / "resources/odb_cache/v12_3193").glob("*/snapshot.json"))) == 2
     config["run_name"] = "same_species_new_run"
     second = execute()
     assert all(json.loads(p.read_text())["reused"] for p in (second / "proteins").glob("*_protein.json"))

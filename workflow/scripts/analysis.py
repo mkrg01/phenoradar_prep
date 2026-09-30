@@ -19,7 +19,7 @@ from configuration import validate_analysis, validate_keys
 from layout import run_layout
 from dataset import absolute, implementation, inside, load_execution
 from dataset_assets import SAFE, digest, link_file, locked, record, verify
-from phase_config import deep_merge, execution_settings, read_yaml, validate_slurm, write_profile
+from phase_config import deep_merge, execution_settings, merge_slurm, read_yaml, validate_slurm, worker_budgets, workflow_jobs, write_profile
 
 TARGETS = ('all','alignments','kegg','phylogeny','phylogeny_prepare','taxonomy_check',
            'contrast_pairs','phylogeny_calibrations','timetree','phenoradar_inputs')
@@ -29,12 +29,12 @@ ANALYSIS_KEYS = {'build','inputs','seed','trait','selection','alignment','kegg',
 def settings(root, config, build=None):
     root = Path(root).resolve()
     override = read_yaml(config)
-    if 'tpm' in override: raise ValueError('tpm settings belong to config/build.yaml; downstream inherits the database policy')
     if set(override) - ANALYSIS_KEYS: raise ValueError('unknown analysis settings: ' + ', '.join(sorted(set(override) - ANALYSIS_KEYS)))
-    cfg = deep_merge(read_yaml(root / 'config/analysis.yaml'), override)
+    base_config = read_yaml(root / 'config/analysis.yaml')
+    cfg = deep_merge(base_config, override)
+    cfg['slurm'] = merge_slurm(base_config['slurm'], override.get('slurm', {}), build=False)
     if 'lineage' in cfg['phylogeny']: raise ValueError('BUSCO lineage belongs to build.yaml')
     if set(cfg['inputs']) - {'species_trait','species_list','calibrations'}: raise ValueError('unknown analysis input')
-    validate_slurm(cfg['slurm'], build=False)
     source = inside(root, absolute(root, build or cfg['build']))
     source = inside(root, completion_path(source))
     completed = load_complete(source)
@@ -43,9 +43,8 @@ def settings(root, config, build=None):
     base = read_yaml(root / 'workflow/pipeline_defaults.yaml')
     resolved = deep_merge(base, {k:v for k,v in cfg.items() if k not in {'build','inputs','slurm'}})
     resolved['translation'] = completed['translation']
-    resolved['tpm'] = completed.get('tpm', base['tpm'])
     resolved['phylogeny']['lineage'] = completed['lineage']
-    resolved['odb'].update(node=completed['odb']['node'], incremental=False, existing_results=None)
+    resolved['odb'].update(ncbi_tax_id=completed['odb']['node'], incremental=False)
     resolved['build_manifest'] = str(source)
     validate_keys(resolved); validate_analysis(resolved)
     threshold = resolved['selection']['busco_threshold']
@@ -160,10 +159,11 @@ def run(path, target='all', execution=None, local=False, cores=1, mem_mb=8000):
     root = Path(manifest['root'])
     validate_analysis(manifest['pipeline'], [target])
     slurm = load_execution(execution) if execution else manifest['config']['slurm']
+    slurm = validate_slurm(slurm, build=False)
     profile = write_profile(path / 'jobs' / (Path(execution).stem if execution else 'local') / 'profile', slurm)
     command = [str(root/'run_pipeline.sh')]
     if local: command += ['--cores',str(cores),'--resources',f'mem_mb={mem_mb}']
-    else: command += ['--slurm','--profile',str(profile),'--jobs',str(slurm['jobs'])]
+    else: command += ['--slurm','--profile',str(profile),'--jobs',str(workflow_jobs(slurm))]
     command += ['--configfile',str(path/'pipeline.yaml')]
     with locked(path/'.run.lock'):
         subprocess.run([*command,'--',target], cwd=root, check=True)
@@ -184,6 +184,7 @@ def submit(path, target='all', dry_run=False, resources=None):
     manifest = load(path, check_code=True)
     validate_analysis(manifest['pipeline'], [target])
     slurm = execution_settings(manifest['config']['slurm'], resources, build=False)
+    worker_budgets(slurm)
     jobs = path/'jobs'; jobs.mkdir(exist_ok=True); (jobs/'logs').mkdir(exist_ok=True)
     with locked(jobs/'.submit.lock'):
         previous = [p for p in jobs.glob('submission_*.json') if not p.name.endswith('.resources.json')]
@@ -206,10 +207,9 @@ def submit(path, target='all', dry_run=False, resources=None):
         script.write_text('#!/usr/bin/env bash\nset -euo pipefail\nexec ' + shlex.join(invocation) + '\n')
         script.chmod(0o755)
         job = slurm['stages']['controller']
-        cmd = ['sbatch','--parsable','--nodes=1','--ntasks=1',f"--cpus-per-task={job['cpus']}",f"--mem={job['mem_mb']}M",f"--time={job['time']}",
+        cmd = ['sbatch','--parsable','--nodes=1','--ntasks=1',f"--cpus-per-task={job['cpus']}",f"--mem={job['mem_gb'] * 1000}M",f"--time={job['time']}",
                '--chdir='+manifest['root'],'--job-name='+manifest['name'],f'--output={jobs}/logs/{number:04d}_%j.out',f'--error={jobs}/logs/{number:04d}_%j.err']
-        for key in ('partition','account'):
-            if slurm.get(key): cmd.append(f'--{key}={slurm[key]}')
+        if slurm.get('partition'): cmd.append(f"--partition={slurm['partition']}")
         cmd.append(str(script))
         if dry_run:
             print(shlex.join(cmd)); return cmd

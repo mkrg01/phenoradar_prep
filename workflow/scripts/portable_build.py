@@ -81,8 +81,8 @@ def load_products(path, data, verify_files=True):
             product[key] = bind(product[key])
     for required in ('metadata.tsv', 'busco/summary.tsv', 'excluded_accessions.tsv', 'excluded_runs.tsv'):
         if required not in files: raise ValueError(f'incomplete product bundle: {required}')
-    if data['schema_version'] >= 5 and data.get('tpm', {}).get('multimap') not in {'error', 'drop', 'split'}:
-        raise ValueError('database requires a valid TPM ambiguity policy')
+    if data['schema_version'] >= 5 and data.get('tpm', {}).get('multimap') != 'error':
+        raise ValueError('database TPM policy must be error')
     bound['input'] = str(root)
     bound['bundle_root'] = str(root)
     return bound
@@ -157,7 +157,7 @@ def publish_products(build, data):
             write_tsv(staging / 'excluded_runs.tsv', ['species', 'run', 'reason'], data.get('excluded_runs', []))
             created('excluded_runs.tsv')
         # These are historical records; their original paths are never dereferenced.
-        for name in ('build.json', 'pipeline.yaml', 'checksums.json'):
+        for name in ('build.json', 'pipeline.yaml', 'checksums.json', 'reuse.json'):
             source = build / name
             if source.exists(): add(record(source), Path('provenance') / name)
         products = copy.deepcopy(data['products'])

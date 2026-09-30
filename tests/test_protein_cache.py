@@ -78,7 +78,7 @@ def test_slurm_profile_uses_short_squeue_polling(tmp_path):
     cfg = yaml.safe_load((Path(__file__).resolve().parents[1]/'config/build.yaml').read_text())
     profile = write_profile(tmp_path/'profile', cfg['slurm'])
     data = yaml.safe_load((profile/'config.yaml').read_text())
-    assert data['jobs'] == 64
+    assert data['jobs'] == 'unlimited'
     assert 'group-components' not in data  # Snakemake 9.8 groups fail with containerized Conda.
     assert data['slurm-status-command'] == 'squeue'
     assert data['slurm-init-seconds-before-status-checks'] == 10

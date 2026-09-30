@@ -19,8 +19,8 @@ Adding or removing samples reuses completed sample data, mappings, and OG expres
 
 Prepare `input/metadata.tsv` using [AMALGKIT](https://github.com/kfuku52/amalgkit).
 Edit [build.yaml](config/build.yaml) and [analysis.yaml](config/analysis.yaml).
-For the C4 analysis example below, set `trait: C4` in `analysis.yaml` and provide
-a `C4` column in the configured trait table; the supplied config uses `carnivory`.
+Set `reuse_from` to a completed `results/<build>/database/` path or a list of
+database paths; use `null` for the first build.
 See the [initial setup](docs/running.md#installation-and-normal-execution) and
 [build and analysis guide](docs/datasets.md).
 

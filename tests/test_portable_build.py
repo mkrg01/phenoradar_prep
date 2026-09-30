@@ -60,7 +60,7 @@ def test_bundle_relocation_and_analysis(completed_project):
     assert original['tpm'] == {'multimap': 'error'}
     assert (source/'expression/runs/A1.tsv').is_file()
     odb_snapshot = json.loads((source/'odb/snapshot.json').read_text())
-    assert len(odb_snapshot['reference_sha256s']) == 1
+    assert odb_snapshot['reference_sha256s'] == []
     assert all(not Path(r['path']).is_absolute() for r in original['files'])
     second = root.parent/'second'; second.mkdir()
     for directory in ['workflow','config']:
@@ -86,7 +86,8 @@ def test_bundle_relocation_and_analysis(completed_project):
         execute(second,run,'all',env)
         execute(second,run,'phenoradar_inputs',env)
         assert {r['species'] for r in read_tsv(run/'phenoradar_inputs/tpm.tsv')} == {'Alpha_plant_A1','Beta_sp-X_B1'}
-        assert len(events.read_text().splitlines()) == 1
+        assert not (run/'orthogroups/expression/runs/A1.qc.json').samefile(moved/'expression/runs/A1.qc.json')
+        assert not events.exists()
     finally:
         offline.rename(root)
 
@@ -142,12 +143,20 @@ def test_database_expression_and_policy_are_required(completed_project):
     root, build, _, _ = completed_project
     config = root / 'bad-analysis.yaml'
     config.write_text('tpm:\n  multimap: split\n')
-    with pytest.raises(ValueError, match='tpm settings belong to config/build.yaml'):
+    with pytest.raises(ValueError, match='unknown analysis settings: tpm'):
         analysis.prepare(root, 'bad', config, build)
     database = root.parent / 'incomplete-database'
     shutil.copytree(build / 'database', database)
     manifest = database / 'manifest.json'
     original = json.loads(manifest.read_text())
+    for policy in ('drop', 'split'):
+        bad = copy.deepcopy(original)
+        bad['tpm']['multimap'] = policy
+        bad['sha256'] = digest({k:v for k,v in bad.items() if k != 'sha256'})
+        write_json(manifest, bad)
+        with pytest.raises(ValueError, match='database TPM policy must be error'):
+            load_complete(database, verify_files=False)
+    write_json(manifest, original)
     product = original['products']['Alpha_plant_A1']
     expression = database / product['expression']['path']
     expression.write_text('corrupt\n')

@@ -1,11 +1,10 @@
 """Accepted configuration keys, including optional tool-specific overrides."""
 KEYS = {
-    "": "run_name selection translation odb tpm alignment kegg phylogeny "
+    "": "run_name selection translation odb alignment kegg phylogeny "
         "trait exclude_species seed input_root build_manifest translation_cache expression_cache output_root work_root log_root",
     "selection": "busco_threshold species_list missing_taxonomy",
     "translation": "table",
-    "odb": "existing_results node incremental cache_dir chunk_size",
-    "tpm": "multimap",
+    "odb": "ncbi_tax_id incremental cache_dir chunk_size",
     "alignment": "enabled",
     "kegg": "enabled ambiguity",
     "phylogeny": "trees lineage "
@@ -32,9 +31,6 @@ def validate_keys(config):
             raise ValueError("unknown configuration settings: " + ", ".join(paths))
     if "species_list" in config.get("selection", {}) and type(config["selection"]["species_list"]) is not bool:
         raise ValueError("selection.species_list must be true or false; true reads input/species_list.txt")
-    existing = config.get("odb", {}).get("existing_results")
-    if existing is not None and (not isinstance(existing, str) or not existing.strip()):
-        raise ValueError("odb.existing_results must be null or a snapshot directory")
     if "input_root" in config and (not isinstance(config["input_root"], str) or not config["input_root"].strip()):
         raise ValueError("input_root must be a directory")
     for key in ("output_root", "work_root", "log_root", "expression_cache"):
@@ -42,9 +38,11 @@ def validate_keys(config):
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ValueError(f"{key} must be null or a directory")
     odb = config.get("odb", {})
+    if "ncbi_tax_id" in odb and (type(odb["ncbi_tax_id"]) is not int or odb["ncbi_tax_id"] < 1):
+        raise ValueError("odb.ncbi_tax_id must be a positive integer")
     if type(odb.get("incremental", False)) is not bool:
         raise ValueError("odb.incremental must be true or false")
-    if type(odb.get("chunk_size", 100)) is not int or odb.get("chunk_size", 100) < 1:
+    if type(odb.get("chunk_size", 50)) is not int or odb.get("chunk_size", 50) < 1:
         raise ValueError("odb.chunk_size must be a positive integer")
     if not isinstance(odb.get("cache_dir", "resources/odb_cache"), str) or not odb.get("cache_dir", "resources/odb_cache").strip():
         raise ValueError("odb.cache_dir must be a directory")

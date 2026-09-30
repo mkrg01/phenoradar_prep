@@ -39,7 +39,7 @@ def test_hundred_species_chunks_and_cpu_dependent_batches(
     write_tsv(source / "metadata.tsv", list(metadata[0]), list(reversed(metadata)))
     write_tsv(source / "busco/summary.tsv", list(busco[0]), busco)
     override = tmp_path / "override.yaml"
-    override.write_text(yaml.safe_dump({"run_name": "test"}))
+    override.write_text(yaml.safe_dump({"run_name": "test", "odb": {"chunk_size": 100}}))
     reference = workflow_project / "resources/orthodb/v12_3193"
     reference.parent.mkdir(parents=True)
     reference.symlink_to(frozen_reference, target_is_directory=True)
@@ -93,7 +93,8 @@ def test_hundred_species_chunks_and_cpu_dependent_batches(
     assert all(path.stat().st_mtime_ns == stamp for path, stamp in before.items())
 
 
-def test_translation_rules_use_individual_slurm_jobs(tiny_inputs, workflow_project, seed_taxonomy, tmp_path):
+@pytest.mark.parametrize('limits', [{}, {'cpus': 9, 'mem_gb': 64}])
+def test_translation_rules_use_individual_slurm_jobs(tiny_inputs, workflow_project, seed_taxonomy, tmp_path, limits):
     from prepare_metadata import prepare
     snakemake = shutil.which('snakemake')
     if not snakemake:
@@ -105,7 +106,9 @@ def test_translation_rules_use_individual_slurm_jobs(tiny_inputs, workflow_proje
     targets = [str((workflow_project/'results/grouped/proteins'/f'{name}_protein.fa').resolve())
                for name in ('Alpha_plant','Beta_sp_X')]
     from phase_config import write_profile
-    profile = write_profile(tmp_path/'profile', yaml.safe_load((ROOT/'config/build.yaml').read_text())['slurm'])
+    slurm = yaml.safe_load((ROOT/'config/build.yaml').read_text())['slurm']
+    slurm['total_limits'].update(limits)
+    profile = write_profile(tmp_path/'profile', slurm)
     result = subprocess.run([snakemake, '--snakefile', str(ROOT/'workflow/Snakefile'),
         '--configfile', str(override), '--profile', str(profile), '--dry-run','--',*targets],
         cwd=workflow_project, text=True, capture_output=True, timeout=60)
@@ -113,3 +116,6 @@ def test_translation_rules_use_individual_slurm_jobs(tiny_inputs, workflow_proje
     assert result.returncode == 0, output
     assert 'Group job' not in output, output
     assert output.count('rule translate_cds:') == 2, output
+    if limits:
+        assert 'workflow_cpus=1' in output
+        assert 'workflow_mem_mb=2000' in output

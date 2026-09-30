@@ -1,4 +1,4 @@
-"""Species/reference-bound receipts for imported and GeneGalleon RNA-seq products."""
+"""Internal stage receipts and verification for reusable pipeline products."""
 import csv
 import fcntl
 import gzip

@@ -204,7 +204,7 @@ def test_invalid_kegg_config_is_rejected(tmp_path, settings, message):
 
 @pytest.mark.parametrize("target,overrides,rule,reference", [
     ("kegg_references", {}, "prepare_kegg_reference", "resources/kegg/snapshot_v1/reference.json"),
-    ("references", {"odb": {"node": 33090}}, "prepare_odb_reference", "resources/orthodb/v12_33090/reference.json"),
+    ("references", {"odb": {"ncbi_tax_id": 33090}}, "prepare_odb_reference", "resources/orthodb/v12_33090/reference.json"),
 ])
 def test_missing_references_are_scheduled_without_assemblies(workflow_project, target, overrides, rule, reference):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")

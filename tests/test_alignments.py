@@ -313,23 +313,23 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     assert events.read_text().splitlines().count("OG1") == 1
     assert events.read_text().splitlines().count("OG2") == 3
 
-    # Quantification changes and TPM ambiguity policy do not affect alignments.
+    # Quantification changes do not affect alignments.
     abundance = Path(tiny_inputs["quant_dir"]) / "Alpha_plant/A1/A1_abundance.tsv"
     values = read_tsv(abundance)
     values[0]["tpm"] = 40
     write_tsv(abundance, list(values[0]), values)
     assert "Nothing to be done" in execute()
     config["alignment"]["enabled"] = True
-    config["tpm"] = {"multimap": "drop"}
     configfile.write_text(yaml.safe_dump(config))
     times = {p.name: p.stat().st_mtime_ns for p in out.glob("*.faa")}
     (out / "OG2.faa").unlink()
-    execute(targets=())
-    assert (out.parent / "expression/tpm.tsv").exists()
+    execute(targets=(), fail=True)  # Multi-OG genes stop TPM aggregation.
+    assert not (out.parent / "expression/tpm.tsv").exists()
+    execute()
     assert (out / "OG2.faa").exists()
     assert all((out / name).stat().st_mtime_ns == t for name, t in times.items() if name != "OG2.faa")
     assert len(alignment_members(out)) == 7  # multi-OG copies still present
-    assert "Nothing to be done" in execute(targets=())
+    assert "Nothing to be done" in execute()
 
     # Species changes remove no-longer-observed OGs and preserve parseable IDs.
     subset = workflow_project / "input/species_list.txt"

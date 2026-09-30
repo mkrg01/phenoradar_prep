@@ -35,6 +35,10 @@ configs; the first `submit` freezes settings and inputs for each named run. Inst
 ## Pinned GeneGalleon source and SIF
 
 Build settings pin GeneGalleon's version, source revision, and image digest.
+`genegalleon.image_uri` is required and must use
+`docker://<registry>/<image>@sha256:<64 lowercase hexadecimal characters>`.
+Tag-only references and direct HTTPS SIF URLs are rejected; `image_sha256`
+is no longer a supported setting.
 Missing software is fetched only when assembly, BUSCO, or quantification is needed;
 `plan` and reuse-only builds do not fetch it. To download in advance:
 
@@ -42,9 +46,12 @@ Missing software is fetched only when assembly, BUSCO, or quantification is need
 ./run_build.sh fetch-software
 ```
 
-Software is cached under `genegalleon.cache_dir`; `repository` and `image` allow
-local overrides. Incompatible product conditions are reported as conflicts;
-use a separate `store` for a deliberate rebuild with different conditions.
+Software is cached under `resources/software/genegalleon/` by default; no
+`cache_dir` setting is needed in `config/build.yaml`. Matching cached source and SIF
+files are verified by their recorded SHA256 checksums and reused without downloading
+again. `repository` and `image` need not be set for automatic retrieval and reuse;
+they remain optional local overrides. Incompatible product conditions are reported as conflicts;
+use `reuse_from: null` and a new build name for a deliberate rebuild with different conditions.
 
 ## Build a reusable database
 
@@ -197,10 +204,48 @@ quantification, mapping, and OG expression. Existing samples reuse their own com
 Mappings are stored per sample; updating membership links only the selected tables.
 There is no combined mapping database to rebuild.
 
-Keep the configured product store and ODB cache: later builds discover matching
-completed samples there automatically. The directory names do not indicate
-whether their contents are temporary; the current store and cache paths under
-`migrations/` contain active products and must be retained.
+## Reusing completed databases
+
+Set `reuse_from` in `config/build.yaml` to the completed database to reuse:
+
+```yaml
+name: angiosperm_leaf_20260930
+reuse_from: results/angiosperm_leaf_20260928/database/
+```
+
+Several databases can supply samples for one build:
+
+```yaml
+reuse_from:
+  - results/leaf_set_a/database/
+  - results/leaf_set_b/database/
+```
+
+Use `null` (or `[]`) for a fresh build. Only samples selected by the new metadata
+and accession exclusions are considered. The pipeline verifies sample identities,
+checksums, genetic code, BUSCO lineage, ODB node/reference, and recorded build
+conditions before reuse. Duplicate paths are ignored. When databases contain the
+same sample, its scientific products and conditions must agree; conflicting
+products stop preparation regardless of list order. If matching sources differ
+only in whether OG expression has been saved, the saved expression is reused.
+Use a compatible set of sources or `null` for a deliberate rebuild.
+
+CDS, BUSCO, quantification, proteins, mappings, and saved OG expression are reused.
+A schema-4 sample bundle without saved expression is also accepted; its expression
+is computed once. Missing samples run the normal pipeline. `plan` only inspects
+sources and reports reuse, pending work, or conflicts.
+
+Preparation stages verified products under the new build's `work/cache/` and
+records their origin in `reuse.json` (also saved in `database/provenance/` on
+completion). Prepared builds no longer need the source database paths to remain
+available. Large immutable products may share hard links; never edit generated
+files in place. Final products are published under the new build's `database/`.
+There are no product writes to `migrations/` and no separately configured product
+store or ODB cache. Old directories are not removed automatically.
+
+An unfinished build resumes from its own `work/` and stage receipts under the same
+name. To reuse it in a different build, finish and publish its database first.
+No databases or unfinished builds are discovered implicitly by scanning `results/`.
 
 ## Copying a completed build to another project
 
@@ -212,59 +257,12 @@ project, for example `results/baseline/database/`:
 ./run_analysis.sh submit --build results/baseline --name c4_photosynthesis_20260929
 ```
 
-Analysis needs no registration or original reads/workspaces. The destination
-supplies analysis settings, traits, software, and shared reference resources.
+Analysis reads the completed database directly and needs no original reads,
+workspaces, or working caches. The destination supplies analysis settings, traits,
+software, and shared reference resources.
 Both `results/<id>/` and its `database/` directory are valid build arguments.
 A renamed local database uses the destination collection name for downstream
 outputs. Bundles elsewhere inside the project are also accepted; downstream goes
 to `results/<manifest-build-id>/downstream/`. If that ID conflicts with a local
 build, copy the bundle under a unique `results/<name>/database/` first.
 Products are immutable; publication may use hard links, so never edit them in place.
-
-
-## Importing an existing database into the current output layout
-
-A completed schema-4 `products/` bundle can be imported under
-`results/<name>/database/` without running assembly, BUSCO, quantification,
-ODB-mapper, or tree inference. When legacy per-run OG expression and sample-ID
-conversion receipts are available, use:
-
-```bash
-python workflow/scripts/migrate_output_layout.py \
-  --source builds/angiosperm_leaf_20260928_samples \
-  --destination results/angiosperm_leaf_20260928 \
-  --legacy-run results/run001 \
-  --receipts migrations/sample_ids_20260928/receipts \
-  --workers 2
-```
-
-The destination must be new and on the same filesystem. The importer checks
-abundance hashes, mapping origins, ID-conversion receipts, expression identities,
-and normalization. It reuses large files through hard links and preserves the
-numeric expression values while updating sample labels and portable QC records.
-Missing or mismatched evidence stops the import. Publication occurs only after
-validation; the original data and downstream results remain in place.
-
-The imported database is ready for `run_analysis.sh`; it does not contain a new
-frozen `build.json` or resumable build jobs. Keep old build jobs with their original
-workflow checkout, and choose a new build name for future upstream runs.
-The database is independently portable. Migration provenance is stored in
-`database/provenance/layout_migration/` and `logs/migration.json`. Existing downstream
-trees and other results retain their original sample selection and labels.
-
-## Migrating old configurations
-
-`config/config.yaml` and `config/dataset.yaml` have been replaced by the two phase
-configs. To convert saved settings without changing existing data:
-
-```bash
-python workflow/scripts/migrate_phase_config.py \
-  --legacy-dataset config/dataset.local.yaml --legacy-config saved-config.yaml \
-  --build-output config/build.migrated.yaml --analysis-output config/analysis.migrated.yaml
-```
-
-A saved `datasets/<old-id>/dataset.json` also works as `--legacy-dataset`.
-Review the converted settings, apply them to `build.yaml`/`analysis.yaml`, import
-old products if needed, and prepare a new build. Older schema-1 builds are not
-portable bundles; resume their jobs with the original checkout. `run_dataset.sh`
-remains an alias for the build interface; the old combined `--until all` is removed.

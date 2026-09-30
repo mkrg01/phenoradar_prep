@@ -35,7 +35,7 @@ def relative_file(root, entry):
 
 
 def checked(entry, cache_dir):
-    """Hash unchanged imported files once, retaining their filesystem identity."""
+    """Hash unchanged mapping files once, retaining their filesystem identity."""
     path = Path(entry['path']).resolve()
     receipt = Path(cache_dir) / '.checks' / (digest([str(path), entry['sha256']]) + '.json')
     if receipt.is_file():
@@ -233,7 +233,7 @@ def subset(snapshot, species, outdir):
     return write_tables(outdir, entries, data['version'], data['node'], qc, data.get('reference_sha256s', []))
 
 
-def collect(samples, chunks, chunk_dir, protein_dir, outdir, cache_dir, existing=None,
+def collect(samples, chunks, chunk_dir, protein_dir, outdir, cache_dir,
             version='v12', node=3193, source_plan=None, threads=1):
     from incremental_odb import load_snapshot
     if type(threads) is not int or threads < 1: raise ValueError('threads must be positive')
@@ -246,8 +246,6 @@ def collect(samples, chunks, chunk_dir, protein_dir, outdir, cache_dir, existing
         if any(proteins[s]['sha256'] != plan['proteins'][s]['sha256'] for s in species):
             raise ValueError('protein changed after ODB planning')
         members = plan['sources']
-    elif existing:
-        members = [{'kind':'existing','root':str(existing),'species':sorted(species)}]
     else:
         members = [{'kind':'mapped', **c} for c in json.loads(Path(chunks).read_text())]
     if sorted(s for c in members for s in c['species']) != sorted(species):
@@ -302,6 +300,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for key in ('samples','chunks','chunk-dir','protein-dir','outdir','cache-dir'): parser.add_argument('--'+key, required=True)
     parser.add_argument('--threads', type=int, default=1)
-    parser.add_argument('--existing'); parser.add_argument('--source-plan')
+    parser.add_argument('--source-plan')
     parser.add_argument('--version',default='v12'); parser.add_argument('--node',type=int,default=3193)
     collect(**vars(parser.parse_args()))

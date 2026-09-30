@@ -32,7 +32,6 @@ if USE_CONTAINER:
 containerized: CONTAINER_IMAGE
 
 ODB_VERSION = "v12"
-EXISTING_ODB = config["odb"]["existing_results"]
 INCREMENTAL_ODB = config["odb"].get("incremental", False)
 ODB_CACHE = config["odb"].get("cache_dir", "resources/odb_cache")
 PYTHON = "python"
@@ -41,10 +40,6 @@ TIMETREE_CACHE = "resources/timetree_cache"
 
 if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", str(config["run_name"])):
     raise WorkflowError("run_name must be a simple directory name")
-if type(config["odb"]["node"]) is not int or config["odb"]["node"] < 1:
-    raise WorkflowError("odb.node must be a positive integer")
-if config["tpm"]["multimap"] not in {"error", "drop", "split"}:
-    raise WorkflowError("tpm.multimap must be error, drop, or split")
 for section in ["alignment", "kegg"]:
     if type(config[section]["enabled"]) is not bool:
         raise WorkflowError(f"{section}.enabled must be true or false")
@@ -99,7 +94,7 @@ TPM = f"{OUT}/{ORTHOGROUP_EXPRESSION}"
 ALIGNMENTS = f"{OUT}/{ORTHOGROUP_ALIGNMENTS}"
 ALIGNMENT_INPUTS = f"{WORK}/{ORTHOGROUP_ALIGNMENTS}/inputs"
 ALIGNMENT_FINAL = [f"{ALIGNMENTS}/provenance.json"]
-REFERENCE = f'resources/orthodb/{ODB_VERSION}_{config["odb"]["node"]}'
+REFERENCE = f'resources/orthodb/{ODB_VERSION}_{config["odb"]["ncbi_tax_id"]}'
 KEGG = f"{OUT}/kegg"
 KEGG_SPECIES = f"{KEGG}/species"
 KEGG_RUNS = f"{KEGG}/runs"
@@ -214,8 +209,6 @@ def odb_manifests(wildcards):
 
 def odb_source_files(wildcards, suffix):
     if not INCREMENTAL_ODB:
-        if EXISTING_ODB:
-            return [f"{EXISTING_ODB}/" + ("snapshot.json" if suffix == "provenance.json" else "annotations.tsv")] if suffix in {"og.annotations", "provenance.json"} else []
         return [f'{CHUNKS}/{r["chunk"]}/' + ("provenance.json" if suffix == "provenance.json" else f'{r["chunk"]}.{suffix}') for r in chunk_rows(wildcards)]
     paths = []
     for source in odb_plan(wildcards)["sources"]:
@@ -369,3 +362,7 @@ include: "rules/contrast.smk"
 include: "rules/taxonomy_check.smk"
 include: "rules/filter_species.smk"
 include: "rules/phenoradar.smk"
+
+# Account for actual rule requests, including rules discovered by checkpoints.
+from resource_limits import apply_workflow_limits
+apply_workflow_limits(workflow)
