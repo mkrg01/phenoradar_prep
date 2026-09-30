@@ -9,7 +9,7 @@ from pathlib import Path
 from phylogeny_outgroup import outgroup_ids, read_outgroup, validate_root
 from types import SimpleNamespace
 
-from common import atomic_writer, file_record, now, read_tsv, write_json, write_tsv
+from common import RANDOM_SEED, atomic_writer, file_record, now, read_tsv, write_json, write_tsv
 from phylogeny_root import nwkit_backend, species_rows
 from species_traits import read_species_traits
 from sample_identity import species_id, traits_for_samples
@@ -51,7 +51,7 @@ def skim(tree, rows, prefix, seed, contrastive=False, topology_only=False):
     return frame.to_dict("records"), sampled.to_dict("records")
 
 
-def prepare(samples, metadata, traits, tree, outdir, trait="C4", seed=12345):
+def prepare(samples, metadata, traits, tree, outdir, trait="C4", seed=RANDOM_SEED):
     from ete4 import Tree
     rows = species_rows(samples)
     annotation = traits_for_samples(rows.values(), read_species_traits(traits, trait))
@@ -105,7 +105,7 @@ def rooted_tree(path, names, outgroup):
     return tree
 
 
-def summarize(tree, selection_dir, outgroup_file, outdir, seed=12345):
+def summarize(tree, selection_dir, outgroup_file, outdir, seed=RANDOM_SEED):
     selection, out = Path(selection_dir), Path(outdir)
     plan = json.loads((selection / "selection.json").read_text())
     all_traits = read_tsv(selection / "traits.tsv")
@@ -198,7 +198,7 @@ def summarize_tree(inferred, rows, all_traits, tip_for_species, outdir, trait, s
     return report
 
 
-def from_tree(tree, tree_qc, samples, metadata, traits, outdir, trait="C4", seed=12345, exclude_species=()):
+def from_tree(tree, tree_qc, samples, metadata, traits, outdir, trait="C4", seed=RANDOM_SEED, exclude_species=()):
     """Assign pairs directly on a completed species tree, optionally pruning species."""
     if not isinstance(exclude_species, (list, tuple)) or any(not isinstance(n, str) for n in exclude_species):
         raise ValueError("exclude_species must be a list of species IDs")
@@ -270,16 +270,16 @@ if __name__ == "__main__":
     for name in ["samples", "metadata", "traits", "tree", "outdir"]:
         p.add_argument("--" + name, required=True)
     p.add_argument("--trait", default="C4")
-    p.add_argument("--seed", type=int, default=12345)
+    p.add_argument("--seed", type=int, default=RANDOM_SEED)
     p = sub.add_parser("summarize")
     for name in ["tree", "selection-dir", "outgroup-file", "outdir"]:
         p.add_argument("--" + name, required=True)
-    p.add_argument("--seed", type=int, default=12345)
+    p.add_argument("--seed", type=int, default=RANDOM_SEED)
     p = sub.add_parser("from_tree")
     for name in ["tree", "tree-qc", "samples", "metadata", "traits", "outdir"]:
         p.add_argument("--" + name, required=True)
     p.add_argument("--trait", default="C4")
-    p.add_argument("--seed", type=int, default=12345)
+    p.add_argument("--seed", type=int, default=RANDOM_SEED)
     p.add_argument("--exclude-species", type=json.loads, default=[], help="JSON list of species IDs to prune")
     args = vars(parser.parse_args())
     globals()[args.pop("action")](**args)

@@ -23,7 +23,8 @@ def test_config_and_optional_tool_defaults_cover_supported_keys():
             values = values[part]
         assert set(values) == set(keys.split()), section
     from analysis import ANALYSIS_KEYS
-    assert set(yaml.safe_load((ROOT / "config/pilot.yaml").read_text())) <= ANALYSIS_KEYS
+    for name in ("analysis", "pilot"):
+        assert set(yaml.safe_load((ROOT / f"config/{name}.yaml").read_text())) <= ANALYSIS_KEYS
     validate_keys({"phylogeny": {"dating": {"calibration_source": "file"}}})
     validate_keys({"run_name": "c4_run1"})
 
@@ -41,6 +42,7 @@ def test_odb_ncbi_tax_id_rejects_invalid_values(value):
 
 @pytest.mark.parametrize("config,path", [
     ({"unknown": {}}, "unknown"),
+    ({"seed": 12345}, "seed"),
     ({"odb": {"node": 33090}}, "odb.node"),
     ({"tpm": {"multimap": "split"}}, "tpm"),
     ({"phylogeny": {"dating": {"treepl": {}}}}, "phylogeny.dating.treepl"),
@@ -68,7 +70,7 @@ def test_sections_require_mappings(config, section):
 
 
 @pytest.mark.parametrize("value", [True, False])
-def test_species_list_is_an_explicit_opt_in(value):
+def test_internal_species_list_flag_accepts_booleans(value):
     validate_keys({"selection": {"species_list": value}})
 
 
@@ -78,15 +80,12 @@ def test_species_list_rejects_paths_and_nonbooleans(value):
         validate_keys({"selection": {"species_list": value}})
 
 
-@pytest.mark.parametrize("seed", [1, 12345, 2147483647])
-def test_global_seed_accepts_supported_integer_range(seed):
-    validate_keys({"seed": seed})
-
-
-@pytest.mark.parametrize("seed", [None, False, True, 0, -1, 1.5, "12345", [], {}, 2147483648])
-def test_global_seed_rejects_unsupported_values(seed):
-    with pytest.raises(ValueError, match="seed must be an integer between 1 and 2147483647"):
-        validate_keys({"seed": seed})
+def test_analysis_rejects_seed_setting(tmp_path):
+    from analysis import settings
+    config = tmp_path / "analysis.yaml"
+    config.write_text("seed: 12345\n")
+    with pytest.raises(ValueError, match="unknown analysis settings: seed"):
+        settings(ROOT, config)
 
 
 def test_image_follows_version_file(tmp_path):

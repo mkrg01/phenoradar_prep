@@ -127,7 +127,7 @@ No branch-rate partitions or confidence-interval simulations are requested.
 The retained site count is passed as `-s` for native variance defaults; it is
 not treated as the effective sample size of a concatenated alignment.
 Point dating is deterministic and takes no seed; upstream tree inference still
-uses the analysis seed. Changed scientific settings require a new analysis.
+uses the fixed internal seed `12345`. Changed scientific settings require a new analysis.
 
 The former `phylogeny.dating.treepl` configuration is no longer accepted.
 Remove it when preparing an LSD2 analysis. Historical result directories are

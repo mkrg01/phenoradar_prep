@@ -124,7 +124,7 @@ species and a variable amino-acid site.
 VeryFastTree uses double precision and `-lg -gamma` (LG+CAT search, Gamma20 length
 rescaling), with SH-like local supports and no bootstrap or support filtering.
 ASTRAL-IV combines gene trees, reporting local posterior probabilities and
-CASTLES-II substitution lengths. Both use the top-level `seed`.
+CASTLES-II substitution lengths. Both use the fixed internal seed `12345`.
 
 Every selected sample must occur in a retained gene tree; review `species_coverage.tsv`.
 Missing data, gene-tree error, paralogy, and model assumptions affect estimates.

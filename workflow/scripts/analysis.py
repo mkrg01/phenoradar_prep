@@ -23,7 +23,7 @@ from phase_config import deep_merge, execution_settings, merge_slurm, read_yaml,
 
 TARGETS = ('all','alignments','kegg','phylogeny','phylogeny_prepare','taxonomy_check',
            'contrast_pairs','phylogeny_calibrations','timetree','phenoradar_inputs')
-ANALYSIS_KEYS = {'build','inputs','seed','trait','selection','alignment','kegg','phylogeny','exclude_species','slurm'}
+ANALYSIS_KEYS = {'build','inputs','trait','selection','alignment','kegg','phylogeny','exclude_species','slurm'}
 
 
 def settings(root, config, build=None):
@@ -53,8 +53,8 @@ def settings(root, config, build=None):
     requested = names
     sample_rows = [dict(p['row'], species=name) for name, p in completed['products'].items()]
     inputs = cfg['inputs']
+    resolved['selection']['species_list'] = bool(inputs.get('species_list'))
     if resolved['selection']['species_list']:
-        if not inputs.get('species_list'): raise ValueError('selection.species_list requires inputs.species_list')
         values = absolute(root, inputs['species_list']).read_text().splitlines()
         if not values or len(values) != len(set(values)):
             raise ValueError('species list must contain unique species from the completed build')

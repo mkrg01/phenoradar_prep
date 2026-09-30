@@ -110,7 +110,8 @@ its CPU or memory request is never silently reduced to fit the budget.
 config overrides take precedence over rule definitions. Unspecified worker
 resources retain their rule definitions, with internal fallbacks of 8 GB memory
 and one day; CPU counts retain each rule's thread count (one when unspecified).
-The shared fallbacks do not need to be repeated in the public config.
+`analysis.yaml` explicitly lists defaults for major worker steps so they can
+be adjusted in one place. Entries for optional jobs do not enable those analyses.
 
 `partition: null` uses the cluster default; use `sinfo` to check available names.
 Account selection is left to the cluster; submission commands omit `--account`,

@@ -21,8 +21,12 @@ config and pass `submit --resources config/build.yaml` or
 Use `slurm.total_limits` for the job count and total CPU/memory budgets of one
 build or analysis, and `slurm.per_job_resources.<job>` for individual job requests.
 Total CPU/memory budgets include the controller; `null` adds no workflow-wide
-limit. The job-count budget also defaults to `null`. Unspecified worker settings use internal defaults, so a separate
-`default_resources` section is unnecessary.
+limit. The job-count budget also defaults to `null`. `analysis.yaml` lists the
+CPU, memory, and time defaults for major worker steps under
+`slurm.per_job_resources`. Listing an optional job does not enable its analysis. Omitted
+worker settings use internal defaults; a separate `default_resources` section is
+unnecessary. Protein and expression imports each request 4 GB to allow for
+loading the complete database manifest, even when importing one sample.
 Per-job memory uses `mem_gb` (positive integer GB), for example `mem_gb: 128`
 in place of `mem_mb: 128000`. Job durations use a quoted Slurm `time`, for example
 `time: "1-00:00:00"` in place of `runtime: 1440`.
@@ -45,8 +49,12 @@ The separate `image_sha256` setting is no longer accepted. See
 | `name` (overridden by `submit --name`), `metadata`, `excluded_accessions`, `reuse_from` | Completed `build` or copied `database/` bundle |
 | `genegalleon` software and assembly/quant settings | `inputs` for traits, species list, and calibrations |
 | `busco.lineage`, `translation.table` | `selection.busco_threshold`, `exclude_species` |
-| `odb.ncbi_tax_id`, `odb.chunk_size` | `trait`, `seed`, optional branches |
+| `odb.ncbi_tax_id`, `odb.chunk_size` | `trait`, optional branches |
 | Build `slurm` resources | Analysis `slurm` resources |
+
+Representative selection, contrast pairs, and tree inference use the internal
+`RANDOM_SEED = 12345` in `workflow/scripts/common.py`. It is recorded in selection
+reports and inference commands, and is not a configuration setting.
 
 Build requires complete products for every included sample. The manual
 [accession list](datasets.md#manually-excluding-unusable-accessions) excludes runs
@@ -68,7 +76,8 @@ under `results/<name>/work/cache/`. Separate `store` and `odb.cache_dir` setting
 are no longer accepted in `build.yaml`.
 
 Analysis uses BUSCO completeness `>= selection.busco_threshold` (default `0.5`).
-`selection.species_list: true` enables `inputs.species_list`. Both the list and
+Setting `inputs.species_list` to a path automatically enables species-list filtering;
+leave it `null` or omit it to disable filtering. Both the list and
 `exclude_species` accept biological species IDs (all their samples) or exact
 analysis sample IDs, applied before computation. Set `inputs.species_trait: null`
 when traits are unused. [OG expression](outputs.md#tpm-interpretation) always stops

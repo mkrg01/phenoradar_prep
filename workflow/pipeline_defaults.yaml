@@ -5,12 +5,10 @@ output_root: null
 work_root: null
 log_root: null
 expression_cache: null
-seed: 12345
 trait: carnivory
 selection:
   species_list: false
   busco_threshold: 0.5
-  missing_taxonomy: error
 translation_cache: resources/dataset_assets/.proteins
 translation:
   table: 1

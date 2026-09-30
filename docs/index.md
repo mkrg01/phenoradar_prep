@@ -16,7 +16,7 @@ its target separately; missing prerequisites are included automatically.
 
 | Task | Guide |
 | --- | --- |
-| Annotate proteins and quantify KO features | [KO expression](kegg.md) |
+| Annotate OG representatives and quantify KO features | [KO expression](kegg.md) |
 | Align mapped orthogroups, retaining all copies | [OG alignments](alignments.md) |
 | Infer trees from independently assembled BUSCO samples | [Phylogeny](phylogeny.md) |
 | Estimate divergence ages with LSD2 | [Dating](dating.md) |

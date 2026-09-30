@@ -44,7 +44,7 @@ two observed states, and at least four representatives. It is available with
 `trees: [representatives]` even when pair selection is disabled.
 
 1. Skim homogeneous trait clades on the local NCBI guide, selecting representatives
-   by BUSCO completeness; top-level `seed` controls randomized ties.
+   by BUSCO completeness; randomized ties use the fixed internal seed `12345`.
 2. Resolve an outgroup and infer a BUSCO tree for that subset.
 3. If pairs are enabled, skim the molecular tree and pair minimal mixed clades
    with opposite-state representatives; multiway cases remain unresolved.

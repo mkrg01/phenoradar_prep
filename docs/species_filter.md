@@ -52,12 +52,14 @@ add `--forcerun filter_species` before `--`.
 
 Representative results, phenotyped inference files, and taxonomy reports remain
 in the source analysis. Completed phenotyped trees can still supply new pairs.
-Pairs use `trait` and `seed`; pair IDs can change after exclusion.
+Pairs use `trait` and the fixed internal seed `12345`; pair IDs can change after exclusion.
 
 ## Numerical and phylogenetic meaning
 
 Expression values and feature axes are preserved without reaggregation or
-normalization, including KO zeros versus unavailable values. Alignments retain
+normalization, including KO zeros versus unavailable values. Shared OG-level KO
+annotations and their original representative metadata are retained even when
+a donor sample is excluded; representatives are not reselected. Alignments retain
 all columns; empty OGs are omitted and listed in `filter_qc.json`.
 
 Pruned trees retain path lengths but are not new inference/dating estimates.

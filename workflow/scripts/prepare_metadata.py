@@ -16,7 +16,7 @@ COUNTS = ["busco_cds_single", "busco_cds_duplicated", "busco_cds_fragmented",
 
 
 def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
-            threshold=0.5, species_list=None, missing_taxonomy="error"):
+            threshold=0.5, species_list=None):
     if not 0 <= threshold <= 1:
         raise ValueError("BUSCO threshold must be between 0 and 1")
     meta = pd.read_csv(metadata, sep="\t", dtype=str, keep_default_na=False)
@@ -105,7 +105,7 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
             taxonomy.append({"taxid": taxid, **row})
     finally:
         ncbi.db.close()
-    if unknown and missing_taxonomy == "error":
+    if unknown:
         raise ValueError(f"taxids absent from frozen taxonomy: {unknown}")
     joined = joined.merge(pd.DataFrame(taxonomy, columns=["taxid", *RANKS]),
                           on="taxid", how="left", validate="many_to_one")
@@ -162,5 +162,4 @@ if __name__ == "__main__":
         parser.add_argument(f"--{flag}", required=True)
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--species-list")
-    parser.add_argument("--missing-taxonomy", choices=["error", "allow"], default="error")
     prepare(**vars(parser.parse_args()))

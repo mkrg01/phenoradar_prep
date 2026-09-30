@@ -13,7 +13,7 @@ import tempfile
 from busco_phylogeny import AMINO, fasta_records
 from sample_identity import species_id
 from phylogeny_outgroup import outgroup_ids, read_outgroup, validate_outgroup, root_on_outgroup, validate_root
-from common import atomic_writer, file_record, now, read_tsv, sha256, write_json, write_tsv
+from common import RANDOM_SEED, atomic_writer, file_record, now, read_tsv, sha256, write_json, write_tsv
 
 
 def executable(command):
@@ -323,7 +323,7 @@ if __name__ == "__main__":
         if action in {"align", "gene_tree", "astral"}:
             p.add_argument("--threads", type=int, required=True)
         if action in {"gene_tree", "astral"}:
-            p.add_argument("--seed", type=int, default=12345)
+            p.add_argument("--seed", type=int, default=RANDOM_SEED)
         if action == "astral":
             p.add_argument("--outgroup")
             p.add_argument("--outgroup-file")

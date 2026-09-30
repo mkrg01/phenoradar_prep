@@ -11,6 +11,7 @@ configfile: "workflow/pipeline_defaults.yaml"
 ROOT = str(Path(workflow.basedir).parent)
 SCRIPTS = str(Path(workflow.basedir) / "scripts")
 sys.path.insert(0, SCRIPTS)
+from common import RANDOM_SEED
 from configuration import validate_keys, validate_analysis
 from layout import input_layout, run_layout
 INPUTS, BUSCO_FULL, SPECIES_LIST, CALIBRATIONS = input_layout(config.get("input_root", "input"))
@@ -96,11 +97,12 @@ ALIGNMENT_INPUTS = f"{WORK}/{ORTHOGROUP_ALIGNMENTS}/inputs"
 ALIGNMENT_FINAL = [f"{ALIGNMENTS}/provenance.json"]
 REFERENCE = f'resources/orthodb/{ODB_VERSION}_{config["odb"]["ncbi_tax_id"]}'
 KEGG = f"{OUT}/kegg"
-KEGG_SPECIES = f"{KEGG}/species"
-KEGG_RUNS = f"{KEGG}/runs"
+KEGG_REPRESENTATIVES = f"{KEGG}/representatives"
+KEGG_ANNOTATIONS = f"{KEGG}/annotation"
 KEGG_REFERENCE = "resources/kegg/snapshot_v1"
 KEGG_FINAL = [f"{KEGG}/{name}" for name in [
-    "gene_kos.tsv", "genes.tsv", "ko_tpm_sum.tsv", "ko_tpm_sum_wide.tsv",
+    "og_kos.tsv", "orthogroups.tsv", "annotation_provenance.json", "provenance.json",
+    "ko_tpm_sum.tsv", "ko_tpm_sum_wide.tsv",
     "ko_support.tsv", "mapping_qc.tsv", "ko_modules.tsv", "ko_pathways.tsv",
     "reference_qc.json",
 ]]
@@ -246,12 +248,18 @@ def run_outputs(wildcards, suffix):
     return [f'{TPM}/runs/{r["run"]}.{suffix}' for r in sample_rows(wildcards)]
 
 
-def kegg_species_outputs(wildcards, name):
-    return sorted({f'{KEGG_SPECIES}/{r["odb_species"]}/{name}' for r in sample_rows(wildcards)})
+def kegg_batch_outputs(wildcards, name):
+    root = Path(checkpoints.select_kegg_representatives.get().output.root)
+    plan = json.loads((root / "provenance.json").read_text())
+    return [f'{KEGG_ANNOTATIONS}/{batch["batch"]}/{name}' for batch in plan["batches"]]
 
 
-def kegg_run_outputs(wildcards, suffix):
-    return [f'{KEGG_RUNS}/{r["run"]}.{suffix}' for r in sample_rows(wildcards)]
+def kegg_batch_input(wildcards):
+    root = Path(checkpoints.select_kegg_representatives.get().output.root)
+    plan = json.loads((root / "provenance.json").read_text())
+    if wildcards.batch not in {b["batch"] for b in plan["batches"]}:
+        raise WorkflowError("unknown KEGG representative batch")
+    return str(root / "batches" / f"{wildcards.batch}.faa")
 
 
 rule all:

@@ -1,22 +1,17 @@
 # Downstream conditions for a completed database; outputs: results/<build>/downstream/<name>/.
-# BUSCO selection is applied here, after all build samples have been mapped.
-# Use --name <trait>_<YYYYMMDD>, e.g. c4_photosynthesis_20260929 for trait: C4.
 build: results/angiosperm_leaf_20260928  # Completed build directory or database/ bundle.
 inputs:
   species_trait: input/species_trait.tsv  # Species traits (TSV); null when traits are unused.
-  species_list: null  # Species/sample IDs, one per line; required when selection.species_list is true.
+  species_list: null  # Species/sample IDs, one per line; a path enables filtering, null disables it.
   calibrations: null  # Calibration TSV required when phylogeny.dating.calibration_source is file.
-seed: 12345  # Shared random seed for reproducible selection and tree inference.
 trait: carnivory  # Trait-table column; use C4 when a C4 column is provided.
 selection:
-  species_list: false  # Restrict analysis to inputs.species_list.
   busco_threshold: 0.5  # Minimum complete BUSCO fraction (single + duplicated); 0.5 = 50%.
-  missing_taxonomy: error  # Missing NCBI taxids: error (stop) or allow (leave taxonomy blank).
 alignment:
   enabled: false  # Include all-copy orthogroup alignments in the all target.
 kegg:
   enabled: false  # Include KO annotation and expression in the all target.
-  ambiguity: duplicate  # Multi-KO genes: duplicate TPM to each KO, drop the gene, or error.
+  ambiguity: duplicate  # Multi-KO orthogroups: duplicate TPM to each KO, drop the OG, or error.
 phylogeny:
   trees:  # Any of all, phenotyped, representatives; [] disables tree inference.
   - representatives
@@ -48,8 +43,68 @@ slurm:
     jobs: null  # No workflow job-count cap; Slurm and finite CPU/memory budgets still apply.
     cpus: null  # Total CPU request budget; null adds no workflow-wide limit.
     mem_gb: null  # Total memory request budget in GB; null adds no workflow-wide limit.
-  per_job_resources:  # Override any rule here with cpus, mem_gb (GB), and time.
+  per_job_resources:  # Per-job cpus, mem_gb (GB), and time (days-HH:MM:SS).
     controller:  # Runs Snakemake and manages its worker jobs.
       cpus: 1
       mem_gb: 8
-      time: "3-00:00:00"
+      time: "64-00:00:00"
+    import_build_protein:  # Import proteins and provenance from the completed database.
+      cpus: 1
+      mem_gb: 4
+      time: "1-00:00:00"
+    import_build_expression:  # Import saved per-sample OG expression.
+      cpus: 1
+      mem_gb: 4
+      time: "1-00:00:00"
+    align_orthogroup:  # Align each all-copy orthogroup.
+      cpus: 4
+      mem_gb: 8
+      time: "1-00:00:00"
+    annotate_kofam:  # Annotate batches of median-length OG representatives.
+      cpus: 4
+      mem_gb: 8
+      time: "1-00:00:00"
+    select_contrast_representatives:  # Select trait-based representatives.
+      cpus: 1
+      mem_gb: 4
+      time: "1-00:00:00"
+    align_busco_marker:  # Align each BUSCO marker.
+      cpus: 4
+      mem_gb: 8
+      time: "1-00:00:00"
+    trim_busco_marker:  # Trim each BUSCO marker alignment.
+      cpus: 1
+      mem_gb: 4
+      time: "1-00:00:00"
+    infer_busco_gene_tree:  # Infer each BUSCO gene tree with VeryFastTree.
+      cpus: 4
+      mem_gb: 8
+      time: "1-00:00:00"
+    infer_busco_species_tree:  # Infer the species tree with ASTRAL.
+      cpus: 32
+      mem_gb: 64
+      time: "14-00:00:00"
+    prepare_timetree_calibrations:  # Retrieve TimeTree age constraints.
+      cpus: 1
+      mem_gb: 4
+      time: "1-00:00:00"
+    date_busco_species_tree:  # Date the species tree with LSD2.
+      cpus: 1
+      mem_gb: 4
+      time: "1-00:00:00"
+    identify_contrast_pairs:  # Select pairs on the representative tree.
+      cpus: 1
+      mem_gb: 4
+      time: "1-00:00:00"
+    identify_phylogeny_contrast_pairs:  # Select pairs on all/phenotyped trees.
+      cpus: 1
+      mem_gb: 4
+      time: "1-00:00:00"
+    check_taxonomy:  # Review taxonomic monophyly.
+      cpus: 1
+      mem_gb: 8
+      time: "1-00:00:00"
+    filter_species:  # Export a species subset from completed results.
+      cpus: 1
+      mem_gb: 8
+      time: "1-00:00:00"

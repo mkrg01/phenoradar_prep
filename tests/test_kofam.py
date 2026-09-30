@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 import subprocess
 
@@ -25,8 +26,10 @@ def kofam_job(tmp_path, monkeypatch):
     ko_list.write_text("knum\tthreshold\tscore_type\tprofile_type\tF-measure\tnseq\tnseq_used\talen\tmlen\teff_nseq\tre/pos\tdefinition\n"
                        "K00001\t10\tfull\tall\t0.9\t3\t3\t2\t2\t3\t0.5\tfirst\n"
                        "K00002\t20\tdomain\tall\t0.9\t3\t3\t2\t2\t3\t0.5\tsecond\n"
-                       "K00003\t-\t-\tall\t-\t1\t1\t2\t2\t1\t0.5\tno threshold\n")
-    for ko in ["K00001", "K00002", "K00003"]:
+                       "K00003\t-\t-\tall\t-\t1\t1\t2\t2\t1\t0.5\tno threshold\n"
+                       "K00004\t10\tfull\tall\t1\t3\t3\t2\t2\t3\t1\texcluded\n")
+    (profiles / "eukaryote.hal").write_text("K00001.hmm\nK00002.hmm\nK00003.hmm\n")
+    for ko in ["K00001", "K00002", "K00003", "K00004"]:
         (profiles / f"{ko}.hmm").write_text(f"HMMER3/f\nNAME  {ko}\nALPH  amino\n//\n")
     modules, pathways = source / "modules.tsv", source / "pathways.tsv"
     modules.write_text("ko:K00001\tmd:M00001\n")
@@ -42,6 +45,11 @@ assert args[args.index('-T') + 1] == '1'
 assert '--no-report-unannotated' in args
 config = json.loads(Path(args[args.index('-c') + 1]).read_text())
 assert config['ko_list'] == args[args.index('-k') + 1]
+profile = Path(args[args.index('-p') + 1])
+assert config['profile'] == str(profile)
+assert profile.name == 'eukaryote.hal' and profile.is_file()
+assert (profile.parent / 'K00004.hmm').is_file()
+assert 'K00004.hmm' not in profile.read_text()
 protein = Path(args[-1]).read_text()
 assert '*' not in protein
 with open(os.environ['FAKE_KOFAM_EVENTS'], 'a') as log:
@@ -89,6 +97,8 @@ def test_annotations_keep_all_gene_states_and_original_identifiers(kofam_job):
     event = json.loads(kofam_job["events"].read_text())
     assert ">plant_g1 original header 1\nMK\n" in event["protein"]
     assert result["identity"]["species"] == "plant"
+    assert result["identity"]["options"]["profile_subset"] == "eukaryote"
+    assert Path(result["identity"]["profile_list"]["path"]).name == "eukaryote.hal"
     assert result["terminal_stop_stripped_count"] == 1
     assert (args["output_dir"] / "detail.tsv").read_text() == kofam_job["detail"].read_text()
 
@@ -107,6 +117,7 @@ def test_zero_hits_is_valid_but_missing_header_is_not(kofam_job):
 @pytest.mark.parametrize("row,error", [
     (detail_row("foreign_gene"), "does not belong"),
     (detail_row("plant_g1", "K99999"), "absent from reference"),
+    (detail_row("plant_g1", "K00004"), "absent from reference"),
     (detail_row("plant_g1", score="NaN"), "invalid score"),
     (detail_row("plant_g1", evalue="inf"), "invalid E-value"),
     (detail_row("plant_g1", evalue="-1"), "invalid E-value"),
@@ -200,3 +211,37 @@ def test_failed_rerun_keeps_previous_complete_output_and_retries_fresh(kofam_job
     events = [json.loads(line) for line in kofam_job["events"].read_text().splitlines()]
     assert len(events) == 3
     assert events[1]["args"][-1] != events[2]["args"][-1]  # partial HMMER work is not trusted
+
+
+
+def test_real_kofam_searches_only_eukaryote_profiles(tmp_path, monkeypatch):
+    command, hmmbuild = shutil.which("exec_annotation"), shutil.which("hmmbuild")
+    if not command or not hmmbuild:
+        pytest.skip("KofamScan and HMMER are required for the real profile-selection test")
+    monkeypatch.delenv("SLURM_CPUS_PER_TASK", raising=False)
+    source = tmp_path / "real_kofam"
+    source.mkdir()
+    sequence = "MALWMRLLPLLALLALWGPDPAAAFVNQHLCGSHLVEALYLVCGERGFFYTPKTRREAEDLQVGQVELGGGPGAGSLQPLALEGSLQ"
+    alignment = source / "alignment.faa"
+    alignment.write_text(f">a\n{sequence}\n>b\n{sequence}\n>c\n{sequence}\n")
+    for ko in ["K00001", "K00002"]:
+        subprocess.run([hmmbuild, "--amino", "-n", ko, str(source / f"{ko}.hmm"), str(alignment)],
+                       check=True, capture_output=True, text=True)
+    # Both models match the query; only the first is in the eukaryote list.
+    (source / "eukaryote.hal").write_text("K00001.hmm\n")
+    ko_list = source / "ko_list"
+    ko_list.write_text(
+        "knum\tthreshold\tscore_type\tprofile_type\tF-measure\tnseq\tnseq_used\talen\tmlen\teff_nseq\tre/pos\tdefinition\n"
+        + "".join(f"{ko}\t1\tfull\tall\t1\t3\t3\t84\t84\t3\t1\ttest\n"
+                  for ko in ["K00001", "K00002"]))
+    modules, pathways = source / "modules.tsv", source / "pathways.tsv"
+    modules.write_text("ko:K00001\tmd:M00001\n")
+    pathways.write_text("ko:K00001\tpath:map00010\n")
+    reference = prepare(source, ko_list, tmp_path / "reference", modules, pathways, release="real-test")
+    protein = tmp_path / "protein.faa"
+    protein.write_text(f">plant_g1\n{sequence}\n")
+    output = tmp_path / "annotation"
+    run(protein, "plant", reference, output, tmp_path / "work", command=command)
+    hits = read_tsv(output / "gene_kos.tsv")
+    assert {(row["ko"], row["accepted"]) for row in hits} == {("K00001", "1")}
+    assert read_tsv(output / "genes.tsv")[0]["selected_ko"] == "K00001"

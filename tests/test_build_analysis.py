@@ -16,6 +16,40 @@ from common import read_tsv, write_tsv
 from test_datasets import dataset_project, imported, new_dataset
 
 
+@pytest.mark.parametrize('mode', ['species', 'sample', 'null', 'omitted'])
+def test_analysis_species_list_is_enabled_by_input_path(dataset_project, mode):
+    root = dataset_project
+    build = imported(root)
+    config = root / 'config/analysis.yaml'
+    cfg = yaml.safe_load(config.read_text())
+    assert 'species_list' not in cfg['selection']
+    cfg['inputs']['species_trait'] = None
+    subset = root / 'input/species_list.txt'
+    subset.write_text('Beta_sp-X_B1\nGamma_plant_G1\n' if mode == 'sample'
+                      else 'Beta_sp-X\nGamma_plant\n')
+    enabled = mode in {'species', 'sample'}
+    if mode == 'omitted':
+        cfg['inputs'].pop('species_list')
+    else:
+        cfg['inputs']['species_list'] = 'input/species_list.txt' if enabled else None
+    config.write_text(yaml.safe_dump(cfg))
+
+    _, resolved, _, _, requested, report = analysis.settings(root, config, build)
+    assert resolved['selection']['species_list'] is enabled
+    expected = {'Beta_sp-X_B1', 'Gamma_plant_G1'}
+    if not enabled:
+        expected.add('Alpha_plant_A1')
+    assert set(requested) == expected
+    assert {r['species'] for r in report if r['selected']} == expected - {'Gamma_plant_G1'}
+    reasons = {r['species']: r['reason'] for r in report}
+    assert reasons['Gamma_plant_G1'] == 'below_busco_threshold'
+    assert reasons['Alpha_plant_A1'] == ('outside_species_list' if enabled else '')
+
+    run = analysis.prepare(root, mode, config, build)
+    assert set((run / 'input/species_list.txt').read_text().splitlines()) == expected
+    assert analysis.load(run)['selection'] == report
+
+
 def test_analysis_requires_completed_build_and_rejects_build_settings(dataset_project):
     root = dataset_project
     imported(root)

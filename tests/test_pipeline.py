@@ -92,7 +92,7 @@ def test_species_list_with_no_passing_candidates_fails(tiny_inputs, tmp_path, mi
         prepare(**tiny_inputs, outdir=tmp_path / "out", species_list=subset)
 
 
-def test_selected_species_still_require_taxonomy_unless_allowed(tiny_inputs, tmp_path):
+def test_selected_species_require_taxonomy(tiny_inputs, tmp_path):
     subset = tmp_path / "subset.txt"
     subset.write_text("Alpha_plant\nGamma_plant\n")
     with sqlite3.connect(tiny_inputs["taxonomy_db"]) as db:
@@ -100,9 +100,7 @@ def test_selected_species_still_require_taxonomy_unless_allowed(tiny_inputs, tmp
     out = tmp_path / "metadata"
     with pytest.raises(ValueError, match="taxids absent from frozen taxonomy:.*42"):
         prepare(**tiny_inputs, outdir=out, species_list=subset)
-    prepare(**tiny_inputs, outdir=out, species_list=subset, missing_taxonomy="allow")
-    assert [r["run"] for r in read_tsv(out / "samples.tsv")] == ["A1", "A2"]
-    assert json.loads((out / "selection.json").read_text())["unknown_taxids"] == ["42"]
+    assert not out.exists()
 
 
 @pytest.mark.parametrize("threshold", [0, 0.5])

@@ -12,13 +12,15 @@ rule filter_species:
         phylogeny_code=f"{SCRIPTS}/filter_species_phylogeny.py",
         contrast_code=[f"{SCRIPTS}/{name}.py" for name in
                        ["contrast_pairs", "plot_contrast_tree", "species_traits", "sample_identity", "phylogeny_root", "phenoradar_metadata"]],
-        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/layout.py"]
+        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/layout.py"],
+        kegg_code=[f"{SCRIPTS}/{name}.py" for name in
+                   ["og_kegg", "select_kegg_representatives", "aggregate_ko_tpm"]]
     output: bundle=directory(f"{OUT}/filtered")
     params:
         source=str(Path(OUT).resolve()),
         excluded=json.dumps(EXCLUDE_SPECIES),
         traits=INPUTS["species_trait"],
-        trait=config["trait"], seed=config["seed"],
+        trait=config["trait"], seed=RANDOM_SEED,
         inventory=lambda wc: json.dumps(filter_snapshot()["sections"], sort_keys=True)
     conda: "../envs/timetree.yaml"
     resources: mem_mb=8000

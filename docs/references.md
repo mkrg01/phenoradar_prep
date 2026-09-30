@@ -77,10 +77,15 @@ from its completed database. See [database reuse](datasets.md#reusing-completed-
 
 KEGG analysis downloads [KOfam](https://www.genome.jp/ftp/db/kofam/) profiles/`ko_list`
 and KEGG REST KO-to-MODULE/PATHWAY maps into `resources/kegg/snapshot_v1/`.
+The snapshot retains all HMMs and a portable `profiles/eukaryote.hal` list;
+annotation searches only the listed profiles. The list and its profile count are
+validated, and its checksum is verified even in quick verification mode.
 Retries reuse `resources/kegg/downloads/`; completed snapshots work offline.
 For separate setup, the low-level target is `kegg_references`.
 
-To prepare from matching local profiles/`ko_list` with an absent destination:
+To prepare from matching local profiles/`ko_list` with an absent destination,
+include the original `eukaryote.hal` from the same KOfam release in the profiles
+directory:
 
 ```bash
 python workflow/scripts/prepare_kegg_reference.py \
@@ -93,5 +98,11 @@ python workflow/scripts/verify_kegg_reference.py \
 For offline setup, also supply `--module-links` and `--pathway-links`: headerless
 two-column responses from `https://rest.kegg.jp/link/module/ko` and
 `https://rest.kegg.jp/link/pathway/ko`. Otherwise those maps are downloaded.
+Older snapshots created without `eukaryote.hal` are rejected, never silently
+searched against all profiles. To migrate, archive `resources/kegg/snapshot_v1/`
+and prepare it again from the matching original profiles archive; the download
+cache can be kept for this migration. Use a new analysis ID to record the changed
+search scope. Do not add a list from a different release to a frozen snapshot.
+
 To refresh, archive all of `resources/kegg/`, including downloads, and prepare a
 new analysis. Keeping the download cache reuses old data.

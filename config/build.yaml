@@ -48,4 +48,4 @@ slurm:
     controller:  # Runs Snakemake and manages its worker jobs.
       cpus: 1
       mem_gb: 8
-      time: "14-00:00:00"
+      time: "64-00:00:00"

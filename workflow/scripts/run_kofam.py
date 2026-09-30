@@ -241,8 +241,10 @@ def run(protein, species, reference, output_dir, work_dir, command="exec_annotat
     identity = {"species": species, "protein": file_record(protein),
                 "reference": file_record(reference), "reference_id": ref["reference_id"],
                 "reference_inventory": file_record(ref["inventory_path"]),
+                "profile_list": file_record(ref["eukaryote_profiles"]),
                 "software": software,
-                "options": {"threads": threads, "format": "detail-tsv", "threshold_scale": 1,
+                "options": {"threads": threads, "profile_subset": "eukaryote",
+                            "format": "detail-tsv", "threshold_scale": 1,
                             "report_unannotated": False, "terminal_stop": "strip_one_reject_internal"},
                 "implementation": [file_record(scripts / name) for name in
                                    ["run_kofam.py", "common.py", "prepare_kegg_reference.py",
@@ -275,15 +277,15 @@ def run(protein, species, reference, output_dir, work_dir, command="exec_annotat
             normalized = work / "protein.faa"
             proteins = normalize_protein(protein, normalized)
             ko_entries = read_ko_list(ref["ko_list"])
-            profile_kos = {path.stem for path in Path(ref["profiles_dir"]).glob("*.hmm")}
-            config = {"profile": ref["profiles_dir"], "ko_list": ref["ko_list"], "cpu": threads}
+            profile_kos = set(ref["eukaryote_kos"])
+            config = {"profile": ref["eukaryote_profiles"], "ko_list": ref["ko_list"], "cpu": threads}
             for dependency in ["hmmsearch", "parallel"]:
                 if software[dependency]:
                     config[dependency] = software[dependency]["path"]
             # JSON is valid YAML; an explicit config prevents ambient config.yml changes.
             write_json(result / "execution_config.json", config)
             argv = [str(executable), "-c", str(result / "execution_config.json"),
-                    "-p", ref["profiles_dir"], "-k", ref["ko_list"], "--cpu", str(threads),
+                    "-p", ref["eukaryote_profiles"], "-k", ref["ko_list"], "--cpu", str(threads),
                     "--tmp-dir", str(work / "hmmsearch"), "-f", "detail-tsv", "-T", "1",
                     "--no-report-unannotated", "-o", str(result / "detail.tsv"), str(normalized)]
             with open(result / "stdout.log", "w") as stdout, open(result / "stderr.log", "w") as stderr:
@@ -293,6 +295,7 @@ def run(protein, species, reference, output_dir, work_dir, command="exec_annotat
             write_tsv(result / "genes.tsv", GENE_FIELDS, genes)
             if (file_record(protein) != identity["protein"]
                     or file_record(reference) != identity["reference"]
+                    or file_record(ref["eukaryote_profiles"]) != identity["profile_list"]
                     or file_record(ref["inventory_path"]) != identity["reference_inventory"]):
                 raise ValueError("KofamScan inputs changed during annotation")
             record = {"schema_version": 1, "completed_at": now(), "fingerprint": fingerprint,

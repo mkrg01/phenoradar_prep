@@ -14,7 +14,8 @@ rule import_build_protein:
         protein=f'{PROTEINS}/{{species}}_protein.fa',
         provenance=f'{PROTEINS}/{{species}}_protein.json'
     conda: '../envs/analysis.yaml'
-    resources: mem_mb=1000
+    # Each import loads the complete database manifest, including sample metadata.
+    resources: mem_mb=4000
     shell:
         '{PYTHON:q} {input.code:q} protein --completion {input.completion:q} --species {wildcards.species:q} '
         '--protein {output.protein:q} --provenance {output.provenance:q}'

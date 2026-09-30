@@ -11,7 +11,7 @@ import shutil
 import sqlite3
 import tempfile
 
-from common import file_record, now, species_from_gene_id, write_json, write_tsv
+from common import RANDOM_SEED, file_record, now, species_from_gene_id, write_json, write_tsv
 from mapping_tables import load_tables, read_species, relative_file, subset
 from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
                     PHYLOGENY_BRANCHES, REPRESENTATIVES)
@@ -29,6 +29,11 @@ BUNDLES = {
     "phylogeny": [f"{ALL_PHYLOGENY}/species_tree.nwk", f"{ALL_PHYLOGENY}/species_tree.json", f"{ALL_PHYLOGENY}/gene_trees.nwk",
                   f"{ALL_PHYLOGENY}/gene_trees.json", f"{ALL_PHYLOGENY}/species_coverage.tsv"],
 }
+
+KEGG_OG_BUNDLE = [f"kegg/{name}" for name in [
+    "orthogroups.tsv", "og_kos.tsv", "annotation_provenance.json",
+    "ko_tpm_sum.tsv", "ko_tpm_sum_wide.tsv", "ko_support.tsv", "mapping_qc.tsv"]]
+
 CONTRAST_BRANCHES = {ALL_PHYLOGENY: "metadata/samples.tsv",
                      PHENOTYPED_PHYLOGENY: f"{PHENOTYPED_PHYLOGENY}/selection/samples.tsv"}
 
@@ -96,6 +101,8 @@ def discover(source, traits=None):
     files = {source / "metadata/samples.tsv"}
     sections = {}
     for name, names in BUNDLES.items():
+        if name == "kegg" and any((source / p).exists() for p in KEGG_OG_BUNDLE[:3]):
+            names = KEGG_OG_BUNDLE
         missing = [n for n in names if not (source / n).is_file()]
         sections[name] = {"status": "ready" if not missing else "absent" if len(missing) == len(names) else "incomplete",
                           "missing": missing}
@@ -115,7 +122,9 @@ def discover(source, traits=None):
             sections["alignments"]["status"] = "incomplete"
             files.update(unfinished)
     for relative in ["run.json", "metadata/metadata_all.tsv", "metadata/metadata_high_busco.tsv", "metadata/selection.json",
-                     "kegg/ko_modules.tsv", "kegg/ko_pathways.tsv", "kegg/reference_qc.json"]:
+                     "kegg/ko_modules.tsv", "kegg/ko_pathways.tsv", "kegg/reference_qc.json",
+                     "kegg/provenance.json", "kegg/representatives/representatives.tsv",
+                     "kegg/representatives/provenance.json"]:
         if (source / relative).is_file():
             files.add(source / relative)
     proteins = [source / "proteins" / f"{r['odb_species']}_protein.fa" for r in species.values()]
@@ -384,6 +393,31 @@ class Export:
     def kegg(self):
         destination = self.stage / "kegg"
         destination.mkdir()
+        if (self.source / "kegg/orthogroups.tsv").is_file():
+            # OG labels are shared annotation evidence. A donor may belong to a
+            # removed sample; filtering expression does not reselect donors.
+            from og_kegg import load_og_annotations
+            load_og_annotations(self.source / "kegg")
+            for relative in KEGG_OG_BUNDLE[:3]:
+                self.copy(self.source / relative, self.stage / relative)
+            for relative in KEGG_OG_BUNDLE[3:]:
+                unique = relative.endswith("_wide.tsv") or relative.endswith("mapping_qc.tsv")
+                self.subset_table(relative, ["species", "run"], self.run_row,
+                                  unique_runs=unique, complete_runs=unique)
+            for relative in ["ko_modules.tsv", "ko_pathways.tsv", "reference_qc.json",
+                             "representatives/representatives.tsv", "representatives/provenance.json"]:
+                path = self.source / "kegg" / relative
+                if path.is_file():
+                    self.copy(path, destination / relative)
+            source_completion = self.source / "kegg/provenance.json"
+            if source_completion.is_file():
+                self.copy(source_completion, destination / "source_provenance.json")
+            write_json(destination / "filter_qc.json", {
+                "annotation_scope": "orthogroup", "representatives_reselected": False,
+                "annotation_source": str(self.source / "kegg"),
+                "retained_species": sorted(self.keep),
+            })
+            return
         with sqlite3.connect(self.stage / ".ko_genes.sqlite", uri=True) as db:
             db.execute("CREATE TABLE genes(gene TEXT PRIMARY KEY,species TEXT)")
             def gene_row(row):
@@ -431,7 +465,7 @@ def export_contrast(job, branch, trait, seed):
                                        ["source_species", "retained_species", "observed_species", "contrast_pairs"]}
 
 
-def export(source, exclusions, outdir=None, traits=None, contrast_trait="C4", seed=12345):
+def export(source, exclusions, outdir=None, traits=None, contrast_trait="C4", seed=RANDOM_SEED):
     exclusions = validate_exclusions(exclusions)
     source = Path(source).resolve()
     requested_out = Path(outdir) if outdir else source / "filtered"
@@ -517,7 +551,7 @@ def main():
     parser.add_argument("--outdir")
     parser.add_argument("--traits")
     parser.add_argument("--contrast-trait", default="C4")
-    parser.add_argument("--seed", type=int, default=12345)
+    parser.add_argument("--seed", type=int, default=RANDOM_SEED)
     parser.add_argument("--exclude-species", default="[]", help="JSON list of exact species IDs")
     args = vars(parser.parse_args())
     args["exclusions"] = json.loads(args.pop("exclude_species"))

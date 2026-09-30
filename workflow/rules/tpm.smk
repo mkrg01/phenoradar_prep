@@ -13,7 +13,8 @@ if config.get("build_manifest") and COMPLETED_BUILD['schema_version'] >= 5:
             tpm=f"{TPM}/runs/{{run}}.tsv",
             qc=f"{TPM}/runs/{{run}}.qc.json"
         conda: "../envs/analysis.yaml"
-        resources: mem_mb=2000
+        # Each import loads the complete database manifest, including sample metadata.
+        resources: mem_mb=4000
         shell:
             "{PYTHON:q} {input.code:q} expression --completion {input.completion:q} "
             "--samples {input.samples:q} --run {wildcards.run:q} --output {output.tpm:q} "

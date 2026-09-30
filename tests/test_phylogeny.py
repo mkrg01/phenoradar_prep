@@ -14,7 +14,7 @@ import pytest
 import yaml
 
 from busco_phylogeny import busco_full_path, busco_table, extract, fasta_records, plan, prepare_cds
-from common import read_tsv, write_json, write_tsv
+from common import RANDOM_SEED, read_tsv, write_json, write_tsv
 from date_phylogeny import date, calibration_rows
 from infer_phylogeny import alignment_qc, astral, merge, read_tree, trim
 
@@ -409,7 +409,7 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
         else:
             original.rename(target)
     seed_taxonomy(source / "taxa.sqlite")
-    cfg = {"run_name": "test", "seed": 17,
+    cfg = {"run_name": "test",
            "phylogeny": {"trees": ["all"], "outgroup": species[0], "max_markers": 3}}
     conda_prefix = os.environ.get("PHYLOGENY_CONDA_PREFIX")
     config = tmp_path / "config.yaml"
@@ -441,9 +441,8 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
     assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
     assert not (tmp_path / "results/test/orthogroups/mapping").exists()
     assert not (tmp_path / "results/test/orthogroups/expression").exists()
-    # A changed global seed reruns inference, retaining deterministic upstream
-    # work. Returning to the original seed must reproduce the trees, not reuse
-    # them: the intermediate run has replaced their outputs and job metadata.
+    # Recompute missing trees with the internal seed, retaining upstream work.
+    # This checks fresh inference reproduces outputs without a seed in config.
     tree_files = [out / "species_tree.nwk", out / "gene_trees.nwk", *(out / "gene_trees").glob("*.nwk")]
     trees = {p: p.read_bytes() for p in tree_files}
     retained = {p: p.stat().st_mtime_ns for folder in [out / "species", out / "alignments"]
@@ -454,15 +453,14 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
             command = json.loads(path.read_text())["command"]
             flag = "--seed" if path.name == "species_tree.json" else "-seed"
             assert command[command.index(flag) + 1] == str(seed)
-    assert_seed(17)
-    for seed in [19, 17]:
-        stamps = {p: p.stat().st_mtime_ns for p in tree_files}
-        cfg["seed"] = seed
-        config.write_text(yaml.safe_dump(cfg))
-        run()
-        assert_seed(seed)
-        assert all(p.stat().st_mtime_ns != stamp for p, stamp in stamps.items())
-        assert all(p.stat().st_mtime_ns == stamp for p, stamp in retained.items())
+    assert_seed(RANDOM_SEED)
+    stamps = {p: p.stat().st_mtime_ns for p in tree_files}
+    for path in tree_files:
+        path.unlink()
+    run()
+    assert_seed(RANDOM_SEED)
+    assert all(p.stat().st_mtime_ns != stamp for p, stamp in stamps.items())
+    assert all(p.stat().st_mtime_ns == stamp for p, stamp in retained.items())
     assert all(p.read_bytes() == content for p, content in trees.items())
     assert "Nothing to be done" in run()
     upstream = {p: p.stat().st_mtime_ns for folder in [out / "species", out / "alignments/raw"]

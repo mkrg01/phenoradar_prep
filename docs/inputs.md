@@ -22,11 +22,11 @@ and exclusions; analysis auxiliary paths are under `inputs` in `analysis.yaml`.
 | `input/metadata.tsv` | **Required:** define the species and RNA-seq runs to build. | TSV: `scientific_name`, `run`, positive NCBI `taxid`; one run per separately processed sample (multiple samples per species are allowed) |
 | `config/excluded_accessions.tsv` | **Optional:** exclude unusable or misidentified runs from builds while retaining their metadata. | TSV: `accession`, optional `reason`; `excluded_accessions` in build settings |
 | `input/species_trait.tsv` | **Optional:** provide traits for PhenoRadar; required for phenotyped/representative trees and contrast pairs. | TSV: `species` and chosen trait column; `inputs.species_trait` and `trait` |
-| `input/species_list.txt` | **Optional:** restrict an analysis to a chosen set of candidate species; BUSCO filtering still applies. | Biological species IDs or exact analysis sample IDs, one per line; `inputs.species_list` and `selection.species_list: true` |
+| `input/species_list.txt` | **Optional:** restrict an analysis to a chosen set of candidate species; BUSCO filtering still applies. | Biological species IDs or exact analysis sample IDs, one per line; setting `inputs.species_list` automatically enables filtering |
 | `input/calibrations.tsv` | **Optional:** supply your own age bounds for [dating](dating.md#manual-calibrations) instead of TimeTree calibrations. | TSV: `taxa`, `min_age_ma`, `max_age_ma`, `source`; `inputs.calibrations` and `phylogeny.dating.calibration_source: file` |
 
 Optional files with a configured path must exist; set unused paths to `null`.
-Without a species list, use `selection.species_list: false`; without traits,
+Without a species list, leave `inputs.species_list` as `null` or omit it; without traits,
 disable trait-dependent analyses. The supplied configs already specify paths
 for the exclusion list and trait table.
 
@@ -93,8 +93,7 @@ Analysis applies the optional species list, `exclude_species`, and a per-sample 
 `(single + duplicated) / total >= selection.busco_threshold` (default `0.5`).
 Unknown species IDs, invalid counts, duplicate identities, or an empty selection
 are errors. Metadata columns such as `exclusion` do not filter species.
-Unresolved taxids fail unless `selection.missing_taxonomy: allow`; missing
-individual ranks are allowed.
+Unresolved taxids always fail; missing individual ranks are allowed.
 
 Review `results/<build>/downstream/<analysis>/metadata/selection.json`, `samples.tsv`, and
 `busco_completeness.svg` for selection reasons, sample paths, and BUSCO QC.

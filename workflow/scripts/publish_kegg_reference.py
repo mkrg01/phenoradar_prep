@@ -23,6 +23,8 @@ def publish(reference, qc, modules, pathways):
     write_json(qc, {"created_at": now(), "reference_id": metadata["reference_id"],
                     "reference": file_record(reference), "release": metadata["release"],
                     "verification": "all_inventory_checksums",
+                    "profile_subset": "eukaryote",
+                    "searched_profiles": metadata["counts"]["eukaryote_profiles"],
                     "semantics": "KO membership, not module completeness or activity",
                     "results": [file_record(modules), file_record(pathways)]})
 

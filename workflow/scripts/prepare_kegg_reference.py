@@ -78,6 +78,27 @@ def validate_profile(path):
     return ko
 
 
+def read_profile_list(path):
+    """Resolve a nonempty HAL list within its directory, ready for relocation."""
+    path = Path(path).resolve(strict=True)
+    profiles, seen = [], set()
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        profile = (path.parent / entry).resolve()
+        if (not profile.is_relative_to(path.parent) or not profile.is_file()
+                or not re.fullmatch(r"K[0-9]{5}\.hmm", profile.name)):
+            raise ValueError(f"invalid KOfam profile list entry at {path}:{lineno}: {entry}")
+        if profile in seen:
+            raise ValueError(f"duplicate KOfam profile list entry at {path}:{lineno}: {entry}")
+        seen.add(profile)
+        profiles.append(profile)
+    if not profiles:
+        raise ValueError(f"empty KOfam profile list: {path}")
+    return profiles
+
+
 def normalize_links(path, kind):
     """Read raw KEGG links in either direction; retain all memberships."""
     if kind not in LINK_URLS:
@@ -177,6 +198,13 @@ def prepare(profiles_dir, ko_list, reference_dir, module_links=None, pathway_lin
             raise ValueError(f"duplicate profile for {ko}")
         profile_ids.add(ko)
 
+    lists = sorted(source_dir.rglob("eukaryote.hal"))
+    if len(lists) != 1:
+        raise ValueError(f"expected exactly one eukaryote.hal in extracted KOfam profiles: {source_dir}")
+    eukaryote_profiles = read_profile_list(lists[0])
+    if not set(eukaryote_profiles).issubset({path.resolve() for path in profiles}):
+        raise ValueError("eukaryote.hal references profiles outside the supplied KOfam collection")
+
     root.parent.mkdir(parents=True, exist_ok=True)
     root = root.parent.resolve() / root.name
     # Keep the lock file: unlinking an acquired lock permits competing lock inodes.
@@ -190,6 +218,9 @@ def prepare(profiles_dir, ko_list, reference_dir, module_links=None, pathway_lin
             (staging / "raw").mkdir()
             for source in profiles:
                 shutil.copyfile(source, staging / "profiles" / source.name)
+            # Flatten paths with the HMMs, so the frozen selection remains portable.
+            (staging / "profiles" / "eukaryote.hal").write_text(
+                "".join(f"{path.name}\n" for path in eukaryote_profiles), encoding="utf-8")
             shutil.copyfile(source_ko_list, staging / "ko_list")
             # Validate the copied input, including consistency if a source changed during setup.
             frozen_entries = read_ko_list(staging / "ko_list")
@@ -198,10 +229,12 @@ def prepare(profiles_dir, ko_list, reference_dir, module_links=None, pathway_lin
                     raise ValueError(f"copied profile absent from ko_list: {path.name}")
 
             sources = {"profiles_dir": str(source_dir),
+                       "eukaryote_profiles": str(lists[0]),
                        "ko_list": _copied_source_record(source_ko_list, staging / "ko_list")}
             if source_downloads is not None:
                 sources["downloads"] = source_downloads
-            counts = {"profiles": len(profiles), "ko_list_entries": len(frozen_entries)}
+            counts = {"profiles": len(profiles), "eukaryote_profiles": len(eukaryote_profiles),
+                      "ko_list_entries": len(frozen_entries)}
             for kind, local in [("module", module_links), ("pathway", pathway_links)]:
                 raw = staging / "raw" / f"ko_{kind}_links.tsv"
                 if local is None:
@@ -221,6 +254,7 @@ def prepare(profiles_dir, ko_list, reference_dir, module_links=None, pathway_lin
                 "format_version": FORMAT_VERSION, "kind": REFERENCE_KIND,
                 "created_at": now(), "release": release.strip(),
                 "profiles_dir": "profiles", "ko_list": "ko_list",
+                "eukaryote_profiles": "profiles/eukaryote.hal",
                 "ko_modules": "ko_modules.tsv", "ko_pathways": "ko_pathways.tsv",
                 "raw_module_links": "raw/ko_module_links.tsv",
                 "raw_pathway_links": "raw/ko_pathway_links.tsv",
@@ -242,7 +276,7 @@ def prepare(profiles_dir, ko_list, reference_dir, module_links=None, pathway_lin
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profiles-dir", required=True, help="Extracted local KOfam *.hmm profiles")
+    parser.add_argument("--profiles-dir", required=True, help="Extracted KOfam *.hmm profiles and eukaryote.hal")
     parser.add_argument("--ko-list", required=True, help="Local decompressed KOfam ko_list")
     parser.add_argument("--reference-dir", "--output", dest="reference_dir", required=True)
     parser.add_argument("--module-links", help="Local raw KEGG KO/MODULE links; otherwise fetch via REST")

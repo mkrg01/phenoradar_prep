@@ -9,7 +9,7 @@ import sys
 import pytest
 import yaml
 
-from common import file_record, read_tsv, sha256, write_json, write_tsv
+from common import RANDOM_SEED, file_record, read_tsv, sha256, write_json, write_tsv
 from mapping_fixtures import make_mapping, edit_mapping
 from mapping_tables import read_species, load_tables
 from filter_species import discover, export, fasta_records, validate_exclusions
@@ -330,13 +330,13 @@ def test_full_snakefile_exports_frozen_results_without_upstream_inputs(snapshot,
     environment = command_environment({"python": sys.executable})
     argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(cfg), "--cores", "1", "--", "filter_species"]
     def run(excluded):
-        cfg.write_text(yaml.safe_dump({"run_name": "test", "seed": 19, "exclude_species": excluded}))
+        cfg.write_text(yaml.safe_dump({"run_name": "test", "exclude_species": excluded}))
         process = subprocess.run(argv, cwd=project, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         assert process.returncode == 0, process.stdout + "\n" + "\n".join(p.read_text() for p in (project / "logs").rglob("*.log"))
         return process.stdout
     run(["Plant_A"])
     out = target / "filtered"
-    assert json.loads((out / "manifest.json").read_text())["contrast"]["seed"] == 19
+    assert json.loads((out / "manifest.json").read_text())["contrast"]["seed"] == RANDOM_SEED
     assert {r["species"] for r in read_tsv(out / "metadata/samples.tsv")} == set(SPECIES[1:])
     assert "Nothing to be done" in run(["Plant_A"])
     run(["Plant_C"])

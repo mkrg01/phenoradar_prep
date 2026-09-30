@@ -1,8 +1,8 @@
 """Accepted configuration keys, including optional tool-specific overrides."""
 KEYS = {
     "": "run_name selection translation odb alignment kegg phylogeny "
-        "trait exclude_species seed input_root build_manifest translation_cache expression_cache output_root work_root log_root",
-    "selection": "busco_threshold species_list missing_taxonomy",
+        "trait exclude_species input_root build_manifest translation_cache expression_cache output_root work_root log_root",
+    "selection": "busco_threshold species_list",
     "translation": "table",
     "odb": "ncbi_tax_id incremental cache_dir chunk_size",
     "alignment": "enabled",
@@ -46,9 +46,6 @@ def validate_keys(config):
         raise ValueError("odb.chunk_size must be a positive integer")
     if not isinstance(odb.get("cache_dir", "resources/odb_cache"), str) or not odb.get("cache_dir", "resources/odb_cache").strip():
         raise ValueError("odb.cache_dir must be a directory")
-    # Use the positive signed 32-bit range supported by all seeded tools.
-    if "seed" in config and (type(config["seed"]) is not int or not 1 <= config["seed"] <= 2147483647):
-        raise ValueError("seed must be an integer between 1 and 2147483647")
     if "trait" in config:
         trait = config["trait"]
         if not isinstance(trait, str) or not trait.strip():

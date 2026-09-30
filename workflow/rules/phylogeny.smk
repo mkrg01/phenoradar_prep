@@ -204,7 +204,7 @@ rule infer_busco_gene_tree:
     output:
         tree=f"{PHYLO_RUN}/gene_trees/{{marker}}.nwk",
         qc=f"{PHYLO_RUN}/gene_trees/{{marker}}.json"
-    params: command="VeryFastTree", seed=config["seed"]
+    params: command="VeryFastTree", seed=RANDOM_SEED
     threads: 4
     resources: mem_mb=8000
     conda: "../envs/phylogeny.yaml"
@@ -269,7 +269,7 @@ rule infer_busco_species_tree:
         binary=ASTRAL,
         outgroup=f"{PHYLO_RUN}/rooting/outgroup.txt"
     output: tree=f"{PHYLO_RUN}/species_tree.nwk", qc=f"{PHYLO_RUN}/species_tree.json"
-    params: command=ASTRAL, seed=config["seed"]
+    params: command=ASTRAL, seed=RANDOM_SEED
     threads: 32
     resources: mem_mb=64000
     conda: "../envs/phylogeny.yaml"

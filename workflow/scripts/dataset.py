@@ -66,7 +66,7 @@ def settings(root, config, analysis_config=None, name=None):
     analysis["phylogeny"]["trees"] = []
     for key in ("contrast_pairs", "dating", "taxonomy_check"):
         analysis["phylogeny"][key]["enabled"] = False
-    analysis["selection"] = {"species_list": False, "busco_threshold": 0, "missing_taxonomy": "allow"}
+    analysis["selection"] = {"species_list": False, "busco_threshold": 0}
     analysis["exclude_species"] = []
     validate_keys(analysis); validate_analysis(analysis)
     if type(analysis["translation"].get("table")) is not int or analysis["translation"]["table"] < 1:

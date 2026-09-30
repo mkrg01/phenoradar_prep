@@ -58,7 +58,10 @@ data:
 
 For KO expression, use `kegg/ko_tpm_sum.tsv`, `feature_col: ko`,
 `value_col: tpm_sum`, and `orthogroup_annotation_path: null`. KO sums retain
-original TPM and different [missing-value rules](kegg.md#outputs).
+original TPM and different [missing-value rules](kegg.md#outputs). KOs are assigned
+to OGs from one median-length representative per OG, and expression sums those
+OGs' original `tpm_sum`. The collection includes `kegg/orthogroups.tsv`,
+`kegg/og_kos.tsv`, and representative metadata for interpreting these labels.
 See PhenoRadar's [quick start](https://github.com/mkrg01/phenoradar/blob/main/docs/quickstart.md)
 and [data formats](https://github.com/mkrg01/phenoradar/blob/main/docs/data-format.md)
 for supported downstream inputs.

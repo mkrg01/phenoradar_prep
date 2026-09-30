@@ -75,10 +75,22 @@ def discover(source, exclusions=()):
     if branch("mapping", [f"{ORTHOGROUP_MAPPING}/{name}" for name in
                           ["snapshot.json"]]):
         folder(ORTHOGROUP_MAPPING, recursive=True)
+    og_kegg = any((source / "kegg" / name).is_file() for name in
+                  ["orthogroups.tsv", "og_kos.tsv", "annotation_provenance.json"])
     if branch("kegg", ["kegg/ko_tpm_sum.tsv", "kegg/mapping_qc.tsv", "kegg/ko_support.tsv"]):
         for name in ["ko_tpm_sum.tsv", "ko_tpm_sum_wide.tsv", "ko_support.tsv", "mapping_qc.tsv",
-                     "genes.tsv", "gene_kos.tsv"]:
+                     "orthogroups.tsv", "og_kos.tsv",
+                     "annotation_provenance.json", "provenance.json", "source_provenance.json",
+                     "filter_qc.json"]:
             publish("kegg/" + name)
+        if og_kegg:
+            from og_kegg import load_og_annotations
+            load_og_annotations(source / "kegg")
+            for name in ["representatives.tsv", "provenance.json"]:
+                publish("kegg/representatives/" + name)
+        else:
+            for name in ["genes.tsv", "gene_kos.tsv"]:
+                publish("kegg/" + name)
     for group in ["module", "pathway"]:
         relative = f"kegg/ko_{group}s.tsv"
         if branch(f"kegg_{group}s", [relative, "kegg/reference_qc.json"]):
@@ -126,7 +138,7 @@ def discover(source, exclusions=()):
             if not filtered:
                 hashes[str(source / protein)] = json.loads((source / report).read_text())["protein"]["sha256"]
         relative = f"kegg/species/{name}"
-        if branch(relative, [f"{relative}/{n}" for n in ["genes.tsv", "gene_kos.tsv", "detail.tsv", "provenance.json"]]):
+        if not og_kegg and branch(relative, [f"{relative}/{n}" for n in ["genes.tsv", "gene_kos.tsv", "detail.tsv", "provenance.json"]]):
             folder(relative)
 
     for relative in [*PHYLOGENY_BRANCHES.values(), REPRESENTATIVES]:

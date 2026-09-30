@@ -37,7 +37,6 @@ checkpoint select_metadata:
         cds=INPUTS["cds_dir"],
         quant=INPUTS["quant_dir"],
         threshold=config["selection"]["busco_threshold"],
-        missing_taxonomy=config["selection"]["missing_taxonomy"],
         subset_flag="--species-list" if config["selection"]["species_list"] else ""
     log: f"{LOG}/metadata.log"
     conda: "../envs/analysis.yaml"
@@ -45,7 +44,7 @@ checkpoint select_metadata:
     shell:
         "{PYTHON:q} {input.code:q} --metadata {input.metadata:q} --busco {input.busco:q} "
         "--taxonomy-db {input.taxonomy:q} --cds-dir {params.cds:q} --quant-dir {params.quant:q} "
-        "--outdir {params.outdir:q} --threshold {params.threshold} --missing-taxonomy {params.missing_taxonomy:q} "
+        "--outdir {params.outdir:q} --threshold {params.threshold} "
         "{params.subset_flag} {input.subset:q} > {log:q} 2>&1"
 
 

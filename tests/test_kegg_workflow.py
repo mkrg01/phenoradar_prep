@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from common import read_tsv, write_tsv
+from test_datasets import dataset_project
 from prepare_kegg_reference import prepare as prepare_reference
 from publish_kegg_reference import publish
 from verify_kegg_reference import verify
@@ -21,14 +22,15 @@ ROOT = Path(__file__).resolve().parents[1]
 def small_reference(tmp_path):
     source = tmp_path / "kofam_source"
     source.mkdir()
-    for ko in ["K00001", "K00002", "K00003"]:
+    (source / "eukaryote.hal").write_text("K00001.hmm\nK00002.hmm\nK00003.hmm\n")
+    for ko in ["K00001", "K00002", "K00003", "K00004"]:
         (source / f"{ko}.hmm").write_text(f"HMMER3/f\nNAME  {ko}\nALPH  amino\n//\n")
     ko_list = tmp_path / "ko_list"
     header = ["knum", "threshold", "score_type", "profile_type", "F-measure", "nseq", "nseq_used",
               "alen", "mlen", "eff_nseq", "re/pos", "definition"]
     ko_list.write_text("\t".join(header) + "\n" + "".join(
         f"{ko}\t10\tfull\tall\t1\t10\t10\t100\t100\t10\t1\ttest\n"
-        for ko in ["K00001", "K00002", "K00003"]))
+        for ko in ["K00001", "K00002", "K00003", "K00004"]))
     modules, pathways = tmp_path / "module_links", tmp_path / "pathway_links"
     modules.write_text("ko:K00001\tmd:M00001\nko:K00002\tmd:M00001\n")
     pathways.write_text("ko:K00001\tpath:ko00010\nko:K00003\tpath:map00020\n")
@@ -46,6 +48,10 @@ args = sys.argv[1:]
 if '--help' in args:
     print('fake KofamScan for workflow tests')
     raise SystemExit(0)
+profile = Path(args[args.index('-p') + 1])
+assert profile.name == 'eukaryote.hal' and profile.is_file()
+assert 'K00004.hmm' not in profile.read_text()
+assert (profile.parent / 'K00004.hmm').is_file()
 output = Path(args[args.index('-o') + 1])
 query = Path(args[-1])
 genes = [line[1:].split()[0] for line in query.read_text().splitlines() if line.startswith('>')]
@@ -53,9 +59,9 @@ with open(os.environ['FAKE_KOFAM_LOG'], 'a') as log:
     log.write(genes[0] + '\\n')
 lines = ['#\\tgene name\\tKO\\tthrshld\\tscore\\tE-value\\tKO definition\\n']
 for gene in genes:
-    if gene.endswith('_g1'):
+    if gene == 'OG1':
         lines.append('*\\t' + gene + '\\tK00001\\t10.00\\t20.0\\t1e-8\\t"unique"\\n')
-    elif gene.endswith('_g2'):
+    elif gene == 'OG2':
         for ko in ['K00002', 'K00003']:
             lines.append('*\\t' + gene + '\\t' + ko + '\\t10.00\\t20.0\\t1e-8\\t"ambiguous"\\n')
     else:
@@ -71,7 +77,10 @@ def test_publish_preserves_frozen_reference(tmp_path):
     original = verify(reference / "reference.json")["reference_id"]
     output = tmp_path / "published"
     publish(reference / "reference.json", output / "qc.json", output / "modules.tsv", output / "pathways.tsv")
-    assert json.loads((output / "qc.json").read_text())["reference_id"] == original
+    qc = json.loads((output / "qc.json").read_text())
+    assert qc["reference_id"] == original
+    assert qc["profile_subset"] == "eukaryote"
+    assert qc["searched_profiles"] == 3
     with pytest.raises(ValueError, match="frozen reference"):
         publish(reference / "reference.json", reference / "extra.json", output / "modules.tsv", output / "pathways.tsv")
     with pytest.raises(ValueError, match="distinct"):
@@ -119,17 +128,20 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
 
     execute()
     out = tmp_path / "results/test/kegg"
-    assert not odb_events.exists()  # A standalone KEGG target never maps to ODB.
-    assert len(events.read_text().splitlines()) == 2  # two species, three runs
-    benchmarks = list((workflow_project / "logs/test/kegg/benchmarks").glob("*.tsv"))
-    assert len(benchmarks) == 2
+    assert len(odb_events.read_text().splitlines()) == 1  # Representatives require ODB groups.
+    assert len(events.read_text().splitlines()) == 1  # two OGs, one representative batch
+    benchmarks = list((workflow_project / "logs/test/kegg/benchmarks").glob("batch_*.tsv"))
+    assert len(benchmarks) == 1
     assert all(float(read_tsv(path)[0]["s"]) >= 0 for path in benchmarks)
     rows = read_tsv(out / "ko_tpm_sum.tsv")
     assert {(r["run"], r["ko"]): float(r["tpm_sum"]) for r in rows} == {
         (run, ko): value for run, unique, multi in [("A1", 20, 30), ("A2", 80, 10), ("B1", 20, 30)]
         for ko, value in [("K00001", unique), ("K00002", multi), ("K00003", multi)]}
-    assert len(read_tsv(out / "genes.tsv")) == 6
-    assert {r["assignment_status"] for r in read_tsv(out / "genes.tsv")} == {"unique", "ambiguous", "below_threshold"}
+    assert len(read_tsv(out / "orthogroups.tsv")) == 2
+    representatives = read_tsv(out / "representatives/representatives.tsv")
+    assert [row["member_count"] for row in representatives] == ["2", "2"]
+    assert [row["representative_gene_id"] for row in representatives] == ["Alpha_plant_g1", "Alpha_plant_g2"]
+    assert {r["assignment_status"] for r in read_tsv(out / "orthogroups.tsv")} == {"unique", "ambiguous"}
     qc = {r["run"]: r for r in read_tsv(out / "mapping_qc.tsv")}
     assert qc["A1"]["ambiguity"] == "duplicate"
     assert float(qc["A1"]["retained_tpm_fraction"]) == 0.5
@@ -144,24 +156,24 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     values[0]["tpm"] = 40
     write_tsv(abundance, list(values[0]), values)
     dry = execute(["--dry-run"])
-    assert "rule aggregate_ko_tpm:" in dry
+    assert "rule merge_kegg:" in dry
     assert "rule annotate_kofam:" not in dry
     execute()
-    assert len(events.read_text().splitlines()) == 2
+    assert len(events.read_text().splitlines()) == 1
     assert float(next(r for r in read_tsv(out / "ko_tpm_sum.tsv")
                       if r["run"] == "A1" and r["ko"] == "K00001")["tpm_sum"]) == 40
 
-    # Aggregation policy changes reuse the species annotations.
-    annotation_times = {p: p.stat().st_mtime_ns for p in (out / "species").glob("*/provenance.json")}
+    # Aggregation policy changes reuse the representative annotations.
+    annotation_times = {p: p.stat().st_mtime_ns for p in (out / "annotation").glob("*/provenance.json")}
     for ambiguity, expected_kos in [("drop", {"K00001"}), ("duplicate", {"K00001", "K00002", "K00003"})]:
         config["kegg"]["ambiguity"] = ambiguity
         configfile.write_text(yaml.safe_dump(config))
         dry = execute(["--dry-run"])
-        assert "rule aggregate_ko_tpm:" in dry
+        assert "rule merge_kegg:" in dry
         assert "rule annotate_kofam:" not in dry
         execute()
         assert {r["ko"] for r in read_tsv(out / "ko_tpm_sum.tsv")} == expected_kos
-        assert len(events.read_text().splitlines()) == 2
+        assert len(events.read_text().splitlines()) == 1
         assert all(p.stat().st_mtime_ns == timestamp for p, timestamp in annotation_times.items())
 
     subset = workflow_project / "input/species_list.txt"
@@ -170,14 +182,14 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     configfile.write_text(yaml.safe_dump(config))
     execute()
     assert [r["run"] for r in read_tsv(out / "ko_tpm_sum.tsv")] == ["B1"] * 3
-    assert {r["species"] for r in read_tsv(out / "genes.tsv")} == {"Beta_sp-X"}
-    assert len(events.read_text().splitlines()) == 2
+    assert {r["representative_species"] for r in read_tsv(out / "orthogroups.tsv")} == {"Beta_sp-X"}
+    assert len(events.read_text().splitlines()) == 1
 
     config["kegg"]["enabled"] = True
     configfile.write_text(yaml.safe_dump(config))
     execute(targets=())
     assert [r["run"] for r in read_tsv(out.parent / "orthogroups/expression/tpm.tsv")] == ["B1", "B1"]
-    assert len(odb_events.read_text().splitlines()) == 1
+    assert len(odb_events.read_text().splitlines()) == 2  # Legacy mapping reran for the smaller sample set.
     assert "Nothing to be done" in execute(["--dry-run"], targets=())
 
 
@@ -220,3 +232,74 @@ def test_missing_references_are_scheduled_without_assemblies(workflow_project, t
     assert f"rule {rule}:" in result.stdout
     assert reference in result.stdout
     assert not (workflow_project / "resources").exists()
+
+
+def test_kegg_reuses_completed_database_without_mapping_or_translation(
+        dataset_project, tmp_path, command_environment):
+    import analysis
+    import dataset
+    from build_products import complete, load_complete
+    from test_datasets import imported
+
+    root = dataset_project
+    snakemake = shutil.which("snakemake")
+    if not snakemake:
+        pytest.skip("Snakemake required")
+    imported(root)
+    taxonomy = root / "resources/taxonomy/taxa.sqlite"
+    taxonomy.parent.mkdir(parents=True)
+    shutil.copy2(root / "input/taxa.sqlite", taxonomy)
+    reference = small_reference(tmp_path)
+    destination = root / "resources/kegg/snapshot_v1"
+    destination.parent.mkdir(parents=True)
+    reference.rename(destination)
+    command = fake_kofam_command(tmp_path)
+    events = tmp_path / "kofam_events.txt"
+    env = {**command_environment({"python": sys.executable, "exec_annotation": command}),
+           "FAKE_KOFAM_LOG": str(events)}
+
+    def execute(run, target, dry=False):
+        cmd = [snakemake, "--snakefile", str(root / "workflow/Snakefile"),
+               "--configfile", str(run / "pipeline.yaml"), "--cores", "2",
+               "--resources", "mem_mb=16000", "--set-threads", "annotate_kofam=1"]
+        if dry:
+            cmd.append("--dry-run")
+        result = subprocess.run([*cmd, "--", target], cwd=root, env=env,
+                                capture_output=True, text=True, timeout=120)
+        logs = "\n".join(f"{p}: {p.read_text()[-3000:]}" for p in run.rglob("*.log"))
+        assert result.returncode == 0, result.stdout + result.stderr + logs
+        output = result.stdout + result.stderr
+        if target != "database":
+            assert "rule odb_map:" not in output and "rule translate_cds:" not in output
+        return output
+
+    # Produce a schema-5 database with saved OG expression using cached mappings.
+    build = dataset.prepare(root, "kegg_base", root / "config/build.yaml")
+    dataset.materialize(build)
+    execute(build, "database")
+    receipt = complete(build)
+    before = receipt.read_bytes()
+    assert load_complete(build)["schema_version"] == 5
+    cfg = yaml.safe_load((root / "config/analysis.yaml").read_text())
+    cfg["inputs"]["species_trait"] = None
+    cfg["phylogeny"]["trees"] = []
+    cfg["phylogeny"]["contrast_pairs"]["enabled"] = False
+    cfg["kegg"]["enabled"] = True
+    config = root / "kegg_analysis.yaml"
+    config.write_text(yaml.safe_dump(cfg))
+    run = analysis.prepare(root, "median_ko", config, build)
+    execute(run, "all")
+    reps = read_tsv(run / "kegg/representatives/representatives.tsv")
+    assert len(reps) == 2
+    assert {r["member_count"] for r in reps} == {"2"}
+    assert len(events.read_text().splitlines()) == 1
+    assert (run / "orthogroups/expression/runs/A1.tsv").samefile(
+        build / "database/expression/runs/A1.tsv")
+    values = {(r["run"], r["ko"]): float(r["tpm_sum"])
+              for r in read_tsv(run / "kegg/ko_tpm_sum.tsv")}
+    assert values["A1", "K00001"] == 20
+    assert values["B1", "K00002"] == values["B1", "K00003"] == 30
+    execute(run, "phenoradar_inputs")
+    assert (run / "phenoradar_inputs/kegg/og_kos.tsv").is_file()
+    assert "Nothing to be done" in execute(run, "all", dry=True)
+    assert receipt.read_bytes() == before

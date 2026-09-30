@@ -10,6 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+# Fixed across representative/pair selection and phylogenetic inference.
+RANDOM_SEED = 12345
+
+
 def species_from_gene_id(gene_id):
     """Recover the computational sample key from a {sample}_g{number} ID.
 

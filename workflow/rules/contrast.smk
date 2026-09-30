@@ -58,7 +58,7 @@ if "representatives" in PHY["trees"]:
             sampled=f"{REPRESENTATIVES}/selection/ncbi_skim.sampled.tsv",
             qc=f"{REPRESENTATIVES}/selection/selection.json"
         params:
-            outdir=f"{REPRESENTATIVES}/selection", trait=config["trait"], seed=config["seed"]
+            outdir=f"{REPRESENTATIVES}/selection", trait=config["trait"], seed=RANDOM_SEED
         conda: "../envs/timetree.yaml"
         resources: mem_mb=4000
         log: f"{LOG}/{REPRESENTATIVES_REL}/selection.log"
@@ -87,7 +87,7 @@ if "representatives" in PHY["trees"]:
                 metadata=f"{CONTRAST}/species_metadata.tsv",
                 qc=f"{CONTRAST}/summary.json"
             params:
-                selection=f"{REPRESENTATIVES}/selection", outdir=CONTRAST, seed=config["seed"]
+                selection=f"{REPRESENTATIVES}/selection", outdir=CONTRAST, seed=RANDOM_SEED
             conda: "../envs/timetree.yaml"
             resources: mem_mb=4000
             log: f"{LOG}/{REPRESENTATIVES_REL}/contrast/pairs.log"
@@ -136,7 +136,7 @@ rule identify_phylogeny_contrast_pairs:
         pairs=f"{PHYLO_RUN}/contrast/contrast_pairs.tsv",
         metadata=f"{PHYLO_RUN}/contrast/species_metadata.tsv",
         qc=f"{PHYLO_RUN}/contrast/summary.json"
-    params: outdir=f"{PHYLO_RUN}/contrast", trait=config["trait"], seed=config["seed"]
+    params: outdir=f"{PHYLO_RUN}/contrast", trait=config["trait"], seed=RANDOM_SEED
     conda: "../envs/timetree.yaml"
     resources: mem_mb=4000
     log: f"{LOG}/{{phylo_branch}}/contrast/pairs.log"

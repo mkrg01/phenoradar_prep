@@ -9,7 +9,7 @@ import sys
 import pytest
 import yaml
 
-from common import read_tsv, write_tsv
+from common import RANDOM_SEED, read_tsv, write_tsv
 from species_traits import read_species_traits
 from phylogeny_root import ncbi_tree, prepare_root, resolve_outgroup
 from contrast_pairs import prepare, summarize, skim
@@ -191,7 +191,7 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     seed_taxonomy(source / "taxa.sqlite")
     write_tsv(traits, ["species", "C4"], [{"species": n.replace("_", " "), "C4": "" if i == 0 else i % 2}
                                          for i, n in enumerate(species)])
-    cfg = {"run_name": "test", "seed": 19,
+    cfg = {"run_name": "test",
            "phylogeny": {"trees": ["representatives"], "contrast_pairs": {"enabled": False},
                          "outgroup": "auto", "max_markers": 3}}
     config = tmp_path / "config.yaml"
@@ -229,7 +229,7 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     assert json.loads((result / "phylogeny/representatives/species_tree.json").read_text())["outgroup"] == [species[1]]
     selected = {r["species"] for r in read_tsv(result / "phylogeny/representatives/selection/samples.tsv")}
     for path in ["phylogeny/representatives/selection/selection.json", "phylogeny/representatives/contrast/summary.json"]:
-        assert json.loads((result / path).read_text())["seed"] == 19
+        assert json.loads((result / path).read_text())["seed"] == RANDOM_SEED
     assert selected == {r["leaf_name"] for r in read_tsv(result / "phylogeny/representatives/selection/ncbi_skim.sampled.tsv")}
     assert species[0] not in selected and species[1] in selected
     assert "Nothing to be done" in run(["contrast_pairs"])
@@ -248,7 +248,7 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     full_pairs = result / "phylogeny/all/contrast/contrast_pairs.tsv"
     full_pair_mtime = full_pairs.stat().st_mtime_ns
     assert {r["species"] for r in read_tsv(full_pairs.parent / "species_metadata.tsv")} == set(species)
-    assert json.loads((full_pairs.parent / "summary.json").read_text())["seed"] == 19
+    assert json.loads((full_pairs.parent / "summary.json").read_text())["seed"] == RANDOM_SEED
     assert "Nothing to be done" in run(["contrast_pairs"])
     cfg["phylogeny"]["trees"] = ["phenotyped"]
     config.write_text(yaml.safe_dump(cfg))

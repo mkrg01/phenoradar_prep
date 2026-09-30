@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 from common import now, sha256, write_json
+from prepare_kegg_reference import read_profile_list
 
 
 def _contained_path(root, relative):
@@ -74,7 +75,23 @@ def verify(reference, full=True):
         raise ValueError("snapshot contains unrecorded or missing reference files")
     if record.get("counts", {}).get("profiles") != len(profiles):
         raise ValueError("profile count does not match reference inventory")
+    if not record.get("eukaryote_profiles"):
+        raise ValueError("KEGG snapshot lacks eukaryote.hal; prepare a new reference snapshot "
+                         "from the matching KOfam profiles archive")
+    selection = _contained_path(root, record["eukaryote_profiles"])
+    if selection not in listed or selection != profiles_dir / "eukaryote.hal":
+        raise ValueError("eukaryote.hal is absent from the reference profile inventory")
+    # The selection changes search scope; verify its bytes even in quick mode.
+    selection_entry = next(entry for entry in entries
+                           if root / entry["relative_path"] == selection)
+    _check_entry(root, selection_entry, full=True)
+    selected = read_profile_list(selection)
+    if not set(selected).issubset(profiles):
+        raise ValueError("eukaryote.hal includes a profile absent from the reference inventory")
+    if record.get("counts", {}).get("eukaryote_profiles") != len(selected):
+        raise ValueError("eukaryote profile count does not match eukaryote.hal")
     result.update(profiles_dir=str(profiles_dir), inventory_path=str(inventory_path),
+                  eukaryote_profiles=str(selection), eukaryote_kos=[path.stem for path in selected],
                   reference_json=str(reference), reference_id=sha256(reference),
                   verified_files=len(entries), verification_mode="sha256" if full else "sizes")
     return result

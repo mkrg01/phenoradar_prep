@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from common import read_tsv, sha256
+from common import read_tsv, sha256, write_json
 from prepare_kegg_reference import download_links, normalize_links, prepare
 from verify_kegg_reference import verify
 import bootstrap_kegg_reference as bootstrap_module
@@ -23,6 +23,7 @@ def kegg_inputs(tmp_path):
     profiles.mkdir(parents=True)
     for ko in ["K00001", "K00002"]:
         (profiles / f"{ko}.hmm").write_text(f"HMMER3/f\nNAME  {ko}\nALPH  amino\nHMM A C D\n//\n")
+    (profiles / "eukaryote.hal").write_text("# Eukaryote selection\n./K00001.hmm\n")
     ko_list = source / "ko_list"
     ko_list.write_text(
         "knum\tthreshold\tscore_type\tprofile_type\tF-measure\tnseq\tnseq_used\talen\tmlen\teff_nseq\tre/pos\tdefinition\n"
@@ -44,6 +45,9 @@ def test_snapshot_is_portable_independent_and_deduplicated(kegg_inputs, tmp_path
     assert metadata["release"] == "offline-fixture"
     assert metadata["reference_id"] == sha256(reference)
     assert metadata["counts"]["profiles"] == 2
+    assert metadata["counts"]["eukaryote_profiles"] == 1
+    assert metadata["eukaryote_kos"] == ["K00001"]
+    assert Path(metadata["eukaryote_profiles"]).read_text() == "K00001.hmm\n"
     assert read_tsv(metadata["ko_modules"]) == [
         {"ko": "K00001", "module": "M00001"}, {"ko": "K00001", "module": "M00002"}]
     assert read_tsv(metadata["ko_pathways"]) == [
@@ -53,6 +57,7 @@ def test_snapshot_is_portable_independent_and_deduplicated(kegg_inputs, tmp_path
     reference.parent.rename(destination)
     moved = verify(destination / "reference.json", full=False)
     assert Path(moved["profiles_dir"]) == destination / "profiles"
+    assert Path(moved["eukaryote_profiles"]) == destination / "profiles/eukaryote.hal"
     assert moved["reference_id"] == metadata["reference_id"]
     assert moved["verification_mode"] == "sizes"
     verify(destination / "reference.json")
@@ -179,7 +184,73 @@ def test_cli_verification_report(kegg_inputs, tmp_path):
     report = json.loads(output.read_text())
     assert report["reference_id"] == sha256(reference)
     assert report["verification_mode"] == "sha256"
-    assert report["verified_files"] == 7
+    assert report["verified_files"] == 8
+
+
+@pytest.mark.parametrize("content,error", [
+    (None, "exactly one eukaryote.hal"),
+    ("# no profiles\n\n", "empty KOfam profile list"),
+    ("K00001.hmm\n./K00001.hmm\n", "duplicate KOfam profile list"),
+    ("K99999.hmm\n", "invalid KOfam profile list"),
+    ("../ko_list\n", "invalid KOfam profile list"),
+])
+def test_rejects_missing_or_invalid_eukaryote_list(kegg_inputs, content, error):
+    selection = kegg_inputs["profiles_dir"] / "eukaryote.hal"
+    if content is None:
+        selection.unlink()
+    else:
+        selection.write_text(content)
+    with pytest.raises(ValueError, match=error):
+        prepare(**kegg_inputs)
+    assert not kegg_inputs["reference_dir"].exists()
+
+
+def test_nested_eukaryote_paths_are_relocated(kegg_inputs):
+    profiles = kegg_inputs["profiles_dir"]
+    nested = profiles / "nested"
+    nested.mkdir()
+    (profiles / "K00001.hmm").rename(nested / "K00001.hmm")
+    (profiles / "eukaryote.hal").write_text("nested/K00001.hmm\n")
+    reference = prepare(**kegg_inputs)
+    metadata = verify(reference)
+    assert Path(metadata["eukaryote_profiles"]).read_text() == "K00001.hmm\n"
+    assert metadata["eukaryote_kos"] == ["K00001"]
+
+
+def test_quick_verification_checks_selection_checksum(kegg_inputs):
+    reference = prepare(**kegg_inputs)
+    selection = reference.parent / "profiles/eukaryote.hal"
+    selection.write_text(selection.read_text().replace("K00001", "K00002"))
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        verify(reference, full=False)
+
+
+def test_verification_rejects_selection_count_mismatch(kegg_inputs):
+    reference = prepare(**kegg_inputs)
+    record = json.loads(reference.read_text())
+    record["counts"]["eukaryote_profiles"] = 2
+    write_json(reference, record)
+    with pytest.raises(ValueError, match="eukaryote profile count"):
+        verify(reference)
+
+
+def test_legacy_snapshot_requires_rebuild_without_mutation(kegg_inputs):
+    reference = prepare(**kegg_inputs)
+    selection = reference.parent / "profiles/eukaryote.hal"
+    selection.unlink()
+    inventory = reference.parent / "files.json"
+    entries = json.loads(inventory.read_text())
+    write_json(inventory, [entry for entry in entries
+                           if entry["relative_path"] != "profiles/eukaryote.hal"])
+    record = json.loads(reference.read_text())
+    del record["eukaryote_profiles"]
+    del record["counts"]["eukaryote_profiles"]
+    record["inventory"].update(bytes=inventory.stat().st_size, sha256=sha256(inventory))
+    write_json(reference, record)
+    before = {p: p.read_bytes() for p in reference.parent.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="lacks eukaryote.hal; prepare a new reference"):
+        bootstrap_module.bootstrap(reference.parent)
+    assert all(p.read_bytes() == content for p, content in before.items())
 
 
 def test_download_retries_and_rate_limits(monkeypatch, tmp_path):
