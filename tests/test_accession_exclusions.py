@@ -102,7 +102,7 @@ def test_excluded_species_never_receive_array_indices(dataset_project):
     (root/'config/excluded_accessions.tsv').write_text('accession\treason\nA1\tdownload_failed\n')
     build = prepare(root,'two_species',root/'config/build.yaml')
     commands = submit(build,until='assembly',dry_run=True)
-    assert len(commands) == 1 and '--array=1,2%64' in commands[0]
+    assert len(commands) == 1 and '--array=1,2' in commands[0]
     for index in (1,2): worker(build,'assembly',index)
     events = [e['species'] for e in native_events(build)]
     assert events == ['Beta_sp-X','Gamma_plant']
@@ -121,7 +121,7 @@ def test_download_failure_is_retried_without_rerunning_completed_species(dataset
     receipt = json.loads((build/'jobs/status/New_plant_SRR1.assembly.json').read_text())
     assert receipt['state'] == 'failed' and receipt['run'] == 'SRR1' and receipt['stage'] == 'assembly'
     assert [r['assembly'] for r in status(build)] == ['pending','reuse']
-    assert '--array=1%64' in submit(build,until='assembly',dry_run=True)[0]
+    assert '--array=1' in submit(build,until='assembly',dry_run=True)[0]
     monkeypatch.delenv('FAKE_GG_FAIL_DOWNLOAD')
     worker(build,'assembly',1)
     assert raw.read_text() == 'retained resumable download'

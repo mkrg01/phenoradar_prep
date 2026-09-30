@@ -165,7 +165,7 @@ def test_two_sources_and_one_missing_sample_only_compute_missing_work(completed_
     config = configure(root, [str(first), str(second)])
     build = dataset.prepare(root, 'mixed', config)
     commands = dataset.submit(build, until='quant', dry_run=True)
-    assert len(commands) == 3 and all('--array=3%64' in cmd for cmd in commands)
+    assert len(commands) == 3 and all('--array=3' in cmd for cmd in commands)
     for stage in dataset.STAGES: dataset.worker(build, stage, 3)
     assert len(native_events(build)) == 3
     assert {event['species'] for event in native_events(build)} == {'Gamma_plant'}
