@@ -1,3 +1,0 @@
-# Partial analysis override; set the name/build with run_analysis.sh submit.
-inputs:
-  species_list: input/species_list.txt  # One species/sample ID per line.

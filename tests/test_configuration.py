@@ -23,8 +23,8 @@ def test_config_and_optional_tool_defaults_cover_supported_keys():
             values = values[part]
         assert set(values) == set(keys.split()), section
     from analysis import ANALYSIS_KEYS
-    for name in ("analysis", "pilot"):
-        assert set(yaml.safe_load((ROOT / f"config/{name}.yaml").read_text())) <= ANALYSIS_KEYS
+    analysis = yaml.safe_load((ROOT / "config/analysis.yaml").read_text())
+    assert set(analysis) <= ANALYSIS_KEYS
     validate_keys({"phylogeny": {"dating": {"calibration_source": "file"}}})
     validate_keys({"run_name": "c4_run1"})
 

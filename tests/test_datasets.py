@@ -34,7 +34,6 @@ def dataset_project(tmp_path, tiny_inputs, monkeypatch):
     cfg = yaml.safe_load(build_config.read_text())
     cfg["reuse_from"] = None
     build_config.write_text(yaml.safe_dump(cfg))
-    shutil.copytree(ROOT / "profiles", root / "profiles")
     shutil.copytree(ROOT / "workflow", root / "workflow", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy2(ROOT / "run_pipeline.sh", root / "run_pipeline.sh")
     shutil.copytree(Path(tiny_inputs["metadata"]).parent, root / "input")

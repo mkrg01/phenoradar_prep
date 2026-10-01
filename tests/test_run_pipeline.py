@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
+
+from phase_config import merge_slurm, write_profile
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,7 +53,7 @@ def test_launcher_arguments_and_exit_status(batch_workspace, tmp_path, mode, exi
     if mode == "batch_cpu":
         del env["SLURM_MEM_PER_NODE"]
         env["SLURM_MEM_PER_CPU"] = "4096"
-    arguments = ["--configfile", "config/data with spaces.yaml", "config/pilot.yaml",
+    arguments = ["--configfile", "config/data with spaces.yaml", "config/override.yaml",
                  "--config", "mem_gb=99",
                  "--set-threads", "odb_map=1", "--set-resources", "odb_map:mem_mb=3000",
                  "--", "references", "proteins"]
@@ -68,7 +71,7 @@ def test_launcher_arguments_and_exit_status(batch_workspace, tmp_path, mode, exi
     observed = json.loads(capture.read_text())
     argv = observed["argv"]
     assert argv[argv.index("--configfile") + 1:argv.index("--configfile") + 3] == [
-        "config/data with spaces.yaml", "config/pilot.yaml"]
+        "config/data with spaces.yaml", "config/override.yaml"]
     assert argv[-3:] == ["--", "references", "proteins"]
     assert argv[argv.index("--executor") + 1] == "local"
     deployment_index = argv.index("--software-deployment-method")
@@ -360,11 +363,12 @@ def test_distributed_launcher_does_not_apply_controller_budget(batch_workspace, 
     fake.chmod(0o755)
     env["SNAKEMAKE_BIN"] = str(fake)
     env["SLURM_MEM_PER_NODE"] = "2048"  # The controller does not allocate worker memory.
-    result = subprocess.run([str(script), "--slurm", "--profile", "profiles/slurm", "--jobs", "7", "--", "mapping"],
+    result = subprocess.run([str(script), "--slurm", "--profile", "jobs/test/profile", "--jobs", "7", "--", "mapping"],
                             cwd=checkout, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     args = json.loads(capture.read_text())
     assert args[args.index("--executor") + 1] == "slurm"
+    assert args[args.index("--profile") + 1] == "jobs/test/profile"
     assert "--cores" not in args
     assert not any(a.startswith("mem_mb=") for a in args)
     assert args[args.index("--jobs") + 1] == "7"
@@ -376,7 +380,8 @@ def test_slurm_profile_parses_without_submitting_jobs(batch_workspace, tmp_path)
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     if not snakemake: pytest.skip("Snakemake required")
     pytest.importorskip("snakemake_executor_plugin_slurm")
-    shutil.copytree(ROOT / "profiles", checkout / "profiles")
+    slurm = merge_slurm(yaml.safe_load((ROOT / "config/build.yaml").read_text())["slurm"], {})
+    profile = write_profile(checkout / "jobs/test/profile", slurm)
     (checkout / "workflow/Snakefile").write_text('''
 rule all:
     input: "a.txt", "b.txt"
@@ -387,7 +392,7 @@ rule task:
     shell: "touch {output}"
 ''')
     env["SNAKEMAKE_BIN"] = snakemake
-    result = subprocess.run([str(script), "--slurm", "--profile", "profiles/slurm", "--dry-run"],
+    result = subprocess.run([str(script), "--slurm", "--profile", str(profile), "--dry-run"],
                             cwd=checkout, env=env, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     output = result.stdout + result.stderr
