@@ -63,6 +63,26 @@ Optional [analysis guides](index.md#choose-an-analysis) describe their own outpu
 Keep `run.json`, branch provenance, reference snapshots, and the release's
 `image.json` with your results.
 
+## Storage cleanup
+
+ODB, KofamScan, and GeneGalleon remove temporary files after saving and verifying
+their results. ODB cleans up each completed chunk. Downloaded FASTQ/SRA files are
+removed after both assembly and quantification finish. Original inputs, reusable
+results, and failed work are kept. For debugging, [retain intermediates](configuration.md#intermediate-storage)
+when preparing the run.
+
+Check cleanup status and preview files left by completed jobs:
+
+```bash
+./run_build.sh status --build results/leaf --storage
+./run_build.sh cleanup --build results/leaf
+./run_analysis.sh cleanup --analysis results/leaf/downstream/carnivory
+```
+
+Add `--apply` to a `cleanup` command to delete the listed files. Cleanup errors
+are reported as `pending`; retrying cleanup does not rerun computation.
+Keep the rest of `work/` for reuse.
+
 ## TPM interpretation
 
 Long tables contain `species` (sample ID), `run`, `orthogroup`, and `tpm_sum` or
@@ -80,9 +100,3 @@ retained TPM also cause errors.
 [PhenoRadar export](phenoradar_inputs.md) removes the `run` column and preserves
 TPM values; it never averages samples. [KO expression](kegg.md#outputs) uses
 original TPM sums and distinguishes unquantified features from measured zeros.
-
-## Older results
-
-Historical directories are not moved automatically. Schema-3/4 `products/`
-bundles remain readable; analysis computes missing OG expression. Resume old
-frozen jobs with their original workflow checkout so code verification succeeds.

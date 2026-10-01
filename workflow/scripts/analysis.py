@@ -23,7 +23,7 @@ from phase_config import deep_merge, execution_settings, merge_slurm, read_yaml,
 
 TARGETS = ('all','alignments','kegg','phylogeny','phylogeny_prepare','taxonomy_check',
            'contrast_pairs','phylogeny_calibrations','timetree','phenoradar_inputs')
-ANALYSIS_KEYS = {'build','inputs','trait','selection','alignment','kegg','phylogeny','exclude_species','slurm'}
+ANALYSIS_KEYS = {'build','inputs','trait','selection','alignment','kegg','phylogeny','exclude_species','slurm','storage'}
 
 
 def settings(root, config, build=None):
@@ -38,8 +38,6 @@ def settings(root, config, build=None):
     source = inside(root, absolute(root, build or cfg['build']))
     source = inside(root, completion_path(source))
     completed = load_complete(source)
-    if completed['schema_version'] == 1 and Path(completed['root']).resolve() != root:
-        raise ValueError('completed build must belong to this project for container mounts')
     base = read_yaml(root / 'workflow/pipeline_defaults.yaml')
     resolved = deep_merge(base, {k:v for k,v in cfg.items() if k not in {'build','inputs','slurm'}})
     resolved['translation'] = completed['translation']
@@ -80,7 +78,7 @@ def downstream_parent(root, source, completed):
     """Use the local collection name when a database has been copied or renamed."""
     root = Path(root)
     bundle = Path(source).parent
-    if bundle.name in {'database', 'products'} and bundle.parent.parent == root / 'results':
+    if bundle.name == 'database' and bundle.parent.parent == root / 'results':
         return bundle.parent / 'downstream'
     build_id = completed['build_id']
     if not isinstance(build_id, str) or not SAFE.fullmatch(build_id):
@@ -148,7 +146,9 @@ def status(path):
     done = Path(path) / 'completed.json'
     if done.exists():
         for entry in json.loads(done.read_text())['files']: verify(entry)
-    return {'name':manifest['name'], 'build':manifest['build']['path'], 'state':'complete' if done.exists() else 'prepared',
+    from storage_management import storage_report
+    return {'storage': storage_report(path, manifest, 'analysis'),
+            'name':manifest['name'], 'build':manifest['build']['path'], 'state':'complete' if done.exists() else 'prepared',
             'selection':manifest['selection'],
             'submissions':[json.loads(p.read_text()) for p in sorted((Path(path)/'jobs').glob('submission_*.json')) if not p.name.endswith('.resources.json')]}
 
@@ -257,9 +257,10 @@ def main():
     for name in ('plan','prepare'):
         p=sub.add_parser(name); p.add_argument('--root',default='.'); p.add_argument('--config',default='config/analysis.yaml'); p.add_argument('--build')
         if name=='prepare': p.add_argument('--name',required=True)
-    for name in ('status','submit','run'):
+    for name in ('status','cleanup','submit','run'):
         p=sub.add_parser(name); p.add_argument('--analysis',required=name != 'submit',help='Path to an already prepared downstream run')
-        if name!='status': p.add_argument('--target',choices=TARGETS,default='all')
+        if name in {'submit','run'}: p.add_argument('--target',choices=TARGETS,default='all')
+        if name=='cleanup': p.add_argument('--apply',action='store_true',help='Delete verified successful scratch; default is preview')
         if name=='submit':
             p.add_argument('--root',default='.'); p.add_argument('--config'); p.add_argument('--build')
             p.add_argument('--name',help='Downstream condition name'); p.add_argument('--dry-run',action='store_true'); p.add_argument('--resources')
@@ -271,6 +272,11 @@ def main():
         if args.command=='plan': print(json.dumps(settings(root,config,args.build)[-1],indent=2))
         else: print(prepare(root,args.name,config,args.build))
     elif args.command=='status': print(json.dumps(status(args.analysis),indent=2))
+    elif args.command=='cleanup':
+        from storage_management import run_storage
+        report = run_storage(args.analysis, 'analysis', inspect=True, apply=args.apply)
+        print(json.dumps(report,indent=2))
+        if report['state'] == 'pending': sys.exit(1)
     elif args.command=='submit':
         if args.analysis:
             if any(value is not None for value in (args.name,args.config,args.build)):

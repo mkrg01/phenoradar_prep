@@ -49,13 +49,15 @@ def settings(root, config, analysis_config=None, name=None):
     cfg = read_yaml(config)
     if analysis_config is not None:
         raise ValueError("build does not accept analysis overrides; use run_analysis.sh")
-    unknown = set(cfg) - {"name", "metadata", "reuse_from", "translation", "busco", "odb", "genegalleon", "slurm", "excluded_accessions"}
+    unknown = set(cfg) - {"name", "metadata", "reuse_from", "translation", "busco", "odb", "genegalleon", "slurm", "excluded_accessions", "storage"}
     if unknown: raise ValueError(f"unknown build settings: {sorted(unknown)}; use config/build.yaml for build settings")
     excluded = cfg.get("excluded_accessions")
     if excluded is not None and (not isinstance(excluded, str) or not excluded.strip()):
         raise ValueError("excluded_accessions must be null or a TSV path")
     cfg["excluded_accessions"] = str(absolute(root, excluded)) if excluded is not None else None
     analysis = read_yaml(root / "workflow/pipeline_defaults.yaml")
+    cfg.setdefault("storage", {"keep_intermediates": False})
+    analysis["storage"] = cfg["storage"]
     analysis["translation"] = cfg["translation"]
     if set(cfg["busco"]) != {"lineage"} or not isinstance(cfg["busco"]["lineage"], str) or not cfg["busco"]["lineage"].strip():
         raise ValueError("busco.lineage must be a nonempty string")
@@ -69,6 +71,7 @@ def settings(root, config, analysis_config=None, name=None):
     analysis["selection"] = {"species_list": False, "busco_threshold": 0}
     analysis["exclude_species"] = []
     validate_keys(analysis); validate_analysis(analysis)
+    cfg["storage"].setdefault("keep_intermediates", False)
     if type(analysis["translation"].get("table")) is not int or analysis["translation"]["table"] < 1:
         raise ValueError("translation.table must be a positive integer")
     gg = cfg["genegalleon"]
@@ -385,6 +388,49 @@ def gg_environment(manifest, item, products, stage, work, task_id):
     return env
 
 
+def cleanup_genegalleon(path, manifest, item, stage, products, *, apply=True):
+    """Retire only owned scratch; products and native BUSCO receipts stay valid."""
+    if manifest['config'].get('storage', {}).get('keep_intermediates', False):
+        return
+    from cleanup_work import cleanup, owned_path
+    path = Path(path)
+    work = workspace(path, manifest, item)
+    relative = work.relative_to(path) / 'output/transcriptome_assembly'
+    targets = []
+    # The upstream stages share tmp/. Never clear another failed stage's work
+    # just because a previously completed stage was requested again.
+    errors = []
+    try:
+        other_failed = False
+        for other in STAGES:
+            receipt = path / 'jobs/status' / f"{item['species']}.{other}.json"
+            if other != stage and receipt.exists():
+                other_failed |= json.loads(receipt.read_text()).get('state') in {'running', 'failed'}
+        if not other_failed:
+            targets.append(relative / 'tmp')
+        # Assembly FASTQs are also used for quantification. Require both products,
+        # irrespective of which stage is being retried. Keep caller-owned input/reads.
+        if products.get('reference') and products.get('quant'):
+            reads = relative / 'amalgkit_getfastq' / item['row']['species_id']
+            # Preserve getfastq logs/QC and never descend into a linked input tree.
+            directory = owned_path(path, reads)
+            if not directory.is_symlink():
+                for root, _, names in os.walk(directory, followlinks=False):
+                    for name in names:
+                        if name.endswith(('.fastq', '.fastq.gz', '.fq', '.fq.gz', '.sra')):
+                            targets.append((Path(root) / name).relative_to(path))
+    except (OSError, ValueError) as error:
+        targets = []
+        errors.append({'path': str(relative), 'error': str(error)})
+    if not apply:
+        from cleanup_work import scratch_usage
+        sizes = [scratch_usage(owned_path(path, target)) for target in targets]
+        return {'targets': [str(t) for t in targets], 'errors': errors,
+                **{key: sum(size[key] for size in sizes)
+                   for key in ('files', 'allocated_bytes', 'reclaimable_bytes')}}
+    return cleanup(path, targets, path / 'jobs/cleanup' / f"{item['species']}.{stage}.json", errors=errors)
+
+
 def worker(path, stage, task_id):
     path = Path(path).resolve()
     manifest = load(path, check_code=True)
@@ -401,6 +447,7 @@ def worker(path, stage, task_id):
         key = dict(zip(STAGES, ("reference", "busco", "quant")))[stage]
         if products[key]:
             write_json(receipt_path, {"state": "reused", "at": now()})
+            cleanup_genegalleon(path, manifest, item, stage, products)
             return
         work = workspace(path, manifest, item)
         if not (work / "input/amalgkit_metadata" / f"{native}_metadata.tsv").is_file():
@@ -479,6 +526,7 @@ def worker(path, stage, task_id):
             write_json(receipt_path, {"state": "failed", "at": now(), "error": str(error), "species": species,
                                       "run": item["row"]["run"], "stage": stage, "job_id": os.environ.get("SLURM_JOB_ID")})
             raise
+        cleanup_genegalleon(path, manifest, item, stage, item_products(manifest, item))
 
 
 def materialize(path):
@@ -567,7 +615,7 @@ def submit(path, until="database", species=None, dry_run=False, resources=None):
     pending = {stage: [index for index, state in enumerate(report, 1)
                        if state[stage] == "pending" and (wanted is None or state["species"] in wanted)]
                for stage in STAGES[:stop + 1]}
-    from phase_config import array_concurrency, execution_settings, worker_budgets
+    from phase_config import array_concurrency, execution_settings, resolve_array_size, worker_budgets
     slurm = execution_settings(manifest["config"]["slurm"], resources)
     caps = {stage: array_concurrency(slurm, stage) for stage, indices in pending.items() if indices}
     if until in {"mapping", "database"} and wanted is None: worker_budgets(slurm)
@@ -588,16 +636,20 @@ def submit(path, until="database", species=None, dry_run=False, resources=None):
                                                       "--format=%i"], text=True).splitlines()
                     active = [job.strip() for job in queued if job.strip().split("_", 1)[0] in ids]
                     if active: raise ValueError("dataset still has queued/running jobs; inspect or cancel them before resubmitting: " + ", ".join(active))
-        if any(pending.values()): stage_workspace(path, manifest)
+        array_size = None
+        if any(pending.values()):
+            array_size = resolve_array_size()
+            print(f"Using Slurm array limit: {array_size} sample index slots per batch", flush=True)
+            stage_workspace(path, manifest)
         batch_number = 1 + max([int(p.name.split("_")[1].split(".")[0]) for p in jobs.glob("submission_*.resources.json")] + [0])
         execution = jobs / f"submission_{batch_number:04d}.resources.json"
-        write_json(execution, {"slurm": slurm, "sha256": digest(slurm)})
+        write_json(execution, {"slurm": slurm, "sha256": digest(slurm),
+                               "resolved_array_size": array_size})
         batch = {"created_at": now(), "until": until, "pilot_species": sorted(wanted) if wanted else None, "resources": record(execution), "jobs": []}
         receipt = jobs / f"submission_{batch_number:04d}.json"
         previous = None
         commands = []
         scheduled = []
-        array_size = slurm["array_size"]
         for stage, indices in pending.items():
             for offset in sorted({((i - 1) // array_size) * array_size for i in indices}):
                 scheduled.append((stage, [i for i in indices if offset < i <= offset + array_size], offset))
@@ -686,12 +738,14 @@ def main():
         command.add_argument("--config", default="config/build.yaml")
         if name != "fetch-software": command.add_argument("--metadata")
         if name == "prepare": command.add_argument("--name", help="Override name from the build config")
-    for name in ("status", "submit", "materialize", "worker", "mapping", "complete"):
+    for name in ("status", "cleanup", "submit", "materialize", "worker", "mapping", "complete"):
         command = sub.add_parser(name)
         command.add_argument("--build", "--dataset", dest="dataset", required=name != "submit",
                              help="Path to an already prepared build")
         if name == "submit": command.add_argument("--until", choices=UNTIL, default="database")
         if name == "mapping": command.add_argument("--execution")
+        if name == "status": command.add_argument("--storage", action="store_true", help="Include intermediate cleanup status")
+        if name == "cleanup": command.add_argument("--apply", action="store_true", help="Delete verified successful scratch; default is preview")
         if name == "submit":
             command.add_argument("--root", default=".")
             command.add_argument("--config", help="Settings for a new build; default: config/build.yaml")
@@ -722,8 +776,17 @@ def main():
                               "container": software_lock["container"].get("identity", {"kind": "local_image"})}, indent=2))
     elif args.command == "status":
         report = status(args.dataset)
-        print(json.dumps(report, indent=2))
+        if args.storage:
+            from storage_management import run_storage
+            print(json.dumps({'samples': report, 'storage': run_storage(args.dataset, 'build')}, indent=2))
+        else:
+            print(json.dumps(report, indent=2))
         return int(any(r["assembly"] == "conflict" for r in report))
+    elif args.command == "cleanup":
+        from storage_management import run_storage
+        report = run_storage(args.dataset, 'build', inspect=True, apply=args.apply)
+        print(json.dumps(report, indent=2))
+        return int(report['state'] == 'pending')
     elif args.command == "submit":
         if args.dataset:
             if any(value is not None for value in (args.name, args.config, args.metadata)):

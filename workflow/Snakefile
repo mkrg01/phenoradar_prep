@@ -48,7 +48,7 @@ if config["kegg"]["ambiguity"] not in {"duplicate", "drop", "error"}:
     raise WorkflowError("kegg.ambiguity must be duplicate, drop, or error")
 PHY = dict(config["phylogeny"], busco_full_dir=BUSCO_FULL,
            translation_table=config["translation"]["table"], trait=config["trait"])
-for key in ["max_markers", "min_protein_length", "min_taxa"]:
+for key in ["min_protein_length", "min_taxa"]:
     if type(PHY[key]) is not int or PHY[key] <= 0:
         raise WorkflowError(f"phylogeny.{key} must be a positive integer")
 if type(PHY["max_unknown_fraction"]) not in {int, float} or not 0 <= PHY["max_unknown_fraction"] <= 1:

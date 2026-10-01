@@ -1,4 +1,4 @@
-if config.get("build_manifest") and COMPLETED_BUILD['schema_version'] >= 5:
+if config.get("build_manifest"):
     BUILD_RUNS = {p['row']['run']: p for p in COMPLETED_BUILD['products'].values()}
 
     rule import_build_expression:

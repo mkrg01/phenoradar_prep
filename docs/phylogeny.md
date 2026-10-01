@@ -79,11 +79,21 @@ Coverage counts distinct biological species, so extra samples do not inflate it.
 
 | Setting under `phylogeny` | Default | Meaning |
 | --- | --- | --- |
-| `max_markers` | `500` | Select by species coverage, then BUSCO ID |
+| `max_markers` | `500` | Positive integer cap, or `null` for no limit; select by species coverage, then BUSCO ID |
 | `min_taxa` | `4` | Minimum species per marker before and after QC; at least four |
 | `min_protein_length` | `100` | Minimum known amino acids per extracted/trimmed sequence |
 | `max_unknown_fraction` | `0.05` | Maximum unknown fraction in prepared proteins |
 | `trimal_mode` | `gappyout` | `gappyout` or `automated1` |
+
+To use every eligible marker without a count limit, set:
+
+```yaml
+phylogeny:
+  max_markers: null
+```
+
+`min_taxa` and sequence/alignment QC still apply. Omitting `max_markers` keeps
+the default cap of 500; `0` and negative values are invalid.
 
 cdskit pads, masks, and translates CDS using the build's genetic code. Stops and
 unresolved codons become X. Review `species/*.json`: padding may affect reading

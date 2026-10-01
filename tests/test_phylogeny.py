@@ -51,7 +51,8 @@ def test_busco_single_copy_and_lineage_validation(tmp_path):
 
 
 @pytest.mark.parametrize("limit,expected", [(2, ["4at1", "6at1"]),
-                                           (500, ["4at1", "6at1", "1at1", "3at1", "2at1", "5at1"])])
+                                           (500, ["4at1", "6at1", "1at1", "3at1", "2at1", "5at1"]),
+                                           (None, ["4at1", "6at1", "1at1", "3at1", "2at1", "5at1"])])
 def test_plan_selects_highest_coverage_with_id_ties_independent_of_orders(tmp_path, limit, expected):
     # Thirty species in two orders (20 + 10): 1at1 is absent from the second
     # order. Its tied competitor 3at1 spans both orders and has longer hits.
@@ -100,7 +101,10 @@ def test_plan_selects_highest_coverage_with_id_ties_independent_of_orders(tmp_pa
         assert stats["6at1"]["eligible"] == "True"
         assert stats["6at1"]["selection_rank"] == "2"
         assert float(stats["6at1"]["mean_busco_length"]) == 99
-        assert json.loads((out / "provenance.json").read_text())["eligible_markers"] == 6
+        provenance = json.loads((out / "provenance.json").read_text())
+        assert provenance["eligible_markers"] == 6
+        assert provenance["markers"] == len(expected)
+        assert provenance["settings"]["max_markers"] == limit
         selected.append(chosen)
     assert selected[0] == selected[1]
 

@@ -1,6 +1,7 @@
 """Public build/analysis settings and per-submission Slurm resources."""
 import copy
 import re
+import subprocess
 from pathlib import Path
 import yaml
 
@@ -49,6 +50,9 @@ BUDGET_RESOURCES = {'cpus': 'workflow_cpus', 'mem_gb': 'workflow_mem_mb'}
 def normalize_slurm(slurm, build=True):
     if not isinstance(slurm, dict): raise ValueError('slurm must be a mapping')
     result = copy.deepcopy(slurm)
+    # Old build snapshots/retry files may contain this retired setting. Array
+    # limits now always come from Slurm; leave the saved inputs unchanged.
+    if build: result.pop('array_size', None)
     if 'total_limits' in result:
         limits = result['total_limits']
         if not isinstance(limits, dict) or set(limits) - {'jobs', 'cpus', 'mem_gb'}:
@@ -85,13 +89,11 @@ def validate_slurm(slurm, build=True):
     if slurm.get('partition') is not None and (not isinstance(slurm['partition'], str) or not slurm['partition'].strip()):
         raise ValueError('slurm.partition must be null or a nonempty string')
     allowed = {'partition','jobs','stages','default_resources','rules','total_limits'}
-    if build: allowed.update({'concurrency','array_size'})
+    if build: allowed.add('concurrency')
     if set(slurm) - allowed: raise ValueError('unknown slurm setting')
     for key in ('jobs', 'concurrency') if build else ('jobs',):
         if key not in slurm or (slurm[key] is not None and (type(slurm[key]) is not int or slurm[key] < 1)):
             raise ValueError(f'slurm.{key} must be a positive integer or null')
-    if build and (type(slurm.get('array_size')) is not int or slurm['array_size'] < 1):
-        raise ValueError('slurm.array_size must be positive')
     for key, value in slurm.get('total_limits', {}).items():
         if value is not None and (type(value) is not int or value < 1):
             raise ValueError(f'slurm.total_limits.{key} must be a positive integer or null')
@@ -120,6 +122,36 @@ def execution_settings(frozen, resources=None, build=True):
     override = read_yaml(resources) if resources else {}
     if override and 'slurm' not in override: raise ValueError('resource override requires a slurm section')
     return merge_slurm(frozen, override.get('slurm', {}), build)
+
+
+def resolve_array_size():
+    """Read the current Slurm limits for one-based sample arrays."""
+    try:
+        output = subprocess.check_output(['scontrol', 'show', 'config'], text=True,
+                                         stderr=subprocess.PIPE, timeout=10)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ValueError("Cannot query Slurm array limits with 'scontrol show config'; "
+                         "check Slurm availability and retry") from error
+    settings = {}
+    for line in output.splitlines():
+        name, separator, raw = line.partition('=')
+        if separator:
+            settings[name.strip()] = raw.strip()
+    raw = settings.get('MaxArraySize', '')
+    if not re.fullmatch(r'[0-9]+', raw) or 'SchedulerParameters' not in settings:
+        raise ValueError('Cannot read Slurm MaxArraySize/SchedulerParameters from scontrol show config')
+    # Slurm's maximum task ID is MaxArraySize - 1; our workers start at one.
+    size = int(raw) - 1
+    if size < 1:
+        raise ValueError('Slurm MaxArraySize must be at least 2 for one-based sample arrays')
+    for parameter in settings['SchedulerParameters'].split(','):
+        key, separator, raw = parameter.strip().partition('=')
+        if key != 'max_array_tasks':
+            continue
+        if not separator or not re.fullmatch(r'[0-9]+', raw) or int(raw) < 1:
+            raise ValueError('Cannot read a positive Slurm max_array_tasks limit')
+        size = min(size, int(raw))
+    return size
 
 
 def array_concurrency(slurm, stage):
@@ -164,7 +196,8 @@ def _snakemake_resources(values):
 
 def write_profile(destination, slurm):
     # Also used with partial legacy resource dictionaries by low-level callers.
-    slurm = normalize_slurm(slurm, build='array_size' in slurm)
+    # Snakemake profiles only use worker limits, not sample-array concurrency.
+    slurm = normalize_slurm(slurm, build=False)
     defaults = _snakemake_resources(slurm.get('default_resources', WORKER_DEFAULTS))
     if slurm.get('partition'): defaults['slurm_partition'] = slurm['partition']
     profile = {'executor':'slurm', 'jobs':workflow_jobs(slurm), 'latency-wait':90,

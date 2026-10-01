@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 
 from common import file_record, now, sha256, write_json, write_tsv
+from cleanup_work import cleanup
 from prepare_kegg_reference import read_ko_list
 from verify_kegg_reference import verify
 
@@ -211,6 +212,20 @@ def _completed(output, fingerprint):
         return None
 
 
+def completed_work(record, base):
+    """The published command identifies scratch even for old reused statuses."""
+    try:
+        normalized = Path(record['command'][-1])
+        work = normalized.parent
+        if (not normalized.is_absolute() or normalized.name != 'protein.faa'
+                or work.parent != base or work.is_symlink()
+                or not work.name.startswith(record['fingerprint'] + '.')):
+            raise ValueError('Kofam scratch identity differs from published command')
+        return work
+    except (KeyError, IndexError, TypeError) as error:
+        raise ValueError('Kofam provenance has no scratch location') from error
+
+
 def _publish(source, destination):
     """Replace a generated directory only after all files and provenance exist."""
     staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.publish-", dir=destination.parent))
@@ -228,7 +243,7 @@ def _publish(source, destination):
         shutil.rmtree(staging)
 
 
-def run(protein, species, reference, output_dir, work_dir, command="exec_annotation", threads=1):
+def run(protein, species, reference, output_dir, work_dir, command="exec_annotation", threads=1, keep_intermediates=False):
     if not species or any(character.isspace() for character in species) or "\x00" in species:
         raise ValueError("species must be a nonempty identifier without whitespace")
     if threads < 1 or threads > int(os.environ.get("SLURM_CPUS_PER_TASK", threads)):
@@ -247,7 +262,7 @@ def run(protein, species, reference, output_dir, work_dir, command="exec_annotat
                             "format": "detail-tsv", "threshold_scale": 1,
                             "report_unannotated": False, "terminal_stop": "strip_one_reject_internal"},
                 "implementation": [file_record(scripts / name) for name in
-                                   ["run_kofam.py", "common.py", "prepare_kegg_reference.py",
+                                   ["run_kofam.py", "common.py", "cleanup_work.py", "prepare_kegg_reference.py",
                                     "verify_kegg_reference.py"]]}
     fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     out, base = Path(output_dir).absolute(), Path(work_dir).absolute()
@@ -264,8 +279,11 @@ def run(protein, species, reference, output_dir, work_dir, command="exec_annotat
         status_path = base / "status.json"
         cached = _completed(out, fingerprint)
         if cached is not None:
+            work = completed_work(cached, base)
             write_json(status_path, {"state": "success", "completed_at": now(),
-                                     "fingerprint": fingerprint, "reused": True})
+                                     "fingerprint": fingerprint, "reused": True, "work": str(work)})
+            if not keep_intermediates:
+                cleanup(base, [work.name], base / 'cleanup.json')
             return cached
         work = Path(tempfile.mkdtemp(prefix=f"{fingerprint}.", dir=base))
         result = work / "result"
@@ -309,6 +327,8 @@ def run(protein, species, reference, output_dir, work_dir, command="exec_annotat
                                   for name in RESULT_NAMES]}
             write_json(result / "provenance.json", record)
             _publish(result, out)
+            if _completed(out, fingerprint) is None:
+                raise ValueError("KofamScan published results failed verification")
             write_json(status_path, {"state": "success", "completed_at": now(),
                                      "fingerprint": fingerprint, "work": str(work), "reused": False})
         except BaseException as error:
@@ -316,6 +336,8 @@ def run(protein, species, reference, output_dir, work_dir, command="exec_annotat
                                      "work": str(work), "error": str(error)})
             raise
         else:
+            if not keep_intermediates:
+                cleanup(base, [work.name], base / "cleanup.json")
             return record
 
 
@@ -325,4 +347,5 @@ if __name__ == "__main__":
         parser.add_argument(f"--{flag}", required=True)
     parser.add_argument("--command", default="exec_annotation")
     parser.add_argument("--threads", type=int, default=1)
+    parser.add_argument("--keep-intermediates", action="store_true")
     run(**vars(parser.parse_args()))

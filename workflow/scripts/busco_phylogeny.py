@@ -222,6 +222,7 @@ def plan(samples, outdir, settings, outgroup_file=None):
                     key=lambda r: (-r["occupancy"], r["marker"]))
     for rank, row in enumerate(ranked, 1):
         row["selection_rank"] = rank
+    # YAML null becomes None, so this slice keeps every eligible marker.
     chosen = ranked[:settings["max_markers"]]
     if not chosen:
         raise ValueError("no BUSCO markers pass selection; inspect per-marker species counts, min_taxa and input lineage")

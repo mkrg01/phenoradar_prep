@@ -48,6 +48,12 @@ Lineage, genetic code, and ODB clade are inherited from the build.
 Configured input paths must exist; set unused optional paths to `null`.
 Trait-dependent branches also need to be disabled when traits are unused.
 
+## Intermediate storage
+
+Both build and analysis configs use `storage.keep_intermediates: false` by
+default, enabling [cleanup after successful jobs](outputs.md#storage-cleanup).
+Set it to `true` before preparing a run to retain intermediates for debugging.
+
 ## Optional analyses and exports
 
 Choose branches before the first submission. The supplied analysis config enables

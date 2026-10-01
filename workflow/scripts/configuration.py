@@ -1,7 +1,8 @@
 """Accepted configuration keys, including optional tool-specific overrides."""
 KEYS = {
-    "": "run_name selection translation odb alignment kegg phylogeny "
+    "": "run_name selection translation odb alignment kegg phylogeny storage "
         "trait exclude_species input_root build_manifest translation_cache expression_cache output_root work_root log_root",
+    "storage": "keep_intermediates",
     "selection": "busco_threshold species_list",
     "translation": "table",
     "odb": "ncbi_tax_id incremental cache_dir chunk_size",
@@ -37,6 +38,8 @@ def validate_keys(config):
         value = config.get(key)
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ValueError(f"{key} must be null or a directory")
+    if type(config.get("storage", {}).get("keep_intermediates", False)) is not bool:
+        raise ValueError("storage.keep_intermediates must be true or false")
     odb = config.get("odb", {})
     if "ncbi_tax_id" in odb and (type(odb["ncbi_tax_id"]) is not int or odb["ncbi_tax_id"] < 1):
         raise ValueError("odb.ncbi_tax_id must be a positive integer")
@@ -54,6 +57,9 @@ def validate_keys(config):
                      "n_species_in_group", "n_samples_in_group", "species_id", "contrast_pair_id"}:
             raise ValueError("trait conflicts with a reserved output column")
     phylogeny = config.get("phylogeny", {})
+    max_markers = phylogeny.get("max_markers")
+    if max_markers is not None and (type(max_markers) is not int or max_markers <= 0):
+        raise ValueError("phylogeny.max_markers must be a positive integer or null")
     if "trees" in phylogeny:
         trees = phylogeny["trees"]
         if (not isinstance(trees, list)

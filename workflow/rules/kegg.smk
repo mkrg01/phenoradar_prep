@@ -69,6 +69,7 @@ rule annotate_kofam:
         reference=f"{KEGG_REFERENCE}/reference.json",
         verified=f"{KEGG}/reference_qc.json",
         code=f"{SCRIPTS}/run_kofam.py",
+        cleanup=f"{SCRIPTS}/cleanup_work.py",
         verifier=f"{SCRIPTS}/verify_kegg_reference.py",
         preparation=f"{SCRIPTS}/prepare_kegg_reference.py",
         common=f"{SCRIPTS}/common.py"
@@ -80,7 +81,8 @@ rule annotate_kofam:
     params:
         outdir=lambda wc: f"{KEGG_ANNOTATIONS}/{wc.batch}",
         workdir=lambda wc: f"{WORK}/kegg/{wc.batch}",
-        command="exec_annotation"
+        command="exec_annotation",
+        keep=["--keep-intermediates"] if config["storage"]["keep_intermediates"] else []
     threads: 4
     resources: mem_mb=8000
     log: f"{LOG}/kegg/annotation/{{batch}}.log"
@@ -89,7 +91,7 @@ rule annotate_kofam:
     shell:
         "{PYTHON:q} {input.code:q} --protein {input.protein:q} --species orthogroup_representatives "
         "--reference {input.reference:q} --output-dir {params.outdir:q} --work-dir {params.workdir:q} "
-        "--command {params.command:q} --threads {threads} > {log:q} 2>&1"
+        "--command {params.command:q} --threads {threads} {params.keep:q} > {log:q} 2>&1"
 
 
 rule assign_og_kos:

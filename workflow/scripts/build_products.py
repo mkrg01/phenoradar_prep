@@ -14,8 +14,8 @@ def load_complete(path, verify_files=True):
     from portable_build import completion_path, load_products
     path = completion_path(path)
     data = json.loads(path.read_text())
-    if data.get('kind') != 'completed_build' or data.get('schema_version') not in (3, 4, 5):
-        raise ValueError('unsupported completed products: use a schema-3/4 products bundle or schema-5 database, or prepare a new build from metadata')
+    if data.get('kind') != 'completed_build' or data.get('schema_version') != 5:
+        raise ValueError('unsupported database format: expected schema 5; prepare a new build from metadata')
     if digest({k:v for k,v in data.items() if k != 'sha256'}) != data.get('sha256'):
         raise ValueError('build completion record changed')
     return load_products(path, data, verify_files=verify_files)
@@ -32,7 +32,6 @@ def complete(path):
         manifest = load(path, check_code=True)
         inputs = materialize(path)
         results = Path(manifest['root']) / run_layout(manifest['analysis'])[0]
-        with_expression = bool(manifest['analysis'].get('output_root'))
         mapping = results / 'orthogroups/mapping/snapshot.json'
         if not mapping.is_file(): raise ValueError(f'build mapping incomplete: missing {mapping}')
         tables = load_tables(mapping)
@@ -69,35 +68,31 @@ def complete(path):
                 'busco':inventory[str(inputs / 'busco/full' / f'{species}.busco.full.tsv')],
                 'abundance':inventory[str(inputs / 'quant' / species / run / f'{run}_abundance.tsv')],
                 'protein':protein_entry, 'translation':record(provenance)}
-            if with_expression:
-                expression = results / 'orthogroups/expression/runs' / f'{run}.tsv'
-                qc_path = expression.with_suffix('.qc.json')
-                if not expression.is_file() or not qc_path.is_file():
-                    raise ValueError(f'build expression incomplete: {run}; run the database target before complete')
-                expression_entry = record(expression)
-                qc = json.loads(qc_path.read_text())
-                expected_table = tables['tables'][species]['table']
-                if (qc.get('species') != species or qc.get('run') != run or
-                    qc.get('multimap') != 'error' or
-                    qc.get('abundance', {}).get('sha256') != products[species]['abundance']['sha256'] or
-                    qc.get('mapping_table', {}).get('sha256') != expected_table['sha256'] or
-                    qc.get('expression', {}).get('sha256') != expression_entry['sha256']):
-                    raise ValueError(f'build expression differs from inputs: {species}')
-                products[species].update(expression=expression_entry, expression_qc=record(qc_path))
+            expression = results / 'orthogroups/expression/runs' / f'{run}.tsv'
+            qc_path = expression.with_suffix('.qc.json')
+            if not expression.is_file() or not qc_path.is_file():
+                raise ValueError(f'build expression incomplete: {run}; run the database target before complete')
+            expression_entry = record(expression)
+            qc = json.loads(qc_path.read_text())
+            expected_table = tables['tables'][species]['table']
+            if (qc.get('species') != species or qc.get('run') != run or
+                qc.get('multimap') != 'error' or
+                qc.get('abundance', {}).get('sha256') != products[species]['abundance']['sha256'] or
+                qc.get('mapping_table', {}).get('sha256') != expected_table['sha256'] or
+                qc.get('expression', {}).get('sha256') != expression_entry['sha256']):
+                raise ValueError(f'build expression differs from inputs: {species}')
+            products[species].update(expression=expression_entry, expression_qc=record(qc_path))
         files = [*input_files, record(mapping), record(results / 'metadata/samples.tsv')]
         files.extend(relative_file(mapping.parent, e['table']) for e in tables['tables'].values())
         files.extend(manifest['auxiliary'].values())
         files.extend(record(path / n) for n in ('build.json','pipeline.yaml','checksums.json','metadata.tsv'))
         for p in products.values(): files.extend([p['protein'], p['translation']])
-        data = {'schema_version':5 if with_expression else 4, 'kind':'completed_build', 'build_id':manifest['name'], 'created_at':now(),
+        data = {'schema_version':5, 'kind':'completed_build', 'build_id':manifest['name'], 'created_at':now(),
                 'input':str(inputs), 'fields':manifest['fields'],
                 'translation':manifest['analysis']['translation'], 'lineage':manifest['analysis']['phylogeny']['lineage'],
                 'odb':{'version':'v12','node':manifest['analysis']['odb']['ncbi_tax_id']},
                 'mapping':record(mapping), 'products':products, 'files':files,
-                'excluded_runs':manifest.get('excluded', [])}
-        if with_expression:
-            # Preserve the schema-5 provenance field for existing bundles.
-            data['tpm'] = {'multimap': 'error'}
+                'excluded_runs':manifest.get('excluded', []), 'tpm':{'multimap':'error'}}
         return publish_pointer(path, publish_products(path, data))
 
 

@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from common import write_json
+from aggregate_tpm import aggregate
 from dataset_assets import record, resolve
 from mapping_tables import load_tables, relative_file, write_tables
 from mapping_fixtures import make_mapping
@@ -58,8 +59,19 @@ def database_from_stages(root, store, items, name='source'):
     write_tsv(input_root/'busco/summary.tsv', ['Species', *COUNTS],
               [dict(Species=s, **p['counts']) for s,p in products.items()])
     files += [record(input_root/'metadata.tsv'), record(input_root/'busco/summary.tsv')]
-    data = {'schema_version': 4, 'kind': 'completed_build', 'build_id': name, 'created_at': 'fixture',
+    samples = build / 'samples.tsv'
+    write_tsv(samples, ['species', 'run', 'abundance'],
+              [dict(species=s, run=p['row']['run'], abundance=p['abundance']['path'])
+               for s,p in products.items()])
+    for product in products.values():
+        run = product['row']['run']
+        expression = build / 'expression' / f'{run}.tsv'
+        qc = expression.with_suffix('.qc.json')
+        aggregate(samples, run, mapping, expression, qc)
+        product.update(expression=record(expression), expression_qc=record(qc))
+    data = {'schema_version': 5, 'kind': 'completed_build', 'build_id': name, 'created_at': 'fixture',
             'input': str(input_root), 'fields': list(rows[0]), 'translation': {'table': 1},
             'lineage': 'embryophyta_odb12', 'odb': {'version': 'v12', 'node': 3193},
-            'mapping': record(mapping), 'products': products, 'files': files, 'excluded_runs': []}
+            'mapping': record(mapping), 'products': products, 'files': files, 'excluded_runs': [],
+            'tpm': {'multimap': 'error'}}
     return publish_products(build, data).parent

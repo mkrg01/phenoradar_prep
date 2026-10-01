@@ -99,7 +99,8 @@ controller can leave workers running, so inspect those too.
 A retry may restart a failed stage: rnaSPAdes assembly starts from scratch, and
 partial read downloads are not guaranteed reusable. Successful samples are
 unaffected. For repeated timeouts or memory errors, adjust
-[resources](running.md#resource-budgets).
+[resources](running.md#resource-budgets). See [storage cleanup](outputs.md#storage-cleanup)
+for removing intermediates from completed jobs.
 
 ## Manually excluding unusable accessions
 

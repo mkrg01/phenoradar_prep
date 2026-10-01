@@ -88,6 +88,18 @@ def test_conflicting_duplicate_abundance_is_not_resolved_by_list_order(dataset_p
     entry = dict(record(abundance), path=relative)
     product['abundance'] = entry
     data['files'] = [entry if p['path'] == relative else p for p in data['files']]
+    # Keep each database internally consistent so the conflict is between sources.
+    from aggregate_tpm import aggregate
+    samples = root / 'changed-samples.tsv'
+    write_tsv(samples, ['species', 'run', 'abundance'],
+              [dict(species='Alpha_plant_A1', run='A1', abundance=str(abundance))])
+    aggregate(samples, 'A1', second / data['mapping']['path'],
+              second / product['expression']['path'], second / product['expression_qc']['path'])
+    for key in ('expression', 'expression_qc'):
+        relative = product[key]['path']
+        entry = dict(record(second / relative), path=relative)
+        product[key] = entry
+        data['files'] = [entry if p['path'] == relative else p for p in data['files']]
     data['sha256'] = digest({k:v for k,v in data.items() if k != 'sha256'})
     write_json(path, data)
     sources = [str(first), str(second)]
@@ -133,7 +145,7 @@ def test_database_reuse_retains_expression_without_mapper_or_translation(complet
     root, source_build, env, events = completed_project
     source = source_build/'database'
     other = root/'results/identical/database'; shutil.copytree(source, other)
-    config = configure(root, [str(root/'resources/source/products'), str(source), str(other)])
+    config = configure(root, [str(root/'resources/source/database'), str(source), str(other)])
     first_expression = (source/'expression/runs/A1.tsv').read_bytes()
     build = dataset.prepare(root, 'combined', config)
     assert dataset.submit(build, until='quant', dry_run=True) == []

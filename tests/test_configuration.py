@@ -241,3 +241,32 @@ def test_basal_group_settings(value):
 def test_invalid_basal_group_settings(value):
     with pytest.raises(ValueError, match="phylogeny.outgroup"):
         validate_keys({"phylogeny": {"outgroup": value}})
+
+
+@pytest.mark.parametrize("value", [None, 1, 500])
+def test_max_markers_accepts_positive_integers_or_null(value):
+    validate_keys({"phylogeny": {"max_markers": value}})
+
+
+@pytest.mark.parametrize("value", [True, False, 0, -1, 1.5, "500", "null", [], {}])
+def test_max_markers_rejects_invalid_limits(value):
+    with pytest.raises(ValueError, match="phylogeny.max_markers must be a positive integer or null"):
+        validate_keys({"phylogeny": {"max_markers": value}})
+
+
+def test_snakefile_accepts_null_marker_limit(workflow_project):
+    import os
+    import shutil
+    import subprocess
+    snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
+    if not snakemake:
+        pytest.skip("Snakemake required")
+    override = workflow_project / "override.yaml"
+    override.write_text("phylogeny:\n  max_markers: null\n")
+    result = subprocess.run([snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"),
+                             "--configfile", str(override), "--list-rules"],
+                            cwd=workflow_project, text=True, capture_output=True,
+                            env={**os.environ, "XDG_CACHE_HOME": str(workflow_project / "cache")})
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert "plan_phylogeny" in output, output

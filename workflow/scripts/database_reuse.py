@@ -8,7 +8,7 @@ from dataset_assets import counts, link_file, record, stat_identity, verify
 from mapping_tables import load_tables, relative_file, write_tables
 from portable_build import completion_path
 
-PRODUCTS = ('cds', 'busco', 'abundance', 'protein', 'translation')
+PRODUCTS = ('cds', 'busco', 'abundance', 'protein', 'translation', 'expression', 'expression_qc')
 SAMPLE_FIELDS = ('scientific_name', 'taxid', 'species_id', 'analysis_sample_id', 'run',
                  'private_file', 'lib_layout', 'read1_path', 'read2_path')
 
@@ -34,8 +34,6 @@ def normalize(root, value):
 
 def validate_product(item, product, database, tables, cfg):
     name = item['species']
-    if database['schema_version'] < 4:
-        raise ValueError('reuse_from requires sample identities (schema-4 or newer database)')
     if database['translation'] != cfg['translation'] or database['lineage'] != cfg['busco']['lineage']:
         raise ValueError(f'reuse_from genetic code or BUSCO lineage differs: {name}')
     if database['odb'] != {'version': 'v12', 'node': cfg['odb']['ncbi_tax_id']}:
@@ -69,15 +67,13 @@ def validate_product(item, product, database, tables, cfg):
         raise ValueError(f'reuse_from translation/mapping identity differs: {name}')
     table = relative_file(Path(database['mapping']['path']).parent, mapping['table'])
     verify(table)
-    if 'expression' in product:
-        verify(product['expression']); verify(product['expression_qc'])
-        qc = json.loads(Path(product['expression_qc']['path']).read_text())
-        if (qc.get('species') != name or qc.get('run') != item['row']['run'] or
-                qc.get('multimap') != 'error' or
-                qc.get('abundance', {}).get('sha256') != product['abundance']['sha256'] or
-                qc.get('mapping_table', {}).get('sha256') != table['sha256'] or
-                qc.get('expression', {}).get('sha256') != product['expression']['sha256']):
-            raise ValueError(f'reuse_from expression identity differs: {name}')
+    qc = json.loads(Path(product['expression_qc']['path']).read_text())
+    if (qc.get('species') != name or qc.get('run') != item['row']['run'] or
+            qc.get('multimap') != 'error' or
+            qc.get('abundance', {}).get('sha256') != product['abundance']['sha256'] or
+            qc.get('mapping_table', {}).get('sha256') != table['sha256'] or
+            qc.get('expression', {}).get('sha256') != product['expression']['sha256']):
+        raise ValueError(f'reuse_from expression identity differs: {name}')
     return dict(mapping, table=table), translation
 
 
@@ -103,17 +99,14 @@ def select(paths, items, cfg):
             try:
                 product = data['products'][name]
                 mapping, translation = validate_product(wanted[name], product, data, tables, cfg)
-                identity = {'files': {k: product[k]['sha256'] for k in ('cds', 'busco', 'abundance', 'protein')},
+                identity = {'files': {k: product[k]['sha256'] for k in ('cds', 'busco', 'abundance', 'protein', 'expression')},
                             'mapping': mapping['table']['sha256'], 'counts': product['counts'],
                             'conditions': {stage: product.get('conditions', {}).get(stage) for stage in ('assembly', 'busco', 'quant')},
                             'reference': sorted(tables.get('reference_sha256s', []))}
                 previous = selected.get(name)
-                expression = product.get('expression', {}).get('sha256')
-                old_expression = previous['product'].get('expression', {}).get('sha256') if previous else None
-                if previous and (previous['identity'] != identity or
-                                 (expression and old_expression and expression != old_expression)):
+                if previous and previous['identity'] != identity:
                     raise ValueError(f'conflicting reuse_from databases for {name}: {previous["source"]["path"]} and {path}')
-                if not previous or (expression and not old_expression):
+                if not previous:
                     selected[name] = {'product': product, 'mapping': mapping, 'translation': translation,
                                       'identity': identity, 'source': source}
             except (ValueError, OSError, KeyError) as error:
@@ -167,19 +160,18 @@ def stage(staging, target, selected, cfg):
                    'sequences': info['sequences'], 'protein': dict(protein, path='protein.fa')})
         tables[name] = chosen['mapping']
         references.update(chosen['identity']['reference'])
-        if 'expression' in product:
-            identity = cache_identity({'species': name, 'run': row['run']}, abundance, chosen['mapping']['table'])
-            expression_dir = Path('expression') / identity
-            expression = saved(product['expression'], expression_dir / 'tpm.tsv')
-            qc = copy.deepcopy(json.loads(verify(product['expression_qc']).read_text()))
-            qc.update(abundance=abundance, expression=expression)
-            qc['mapping_table'] = dict(chosen['mapping']['table'],
-                path=str(final / 'odb' / f'v12_{cfg["odb"]["ncbi_tax_id"]}' / 'reused/species' / (product['odb_species'] + '.tsv.gz')))
-            write_json(base / expression_dir / 'qc.json', qc)
-            qc_entry = record(base / expression_dir / 'qc.json')
-            write_json(base / expression_dir / 'receipt.json', {'identity': identity,
-                'files': {'tpm.tsv': dict(expression, path='tpm.tsv'), 'qc.json': dict(qc_entry, path='qc.json')},
-                'reused_from': chosen['source']})
+        identity = cache_identity({'species': name, 'run': row['run']}, abundance, chosen['mapping']['table'])
+        expression_dir = Path('expression') / identity
+        expression = saved(product['expression'], expression_dir / 'tpm.tsv')
+        qc = copy.deepcopy(json.loads(verify(product['expression_qc']).read_text()))
+        qc.update(abundance=abundance, expression=expression)
+        qc['mapping_table'] = dict(chosen['mapping']['table'],
+            path=str(final / 'odb' / f'v12_{cfg["odb"]["ncbi_tax_id"]}' / 'reused/species' / (product['odb_species'] + '.tsv.gz')))
+        write_json(base / expression_dir / 'qc.json', qc)
+        qc_entry = record(base / expression_dir / 'qc.json')
+        write_json(base / expression_dir / 'receipt.json', {'identity': identity,
+            'files': {'tpm.tsv': dict(expression, path='tpm.tsv'), 'qc.json': dict(qc_entry, path='qc.json')},
+            'reused_from': chosen['source']})
     if tables:
         write_tables(base / 'odb' / f'v12_{cfg["odb"]["ncbi_tax_id"]}' / 'reused', tables,
                      node=cfg['odb']['ncbi_tax_id'], references=references)

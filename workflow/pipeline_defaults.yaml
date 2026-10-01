@@ -27,7 +27,7 @@ phylogeny:
   - representatives
   lineage: embryophyta_odb12
   outgroup: auto
-  max_markers: 500
+  max_markers: 500  # null: no marker-count limit.
   min_protein_length: 100
   max_unknown_fraction: 0.05
   min_taxa: 4
@@ -49,3 +49,6 @@ phylogeny:
     collapse_monophyletic: true
 exclude_species: []
 build_manifest: null
+
+storage:
+  keep_intermediates: false  # Remove verified successful job scratch; true retains it for debugging.

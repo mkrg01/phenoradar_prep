@@ -1,10 +1,11 @@
 """Public Slurm time settings preserve duration across execution backends."""
 from pathlib import Path
+import subprocess
 
 import pytest
 import yaml
 
-from phase_config import array_concurrency, execution_settings, merge_slurm, time_minutes, validate_slurm, worker_budgets, workflow_jobs, write_profile
+from phase_config import array_concurrency, execution_settings, merge_slurm, resolve_array_size, time_minutes, validate_slurm, worker_budgets, workflow_jobs, write_profile
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -69,6 +70,18 @@ def test_all_time_fields_reject_yaml_numeric_values(section):
 @pytest.fixture
 def public_slurm():
     return yaml.safe_load((ROOT / 'config/build.yaml').read_text())['slurm']
+
+
+def test_build_config_has_no_array_size_setting(public_slurm):
+    assert 'array_size' not in public_slurm
+    assert 'array_size' not in validate_slurm(public_slurm)
+
+
+@pytest.mark.parametrize('value', [None, 1, 1000])
+def test_legacy_array_size_is_ignored_without_mutation(public_slurm, value):
+    public_slurm['array_size'] = value
+    assert 'array_size' not in validate_slurm(public_slurm)
+    assert public_slurm['array_size'] == value
 
 
 def test_finite_public_config_preserves_legacy_profile_and_array_caps(public_slurm, tmp_path):
@@ -181,3 +194,47 @@ def test_null_override_removes_legacy_count_caps_but_keeps_cpu_budget(public_slu
     assert updated['jobs'] is updated['concurrency'] is None
     assert array_concurrency(updated, 'assembly') == 4
     assert slurm['jobs'] == slurm['concurrency'] == 2
+
+
+@pytest.mark.parametrize('configuration,expected', [
+    ('MaxArraySize = 1001\nSchedulerParameters = (null)\n', 1000),
+    ('MaxArraySize = 4000001\nSchedulerParameters = (null)\n', 4000000),
+    ('MaxArraySize = 100001\nSchedulerParameters = bf_continue,max_array_tasks=1000\n', 1000),
+    ('MaxArraySize = 3\nSchedulerParameters = max_array_tasks=10,bf_continue\n', 2),
+    ('  MaxArraySize = 11\nSchedulerParameters = bf_continue, max_array_tasks=4\n', 4),
+])
+def test_detect_array_size_from_slurm(monkeypatch, configuration, expected):
+    calls = []
+    def query(command, **kwargs):
+        calls.append(command)
+        assert kwargs == {'text': True, 'stderr': subprocess.PIPE, 'timeout': 10}
+        return configuration
+    monkeypatch.setattr(subprocess, 'check_output', query)
+    assert resolve_array_size() == expected
+    assert calls == [['scontrol', 'show', 'config']]
+
+
+@pytest.mark.parametrize('configuration', [
+    '', 'SchedulerParameters = (null)\n', 'MaxArraySize = 1001\n',
+    'MaxArraySize = invalid\nSchedulerParameters = (null)\n',
+    'MaxArraySize = 0\nSchedulerParameters = (null)\n',
+    'MaxArraySize = 1\nSchedulerParameters = (null)\n',
+    'MaxArraySize = 1001\nSchedulerParameters = max_array_tasks=0\n',
+    'MaxArraySize = 1001\nSchedulerParameters = max_array_tasks=invalid\n',
+    'MaxArraySize = 1001\nSchedulerParameters = max_array_tasks\n',
+])
+def test_unusable_slurm_array_limits_fail_explicitly(monkeypatch, configuration):
+    monkeypatch.setattr(subprocess, 'check_output', lambda *args, **kwargs: configuration)
+    with pytest.raises(ValueError, match='Slurm'):
+        resolve_array_size()
+
+
+@pytest.mark.parametrize('error', [FileNotFoundError('scontrol'),
+    subprocess.CalledProcessError(1, ['scontrol', 'show', 'config']),
+    subprocess.TimeoutExpired(['scontrol', 'show', 'config'], 10)])
+def test_array_limit_query_failure_is_reported(monkeypatch, error):
+    def fail(*args, **kwargs):
+        raise error
+    monkeypatch.setattr(subprocess, 'check_output', fail)
+    with pytest.raises(ValueError, match='Cannot query Slurm array limits'):
+        resolve_array_size()

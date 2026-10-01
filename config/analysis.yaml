@@ -16,7 +16,7 @@ phylogeny:
   trees:  # Any of all, phenotyped, representatives; [] disables tree inference.
   - representatives
   outgroup: auto  # Infer a basal group from taxonomy, or supply species/sample ID(s).
-  max_markers: 500  # Maximum BUSCO markers, ranked by species coverage.
+  max_markers: 500  # Maximum BUSCO markers, ranked by species coverage; null: no limit.
   min_protein_length: 100  # Minimum known amino acids per extracted/trimmed sequence.
   max_unknown_fraction: 0.05  # Maximum unknown amino-acid fraction in prepared proteins.
   min_taxa: 4  # Minimum distinct biological species per marker; must be at least 4.
@@ -108,3 +108,5 @@ slurm:
       cpus: 1
       mem_gb: 8
       time: "1-00:00:00"
+storage:
+  keep_intermediates: false  # Remove verified successful job scratch; true retains it for debugging.

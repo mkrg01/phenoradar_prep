@@ -115,28 +115,19 @@ def test_bundle_rejects_missing_corrupt_and_escaping_paths(completed_project):
     with pytest.raises(ValueError,match='escapes bundle'): load_complete(dest,verify_files=False)
 
 
-def test_legacy_products_remain_usable(completed_project):
-    root, build, env, _ = completed_project
-    legacy = root / 'builds/legacy/products'
-    shutil.copytree(build / 'database', legacy)
+@pytest.mark.parametrize('schema', [3, 4])
+def test_unsupported_database_schema_is_rejected(tmp_path, schema):
+    legacy = tmp_path / 'products'
+    legacy.mkdir()
     manifest = legacy / 'manifest.json'
-    old = json.loads(manifest.read_text())
-    old.update(schema_version=4, build_id='legacy')
-    old.pop('tpm')
-    old['files'] = [entry for entry in old['files'] if not entry['path'].startswith('expression/')]
-    for product in old['products'].values():
-        for key in ('expression', 'expression_qc', 'source_expression_qc_sha256'):
-            product.pop(key)
-    old['sha256'] = digest({k:v for k,v in old.items() if k != 'sha256'})
+    old = {'schema_version': schema, 'kind': 'completed_build'}
+    old['sha256'] = digest(old)
     write_json(manifest, old)
-    shutil.rmtree(legacy / 'expression')
-    config = root / 'legacy-analysis.yaml'
-    config.write_text('inputs:\n  species_trait: null\nphylogeny:\n  trees: []\n  contrast_pairs:\n    enabled: false\n')
-    assert load_complete(legacy.parent)['schema_version'] == 4
-    downstream = analysis.prepare(root, 'legacy', config, legacy.parent)
-    assert downstream == root / 'results/legacy/downstream/legacy'
-    execute(root, downstream, 'all', env)
-    assert (downstream / 'orthogroups/expression/tpm.tsv').is_file()
+    for path in (legacy, manifest):
+        with pytest.raises(ValueError, match='unsupported database format: expected schema 5'):
+            load_complete(path)
+    with pytest.raises(ValueError, match='build is incomplete'):
+        load_complete(legacy.parent)
 
 
 def test_database_expression_and_policy_are_required(completed_project):

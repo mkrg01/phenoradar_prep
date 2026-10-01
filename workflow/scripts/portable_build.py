@@ -9,8 +9,7 @@ from pathlib import Path
 from common import write_json, write_tsv
 from dataset_assets import digest, link_file, record, stat_identity, verify
 
-PRODUCT_FILES = ('cds', 'busco', 'abundance', 'protein', 'translation')
-EXPRESSION_FILES = ('expression', 'expression_qc')
+PRODUCT_FILES = ('cds', 'busco', 'abundance', 'protein', 'translation', 'expression', 'expression_qc')
 
 
 def inside_bundle(root, relative):
@@ -30,8 +29,6 @@ def completion_path(path):
             path /= 'manifest.json'
         elif (path / 'completed.json').is_file():
             path /= 'completed.json'
-        elif (path / 'products/manifest.json').is_file():
-            path /= 'products/manifest.json'
         else:
             path /= 'database/manifest.json'
     if not path.is_file():
@@ -69,19 +66,15 @@ def load_products(path, data, verify_files=True):
 
     bound['mapping'] = bind(bound['mapping'])
     for species, product in bound['products'].items():
-        if data['schema_version'] >= 4:
-            from sample_identity import annotate
-            if annotate(product['row']) != product['row'] or product['row']['analysis_sample_id'] != species:
-                raise ValueError('product sample identity differs from metadata')
-        if product['row'].get('analysis_sample_id', product['row']['scientific_name'].replace(' ', '_')) != species:
-            raise ValueError('product species differs from metadata')
-        keys = PRODUCT_FILES + (EXPRESSION_FILES if data['schema_version'] >= 5 else ())
-        for key in keys:
+        from sample_identity import annotate
+        if annotate(product['row']) != product['row'] or product['row']['analysis_sample_id'] != species:
+            raise ValueError('product sample identity differs from metadata')
+        for key in PRODUCT_FILES:
             if key not in product: raise ValueError(f'incomplete database product: {species}: {key}')
             product[key] = bind(product[key])
     for required in ('metadata.tsv', 'busco/summary.tsv', 'excluded_accessions.tsv', 'excluded_runs.tsv'):
         if required not in files: raise ValueError(f'incomplete product bundle: {required}')
-    if data['schema_version'] >= 5 and data.get('tpm', {}).get('multimap') != 'error':
+    if data.get('tpm', {}).get('multimap') != 'error':
         raise ValueError('database TPM policy must be error')
     bound['input'] = str(root)
     bound['bundle_root'] = str(root)
@@ -94,7 +87,7 @@ def input_entries(completed):
         path = Path(entry['path'])
         if not path.is_relative_to(root): continue
         relative = path.relative_to(root)
-        if completed['schema_version'] == 1 or relative == Path('metadata.tsv') or relative.parts[0] in {'cds', 'busco', 'quant'}:
+        if relative == Path('metadata.tsv') or relative.parts[0] in {'cds', 'busco', 'quant'}:
             yield entry, relative
 
 
@@ -102,7 +95,7 @@ def publish_products(build, data):
     """Publish a relocatable bundle after the ordinary completion checks pass."""
     from build_products import load_complete
     build = Path(build).resolve()
-    target = build / ('database' if data['schema_version'] >= 5 else 'products')
+    target = build / 'database'
     if target.exists():
         existing = load_complete(target)
         if existing['build_id'] != data['build_id']:
@@ -116,12 +109,12 @@ def publish_products(build, data):
         for species, product in data['products'].items():
             if any(product.get(key) != existing['products'][species].get(key) for key in ('row', 'conditions')):
                 raise ValueError('existing products have different metadata or conditions')
-            for key in ('cds', 'busco', 'abundance', 'protein') + (('expression',) if data['schema_version'] >= 5 else ()):
+            for key in ('cds', 'busco', 'abundance', 'protein', 'expression'):
                 if product[key]['sha256'] != existing['products'][species][key]['sha256']:
                     raise ValueError('existing products differ from completed build')
             if product['translation']['sha256'] != existing['products'][species]['source_translation_sha256']:
                 raise ValueError('existing translation differs from completed build')
-            if data['schema_version'] >= 5 and product['expression_qc']['sha256'] != existing['products'][species]['source_expression_qc_sha256']:
+            if product['expression_qc']['sha256'] != existing['products'][species]['source_expression_qc_sha256']:
                 raise ValueError('existing expression QC differs from completed build')
         from mapping_tables import load_tables
         old_tables = load_tables(existing['mapping']['path'])['tables']
@@ -174,19 +167,18 @@ def publish_products(build, data):
             translation_relative = protein_relative.with_suffix('.json')
             write_json(staging / translation_relative, translation)
             product['translation'] = created(translation_relative)
-            if data['schema_version'] >= 5:
-                run = product['row']['run']
-                relative = Path('expression/runs') / f'{run}.tsv'
-                product['expression'] = add(product['expression'], relative)
-                product['source_expression_qc_sha256'] = product['expression_qc']['sha256']
-                qc = json.loads(verify(product['expression_qc']).read_text())
-                qc['abundance'] = {k:v for k,v in product['abundance'].items() if k != 'stat'}
-                qc['expression'] = {k:v for k,v in product['expression'].items() if k != 'stat'}
-                qc['mapping_table']['path'] = f"odb/species/{product['odb_species']}.tsv.gz"
-                qc['mapping_table'].pop('stat', None)
-                relative = relative.with_suffix('.qc.json')
-                write_json(staging / relative, qc)
-                product['expression_qc'] = created(relative)
+            run = product['row']['run']
+            relative = Path('expression/runs') / f'{run}.tsv'
+            product['expression'] = add(product['expression'], relative)
+            product['source_expression_qc_sha256'] = product['expression_qc']['sha256']
+            qc = json.loads(verify(product['expression_qc']).read_text())
+            qc['abundance'] = {k:v for k,v in product['abundance'].items() if k != 'stat'}
+            qc['expression'] = {k:v for k,v in product['expression'].items() if k != 'stat'}
+            qc['mapping_table']['path'] = f"odb/species/{product['odb_species']}.tsv.gz"
+            qc['mapping_table'].pop('stat', None)
+            relative = relative.with_suffix('.qc.json')
+            write_json(staging / relative, qc)
+            product['expression_qc'] = created(relative)
         from mapping_tables import load_tables, relative_file, write_tables
         source_mapping = verify(data['mapping'])
         snapshot = load_tables(source_mapping)
@@ -201,7 +193,7 @@ def publish_products(build, data):
         mapping = created('odb/snapshot.json')
         portable = {k:copy.deepcopy(data[k]) for k in
                     ('kind','build_id','created_at','fields','translation','lineage','odb','excluded_runs')}
-        if data['schema_version'] >= 5: portable['tpm'] = copy.deepcopy(data['tpm'])
+        portable['tpm'] = copy.deepcopy(data['tpm'])
         portable.update(schema_version=data["schema_version"], products=products, mapping=mapping, files=list(files.values()))
         portable['sha256'] = digest(portable)
         write_json(staging / 'manifest.json', portable)

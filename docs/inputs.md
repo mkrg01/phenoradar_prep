@@ -8,13 +8,13 @@ separately.
 
 ## File formats
 
-| File | Required columns or format | Setting |
-| --- | --- | --- |
-| `input/metadata.tsv` | TSV: `scientific_name`, unique `run`, positive NCBI `taxid` | Build `metadata` |
-| `config/excluded_accessions.tsv` | TSV: `accession`, optional `reason` | Build `excluded_accessions` |
-| `input/species_trait.tsv` | TSV: `species` and the chosen trait column | Analysis `inputs.species_trait`, `trait` |
-| `input/species_list.txt` | One biological species ID or exact sample ID per line | Analysis `inputs.species_list` |
-| `input/calibrations.tsv` | TSV: `taxa`, `min_age_ma`, `max_age_ma`, `source` | Analysis `inputs.calibrations`; see [dating](dating.md#manual-calibrations) |
+| File | Required columns or format |
+| --- | --- |
+| `input/metadata.tsv` | TSV: `scientific_name`, unique `run`, positive NCBI `taxid` |
+| `config/excluded_accessions.tsv` | TSV: `accession`, optional `reason` |
+| `input/species_trait.tsv` | TSV: `species` and the chosen trait column |
+| `input/species_list.txt` | One biological species ID or exact sample ID per line |
+| `input/calibrations.tsv` | TSV: `taxa`, `min_age_ma`, `max_age_ma`, `source`; see [dating](dating.md#manual-calibrations) |
 
 Only metadata is always required. Other files depend on your analysis;
 configured paths must exist, so set unused optional paths to `null`. The supplied

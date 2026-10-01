@@ -162,7 +162,7 @@ def test_protein_validation_is_explicit(tmp_path, content, error):
 
 
 def test_resume_verifies_outputs_and_input_tool_options(kofam_job):
-    args = kofam_job["args"]
+    args = dict(kofam_job["args"], keep_intermediates=True)
     first = run(**args)
     work = Path(json.loads((args["work_dir"] / "status.json").read_text())["work"])
     retained = {p: p.stat().st_mtime_ns for p in work.rglob("*") if p.is_file()}

@@ -256,7 +256,7 @@ def test_odb_resume_is_bound_to_input_contents(fake_odb, frozen_reference, tmp_p
     monkeypatch.setenv("FAKE_ODB_LOG", str(events))
     args = dict(manifest=manifest, reference=frozen_reference / "reference.json", output_dir=tmp_path / "out",
                 work_dir=tmp_path / "work", label="chunk_000", command=str(fake_odb), jobs=1,
-                batch_size=1)
+                batch_size=1, keep_intermediates=True)
     with pytest.raises(subprocess.CalledProcessError):
         run_odb(**args)
     run_odb(**args)
@@ -276,6 +276,7 @@ def test_odb_resume_is_bound_to_input_contents(fake_odb, frozen_reference, tmp_p
     assert "OP_SAVE_JOBLOG=1" in (tmp_path / "out/orthologer_conf.sh").read_text()
     # A failed attempt must not leave a stale completion marker in reused work.
     fail.touch()
+    (tmp_path / "out/chunk_000.og.annotations").unlink()
     with pytest.raises(subprocess.CalledProcessError):
         run_odb(**args)
     assert retained.is_file()
@@ -457,7 +458,10 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     assert json.loads((out / "orthogroups/mapping/snapshot.json").read_text())["qc"]["duplicate_pairs_removed"] == 4
     completed_work = {p: p.stat().st_mtime_ns for p in
                       (tmp_path / "work/test/orthogroups/mapping").glob("chunk_*/*/completed.json")}
-    assert len(completed_work) == (0 if reuse else 1)
+    assert not completed_work  # successful scratch is removed after publication
+    if not reuse:
+        cleanup = tmp_path / "work/test/orthogroups/mapping/chunk_000/cleanup.json"
+        assert json.loads(cleanup.read_text())["state"] == "complete"
     assert "Nothing to be done" in execute()
     assert all(p.stat().st_mtime_ns == stamp for p, stamp in completed_work.items())
     assert (len(events.read_text().splitlines()) if events.exists() else 0) == (0 if reuse else 1)

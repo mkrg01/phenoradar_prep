@@ -11,16 +11,21 @@ from pathlib import Path
 import pytest
 import yaml
 
-from common import read_tsv, write_json, write_tsv
+from common import file_record, read_tsv, write_json, write_tsv
 from dataset import (gg_environment, load, materialize, plan, prepare, status, submit, worker)
 from dataset_assets import (COUNTS, identities, register_busco, register_quant,
                             register_reference, resolve)
+
+from phase_config import resolve_array_size
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
-def dataset_project(tmp_path, tiny_inputs):
+def dataset_project(tmp_path, tiny_inputs, monkeypatch):
+    # General workflow tests must not depend on a real Slurm controller.
+    # Query integration tests restore the real helper with a fake scontrol.
+    monkeypatch.setattr('phase_config.resolve_array_size', lambda: 1000)
     root = tmp_path / "project"
     root.mkdir()
     shutil.copytree(ROOT / "config", root / "config")
@@ -317,12 +322,8 @@ if os.environ[prefix+"RUN_AMALGKIT_QUANT"] == "1":
     return repo
 
 
-def new_dataset(root, names=("New plant",), array_size=None):
+def new_dataset(root, names=("New plant",)):
     fake_genegalleon(root)
-    if array_size is not None:
-        cfg = yaml.safe_load((root / "config/build.yaml").read_text())
-        cfg["slurm"]["array_size"] = array_size
-        (root / "config/build.yaml").write_text(yaml.safe_dump(cfg))
     fields = ["scientific_name", "run", "taxid"]
     write_tsv(root / "input/new.tsv", fields, [dict(zip(fields, [name, f"SRR{i+1}", "42"])) for i,name in enumerate(names)])
     return prepare(root, "addition", root / "config/build.yaml", "input/new.tsv")
@@ -485,7 +486,8 @@ def test_retry_quarantine_does_not_touch_another_species_with_same_prefix(datase
 
 
 def test_split_slurm_arrays_preserve_species_identity_and_bound_concurrency(dataset_project, monkeypatch):
-    path = new_dataset(dataset_project, ("Alpha new", "Beta new", "Gamma new"), array_size=2)
+    path = new_dataset(dataset_project, ("Alpha new", "Beta new", "Gamma new"))
+    monkeypatch.setattr('phase_config.resolve_array_size', lambda: 2)
     commands = submit(path, until="assembly", dry_run=True)
     assert len(commands) == 2
     assert "--array=1,2" in commands[0]
@@ -508,6 +510,126 @@ def test_split_slurm_arrays_preserve_species_identity_and_bound_concurrency(data
     assert [j["indices"] for j in batch["jobs"]] == [[1, 2], [1, 2], [3]]
     assert "--dependency=afterok:1001" in calls[1]
     assert "--dependency=afterok:1002" in calls[2]
+
+
+@pytest.mark.parametrize('limits,suffix', [({}, ''), ({'jobs': 2}, '%2'), ({'cpus': 8}, '%2')])
+def test_auto_array_size_preserves_stage_dependencies_and_sparse_retry(dataset_project, monkeypatch, limits, suffix):
+    config = dataset_project / 'config/build.yaml'
+    cfg = yaml.safe_load(config.read_text())
+    cfg['slurm']['total_limits'].update(limits)
+    config.write_text(yaml.safe_dump(cfg))
+    path = new_dataset(dataset_project, ('Alpha new', 'Beta new', 'Gamma new'))
+    frozen = (path / 'build.json').read_bytes()
+    queries = []
+    def detect():
+        queries.append(True)
+        return 3
+    monkeypatch.setattr('phase_config.resolve_array_size', detect)
+    commands = submit(path, dry_run=True)
+    assert len(commands) == 4  # One array per stage, followed by the mapping controller.
+    assert all('--array=1,2,3' + suffix in command for command in commands[:3])
+    assert not any(arg.startswith('--dependency=') for arg in commands[0])
+    for command, predecessor in zip(commands[1:], ('assembly', 'busco', 'quant')):
+        assert '--dependency=afterok:JOB_ID_' + predecessor in command
+        assert '--kill-on-invalid-dep=yes' in command
+    # An array task failure must not change the identities of the remaining tasks.
+    for task_id in (1, 2, 3):
+        env = dict(os.environ, SLURM_ARRAY_TASK_ID=str(task_id))
+        if task_id == 2:
+            env['FAKE_GG_FAIL_ASSEMBLY'] = '1'
+        result = subprocess.run(['bash', commands[0][-1]], cwd=dataset_project, env=env,
+                                text=True, capture_output=True)
+        assert bool(result.returncode) == (task_id == 2), result.stderr
+    assert [row['assembly'] for row in status(path)] == ['reuse', 'pending', 'reuse']
+    calls = []
+    def scheduler(command, **kwargs):
+        assert command[0] == 'sbatch'
+        calls.append(command)
+        return str(1000 + len(calls)) + '\n'
+    monkeypatch.setattr(subprocess, 'check_output', scheduler)
+    retry = submit(path)
+    assert '--array=2' + suffix in retry[0]
+    assert len(retry) == 4
+    batch = json.loads((path / 'jobs/submission_0002.json').read_text())
+    assert [job['array_offset'] for job in batch['jobs']] == [0, 0, 0, 0]
+    assert [job['indices'] for job in batch['jobs']] == [[2], [1, 2, 3], [1, 2, 3], None]
+    resources = json.loads((path / 'jobs/submission_0002.resources.json').read_text())
+    assert 'array_size' not in resources['slurm']
+    assert resources['resolved_array_size'] == 3
+    assert (path / 'build.json').read_bytes() == frozen
+    subprocess.run(['bash', retry[0][-1]], cwd=dataset_project,
+                   env=dict(os.environ, SLURM_ARRAY_TASK_ID='2'), check=True)
+    assert all(row['assembly'] == 'reuse' for row in status(path))
+    assert submit(path, until='assembly', dry_run=True) == []
+    assert len(queries) == 2  # Once per submission; no query when no array is needed.
+
+
+def test_legacy_array_sizes_in_saved_build_and_override_are_ignored(dataset_project, monkeypatch):
+    path = new_dataset(dataset_project, ('Alpha new', 'Beta new', 'Gamma new'))
+    # Model a frozen build prepared before array_size was retired.
+    manifest = load(path)
+    manifest['config']['slurm']['array_size'] = 2
+    write_json(path / 'build.json', manifest)
+    hashes = json.loads((path / 'checksums.json').read_text())
+    hashes['build.json'] = file_record(path / 'build.json')['sha256']
+    write_json(path / 'checksums.json', hashes)
+    original = (path / 'build.json').read_bytes()
+    resources = dataset_project / 'retry.yaml'
+    resources.write_text('slurm:\n  array_size: 1\n')
+    monkeypatch.setattr('phase_config.resolve_array_size', lambda: 3)
+    commands = submit(path, until='assembly', dry_run=True, resources=resources)
+    assert len(commands) == 1
+    assert '--array=1,2,3' in commands[0]
+    saved = json.loads((path / 'jobs/submission_0001.resources.json').read_text())
+    assert 'array_size' not in saved['slurm']
+    assert saved['resolved_array_size'] == 3
+    assert (path / 'build.json').read_bytes() == original
+    assert load(path)['config']['slurm']['array_size'] == 2
+
+
+def test_auto_array_size_preserves_sample_ids_when_cluster_limit_changes(dataset_project, monkeypatch):
+    path = new_dataset(dataset_project, ('Alpha new', 'Beta new', 'Gamma new'))
+    monkeypatch.setattr('phase_config.resolve_array_size', resolve_array_size)
+    outputs = iter(['MaxArraySize = 4\nSchedulerParameters = (null)\n',
+                    'MaxArraySize = 1001\nSchedulerParameters = max_array_tasks=2\n'])
+    calls = []
+    def query(command, **kwargs):
+        assert command == ['scontrol', 'show', 'config']
+        calls.append(command)
+        return next(outputs)
+    monkeypatch.setattr(subprocess, 'check_output', query)
+    commands = submit(path, until='assembly', dry_run=True)
+    assert len(commands) == 1
+    assert '--array=1,2,3' in commands[0]
+    for task_id in (1, 2):
+        subprocess.run(['bash', commands[0][-1]], cwd=dataset_project,
+                       env=dict(os.environ, SLURM_ARRAY_TASK_ID=str(task_id)), check=True)
+    # A lower detected limit changes local array indices, never sample identity.
+    retry = submit(path, until='assembly', dry_run=True)
+    assert len(retry) == 1
+    assert '--array=1' in retry[0]
+    saved = json.loads((path / 'jobs/submission_0002.resources.json').read_text())
+    assert 'array_size' not in saved['slurm']
+    assert saved['resolved_array_size'] == 2
+    subprocess.run(['bash', retry[0][-1]], cwd=dataset_project,
+                   env=dict(os.environ, SLURM_ARRAY_TASK_ID='1'), check=True)
+    assert all(row['assembly'] == 'reuse' for row in status(path))
+    assert submit(path, until='assembly', dry_run=True) == []
+    assert len(calls) == 2
+
+
+def test_auto_array_query_failure_prevents_submission(dataset_project, monkeypatch):
+    path = new_dataset(dataset_project)
+    monkeypatch.setattr('phase_config.resolve_array_size', resolve_array_size)
+    calls = []
+    def fail(command, **kwargs):
+        calls.append(command)
+        raise subprocess.CalledProcessError(1, command)
+    monkeypatch.setattr(subprocess, 'check_output', fail)
+    with pytest.raises(ValueError, match='Cannot query Slurm array limits'):
+        submit(path)
+    assert calls == [['scontrol', 'show', 'config']]
+    assert not list((path / 'jobs').glob('submission_*.json'))
 
 
 def test_extra_native_metadata_file_cannot_shift_species_array_index(dataset_project):

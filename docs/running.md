@@ -66,14 +66,13 @@ Edit `slurm` in the relevant build or analysis config:
 | Setting | Controls |
 | --- | --- |
 | `partition` | Slurm partition; `null` uses the cluster default |
-| `array_size` (build only) | Sample slots per array batch |
 | `total_limits.jobs` | Running array tasks or queued/running Snakemake workers; excludes the controller |
 | `total_limits.cpus`, `total_limits.mem_gb` | Total requested CPUs/memory for one build or analysis, including its controller |
 | `per_job_resources.<job>` | Per-job `cpus`, `mem_gb`, and `time` |
 
 A `null` total limit adds no workflow cap. Limits apply independently to each
 run and measure requested allocations, not actual usage. Cluster limits still
-apply; keep `array_size` below the site's `MaxArraySize`.
+apply.
 
 ```yaml
 slurm:
@@ -91,9 +90,15 @@ workers, the controller's allocation is subtracted first; queued workers also
 occupy budget. A job that cannot fit fails with an error rather than receiving
 fewer resources.
 
-Assembly, BUSCO, and quantification run as sample arrays. Batches and stages
-wait for predecessor success (`afterok`); a failed task blocks later batches.
-Mapping and analysis each use a controller that submits separate worker jobs.
+Assembly, BUSCO, and quantification run as arrays, split automatically to fit
+[Slurm's array limits](https://slurm.schedmd.com/job_array.html). Array submissions
+require access to `scontrol show config`, including with `--dry-run`; if the limits
+cannot be read, no jobs are submitted.
+
+A failed array task blocks later batches and stages (`afterok`). Other tasks in
+the same array can continue. Concurrency follows `total_limits` and Slurm.
+
+Mapping and analysis use a controller to submit separate worker jobs.
 
 Job names include `assembly`, `busco`, `quant`, `controller`, and rule names such
 as `odb_map`. Config overrides take precedence over rule defaults; the supplied

@@ -67,7 +67,7 @@ rule odb_map:
         reference=f"{REFERENCE}/reference.json",
         inventory=f"{REFERENCE}/files.json",
         code=f"{SCRIPTS}/run_odb_chunk.py",
-        helpers=[f"{SCRIPTS}/odb_map.sh", f"{SCRIPTS}/odb_environment.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/make_manifests.py", f"{SCRIPTS}/incremental_odb.py"],
+        helpers=[f"{SCRIPTS}/cleanup_work.py", f"{SCRIPTS}/odb_map.sh", f"{SCRIPTS}/odb_environment.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/make_manifests.py", f"{SCRIPTS}/incremental_odb.py"],
         samples=f"{META}/samples.tsv"
     output:
         annotations=f"{CHUNKS}/{{chunk}}/{{chunk}}.og.annotations",
@@ -83,6 +83,9 @@ rule odb_map:
         version=ODB_VERSION,
         node=config["odb"]["ncbi_tax_id"],
         batch=lambda wildcards, threads: 4 * threads,  # Internal jobs per batch.
+        keep=["--keep-intermediates"] if config["storage"]["keep_intermediates"] else [],
+        keep_work=int(config["storage"]["keep_intermediates"]),
+        cleanup=[PYTHON, f"{SCRIPTS}/cleanup_work.py", "odb"],
         incremental=int(INCREMENTAL_ODB),
         publish=([PYTHON, f"{SCRIPTS}/incremental_odb.py", "publish", "--samples", f"{META}/samples.tsv",
                   "--protein-dir", PROTEINS, "--cache-dir", ODB_CACHE, "--version", ODB_VERSION,
@@ -96,9 +99,12 @@ rule odb_map:
         "{PYTHON:q} {input.code:q} --manifest {params.manifest:q} --reference {input.reference:q} "
         "--output-dir {params.out:q} --work-dir {params.work:q} --label {wildcards.chunk:q} "
         "--command {params.command:q} --prefix={params.prefix:q} --version {params.version:q} "
-        "--node {params.node} --jobs {threads} --batch-size {params.batch} > {log:q} 2>&1; "
+        "--node {params.node} --jobs {threads} --batch-size {params.batch} --defer-cleanup {params.keep:q} > {log:q} 2>&1; "
         "if [ {params.incremental} -eq 1 ]; then "
-        "{params.publish:q} --chunk-dir {params.out:q} --label {wildcards.chunk:q} >> {log:q} 2>&1; fi"
+        "{params.publish:q} --chunk-dir {params.out:q} --label {wildcards.chunk:q} >> {log:q} 2>&1; fi; "
+        "if [ {params.keep_work} -eq 0 ]; then "
+        "{params.cleanup:q} --work-dir {params.work:q}/{wildcards.chunk:q} --output-dir {params.out:q} "
+        "--apply >> {log:q} 2>&1; fi"
 
 
 rule collect_odb:
