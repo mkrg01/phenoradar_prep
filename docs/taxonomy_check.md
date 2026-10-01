@@ -1,14 +1,14 @@
-# Taxonomy check with MonoPhy
+# Taxonomy check
 
 [Documentation](index.md) · [Species exclusion](species_filter.md)
 
-`taxonomy_check` compares rooted BUSCO trees with NCBI taxonomy using MonoPhy.
-It reports non-monophyletic groups and intruder/outlier tips linked to sample
-runs. Flags support review; they never exclude species automatically.
+MonoPhy compares rooted BUSCO trees with NCBI taxonomy and links conflicting
+placements to RNA-seq runs. Reports support review; they never exclude samples
+automatically.
 
 ## Configuration and execution
 
-Set these options before [preparing analysis](datasets.md#run-an-analysis):
+Before preparing the analysis:
 
 ```yaml
 phylogeny:
@@ -21,49 +21,41 @@ phylogeny:
 ```
 
 ```bash
-./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929 --target taxonomy_check
+./run_analysis.sh submit --analysis results/leaf/downstream/carnivory --target taxonomy_check
 ```
 
-The enabled flag is required and includes reports in `all`. The target follows
-`phylogeny.trees`, including missing inference. Representative trees are unsupported.
-Review jobs default to 1 CPU/8 GB; inference steps use their own resources.
+The target includes missing inference and requires the enabled flag. Reports
+also run with `all`. Supported tree sets are `all` and `phenotyped`.
+Review jobs default to 1 CPU/8 GB.
 
-Choose unique NCBI `ranks`. `outlierlevel` is the required focal-group fraction
-inside a candidate core clade, in `(0, 1]`; it is not confidence.
-`collapse_monophyletic` affects figures only.
+`outlierlevel` is the required focal-group fraction inside a candidate core
+clade, in `(0, 1]`; it is not confidence. `collapse_monophyletic` affects figures only.
 
-## Interpretation
-
-An **outlier** belongs to the focal group but falls outside its selected core
-clade; an **intruder** belongs to another group but falls inside. A tip can have
-both roles for different groups. `focal_taxon` names the assessed group, not a
-corrected identity.
-
-Missing ranks are omitted per assessment. Single-tip groups cannot be assessed
-for their own monophyly, and some non-monophyletic groups yield no outliers.
-There is no branch-support filter or probability of mislabeling.
-
-Flags or their absence do not verify identity: sampling, taxonomy, paralogy,
-and tree error can explain conflicts. Each flagged sample tip is linked to its
-RNA-seq run; establishing misidentification or contamination requires further
-sequence analysis.
-
-## Outputs and figures
+## Read the reports
 
 Under `results/<build>/downstream/<analysis>/phylogeny/<set>/taxonomy_check/`:
 
 | File | Use |
 | --- | --- |
 | `taxon_results.tsv` | Start here: monophyly and intruder/outlier counts by rank/group |
-| `candidates.tsv` | Tip events by focal group/role, linked to runs |
-| `samples.tsv`, `rank_status.tsv` | Run-level review and species/rank roles |
+| `candidates.tsv` | Flagged tips, roles, and associated runs |
+| `samples.tsv`, `rank_status.tsv` | Sample/rank review |
 | `taxonomy.tsv`, `group_members.tsv` | Registered taxonomy and assessed membership |
-| `ranks/<rank>/` | Assessment tree, native MonoPhy result, PDF/SVG figures, and displayed membership |
+| `ranks/<rank>/` | Assessment tree, native results, and PDF/SVG figures |
 | `summary.json`, `engine.json`, `R_session.txt` | Settings and provenance |
 
-Figure colors denote registered groups: triangles mark intruders, squares
-outliers, diamonds both, and gray tips missing ranks. Unflagged monophyletic
-groups may be collapsed; use source/assessment trees for lengths and supports.
+An **outlier** belongs to the focal group but falls outside its selected core
+clade; an **intruder** belongs to another group but falls inside. A tip may have
+both roles for different groups. `focal_taxon` is the assessed group, not a
+corrected identity.
+
+Figures use triangles for intruders, squares for outliers, diamonds for both,
+and gray for missing ranks. Unflagged monophyletic groups may be collapsed.
+
+Missing ranks and single-tip groups cannot be assessed for their own monophyly.
+There is no support filter or probability of mislabeling. Sampling, taxonomy,
+paralogy, or tree error can cause conflicts; flags alone cannot establish
+misidentification or contamination.
 
 ## References
 

@@ -2,42 +2,35 @@
 
 [Documentation](index.md) · [Development](development.md)
 
-## Maintainer steps
+## Publish a release
 
-Every branch push and pull request runs **Actions → Tests** with the full Python
-test suite. For the same local checks, install the
-[test dependencies](development.md#running-tests) first. Real-tool container
-smoke checks also run during release, and must pass before publication.
+1. Set [VERSION](../VERSION) to an unused, higher `major.minor.patch` value without
+   a leading `v`.
+2. Commit and push or merge into `main`.
+3. Wait for **Actions → Release** to finish before using the image or starting
+   another release.
 
-1. Update [VERSION](../VERSION) to an unused, higher `major.minor.patch` value
-   without a leading `v`.
-2. Commit and push or merge into `main`, then wait for **Actions → Release** to
-   finish before using the new image. Finish one release before starting another.
+The [release workflow](../.github/workflows/release.yml) runs tests and container
+smoke checks, then publishes the image, Git tag, and GitHub Release. CI generates
+the Dockerfile from the environment definitions; no manual regeneration is needed.
 
-The [Release workflow](../.github/workflows/release.yml) tests and publishes the
-matching container, Git tag, and GitHub Release. CI generates the Dockerfile from
-the release commit's environment definitions and installers; no manual regeneration
-is required. Tags and image tags use `v<VERSION>`;
-the image is `ghcr.io/mkrg01/phenoradar_prep:v<VERSION>`. The Release's `image.json`
-records its exact digest and source commit.
-
-`VERSION` is the only number to edit. CI never commits to `main`, so no
-synchronization pull is needed. Ordinary commits leave published versions intact.
+Tags use `v<VERSION>` and images use `ghcr.io/mkrg01/phenoradar_prep:v<VERSION>`.
+The release's `image.json` records the exact image digest and source commit.
+`VERSION` is the only version number to edit.
 
 ## Repository setup
 
-Allow `GITHUB_TOKEN` to create tags and Releases (`contents: write`) and publish
+Allow `GITHUB_TOKEN` to create tags/releases (`contents: write`) and publish
 packages (`packages: write`). The GHCR package must be public. If the first run
-stops at the public-access check, set **Package settings → Change visibility →
-Public**, then re-run it.
+fails that check, change the package visibility to public and rerun it.
 
 For a fork, update `IMAGE_REPOSITORY` in
-[versioning.py](../workflow/scripts/versioning.py) to its GHCR repository.
+[versioning.py](../workflow/scripts/versioning.py).
 
 ## Failure recovery
 
-Use **Re-run failed jobs** on the original run to retry the same commit. Existing
-matching images and tags are reused; completed Releases are skipped.
+Use **Re-run failed jobs** on the original run to retry the same commit.
+Matching images and tags are reused; completed releases are skipped.
 
 If source changes are needed after an image or tag was published, choose a new
 version. If nothing was published, fix the source and use **Actions → Release →

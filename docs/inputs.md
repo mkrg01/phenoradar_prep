@@ -1,120 +1,90 @@
-# Input data and species selection
+# Inputs and sample selection
 
 [Documentation](index.md) · [Configuration](configuration.md)
 
-Start with manually curated AMALGKIT metadata, one run per separately processed
-sample (multiple samples per species are allowed). Build stages the metadata and
-any local FASTQs, then launches GeneGalleon for each sample. GeneGalleon retrieves
-public reads through AMALGKIT `getfastq` or processes the staged local reads,
-then performs assembly, longest-CDS extraction, BUSCO, and quantification.
-Completed products go in **`results/<build>/database/`**, not top-level `input/`.
+A new build starts from AMALGKIT metadata with one run per sample. Multiple runs
+may belong to the same biological species; each is assembled and quantified
+separately.
 
 ## File formats
 
-### Files you prepare
-
-Metadata is required for a new build. The other files are optional, depending on
-which species you want to include and which analyses you run. Build selects metadata
-and exclusions; analysis auxiliary paths are under `inputs` in `analysis.yaml`.
-
-| File | When to use | Format and settings |
+| File | Required columns or format | Setting |
 | --- | --- | --- |
-| `input/metadata.tsv` | **Required:** define the species and RNA-seq runs to build. | TSV: `scientific_name`, `run`, positive NCBI `taxid`; one run per separately processed sample (multiple samples per species are allowed) |
-| `config/excluded_accessions.tsv` | **Optional:** exclude unusable or misidentified runs from builds while retaining their metadata. | TSV: `accession`, optional `reason`; `excluded_accessions` in build settings |
-| `input/species_trait.tsv` | **Optional:** provide traits for PhenoRadar; required for phenotyped/representative trees and contrast pairs. | TSV: `species` and chosen trait column; `inputs.species_trait` and `trait` |
-| `input/species_list.txt` | **Optional:** restrict an analysis to a chosen set of candidate species; BUSCO filtering still applies. | Biological species IDs or exact analysis sample IDs, one per line; setting `inputs.species_list` automatically enables filtering |
-| `input/calibrations.tsv` | **Optional:** supply your own age bounds for [dating](dating.md#manual-calibrations) instead of TimeTree calibrations. | TSV: `taxa`, `min_age_ma`, `max_age_ma`, `source`; `inputs.calibrations` and `phylogeny.dating.calibration_source: file` |
+| `input/metadata.tsv` | TSV: `scientific_name`, unique `run`, positive NCBI `taxid` | Build `metadata` |
+| `config/excluded_accessions.tsv` | TSV: `accession`, optional `reason` | Build `excluded_accessions` |
+| `input/species_trait.tsv` | TSV: `species` and the chosen trait column | Analysis `inputs.species_trait`, `trait` |
+| `input/species_list.txt` | One biological species ID or exact sample ID per line | Analysis `inputs.species_list` |
+| `input/calibrations.tsv` | TSV: `taxa`, `min_age_ma`, `max_age_ma`, `source` | Analysis `inputs.calibrations`; see [dating](dating.md#manual-calibrations) |
 
-Optional files with a configured path must exist; set unused paths to `null`.
-Without a species list, leave `inputs.species_list` as `null` or omit it; without traits,
-disable trait-dependent analyses. The supplied configs already specify paths
-for the exclusion list and trait table.
+Only metadata is always required. Other files depend on your analysis;
+configured paths must exist, so set unused optional paths to `null`. The supplied
+configs already specify an exclusion list and trait table.
 
-Use [AMALGKIT-compatible metadata](https://github.com/kfuku52/amalgkit/wiki/amalgkit-metadata);
-additional columns pass through to GeneGalleon. For local reads, also provide
-`private_file` = `yes`, `lib_layout` = `single` or `paired`, `read1_path`, and
-`read2_path` for paired reads. These are TSV columns. Relative FASTQ paths resolve
-against the metadata directory; use a new run ID when read content changes.
+Additional AMALGKIT metadata columns pass through to GeneGalleon. For local
+reads, also provide these TSV columns:
 
-### Generated products
-
-| Path under `results/<build>/database/` | Format |
+| Column | Value |
 | --- | --- |
-| `metadata.tsv` | Frozen metadata after run exclusions |
-| `busco/summary.tsv` | TSV: `Species` (analysis sample ID), `busco_cds_single`, `busco_cds_duplicated`, `busco_cds_fragmented`, `busco_cds_missing`, `busco_cds_total` |
-| `busco/full/{species}.busco.full.tsv` | Full BUSCO table with lineage header, for every build sample |
-| `cds/{species}_longestCDS.fa.gz` | Gzip FASTA, one per sample |
-| `quant/{species}/{run}/{run}_abundance.tsv` | TSV: `target_id`, `tpm` |
-| `expression/runs/{run}.tsv` | TSV: `species`, `run`, `orthogroup`, `tpm_sum`, `tpm` |
-| `expression/runs/{run}.qc.json` | Mapping/TPM QC, policy, and input checksums |
-| `proteins/{odb_species}_protein.fa` | Translated protein FASTA |
-| `odb/` | `snapshot.json` and verified per-species `species/*.tsv.gz` gene/OG tables |
+| `private_file` | `yes` |
+| `lib_layout` | `single` or `paired` |
+| `read1_path` | FASTQ path |
+| `read2_path` | Second FASTQ path for paired reads |
 
-Build creates or reuses these automatically. See [output layout](outputs.md#directory-layout)
-for intermediate workspaces and [portable builds](datasets.md#copying-a-completed-build-to-another-project)
-for copying the complete bundle.
+Relative FASTQ paths resolve against the metadata directory. Use a new run ID
+when read content changes. ODB-mapper paths must avoid spaces and shell metacharacters.
 
 ## Identifiers
 
-Build assigns `analysis_sample_id = scientific_name.replace(" ", "_") + "_" + run`.
-For example, `Abelia chinensis` / `SRR14320411` becomes
-`Abelia_chinensis_SRR14320411`. The separator is one underscore. Accessions,
-including local IDs, may themselves contain underscores; never parse the sample
-ID to recover its biological identity.
+For `Abelia chinensis` and run `SRR14320411`, the workflow derives:
 
-- `scientific_name`, `species_id` (spaces replaced by underscores), and `taxid`
-  retain biological identity. `analysis_sample_id` identifies the independent
-  assembly and expression observation. `run` is unique in each input table.
-- Build adds the two derived columns when absent and validates supplied values.
-  The original AMALGKIT `sample_id` column, if present, is preserved separately.
-- Computational tables retain the historical column name `species` for the
-  **analysis sample ID**. `metadata/samples.tsv` also includes `species_id`,
-  `scientific_name`, `taxid`, and `run`; use those columns for biological joins.
-- In generated paths below, `{species}` means the analysis sample ID and
-  `{odb_species}` is that ID with hyphens replaced by underscores. Collisions in
-  either form are errors, including ambiguous name/accession concatenations.
-- Every sample has its own CDS, BUSCO, quantification, proteins and mappings.
-  Gene IDs are `{analysis_sample_id}_g{number}` and match abundance `target_id`.
-- Changing a run does not reuse another sample's assembly. Same-species samples
-  run in separate GeneGalleon workspaces; reads and expression are never pooled.
-- ODB-mapper paths must not contain spaces or shell metacharacters.
+| Identifier | Value | Meaning |
+| --- | --- | --- |
+| `species_id` | `Abelia_chinensis` | Biological species |
+| `analysis_sample_id` | `Abelia_chinensis_SRR14320411` | Separately processed sample |
+| Gene ID | `Abelia_chinensis_SRR14320411_g0` | Assembled gene; matches abundance `target_id` |
 
-One run is one computational sample. BioSample, experiment, tissue and other
-source metadata remain available; separate runs are not automatically declared
-independent biological replicates.
+Output tables use the column **`species` for the analysis sample ID**. Tree tips
+use the same ID. Join through `metadata/samples.tsv` to recover `species_id`,
+`scientific_name`, `taxid`, and `run`; do not split sample IDs, since run IDs may
+contain underscores. The original AMALGKIT `sample_id` is preserved separately.
+
+In file paths, `{species}` means the analysis sample ID; `{odb_species}` replaces
+its hyphens with underscores. Colliding IDs are rejected.
+Separate runs remain separate observations and are not automatically independent
+biological replicates.
 
 ## Species selection
 
-Build must complete all included samples; missing products do not automatically
-exclude them. Remove unwanted runs with the
-[manual accession list](datasets.md#manually-excluding-unusable-accessions) or metadata edits.
+Build must complete every included sample. Remove unwanted runs through metadata
+or the [accession exclusion list](datasets.md#manually-excluding-unusable-accessions).
 
-Analysis applies the optional species list, `exclude_species`, and a per-sample BUSCO threshold
-`(single + duplicated) / total >= selection.busco_threshold` (default `0.5`).
-Unknown species IDs, invalid counts, duplicate identities, or an empty selection
-are errors. Metadata columns such as `exclusion` do not filter species.
-Unresolved taxids always fail; missing individual ranks are allowed.
+Analysis applies `inputs.species_list`, `exclude_species`, and the per-sample
+BUSCO criterion `(single + duplicated) / total >= selection.busco_threshold`
+(default `0.5`). Biological species IDs select/exclude all their samples; exact
+sample IDs affect only that sample. Metadata columns such as `exclusion` do not
+filter samples.
 
-Review `results/<build>/downstream/<analysis>/metadata/selection.json`, `samples.tsv`, and
-`busco_completeness.svg` for selection reasons, sample paths, and BUSCO QC.
+Unknown IDs, invalid counts, duplicate identities, unresolved taxids, or an empty
+selection are errors; missing individual taxonomy ranks are allowed. Review
+`metadata/selection.json`, `samples.tsv`, and `busco_completeness.svg` in the analysis.
 
 ## Traits
 
-`inputs.species_trait` supplies traits; trait columns in sample metadata are ignored.
+Traits come from `inputs.species_trait`, not sample metadata:
 
 ```tsv
-species	C4
+species	carnivory
 Plant alpha	0
 Plant beta	1
 Plant gamma	NA
 ```
 
-Species names normalize as above; duplicate normalized names are errors. Blanks,
-`NA`, `NaN`, `nan`, and absent rows are unknown. Extra rows do not add species.
-Set `inputs.species_trait: null` when unused.
+Set `trait: carnivory` to use this column. Species names normalize to biological
+species IDs, and every sample of that species inherits its trait. Duplicate
+normalized names are errors. Blanks, `NA`, `NaN`, `nan`, and absent rows are
+unknown; extra rows do not add species.
 
-Top-level `trait` selects the shared column for tree selection, contrast pairs,
-and PhenoRadar metadata. PhenoRadar traits must be `0`, `1`, or blank; the `C4`
-column also enforces these values. Phenotyped inference accepts a single observed
-state; representative selection requires two. On all/phenotyped trees, fewer than
-two states produces zero contrast pairs.
+Use `0`, `1`, or blank for PhenoRadar traits. Phenotyped trees accept a single
+observed state; representative selection requires two. On all/phenotyped trees,
+fewer than two states produces zero contrast pairs. If traits are unused, set
+`inputs.species_trait: null` and disable trait-dependent branches.

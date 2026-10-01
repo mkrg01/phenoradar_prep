@@ -39,8 +39,8 @@ slurm:
       time: "1-00:00:00"
     odb_map:
       cpus: 16
-      mem_gb: 192
-      time: "7-00:00:00"
+      mem_gb: 128
+      time: "2-00:00:00"
     prepare_odb_reference:
       cpus: 1
       mem_gb: 32

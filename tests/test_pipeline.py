@@ -427,7 +427,7 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
         cwd=workflow_project, env=env, text=True, capture_output=True, timeout=60)
     assert defaults.returncode == 0, defaults.stdout + defaults.stderr
     assert defaults.stdout.count("threads: 16") == (0 if reuse else 1)
-    assert defaults.stdout.count("mem_mb=192000") == (0 if reuse else 1)
+    assert defaults.stdout.count("mem_mb=128000") == (0 if reuse else 1)
     assert defaults.stdout.count("--jobs 16 --batch-size 64") == (0 if reuse else 1)
     # The workflow uses only the fixed snapshot, without a source configuration.
     Path(tiny_inputs["taxonomy_db"]).unlink()

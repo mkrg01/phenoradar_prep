@@ -1,80 +1,67 @@
 # PhenoRadar inputs
 
-[Documentation](index.md)
+[Documentation](index.md) · [Output formats](outputs.md)
 
-`phenoradar_inputs` collects completed results in
-`results/<build>/downstream/<analysis>/phenoradar_inputs/`. It writes a three-column OG TPM table
-and links other results. Keep linked source files available.
+The collector writes results to
+`results/<build>/downstream/<analysis>/phenoradar_inputs/`. It creates a
+three-column OG TPM table and links other completed results, so keep the source
+files available.
 
 ## Collecting results
 
-`run_analysis.sh` collects automatically after successful `all` execution.
-After additional branches finish, collect again:
+Collection runs automatically after successful `all` execution. After running
+additional branches, collect again:
 
 ```bash
-./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929 --target phenoradar_inputs
+./run_analysis.sh submit --analysis results/leaf/downstream/carnivory --target phenoradar_inputs
 ```
 
 The collector starts no analyses or downloads. It requires `metadata/samples.tsv`
-and `metadata/species_metadata.tsv`; expression is optional. Logs report ready,
-absent, and incomplete sections. Validation failures preserve the previous collection.
+and `metadata/species_metadata.tsv`; expression is optional. Logs identify absent
+or incomplete sections. Validation failures preserve the previous collection.
 
 ## Published files
 
 | Path under `phenoradar_inputs/` | Contents |
 | --- | --- |
-| `species_metadata.tsv` | Base traits/taxonomy metadata |
+| `species_metadata.tsv` | Base traits and taxonomy |
 | `tpm.tsv` | OG expression: `species`, `orthogroup`, `tpm` |
-| `alignments/{og}.faa` | Completed all-copy OG alignments |
-| `metadata/`, `proteins/`, `orthogroups/` | Original QC, proteins, mappings, expression, and alignments |
-| `kegg/` | KO expression, annotation, support/QC, and group maps |
-| `phylogeny/{all,phenotyped,representatives}/` | Completed trees, marker alignments, calibrations, pairs, and taxonomy reports |
+| `alignments/{og}.faa` | All-copy OG alignments |
+| `metadata/`, `proteins/`, `orthogroups/` | Original data and QC |
+| `kegg/` | KO expression, annotation, support, and group maps |
+| `phylogeny/{all,phenotyped,representatives}/` | Completed trees and related results |
 
-Unfinished outputs and native solver work are omitted. Choose the downstream tree
-explicitly, e.g. `phylogeny/all/species_tree.nwk` or its dated counterpart. Each
-contrast branch keeps its own `contrast/species_metadata.tsv`; pair IDs are not
-combined with base metadata or other branches.
+Choose the tree explicitly, for example `phylogeny/all/species_tree.nwk` or its
+dated counterpart. Pair IDs remain in each branch's `contrast/species_metadata.tsv`;
+they are not merged into base metadata.
 
-Existing `orthogroup_annotations.tsv[.gz]` (headerless OG/taxid/description) files
-are collected from the result root, `orthogroups/`, or `orthogroups/mapping/`;
-descriptions are not downloaded.
+Existing headerless `orthogroup_annotations.tsv[.gz]` files (OG/taxid/description)
+are collected from the result root, `orthogroups/`, or `orthogroups/mapping/`.
+Descriptions are not downloaded.
 
 ## Data checks and downstream use
-
-Collection validates identities, values, checksums, alignments, and tree tips.
-The OG export requires one run per sample ID and never averages runs. It removes
-the `run` column while preserving source TPM values, already rescaled to one
-million per run. See [TPM interpretation](outputs.md#tpm-interpretation).
 
 For OG expression in PhenoRadar:
 
 ```yaml
 data:
-  tpm_path: results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929/phenoradar_inputs/tpm.tsv
+  tpm_path: results/leaf/downstream/carnivory/phenoradar_inputs/tpm.tsv
   species_col: species
   feature_col: orthogroup
   value_col: tpm
 ```
 
+The export preserves source [TPM values](outputs.md#tpm-interpretation).
+`species` identifies a sample with exactly one run; samples are never averaged.
+Use `metadata/samples.tsv` to group samples by biological species.
+
 For KO expression, use `kegg/ko_tpm_sum.tsv`, `feature_col: ko`,
-`value_col: tpm_sum`, and `orthogroup_annotation_path: null`. KO sums retain
-original TPM and different [missing-value rules](kegg.md#outputs). KOs are assigned
-to OGs from one median-length representative per OG, and expression sums those
-OGs' original `tpm_sum`. The collection includes `kegg/orthogroups.tsv`,
-`kegg/og_kos.tsv`, and representative metadata for interpreting these labels.
+`value_col: tpm_sum`, and `orthogroup_annotation_path: null`. Review
+[KO normalization and missing values](kegg.md#outputs) before use.
+
+Normal analysis exclusions need no extra collection settings. For a
+[post hoc subset](species_filter.md), filter first and collect with the same
+override; collection uses the matching `filtered/` snapshot.
+
 See PhenoRadar's [quick start](https://github.com/mkrg01/phenoradar/blob/main/docs/quickstart.md)
-and [data formats](https://github.com/mkrg01/phenoradar/blob/main/docs/data-format.md)
-for supported downstream inputs.
-
-## Species exclusions
-
-Normal `analysis.yaml` exclusions apply before analysis; collection needs no extra
-filtering. For a [post hoc export](species_filter.md), run `filter_species` first
-and collect with the same low-level override. Collection then requires the matching
-`filtered/` snapshot and does not mix it with unfiltered results.
-
-The historical `species` column carries the analysis sample ID everywhere in
-the export, including expression, metadata, tree tips and gene prefixes.
-`metadata/samples.tsv` supplies the sample-to-biological-species mapping.
-Multiple samples of one species remain separate observations with inherited
-species traits; consumers should use that mapping when grouping biological species.
+and [data formats](https://github.com/mkrg01/phenoradar/blob/main/docs/data-format.md).

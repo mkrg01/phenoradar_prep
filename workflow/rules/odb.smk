@@ -88,7 +88,7 @@ rule odb_map:
                   "--protein-dir", PROTEINS, "--cache-dir", ODB_CACHE, "--version", ODB_VERSION,
                   "--node", str(config["odb"]["ncbi_tax_id"])] if INCREMENTAL_ODB else [])
     threads: 16
-    resources: mem_mb=192000
+    resources: mem_mb=128000, runtime=2880
     log: f"{LOG}/{ORTHOGROUP_MAPPING}/chunks/{{chunk}}.log"
     benchmark: f"{LOG}/{ORTHOGROUP_MAPPING}/benchmarks/{{chunk}}.tsv"
     conda: "../envs/odb.yaml"

@@ -129,7 +129,7 @@ def test_worker_profile_reserves_controller_and_preserves_requests(public_slurm,
     assert profile['resources'] == {'workflow_cpus': 32, 'workflow_mem_mb': 504000}
     assert profile['set-resource-scopes'] == {'workflow_cpus': 'global', 'workflow_mem_mb': 'global'}
     assert profile['set-threads']['odb_map'] == 16
-    assert profile['set-resources']['odb_map']['mem_mb'] == 192000
+    assert profile['set-resources']['odb_map']['mem_mb'] == 128000
     assert 'mem_mb' not in profile['resources']  # Do not let Snakemake clip the actual request.
 
 

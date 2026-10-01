@@ -2,15 +2,16 @@
 
 [Documentation](index.md) · [BUSCO phylogeny](phylogeny.md)
 
-Pairs use nwkit's homogeneous-clade grouping and contrastive-clade selection.
-Top-level `trait` selects a column in `inputs.species_trait`; missing traits stay unknown.
+Select opposite-trait representatives with nwkit's homogeneous-clade grouping
+and contrastive-clade selection. Traits come from the column named by `trait`
+in `inputs.species_trait`.
 
 ## Configuration and execution
 
-Set these options before [preparing analysis](datasets.md#run-an-analysis):
+Before preparing the analysis:
 
 ```yaml
-trait: C4
+trait: carnivory
 phylogeny:
   trees: [representatives]
   contrast_pairs:
@@ -18,71 +19,55 @@ phylogeny:
 ```
 
 ```bash
-./run_analysis.sh submit --analysis results/angiosperm_leaf_20260925/downstream/c4_photosynthesis_20260929 --target contrast_pairs
+./run_analysis.sh submit --analysis results/leaf/downstream/carnivory --target contrast_pairs
 ```
 
-The same target works for `trees: [all]`, `[phenotyped]`, `[representatives]`, or
-several trees. It schedules missing prerequisites for exactly those species sets,
-then selects pairs on each resulting tree. The enabled flag is required for the
-explicit target and includes pairs in `all`. Use `phylogeny` to stop at inference.
+The target includes missing tree inference and requires the enabled flag.
+Pairs are also included in `all`.
 
-| Tree | When species are reduced |
+| Tree | Selection before pairing |
 | --- | --- |
-| `all` | Infer all selected species, then prune missing-trait tips for pairs |
-| `phenotyped` | Remove missing-trait species before inference |
-| `representatives` | Remove missing-trait species and choose NCBI representatives before inference |
+| `all` | Infer all selected samples, then prune missing-trait tips |
+| `phenotyped` | Remove missing-trait samples before inference |
+| `representatives` | Remove missing-trait samples and select NCBI representatives before inference |
 
-For full/phenotyped trees, missing-trait tips are pruned with root direction/path
-lengths preserved in `observed_tree.nwk`; their metadata retains empty pair IDs.
-Zero/one observed state yields zero pairs; more than two states is unsupported.
-Pair jobs default to 1 CPU/8 GB; missing inference steps use their own resources.
+All/phenotyped trees with zero or one observed state produce zero pairs.
+More than two states is unsupported. Missing-trait samples keep empty pair IDs.
 
 ## Representative selection
 
-Representative inference needs [phylogeny inputs](phylogeny.md#inputs), exactly
-two observed states, and at least four representatives. It is available with
-`trees: [representatives]` even when pair selection is disabled.
+Representative inference requires exactly two observed states and at least four
+representatives. It also works with pair selection disabled.
 
-1. Skim homogeneous trait clades on the local NCBI guide, selecting representatives
-   by BUSCO completeness; randomized ties use the fixed internal seed `12345`.
-2. Resolve an outgroup and infer a BUSCO tree for that subset.
-3. If pairs are enabled, skim the molecular tree and pair minimal mixed clades
-   with opposite-state representatives; multiway cases remain unresolved.
-4. Map original species through both grouping stages to representatives/pairs.
+1. Group homogeneous trait clades on the NCBI guide and choose representatives
+   by BUSCO completeness, breaking ties with seed `12345`.
+2. Resolve the outgroup and infer a BUSCO tree for those representatives.
+3. Group the molecular tree and pair minimal mixed clades with opposite-state
+   representatives; unresolved multiway cases remain unpaired.
+4. Map original samples through the groups to their representatives and pairs.
 
-Both trait states are compressed. A manual outgroup must belong to the
-representatives. Selection records are in `phylogeny/representatives/selection/`.
-Dating and taxonomy checks currently do not support representative trees.
+Both trait states are reduced. A manual outgroup must belong to the selected
+representatives. Review `phylogeny/representatives/selection/`.
 
-## After species exclusion
+## Outputs and interpretation
 
-Normal `analysis.yaml` exclusions apply before inference for every selected tree,
-including representatives. The separate [post hoc export](species_filter.md)
-recomputes pairs only for completed `all`/`phenotyped` trees; it cannot export
-representative results or replace inference on a newly selected species set.
-
-## Outputs
-
-Each `results/<build>/downstream/<analysis>/phylogeny/<tree>/contrast/` directory contains:
+Under `results/<build>/downstream/<analysis>/phylogeny/<tree>/contrast/`:
 
 | Output | Contents |
 | --- | --- |
-| `contrast_pairs.tsv` | Pair states, representatives, and species counts |
+| `contrast_pairs.tsv` | Pair states, representatives, and counts |
 | `species_metadata.tsv` | Traits, groups, representatives, and nullable pair IDs |
-| `summary_tree.nwk`, `.all.tsv`, `.sampled.tsv` | Molecular skim and membership |
+| `summary_tree.nwk`, `.all.tsv`, `.sampled.tsv` | Grouped molecular tree and membership |
 | `contrastive.nwk`, `.all.tsv`, `.sampled.tsv` | Raw selection, including unresolved candidates |
-| `summary_tree.pdf`, `summary_tree.svg` | Trait-colored tree with group/pair IDs |
+| `summary_tree.pdf`, `.svg` | Trait-colored tree with group/pair IDs |
 | `summary.json` | Counts, settings, and provenance |
 
-Zero-pair results are valid and produce header-only pair tables.
-
-## Interpretation
-
 Pairs describe sampled trait contrasts, not independent evolutionary origins.
-NCBI-inherited membership is not molecularly tested for every species, and
-assignments have no branch-support filter. Pair IDs belong to each result and
-can change with species membership or exclusions.
+NCBI group membership is not molecularly tested for every species, and selection
+uses no branch-support filter. `n_species_*` counts biological species;
+`n_samples_*` counts sample tips.
 
-Traits are looked up by biological `species_id` and inherited by every sample.
-Pair membership and representatives use analysis sample IDs. `n_species_*`
-counts distinct biological species, while `n_samples_*` counts sample tips.
+Pair IDs are local to each result and may change with sample selection. Normal
+analysis exclusions apply before inference. [Post hoc filtering](species_filter.md)
+can recompute pairs for completed all/phenotyped trees, but cannot export
+representative results. Zero-pair results are valid.

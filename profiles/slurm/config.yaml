@@ -14,8 +14,8 @@ default-resources:  # Per-worker defaults; mem_mb = MB, runtime = minutes.
   slurm_partition: epyc  # Cluster partition; adjust for the local scheduler.
 set-resources:  # Per-rule overrides; mem_mb = MB, runtime = minutes.
   odb_map:
-    mem_mb: 192000
-    runtime: 4320
+    mem_mb: 128000
+    runtime: 2880
   prepare_odb_reference:
     mem_mb: 32000
     runtime: 1440

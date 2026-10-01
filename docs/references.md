@@ -2,28 +2,25 @@
 
 [Documentation](index.md)
 
-Missing shared taxonomy, OrthoDB, and KEGG references are prepared automatically
-under `resources/` when a requested stage needs them. GeneGalleon manages its own
-upstream references, including BUSCO data. Completed shared snapshots are reused
-across builds and downstream runs without automatic updates. Keep their
-provenance with results. TimeTree has a separate [response cache](dating.md#timetree-calibrations).
+Required taxonomy, OrthoDB, and KEGG references are prepared automatically under
+`resources/`. Completed snapshots are reused without automatic updates; keep
+their provenance with results. GeneGalleon manages upstream references such as
+BUSCO. TimeTree uses a separate [response cache](dating.md#timetree-calibrations).
 
 ## Taxonomy reference
 
-Build mapping and downstream metadata preparation use
-`resources/taxonomy/taxa.sqlite`, created from NCBI taxonomy when absent, with a
-provenance/checksum sidecar. To refresh, archive `resources/taxonomy/` and prepare
-a new build or analysis as appropriate.
+`resources/taxonomy/taxa.sqlite` is created from NCBI taxonomy when absent.
+To refresh, archive `resources/taxonomy/` and prepare a new build or analysis.
 
 ## OrthoDB reference
 
 ### Choosing an OrthoDB mapping clade
 
-`odb.ncbi_tax_id` in `build.yaml` is an NCBI Taxonomy ID supported as an OrthoDB v12 mapping level.
-Choose a clade containing all build species; narrower levels define finer OGs.
-It is independent of `busco.lineage`.
+Set `odb.ncbi_tax_id` in `build.yaml` to an OrthoDB v12 mapping level containing
+all build species. Narrower clades define finer OGs. This choice is independent
+of `busco.lineage`.
 
-| `odb.ncbi_tax_id` | Clade |
+| NCBI Taxonomy ID | Clade |
 | --- | --- |
 | `33090` | Viridiplantae |
 | `3193` (default) | Embryophyta |
@@ -31,61 +28,33 @@ It is independent of `busco.lineage`.
 | `38820` | Poales |
 | `71240` | Eudicots |
 
-Check supported nodes in the [OrthoDB tree](https://data.orthodb.org/v12/tree),
-or run this in an [ODB-mapper environment](../workflow/envs/odb.yaml):
-
-```bash
-(
-  export ODBAPI_URL_VERSION=v12
-  export ODBMAPPER_WORK="$PWD/work/odb-node-lookup"
-  ODB-mapper SETUP
-  ODB-mapper DOWNLOAD '?'
-)
-```
-
-Quoted `'?'` lists nodes without sequences; `'?plants'` restricts the list.
-Changing the node requires a new build and new mappings.
+Check the [OrthoDB tree](https://data.orthodb.org/v12/tree) for supported nodes.
+Changing the clade requires a new build and new mappings.
 
 ### Preparing and verifying the reference
 
-Build prepares `resources/orthodb/v12_<ncbi_tax_id>/` automatically. For separate setup,
-use a prepared build's resolved config:
+Build prepares `resources/orthodb/v12_<ncbi_tax_id>/` automatically. For advance
+setup, use a prepared build's config:
 
 ```bash
-sbatch --cpus-per-task=1 --mem=40G run_pipeline.sh --configfile results/angiosperm_leaf_20260925/pipeline.yaml -- references
+sbatch --cpus-per-task=1 --mem=40G run_pipeline.sh --configfile results/leaf/pipeline.yaml -- references
 python workflow/scripts/verify_odb_reference.py \
   --reference resources/orthodb/v12_3193/reference.json
 ```
 
-Mapping also needs network access. To refresh, archive the node's snapshot and
-prepare a new build, reviewing the compatibility of retained mapping caches.
-
-### Reusing existing ODB results
-
-Completed databases contain `odb/snapshot.json` and per-sample mapping tables.
-Set `reuse_from` in `build.yaml` to one or more completed databases. Matching
-samples reuse their mappings; missing samples are mapped in chunks. The build
-manages intermediate snapshots under `results/<build>/work/cache/odb/`.
-Each snapshot records the ODB version/node, protein hashes, mapping checksums,
-and reference identity. Changing protein inputs requires new mappings.
-
-Build and analysis reuse verified translations and sample mapping tables; no
-combined mapping database is created. Downstream analysis reads mappings directly
-from its completed database. See [database reuse](datasets.md#reusing-completed-databases).
+Mapping also needs network access. To refresh, archive the clade's snapshot and
+prepare a new build. Reuse only databases with compatible references; see
+[database reuse](datasets.md#reusing-completed-databases).
 
 ## KOfam and KEGG reference
 
-KEGG analysis downloads [KOfam](https://www.genome.jp/ftp/db/kofam/) profiles/`ko_list`
-and KEGG REST KO-to-MODULE/PATHWAY maps into `resources/kegg/snapshot_v1/`.
-The snapshot retains all HMMs and a portable `profiles/eukaryote.hal` list;
-annotation searches only the listed profiles. The list and its profile count are
-validated, and its checksum is verified even in quick verification mode.
-Retries reuse `resources/kegg/downloads/`; completed snapshots work offline.
-For separate setup, the low-level target is `kegg_references`.
+The KEGG branch downloads KOfam profiles, `ko_list`, and KO-to-MODULE/PATHWAY maps
+into `resources/kegg/snapshot_v1/`. Searches use the snapshot's `eukaryote.hal`.
+Completed snapshots work offline; download retries reuse `resources/kegg/downloads/`.
+The separate setup target is `kegg_references`.
 
-To prepare from matching local profiles/`ko_list` with an absent destination,
-include the original `eukaryote.hal` from the same KOfam release in the profiles
-directory:
+To prepare a new snapshot from local files, include profiles, `ko_list`, and the
+original `eukaryote.hal` from the same KOfam release:
 
 ```bash
 python workflow/scripts/prepare_kegg_reference.py \
@@ -95,14 +64,11 @@ python workflow/scripts/verify_kegg_reference.py \
   --reference resources/kegg/snapshot_v1/reference.json
 ```
 
-For offline setup, also supply `--module-links` and `--pathway-links`: headerless
-two-column responses from `https://rest.kegg.jp/link/module/ko` and
-`https://rest.kegg.jp/link/pathway/ko`. Otherwise those maps are downloaded.
-Older snapshots created without `eukaryote.hal` are rejected, never silently
-searched against all profiles. To migrate, archive `resources/kegg/snapshot_v1/`
-and prepare it again from the matching original profiles archive; the download
-cache can be kept for this migration. Use a new analysis ID to record the changed
-search scope. Do not add a list from a different release to a frozen snapshot.
+For offline setup, also supply `--module-links` and `--pathway-links` as headerless
+two-column responses from KEGG's `/link/module/ko` and `/link/pathway/ko` endpoints.
+Otherwise those maps are downloaded.
 
-To refresh, archive all of `resources/kegg/`, including downloads, and prepare a
-new analysis. Keeping the download cache reuses old data.
+Snapshots lacking `eukaryote.hal` must be rebuilt from matching inputs. Do not
+add a list from a different release to an existing snapshot. To refresh all KEGG
+data, archive **all of `resources/kegg/`, including downloads**, and prepare a
+new analysis; keeping the download cache reuses old data.

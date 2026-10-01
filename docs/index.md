@@ -1,37 +1,33 @@
 # Documentation
 
-## Start from metadata
+Prepare a reusable RNA-seq database, select samples for an analysis, and export
+results to PhenoRadar.
 
-1. Prepare [metadata and auxiliary inputs](inputs.md).
-2. Edit [build/analysis settings](configuration.md) and complete [initial setup](running.md#installation-and-normal-execution).
-3. [Build through ODB mapping and OG expression, then run analysis](datasets.md).
-4. Review [outputs and QC](outputs.md) and use the [PhenoRadar inputs](phenoradar_inputs.md).
+## Getting started
 
-[Slurm, retries, and targets](running.md) · [Reference data](references.md)
+1. [Install the workflow](running.md#installation-and-normal-execution).
+2. Prepare [input files](inputs.md) and edit the [configuration](configuration.md).
+3. [Build a database and run an analysis](datasets.md).
+4. Review [outputs and QC](outputs.md), then use the [PhenoRadar inputs](phenoradar_inputs.md).
 
 ## Choose an analysis
 
-Set options before preparing a named analysis. Each guide shows how to submit
-its target separately; missing prerequisites are included automatically.
-
 | Task | Guide |
 | --- | --- |
-| Annotate OG representatives and quantify KO features | [KO expression](kegg.md) |
-| Align mapped orthogroups, retaining all copies | [OG alignments](alignments.md) |
-| Infer trees from independently assembled BUSCO samples | [Phylogeny](phylogeny.md) |
-| Estimate divergence ages with LSD2 | [Dating](dating.md) |
-| Review placements against NCBI taxonomy | [Taxonomic review](taxonomy_check.md) |
+| Align all gene copies in each mapped OG | [OG alignments](alignments.md) |
+| Annotate OGs and quantify KO expression | [KEGG](kegg.md) |
+| Infer trees from BUSCO markers | [Phylogeny](phylogeny.md) |
+| Estimate divergence ages | [Dating](dating.md) |
+| Review tree placements against NCBI taxonomy | [Taxonomy check](taxonomy_check.md) |
 | Select trait contrast pairs | [Contrast pairs](contrast_pairs.md) |
 
-## Prepare downstream inputs
+## Managing runs
 
-`run_analysis.sh` collects PhenoRadar inputs after successful `all` execution.
-After running more branches, [collect again](phenoradar_inputs.md).
-For exclusions, normally prepare a new analysis with `exclude_species`;
-[post hoc filtering](species_filter.md) can instead export a subset of completed results.
+- [Slurm resources, targets, and retries](running.md)
+- [Reuse or copy a database](datasets.md#reusing-completed-databases)
+- [Export a subset of completed results](species_filter.md)
+- [Reference data and updates](references.md)
 
-## Maintenance
-
-[Releasing a version](releases.md) · [Development and tests](development.md)
+For contributors: [development and tests](development.md) · [releases](releases.md).
 
 [Project README](../README.md)
