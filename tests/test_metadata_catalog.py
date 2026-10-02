@@ -1,7 +1,10 @@
 """Representative updates preserve successful runs and remain separate from builds."""
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 
 import pytest
 import yaml
@@ -250,6 +253,71 @@ def test_curation_copies_input_and_rules_without_running_builds(curated_project,
     assert Path(result['metadata']).is_file()
     assert json.loads((root / 'work/curation/curate/provenance.json').read_text())['status'] == 'complete'
     assert not (root / 'results').exists()
+
+
+@pytest.mark.parametrize('action', ['fetch', 'curate'])
+def test_metadata_stage_uses_slurm_cpu_allocation(curated_project, monkeypatch, action):
+    root, dataset, cfg = curated_project
+    source = root / 'source.tsv'
+    write_tsv(source, FIELDS, [row(1, 'OLD1')])
+    monkeypatch.setenv('SLURM_CPUS_PER_TASK', '7')
+    monkeypatch.setattr(catalog, 'software_identity', lambda *a: ('runtime', Path('image'), {}))
+    def run(runtime, image, root, arguments, binds=(), **kwargs):
+        assert arguments[arguments.index('--threads') + 1] == '7'
+        out = Path(arguments[arguments.index('--out_dir') + 1]) / 'metadata/metadata.tsv'
+        write_tsv(out, FIELDS, [row(1, 'OLD1')])
+        return ['runtime', *arguments]
+    monkeypatch.setattr(catalog, 'execute', run)
+    catalog.metadata_stage(root, cfg, action, 'work/slurm', source)
+    provenance = json.loads((root / 'work/slurm' / action / 'provenance.json').read_text())
+    assert provenance['arguments'][provenance['arguments'].index('--threads') + 1] == '7'
+
+
+@pytest.mark.parametrize('cpus', ['', '0', '-1', 'invalid', '1.5'])
+def test_invalid_slurm_cpu_allocation_fails_before_metadata_work(curated_project, monkeypatch, cpus):
+    root, dataset, cfg = curated_project
+    monkeypatch.setenv('SLURM_CPUS_PER_TASK', cpus)
+    with pytest.raises(ValueError, match='SLURM_CPUS_PER_TASK must be a positive integer'):
+        catalog.metadata_stage(root, cfg, 'fetch', 'work/invalid_allocation')
+    assert not (root / 'work').exists()
+
+
+@pytest.mark.parametrize('location', ['direct', 'submit_directory', 'working_directory'])
+def test_metadata_launcher_handles_direct_and_slurm_spooled_scripts(curated_project, tmp_path, location):
+    root, dataset, cfg = curated_project
+    repository = Path(__file__).resolve().parents[1]
+    shutil.copytree(repository / 'workflow/scripts', root / 'workflow/scripts',
+                    ignore=shutil.ignore_patterns('__pycache__'))
+    launcher = root / 'run_metadata.sh'
+    shutil.copy2(repository / 'run_metadata.sh', launcher)
+    elsewhere = root / 'elsewhere with spaces'
+    elsewhere.mkdir()
+    if location != 'direct':
+        spool = elsewhere / 'slurm_script'
+        shutil.copy2(launcher, spool)
+        launcher = spool
+    environment = {**os.environ, 'WORKFLOW_PYTHON': sys.executable,
+                   'SLURM_SUBMIT_DIR': str(root if location == 'submit_directory' else elsewhere)}
+    source = root / 'curated candidates.tsv'
+    write_tsv(source, FIELDS, [row(1, 'OLD1'), row(2, 'REPLACEMENT2')])
+    result = subprocess.run(['bash', str(launcher), 'update', '--config', str(cfg['_path']),
+        '--work', 'work/from_launcher', '--metadata', str(source)],
+        cwd=root if location == 'working_directory' else elsewhere,
+        env=environment, check=True, capture_output=True, text=True)
+    assert json.loads(result.stdout)['updated']['samples'] == 2
+    assert [r['run'] for r in read_tsv(dataset / 'metadata.tsv')] == ['OLD1', 'REPLACEMENT2']
+    assert not (root / 'results').exists()
+
+
+def test_spooled_metadata_launcher_reports_missing_repository(tmp_path):
+    launcher = tmp_path / 'slurm_script'
+    shutil.copy2(Path(__file__).resolve().parents[1] / 'run_metadata.sh', launcher)
+    environment = dict(os.environ)
+    environment.pop('SLURM_SUBMIT_DIR', None)
+    result = subprocess.run(['bash', str(launcher), 'update', '--work', 'work/missing'],
+                            cwd=tmp_path, env=environment, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert 'Metadata repository not found' in result.stderr
 
 
 def test_failed_acquisition_records_attempt_and_requires_a_new_directory(curated_project, monkeypatch):

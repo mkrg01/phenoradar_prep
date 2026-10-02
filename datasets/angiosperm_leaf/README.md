@@ -31,17 +31,17 @@ Edit curation rules and exclusions as needed, then choose a new attempt:
 
 ```bash
 attempt=work/datasets/angiosperm_leaf/refresh_01
-./run_metadata.sh update --work "$attempt"
+sbatch run_metadata.sh update --work "$attempt"
 ```
 
-This retrieves NCBI metadata, curates it, and writes representative metadata.
+The job retrieves NCBI metadata, curates it, and writes representative metadata.
 To preview, add `--dry-run`; publish the reviewed candidate with
 `./run_metadata.sh accept --candidate "$attempt/candidate"`.
 
 To select replacements after recording BUSCO failures or changing exclusions:
 
 ```bash
-./run_metadata.sh update --work work/datasets/angiosperm_leaf/reselect_01 \
+sbatch run_metadata.sh update --work work/datasets/angiosperm_leaf/reselect_01 \
   --metadata "$attempt/curate/metadata/metadata.tsv"
 ```
 
@@ -50,7 +50,7 @@ or processing retries, see [restart options](../README.md#choosing-where-to-rest
 
 ## Building the database
 
-Use a new build name after metadata changes:
+After the metadata job finishes, use a new build name for changed metadata:
 
 ```bash
 ./run_build.sh plan --config datasets/angiosperm_leaf/build.yaml

@@ -4,6 +4,7 @@
 /logs/
 /pipeline-*.out
 /pipeline-*.err
+/slurm-metadata-*.out
 /resources/
 /datasets/**/.metadata.lock
 *.sif

@@ -646,6 +646,9 @@ print(importlib.resources.files('amalgkit.select_rule_sets').joinpath(sys.argv[1
 
 
 def metadata_stage(root, cfg, action, work, source=None):
+    threads = os.environ.get('SLURM_CPUS_PER_TASK')
+    if threads is not None and (not threads.isdigit() or int(threads) < 1):
+        raise ValueError('SLURM_CPUS_PER_TASK must be a positive integer')
     work = path_at(root, work)
     if not work.is_relative_to(Path(root).resolve() / 'work'):
         raise ValueError('metadata work directories must be under project work/')
@@ -685,6 +688,8 @@ def metadata_stage(root, cfg, action, work, source=None):
         arguments = ['amalgkit', 'select', '--out_dir', str(target), '--metadata', str(snapshot),
                      '--select_rules_tsv', str(target / 'select_rules.tsv')]
         binds = []
+    if threads is not None:
+        arguments += ['--threads', threads]
     # select parameters, including sample_group, are supplied by select_rules.tsv.
     # The pinned AMALGKIT version does not accept a --sample_group CLI argument.
     provenance = {'schema_version': 1, 'kind': action, 'created_at': now(), 'software': identity,

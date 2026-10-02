@@ -16,7 +16,7 @@ For each original `taxid`:
 1. Apply exact accession exclusions. Other runs from the same taxid and
    BioProject remain eligible.
 2. Keep the run in `accepted_samples.tsv`, even when a larger run appears.
-   Exclusions take precedence; the BUSCO threshold is not reapplied.
+   Exclusions take precedence.
 3. Otherwise, choose the greatest positive `total_bases`, breaking ties by
    ascending accession.
 4. Apply any optional `overrides.tsv` choice from the eligible candidates.
@@ -37,14 +37,18 @@ if no candidate remains. Source changes for retained runs are flagged in
 
 | Purpose | Command |
 | --- | --- |
-| Refresh NCBI metadata and curate | `./run_metadata.sh update --work <new-attempt>` |
-| Reselect from saved candidates | `./run_metadata.sh update --work <new-attempt> --metadata <curated.tsv>` |
+| Refresh NCBI metadata and curate | `sbatch run_metadata.sh update --work <new-attempt>` |
+| Reselect from saved candidates | `sbatch run_metadata.sh update --work <new-attempt> --metadata <curated.tsv>` |
 | Retry failed or unfinished processing | `./run_build.sh submit --build results/<existing-build>` |
+
+Submit from the repository root. Metadata jobs request 4 CPUs, 128 GB, and three
+days; override these with the `sbatch` options `--mem` and `--time`.
+Logs go to `slurm-metadata-<jobid>.out`. Use `./run_metadata.sh` for direct execution.
 
 Reselection needs the AMALGKIT-curated table **before representative selection**.
 If curation rules changed, first run
-`curate --work <new-attempt> --metadata <saved-raw.tsv>`, then pass its output to
-`update --metadata`.
+`sbatch run_metadata.sh curate --work <new-attempt> --metadata <saved-raw.tsv>`;
+after the job finishes, pass its output to `update --metadata`.
 
 Use a new attempt under `work/` for metadata updates and a new build name for
 changed metadata. `reuse_from: auto` reuses verified sample stages. Retries use
