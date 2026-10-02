@@ -74,29 +74,20 @@ the saved conditions, even if source files have changed. Use a new name for
 scientific changes; use [resource overrides](running.md#resource-budgets) for
 CPU, memory, time, or concurrency changes.
 
-For automatically updated datasets, set `name_mode: timestamp` and keep `name`
-as the dataset prefix. Each `prepare` or new `submit` without `--name` creates
-`results/<name>_YYYYMMDDTHHMMSSZ/` using its UTC preparation time. Repeated builds
-in the same second receive `_02`, `_03`, and so on. An explicit `--name` uses that
-exact name and retains the usual retry behavior. Resume an automatically named
-build with `submit --build results/<printed-build-name>`; repeating a submission
-without `--build` creates another snapshot, including after `--dry-run`.
+With `name_mode: timestamp`, `name` becomes the dataset prefix. Each `prepare`
+or new `submit` creates `results/<name>_YYYYMMDDTHHMMSSZ/` using UTC preparation
+time; same-second builds receive `_02`, `_03`, and so on. `--name` sets an exact
+name. Resume with `submit --build results/<printed-build-name>`, including after
+`--dry-run`; omitting `--build` creates a new snapshot.
 
-Completed timestamp-mode builds update `results/<name>_latest`, a relative symlink
-to the completed build with the newest preparation time. Preparing a build,
-running a pilot, or failing a build does not update it. An older build finishing
-later cannot move it backward. For reproducible analyses, use a specific build
-path rather than the moving alias.
+`results/<name>_latest` points to the completed timestamp-mode build with the
+newest preparation time. Use a specific build path to pin an analysis.
 
-Set `metadata_provenance` to the accepted metadata's `provenance.json` to freeze
-its history along with the input table. Its metadata checksum must match the
-source table, including when `--metadata` overrides the configured table. The
-build records `prepared_at`; the portable database records `dataset_name`,
-`build_id`, `prepared_at`, `completed_at`, and `metadata_history` (selection,
-acceptance, and fetch times when available). Existing `created_at` fields remain:
-preparation time in `build.json`, publication time in `database/manifest.json`.
-These times describe the snapshot; reused sample products keep their original
-generation history. External metadata without fetch evidence has no fetch time.
+Set `metadata_provenance` to the adopted metadata's `provenance.json`. The
+recorded metadata checksum must match the input table, including with
+`--metadata`. Build and database manifests preserve preparation and metadata
+history; database manifests also record completion. Fetch dates require
+acquisition evidence, and reused products retain their original history.
 
 | Command | Effect |
 | --- | --- |

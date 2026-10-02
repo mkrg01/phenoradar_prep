@@ -34,21 +34,9 @@ sbatch run_metadata.sh update
 ```
 
 The job retrieves NCBI metadata, curates it, and publishes representative
-metadata. At execution start it automatically creates and prints a work path,
-for example `work/datasets/angiosperm_leaf/20261002T000000Z/`. The UTC timestamp
-identifies this execution; a second run in the same second fails instead of
-overwriting it. Use `--work <new-path>` to specify a path manually.
-
-To generate a candidate for review, add `--dry-run`. This still retrieves and
-processes metadata, but leaves the adopted dataset tables unchanged. The job
-prints the exact acceptance command. After review, run it, for example:
-
-```bash
-./run_metadata.sh accept \
-  --candidate work/datasets/angiosperm_leaf/20261002T000000Z/candidate
-```
-
-Replace timestamps in these examples with the paths printed by your jobs.
+metadata. It prints a UTC timestamped work path under
+`work/datasets/angiosperm_leaf/`. To review first, add `--dry-run`, then use the
+printed `accept` command after inspection.
 
 To select replacements after recording BUSCO failures or changing exclusions:
 
@@ -57,34 +45,23 @@ sbatch run_metadata.sh update \
   --metadata work/datasets/angiosperm_leaf/20261002T000000Z/curate/metadata/metadata.tsv
 ```
 
-This creates a new timestamped run and reuses the saved curated candidates
-without querying NCBI. Add `--dry-run` to review before adoption. Each run's
-`run.json` records its inputs, source run when available, outcome, and adoption
-time. Fetch dates remain tied to the original NCBI acquisition. For curation
-rule changes or processing retries, see
+This reuses curated metadata without querying NCBI. Substitute the work path
+printed by the original job. For curation rule changes or processing retries, see
 [restart options](../README.md#choosing-where-to-restart).
 
 ## Building the database
 
-After the metadata job finishes, submit a new build. The configuration keeps
-`angiosperm_leaf` as its dataset prefix and automatically appends a UTC
-preparation timestamp:
+After the metadata job finishes, submit a new build:
 
 ```bash
 ./run_build.sh plan --config datasets/angiosperm_leaf/build.yaml
 ./run_build.sh submit --config datasets/angiosperm_leaf/build.yaml
 ```
 
-The command prints its exact build path, for example
-`results/angiosperm_leaf_20261002T000000Z/`. Completed products are in
-that build's `database/`. Compatible stages from earlier builds are reused
-automatically. An optional `--name <exact-name>` sets a name explicitly.
-
-`results/angiosperm_leaf_latest` points to the completed build with the
-newest preparation time. Use its `database/` to access current products; use an
-exact timestamped path to pin an analysis. The database manifest records build
-preparation/completion dates and metadata selection/acceptance/fetch dates;
-`database/provenance/metadata_provenance.json` preserves the adopted history.
+Builds use `results/angiosperm_leaf_<UTC timestamp>/` and reuse compatible stages
+automatically. The command prints the exact path; `--name` sets a name manually.
+Current products are in `results/angiosperm_leaf_latest/database/`. Use an exact
+build path to pin an analysis. See [versioning and provenance](../../docs/datasets.md#saved-settings-and-previews).
 
 ## Recording QC and retrying
 

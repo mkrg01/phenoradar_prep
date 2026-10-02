@@ -45,39 +45,23 @@ Submit from the repository root. Metadata jobs request 4 CPUs, 128 GB, and three
 days; override these with the `sbatch` options `--mem` and `--time`.
 Logs go to `slurm-metadata-<jobid>.out`. Use `./run_metadata.sh` for direct execution.
 
-`update` automatically creates `work/datasets/<name>/YYYYMMDDTHHMMSSZ/` when the
-command starts executing (after queueing for Slurm jobs). The timestamp is UTC,
-matching database build names. A name collision is an error; no suffix is added.
-An optional `--work <new-path>` retains manual naming under the project `work/`.
-Existing updates are never overwritten. A manually specified path may contain
-outputs from separately executed `fetch` or `curate` stages.
+`update` creates `work/datasets/<name>/YYYYMMDDTHHMMSSZ/` at execution start
+(UTC) and prints the path. Use `--work <new-path>` for a manual path under `work/`.
+Existing run names, including same-second collisions, cause an error.
 
-The work path and candidate path are printed before processing starts. A refresh
-contains `fetch/`, `curate/`, and `candidate/`; a reselection contains
-`candidate/`. Both have a `run.json` receipt recording the dataset, execution ID,
-mode (`refresh` or `reselect`), configuration checksum, source metadata checksum,
-source run when available, start/end times, Slurm job ID, summary, and status
-(`running`, `complete`, or `failed`). `metadata_history` preserves the original
-fetch time separately from the new selection time. `accepted_at` records
-adoption, including when a preview is later adopted with `accept`.
-
-By default, `update` publishes the selected metadata immediately. With
-`--dry-run`, acquisition and selection still run and write a candidate, while
-adopted dataset tables remain unchanged. The job prints an acceptance command
-with the matching configuration and candidate path. Review the candidate and
-run that command to publish it. Adopted `provenance.json` records its source run.
+By default, `update` publishes representative metadata. Add `--dry-run` to
+generate a candidate for review; acquisition and selection still run. After
+review, use the printed `accept` command to adopt the candidate.
 
 Reselection needs the AMALGKIT-curated table **before representative selection**.
 If curation rules changed, first run
 `sbatch run_metadata.sh curate --work <new-attempt> --metadata <saved-raw.tsv>`;
 after the job finishes, pass its output to `update --metadata`.
 
-Each metadata update uses a new work directory. Dataset builds with
-`name_mode: timestamp` automatically choose a new name for each submission;
-resume an existing build with `--build results/<printed-build-name>`.
-`reuse_from: auto` reuses verified sample stages. Retries use
-the existing build's frozen inputs and skip completed stages; add `--resources <retry.yaml>`
-to change CPU, memory, or time limits. See [builds and recovery](../docs/datasets.md).
+Dataset builds use `reuse_from: auto` to reuse verified sample stages. Resume
+with `--build results/<printed-build-name>` to keep frozen inputs and completed
+work; add `--resources <retry.yaml>` to adjust resources. See
+[builds and recovery](../docs/datasets.md).
 
 ## Dataset files
 
@@ -90,12 +74,10 @@ to change CPU, memory, or time limits. See [builds and recovery](../docs/dataset
 | `overrides.tsv` | Optional choices with `taxid`, `run`, and `reason` |
 | `accepted_samples.tsv` | Reviewed successes registered by `record` |
 
-`update` writes `metadata.tsv`, `selection.tsv`, and `provenance.json` under its
-`candidate/`, and publishes them to the dataset directory unless `--dry-run`.
-Downloads, candidates, and logs go under `work/datasets/`; builds go under
-`results/`. Configured metadata provenance is frozen into each build and copied
-to the portable database. Timestamp-mode builds publish a `<name>_latest` alias
-only after completion. Keep dataset definitions and reviewed tables in Git.
+Adopted `metadata.tsv`, `selection.tsv`, and `provenance.json` live beside the
+dataset settings. Work directories hold stage outputs, candidates, logs, and
+`run.json` with inputs, status, and dates. Builds in `results/` preserve the
+adopted provenance. Keep dataset definitions and reviewed tables in Git.
 
 ## Adding another dataset
 
