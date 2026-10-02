@@ -4,7 +4,7 @@ build_config: datasets/angiosperm_leaf/build.yaml
 search_string: '"Angiosperms"[Organism] AND "Illumina"[Platform] AND "RNA-seq"[Strategy]'
 sample_group: leaf
 rule_set: plantae
-rules: datasets/angiosperm_leaf/rules/select_rules.tsv
+rules: datasets/angiosperm_leaf/select_rules.tsv
 accepted_samples: datasets/angiosperm_leaf/accepted_samples.tsv
 previous_metadata: datasets/angiosperm_leaf/metadata.tsv
 excluded_accessions: datasets/angiosperm_leaf/excluded_accessions.tsv

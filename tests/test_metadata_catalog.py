@@ -28,11 +28,11 @@ def row(tid, run, project='P1', bases=100, **extra):
 @pytest.fixture
 def curated_project(tmp_path):
     dataset = tmp_path / 'datasets/leaf'
-    (dataset / 'rules').mkdir(parents=True)
-    (dataset / 'rules/select_rules.tsv').write_text('rule_id\tenabled\nleaf\tyes\n')
+    dataset.mkdir(parents=True)
+    (dataset / 'select_rules.tsv').write_text('rule_id\tenabled\nleaf\tyes\n')
     cfg = {'schema_version': 1, 'name': 'leaf', 'build_config': 'datasets/leaf/build.yaml',
            'search_string': 'plants', 'sample_group': 'leaf', 'rule_set': 'plantae',
-           'rules': 'datasets/leaf/rules/select_rules.tsv',
+           'rules': 'datasets/leaf/select_rules.tsv',
            'accepted_samples': 'datasets/leaf/accepted_samples.tsv',
            'previous_metadata': 'datasets/leaf/metadata.tsv',
            'excluded_accessions': 'datasets/leaf/excluded_accessions.tsv',
@@ -165,7 +165,7 @@ def test_acceptance_keeps_success_evidence_only_for_old_representatives(curated_
     assert json.loads((dataset / 'provenance.json').read_text())['kind'] == 'accepted_metadata'
 
 
-@pytest.mark.parametrize('changed', ['rules/select_rules.tsv', 'overrides.tsv', 'metadata.tsv', 'build.yaml'])
+@pytest.mark.parametrize('changed', ['select_rules.tsv', 'overrides.tsv', 'metadata.tsv', 'build.yaml'])
 def test_inputs_changed_after_selection_cannot_be_accepted(curated_project, changed):
     root, dataset, cfg = curated_project
     _, output = select(curated_project, [row(1, 'OLD1')])
@@ -217,20 +217,32 @@ def test_source_duplicates_fail_and_exclusion_context_is_optional(curated_projec
     assert {r['run'] for r in read_tsv(output / 'metadata.tsv')} == {'OLD1', 'RELATED2'}
 
 
-def test_container_rule_refresh_preserves_user_edits(curated_project, monkeypatch):
+@pytest.mark.parametrize('replace', [False, True])
+def test_container_rules_export_uses_only_active_file(curated_project, monkeypatch, replace):
     root, dataset, cfg = curated_project
-    effective = dataset / 'rules/select_rules.tsv'
-    before = effective.read_bytes()
+    rules = dataset / 'select_rules.tsv'
+    if not replace:
+        rules.unlink()
+    before = set(dataset.iterdir())
+    text = 'rule_id\tenabled\nplantae\tyes\n'
     monkeypatch.setattr(catalog, 'software_identity', lambda *a: ('runtime', Path('image'), {'amalgkit': {'version': 'fixed'}}))
-    monkeypatch.setattr(catalog, 'execute', lambda *a, **k: 'rule_id\tenabled\nupstream\tyes\n')
-    catalog.snapshot_rules(root, cfg)
-    assert effective.read_bytes() == before
-    upstream = dataset / 'rules/upstream/select_rules.tsv'
-    assert 'upstream' in upstream.read_text()
+    monkeypatch.setattr(catalog, 'execute', lambda *a, **k: text)
+    result = catalog.export_rules(root, cfg, replace=replace)
+    assert rules.read_text() == text
+    assert result['rules'] == str(rules)
+    assert set(dataset.iterdir()) == before | {rules}
+
+
+def test_container_rules_export_requires_explicit_replacement(curated_project, monkeypatch):
+    root, dataset, cfg = curated_project
+    rules = dataset / 'select_rules.tsv'
+    before = rules.read_bytes()
+    def unexpected_container(*args):
+        raise AssertionError('existing rules should be checked before resolving software')
+    monkeypatch.setattr(catalog, 'software_identity', unexpected_container)
     with pytest.raises(ValueError, match='already exist'):
-        catalog.snapshot_rules(root, cfg)
-    catalog.snapshot_rules(root, cfg, refresh=True)
-    assert effective.read_bytes() == before
+        catalog.export_rules(root, cfg)
+    assert rules.read_bytes() == before
 
 
 def test_curation_copies_input_and_rules_without_running_builds(curated_project, monkeypatch):

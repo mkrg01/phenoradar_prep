@@ -634,7 +634,10 @@ def software_identity(root, cfg):
     return runtime, image, identity
 
 
-def snapshot_rules(root, cfg, refresh=False):
+def export_rules(root, cfg, replace=False):
+    rules = path_at(root, cfg['rules'])
+    if rules.exists() and not replace:
+        raise ValueError('rules already exist; --replace explicitly replaces the active rules')
     runtime, image, identity = software_identity(root, cfg)
     code = '''import importlib.resources, sys
 print(importlib.resources.files('amalgkit.select_rule_sets').joinpath(sys.argv[1], 'select_rules.tsv').read_text(), end='')
@@ -642,17 +645,9 @@ print(importlib.resources.files('amalgkit.select_rule_sets').joinpath(sys.argv[1
     text = execute(runtime, image, root, ['python', '-c', code, cfg['rule_set']], capture=True)
     if 'rule_id\t' not in text.splitlines()[0]:
         raise ValueError('container did not provide a select_rules.tsv rule set')
-    effective = path_at(root, cfg['rules'])
-    upstream = effective.parent / 'upstream/select_rules.tsv'
-    if upstream.exists() and not refresh:
-        raise ValueError('upstream rules already exist; --refresh-upstream explicitly refreshes the snapshot')
-    upstream.parent.mkdir(parents=True, exist_ok=True)
-    upstream.write_text(text)
-    if not effective.exists():
-        shutil.copyfile(upstream, effective)
-    write_json(upstream.with_suffix('.json'), {'created_at': now(), 'rule_set': cfg['rule_set'],
-               'software': identity, 'rules': file_record(upstream)})
-    return {'upstream': str(upstream), 'effective_rules_preserved': str(effective), 'software': identity}
+    rules.parent.mkdir(parents=True, exist_ok=True)
+    rules.write_text(text)
+    return {'rules': str(rules), 'software': identity}
 
 
 def metadata_stage(root, cfg, action, work, source=None):
@@ -863,7 +858,7 @@ def main():
             p.add_argument('--exclusions', required=True)
             p.add_argument('--replace', action='store_true')
         elif name == 'rules':
-            p.add_argument('--refresh-upstream', action='store_true')
+            p.add_argument('--replace', action='store_true', help='Replace the active rules with the pinned container rule set')
         elif name in ('fetch', 'curate'):
             p.add_argument('--work', required=True)
             if name == 'curate': p.add_argument('--metadata')
@@ -887,7 +882,7 @@ def main():
             result = seed_history(root, cfg, args.metadata, args.exclusions, args.source_build, args.replace)
         elif args.command == 'baseline':
             result = initialize(root, cfg, args.database, args.source_metadata, args.exclusions, args.replace)
-        elif args.command == 'rules': result = snapshot_rules(root, cfg, args.refresh_upstream)
+        elif args.command == 'rules': result = export_rules(root, cfg, args.replace)
         elif args.command in ('fetch', 'curate'):
             result = metadata_stage(root, cfg, args.command, args.work, getattr(args, 'metadata', None))
         elif args.command == 'select': result = select_candidates(root, cfg, args.metadata, args.output)

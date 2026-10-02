@@ -69,10 +69,13 @@ work; add `--resources <retry.yaml>` to adjust resources. See
 | --- | --- |
 | `selection.yaml` | Search, tissue, paths, and adoption BUSCO threshold |
 | `build.yaml` | Build settings and pinned GeneGalleon software |
-| `rules/select_rules.tsv` | Effective AMALGKIT curation rules |
+| `select_rules.tsv` | AMALGKIT curation rules |
 | `excluded_accessions.tsv` | Manual exclusions and recorded BUSCO failures; `accession` required |
 | `overrides.tsv` | Optional choices with `taxid`, `run`, and `reason` |
 | `accepted_samples.tsv` | Reviewed successes registered by `record` |
+
+To replace curation rules with the pinned image's rule set, run
+`./run_metadata.sh rules --replace`.
 
 Adopted `metadata.tsv`, `selection.tsv`, and `provenance.json` live beside the
 dataset settings. Work directories hold stage outputs, candidates, logs, and
@@ -82,8 +85,7 @@ adopted provenance. Keep dataset definitions and reviewed tables in Git.
 ## Adding another dataset
 
 Copy a dataset's configuration and rules; adjust its query, paths, tissue, BUSCO
-lineage, and OrthoDB node. Match `sample_group` in `selection.yaml` to the
-parameter in `rules/select_rules.tsv`. Start with an exclusion table containing
-an `accession` header; metadata and acceptance records are created as needed.
+lineage, and OrthoDB node. Set `selection.yaml`'s `sample_group` to a group allowed
+by `select_rules.tsv`. Start with an exclusion table containing an `accession` header.
 Pass `--config datasets/<name>/selection.yaml` to metadata commands and the
 corresponding `build.yaml` to build commands.

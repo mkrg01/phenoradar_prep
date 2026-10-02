@@ -23,11 +23,11 @@ def sample_project(dataset_project):
         row.update(bioproject='P1', sample_group='leaf', exclusion='no', total_bases='100', lib_layout='paired')
     write_tsv(root / 'input/metadata.tsv', list(rows[0]), rows)
     folder = root / 'datasets/leaf'
-    (folder / 'rules').mkdir(parents=True)
-    (folder / 'rules/select_rules.tsv').write_text('rule_id\tenabled\nleaf\tyes\n')
+    folder.mkdir(parents=True)
+    (folder / 'select_rules.tsv').write_text('rule_id\tenabled\nleaf\tyes\n')
     definition = {'schema_version': 1, 'name': 'leaf', 'build_config': 'config/build.yaml',
                   'search_string': 'plants', 'sample_group': 'leaf', 'rule_set': 'plantae',
-                  'rules': 'datasets/leaf/rules/select_rules.tsv',
+                  'rules': 'datasets/leaf/select_rules.tsv',
                   'previous_metadata': 'input/metadata.tsv', 'accepted_samples': 'datasets/leaf/accepted_samples.tsv',
                   'excluded_accessions': 'config/excluded_accessions.tsv'}
     config = folder / 'selection.yaml'

@@ -1,9 +1,0 @@
-{
-  "kind": "imported_effective_rules",
-  "source": "/home/mkrg01/tlight/metadata_prep/angiosperm_leaf_2/amalgkit/work/select_rules.tsv",
-  "source_sha256": "ec6f84463310c4ac048bcf8873199bd34fe6b505a8f933ee701ba6ed748ebf8f",
-  "amalgkit_version": "0.16.21",
-  "source_revision": "26ebfe08ed7e456caa2fc4aa2131e7f0d662e34b",
-  "source_branch": "kfdevel",
-  "note": "Historical effective rules saved in legacy/select_rules.tsv. The initial migration applies these customizations to the upstream snapshot exported from the pinned GeneGalleon image."
-}
