@@ -50,8 +50,10 @@ If curation rules changed, first run
 `sbatch run_metadata.sh curate --work <new-attempt> --metadata <saved-raw.tsv>`;
 after the job finishes, pass its output to `update --metadata`.
 
-Use a new attempt under `work/` for metadata updates and a new build name for
-changed metadata. `reuse_from: auto` reuses verified sample stages. Retries use
+Use a new attempt under `work/` for metadata updates. Dataset builds with
+`name_mode: timestamp` automatically choose a new name for each submission;
+resume an existing build with `--build results/<printed-build-name>`.
+`reuse_from: auto` reuses verified sample stages. Retries use
 the existing build's frozen inputs and skip completed stages; add `--resources <retry.yaml>`
 to change CPU, memory, or time limits. See [builds and recovery](../docs/datasets.md).
 
@@ -68,7 +70,9 @@ to change CPU, memory, or time limits. See [builds and recovery](../docs/dataset
 
 `update` writes `metadata.tsv`, `selection.tsv`, and `provenance.json`.
 Downloads, candidates, and logs go under `work/datasets/`; builds go under
-`results/`. Keep dataset definitions and reviewed tables in Git.
+`results/`. Configured metadata provenance is frozen into each build and copied
+to the portable database. Timestamp-mode builds publish a `<name>_latest` alias
+only after completion. Keep dataset definitions and reviewed tables in Git.
 
 ## Adding another dataset
 

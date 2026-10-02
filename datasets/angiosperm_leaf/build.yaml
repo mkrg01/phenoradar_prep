@@ -1,5 +1,7 @@
-name: angiosperm_leaf_reviewed
+name: angiosperm_leaf
+name_mode: timestamp  # New builds append their UTC preparation time; --name overrides.
 metadata: datasets/angiosperm_leaf/metadata.tsv
+metadata_provenance: datasets/angiosperm_leaf/provenance.json
 excluded_accessions: datasets/angiosperm_leaf/excluded_accessions.tsv
 reuse_from: auto
 translation:

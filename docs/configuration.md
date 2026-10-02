@@ -22,8 +22,10 @@ Use a new name for changed scientific conditions. See
 
 | Setting | Purpose |
 | --- | --- |
-| `name` | Build directory under `results/`; `submit --name` overrides it |
+| `name` | Build directory name, or the dataset prefix with `name_mode: timestamp`; `--name` sets an exact build name |
+| `name_mode` | `fixed` (default) resumes the configured name; `timestamp` creates a new UTC timestamped build when `--name` is omitted |
 | `metadata`, `excluded_accessions` | Sample metadata and optional run exclusions |
+| `metadata_provenance` | Optional JSON history matching the source metadata checksum; copied into the build and portable database |
 | `reuse_from` | `auto` for previous sample stages; build/database path or list; `null` for a fresh build |
 | `genegalleon` | [Pinned software](datasets.md#pinned-genegalleon-source-and-sif) and assembly/quantification settings |
 | `busco.lineage` | BUSCO dataset; default `embryophyta_odb12` |

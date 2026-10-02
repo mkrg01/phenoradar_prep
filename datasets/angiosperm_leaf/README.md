@@ -50,24 +50,33 @@ or processing retries, see [restart options](../README.md#choosing-where-to-rest
 
 ## Building the database
 
-After the metadata job finishes, use a new build name for changed metadata:
+After the metadata job finishes, submit a new build. The configuration keeps
+`angiosperm_leaf` as its dataset prefix and automatically appends a UTC
+preparation timestamp:
 
 ```bash
 ./run_build.sh plan --config datasets/angiosperm_leaf/build.yaml
-./run_build.sh submit --config datasets/angiosperm_leaf/build.yaml \
-  --name angiosperm_leaf_01
+./run_build.sh submit --config datasets/angiosperm_leaf/build.yaml
 ```
 
-Completed products are in `results/angiosperm_leaf_01/database/`.
-Compatible stages from earlier builds are reused automatically.
+The command prints its exact build path, for example
+`results/angiosperm_leaf_20261002T000000Z/`. Completed products are in
+that build's `database/`. Compatible stages from earlier builds are reused
+automatically. An optional `--name <exact-name>` sets a name explicitly.
+
+`results/angiosperm_leaf_latest` points to the completed build with the
+newest preparation time. Use its `database/` to access current products; use an
+exact timestamped path to pin an analysis. The database manifest records build
+preparation/completion dates and metadata selection/acceptance/fetch dates;
+`database/provenance/metadata_provenance.json` preserves the adopted history.
 
 ## Recording QC and retrying
 
 Inspect QC decisions, then record the reviewed results:
 
 ```bash
-./run_metadata.sh record --build results/angiosperm_leaf_01 --dry-run
-./run_metadata.sh record --build results/angiosperm_leaf_01
+./run_metadata.sh record --build results/angiosperm_leaf_20261002T000000Z --dry-run
+./run_metadata.sh record --build results/angiosperm_leaf_20261002T000000Z
 ```
 
 `record` updates acceptance and exclusion tables, including from partial builds.
@@ -78,8 +87,10 @@ For manual exclusions, preserve the table's columns and leave unused cells blank
 For execution failures, retry the same build:
 
 ```bash
-./run_build.sh submit --build results/angiosperm_leaf_01
+./run_build.sh submit --build results/angiosperm_leaf_20261002T000000Z
 ```
 
 Add `--resources <retry.yaml>` for resource changes. Successful stages are reused
-and the build keeps its original sample selection.
+and the build keeps its original sample selection. Repeating `submit --config`
+without `--build` prepares another build; use the printed path when retrying,
+including after `--dry-run`.

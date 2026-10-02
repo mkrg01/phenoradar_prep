@@ -8,6 +8,7 @@ from common import atomic_writer, now, read_tsv, write_json
 from dataset_assets import digest, link_file, locked, record, verify
 from mapping_tables import load_tables, protein_record, relative_file, subset
 from layout import run_layout
+from build_versioning import publish_latest
 
 
 def load_complete(path, verify_files=True):
@@ -28,7 +29,8 @@ def complete(path):
     with locked(path / '.complete.lock'):
         target = path / 'completed.json'
         if target.exists():
-            load_complete(target); return target
+            publish_latest(path, load_complete(target))
+            return target
         manifest = load(path, check_code=True)
         inputs = materialize(path)
         results = Path(manifest['root']) / run_layout(manifest['analysis'])[0]
@@ -87,13 +89,20 @@ def complete(path):
         files.extend(manifest['auxiliary'].values())
         files.extend(record(path / n) for n in ('build.json','pipeline.yaml','checksums.json','metadata.tsv'))
         for p in products.values(): files.extend([p['protein'], p['translation']])
-        data = {'schema_version':5, 'kind':'completed_build', 'build_id':manifest['name'], 'created_at':now(),
+        completed_at = now()
+        data = {'schema_version':5, 'kind':'completed_build', 'build_id':manifest['name'], 'created_at':completed_at,
+                'dataset_name':manifest.get('dataset_name', manifest['name']),
+                'name_mode':manifest.get('name_mode', 'fixed'),
+                'prepared_at':manifest.get('prepared_at', manifest['created_at']), 'completed_at':completed_at,
+                'metadata_history':manifest.get('metadata_history'),
                 'input':str(inputs), 'fields':manifest['fields'],
                 'translation':manifest['analysis']['translation'], 'lineage':manifest['analysis']['phylogeny']['lineage'],
                 'odb':{'version':'v12','node':manifest['analysis']['odb']['ncbi_tax_id']},
                 'mapping':record(mapping), 'products':products, 'files':files,
                 'excluded_runs':manifest.get('excluded', []), 'tpm':{'multimap':'error'}}
-        return publish_pointer(path, publish_products(path, data))
+        completed = publish_pointer(path, publish_products(path, data))
+        publish_latest(path, load_complete(completed, verify_files=False))
+        return completed
 
 
 def import_protein(completion, species, protein, provenance):

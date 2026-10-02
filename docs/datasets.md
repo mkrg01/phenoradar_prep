@@ -74,6 +74,30 @@ the saved conditions, even if source files have changed. Use a new name for
 scientific changes; use [resource overrides](running.md#resource-budgets) for
 CPU, memory, time, or concurrency changes.
 
+For automatically updated datasets, set `name_mode: timestamp` and keep `name`
+as the dataset prefix. Each `prepare` or new `submit` without `--name` creates
+`results/<name>_YYYYMMDDTHHMMSSZ/` using its UTC preparation time. Repeated builds
+in the same second receive `_02`, `_03`, and so on. An explicit `--name` uses that
+exact name and retains the usual retry behavior. Resume an automatically named
+build with `submit --build results/<printed-build-name>`; repeating a submission
+without `--build` creates another snapshot, including after `--dry-run`.
+
+Completed timestamp-mode builds update `results/<name>_latest`, a relative symlink
+to the completed build with the newest preparation time. Preparing a build,
+running a pilot, or failing a build does not update it. An older build finishing
+later cannot move it backward. For reproducible analyses, use a specific build
+path rather than the moving alias.
+
+Set `metadata_provenance` to the accepted metadata's `provenance.json` to freeze
+its history along with the input table. Its metadata checksum must match the
+source table, including when `--metadata` overrides the configured table. The
+build records `prepared_at`; the portable database records `dataset_name`,
+`build_id`, `prepared_at`, `completed_at`, and `metadata_history` (selection,
+acceptance, and fetch times when available). Existing `created_at` fields remain:
+preparation time in `build.json`, publication time in `database/manifest.json`.
+These times describe the snapshot; reused sample products keep their original
+generation history. External metadata without fetch evidence has no fetch time.
+
 | Command | Effect |
 | --- | --- |
 | `plan` | Preview current inputs and settings without saving a run |

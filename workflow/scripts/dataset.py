@@ -22,6 +22,7 @@ from phase_config import read_yaml
 from layout import run_layout
 from sample_identity import select_samples
 from dataset_software import resolve as resolve_software, validate as validate_software
+from build_versioning import metadata_history, naming_mode, timestamp_directory
 from dataset_assets import (COUNTS, SAFE, digest, identities, link_file, locked,
                             normalize_private_paths, record, register_busco, register_quant, register_reference, resolve, verify)
 
@@ -49,8 +50,13 @@ def settings(root, config, analysis_config=None, name=None):
     cfg = read_yaml(config)
     if analysis_config is not None:
         raise ValueError("build does not accept analysis overrides; use run_analysis.sh")
-    unknown = set(cfg) - {"name", "metadata", "reuse_from", "translation", "busco", "odb", "genegalleon", "slurm", "excluded_accessions", "storage"}
+    unknown = set(cfg) - {"name", "name_mode", "metadata", "metadata_provenance", "reuse_from", "translation", "busco", "odb", "genegalleon", "slurm", "excluded_accessions", "storage"}
     if unknown: raise ValueError(f"unknown build settings: {sorted(unknown)}; use config/build.yaml for build settings")
+    cfg['name_mode'] = naming_mode(cfg)
+    provenance = cfg.get('metadata_provenance')
+    if provenance is not None and (not isinstance(provenance, str) or not provenance.strip()):
+        raise ValueError('metadata_provenance must be null or a JSON path')
+    cfg['metadata_provenance'] = str(absolute(root, provenance)) if provenance is not None else None
     excluded = cfg.get("excluded_accessions")
     if excluded is not None and (not isinstance(excluded, str) or not excluded.strip()):
         raise ValueError("excluded_accessions must be null or a TSV path")
@@ -84,7 +90,7 @@ def settings(root, config, analysis_config=None, name=None):
     cfg["slurm"] = validate_slurm(cfg["slurm"])
     from database_reuse import normalize
     cfg["reuse_from"] = normalize(root, cfg.get("reuse_from"))
-    build_name = name or cfg.get("name")
+    build_name = name or (cfg.get("name") if cfg['name_mode'] == 'fixed' else None)
     cache = build_directory(root, build_name, config) / "work/cache" if build_name else root / "results/.plan/work/cache"
     cfg["store"] = str(cache / "products")  # Internal, frozen stage receipts; not a user setting.
     analysis["translation_cache"] = str(cache / "proteins")
@@ -166,6 +172,11 @@ def plan(root, config, metadata=None, analysis_config=None, name=None):
     cfg, analysis = settings(root, config, analysis_config, name)
     metadata = absolute(root, metadata or cfg["metadata"])
     source = record(metadata)
+    provenance_record = record(cfg['metadata_provenance']) if cfg['metadata_provenance'] else None
+    if provenance_record:
+        provenance = json.loads(verify(provenance_record).read_text())
+        if not isinstance(provenance, dict) or not isinstance(provenance.get('metadata'), dict) or provenance['metadata'].get('sha256') != source['sha256']:
+            raise ValueError('metadata provenance does not match the input metadata; update metadata or use its matching provenance')
     policy_record = record(cfg["excluded_accessions"]) if cfg["excluded_accessions"] else None
     policy = read_exclusions(cfg["excluded_accessions"])
     fields, items = identities(metadata)
@@ -175,7 +186,7 @@ def plan(root, config, metadata=None, analysis_config=None, name=None):
     if policy_record: verify(policy_record)
     from database_reuse import select
     reusable, errors, sources = select(cfg['reuse_from'], items, cfg)
-    selection = {"source_metadata": source, "exclusion_policy": policy_record, "excluded": excluded,
+    selection = {"source_metadata": source, "metadata_provenance": provenance_record, "exclusion_policy": policy_record, "excluded": excluded,
                  "reusable": reusable, "reuse_sources": sources}
     report = inspect_items(cfg["store"], items, analysis, conditions=cfg["conditions"],
                            reusable=reusable, errors=errors) + excluded_report(excluded)
@@ -203,12 +214,30 @@ def build_directory(root, name, config):
 
 
 def prepare(root, name, config, metadata=None, analysis_config=None):
+    cfg = read_yaml(config)
+    if name is None and naming_mode(cfg) == 'timestamp':
+        prefix = build_directory(root, None, config).name
+        parent = Path(root).resolve() / 'results'
+        with locked(parent / f'.{prefix}.prepare.lock'):
+            prepared_at = now()
+            target = timestamp_directory(root, prefix, prepared_at)
+            return _prepare(root, target.name, config, metadata, analysis_config, prepared_at)
+    return _prepare(root, name, config, metadata, analysis_config)
+
+
+def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_at=None):
     root = Path(root).resolve()
+    prepared_at = prepared_at or now()
     target = build_directory(root, name, config)
     name = target.name
     if target.exists():
         raise ValueError("dataset/run name already exists; resume it or choose a new name")
     cfg, analysis, metadata, fields, items, selection, report = plan(root, config, metadata, analysis_config, name)
+    dataset_name = cfg.get('name') if cfg['name_mode'] == 'timestamp' else name
+    if not isinstance(dataset_name, str) or not SAFE.fullmatch(dataset_name):
+        raise ValueError('dataset name must be a simple directory name')
+    if cfg['name_mode'] == 'timestamp' and name == f'{dataset_name}_latest':
+        raise ValueError('build name is reserved for the latest dataset alias')
     cfg["name"] = name
     if not items: raise ValueError("all metadata runs are excluded; no build was prepared")
     conflicts = [r for r in report if r["assembly"] == "conflict"]
@@ -238,6 +267,7 @@ def prepare(root, name, config, metadata=None, analysis_config=None):
                 raw_records[item["species"]] = {k: record(item["row"][k]) for k in ("read1_path", "read2_path") if item["row"].get(k)}
         auxiliary = {}
         for filename, entry in (("source_metadata.tsv", selection["source_metadata"]),
+                                ("metadata_provenance.json", selection['metadata_provenance']),
                                 ("excluded_accessions.tsv", selection["exclusion_policy"])):
             if entry:
                 shutil.copy2(verify(entry), staging / filename)
@@ -247,6 +277,7 @@ def prepare(root, name, config, metadata=None, analysis_config=None):
         write_tsv(staging / "excluded_runs.tsv", ["species", "run", "reason"], selection["excluded"])
         auxiliary["excluded_runs.tsv"] = dict(record(staging / "excluded_runs.tsv"), path=str(target / "excluded_runs.tsv"))
         if cfg["excluded_accessions"]: cfg["excluded_accessions"] = str(target / "excluded_accessions.tsv")
+        if cfg['metadata_provenance']: cfg['metadata_provenance'] = str(target / 'metadata_provenance.json')
         analysis["run_name"] = name
         relative = target.relative_to(root)
         analysis["output_root"] = str(relative / "work/database")
@@ -265,7 +296,10 @@ def prepare(root, name, config, metadata=None, analysis_config=None):
             # Retain pinned-container evidence when every native stage is reused.
             # These are audit receipts; no upstream software needs to run again.
             software_lock = next(iter(selection['reusable'].values()))['software_lock']
-        manifest = {"schema_version": 2, "kind": "build", "name": name, "created_at": now(), "root": str(root),
+        history = metadata_history(json.loads((staging / 'metadata_provenance.json').read_text())) if selection['metadata_provenance'] else None
+        manifest = {"schema_version": 2, "kind": "build", "name": name, "created_at": prepared_at, "root": str(root),
+                    "dataset_name": dataset_name, "name_mode": cfg['name_mode'], "prepared_at": prepared_at,
+                    "metadata_history": history,
                     "config": cfg, "analysis": analysis, "fields": fields, "items": items,
                     "metadata": dict(record(frozen), path=str(target / "metadata.tsv")),
                     "auxiliary": auxiliary, "excluded": selection["excluded"], "raw_inputs": raw_records, "implementation": implementation(root),
@@ -750,6 +784,11 @@ def submit_named(root, name=None, config=None, metadata=None, until="database", 
     """Freeze a new build, or submit an existing name with its saved conditions."""
     root = Path(root).resolve()
     config = absolute(root, config or "config/build.yaml")
+    if name is None and naming_mode(read_yaml(config)) == 'timestamp':
+        target = prepare(root, None, config, metadata)
+        print(f"Prepared build: {target}. Resume with --build {target}.", flush=True)
+        return submit(target, until, absolute(root, species) if species else None, dry_run,
+                      absolute(root, resources) if resources else None)
     target = build_directory(root, name, config)
     with locked(target.parent / f".{target.name}.prepare.lock"):
         if target.exists():
@@ -771,7 +810,7 @@ def main():
         command.add_argument("--root", default=".")
         command.add_argument("--config", default="config/build.yaml")
         if name != "fetch-software": command.add_argument("--metadata")
-        if name == "prepare": command.add_argument("--name", help="Override name from the build config")
+        if name == "prepare": command.add_argument("--name", help="Explicit build name; otherwise follow name/name_mode in the build config")
     for name in ("status", "cleanup", "submit", "materialize", "worker", "mapping", "complete"):
         command = sub.add_parser(name)
         command.add_argument("--build", "--dataset", dest="dataset", required=name != "submit",
@@ -783,7 +822,7 @@ def main():
         if name == "submit":
             command.add_argument("--root", default=".")
             command.add_argument("--config", help="Settings for a new build; default: config/build.yaml")
-            command.add_argument("--name", help="Build name; defaults to name in the build config")
+            command.add_argument("--name", help="Explicit build name; otherwise follow name/name_mode in the build config")
             command.add_argument("--metadata", help="Metadata for a new build")
             command.add_argument("--resources")
             command.add_argument("--species-list")

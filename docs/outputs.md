@@ -7,6 +7,7 @@
 | Path | Contents |
 | --- | --- |
 | `results/<build>/database/` | Portable sample products and provenance |
+| `results/<dataset>_latest` | Newest completed timestamp-mode build, by preparation time |
 | `results/<build>/downstream/<analysis>/` | Analysis settings, inputs, and results |
 | `results/<build>/work/` | GeneGalleon workspaces, computation, and build caches |
 | `results/<build>/logs/` | Rule logs and benchmarks for the database and analyses |
@@ -24,6 +25,8 @@ follow the [sample identifier conventions](inputs.md#identifiers).
 | Path | Contents |
 | --- | --- |
 | `metadata.tsv` | Metadata after run exclusions |
+| `manifest.json` | Build ID, dataset name, preparation/completion dates, metadata history, and product checksums |
+| `provenance/metadata_provenance.json` | Frozen source metadata history, when configured |
 | `cds/{species}_longestCDS.fa.gz` | Longest CDS per gene |
 | `busco/summary.tsv`, `busco/full/` | Per-sample counts and full BUSCO tables |
 | `quant/{species}/{run}/{run}_abundance.tsv` | Gene expression: `target_id`, `tpm` |

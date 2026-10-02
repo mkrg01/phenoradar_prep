@@ -150,7 +150,7 @@ def publish_products(build, data):
             write_tsv(staging / 'excluded_runs.tsv', ['species', 'run', 'reason'], data.get('excluded_runs', []))
             created('excluded_runs.tsv')
         # These are historical records; their original paths are never dereferenced.
-        for name in ('build.json', 'pipeline.yaml', 'checksums.json', 'reuse.json'):
+        for name in ('build.json', 'pipeline.yaml', 'checksums.json', 'reuse.json', 'metadata_provenance.json'):
             source = build / name
             if source.exists(): add(record(source), Path('provenance') / name)
         products = copy.deepcopy(data['products'])
@@ -193,6 +193,9 @@ def publish_products(build, data):
         mapping = created('odb/snapshot.json')
         portable = {k:copy.deepcopy(data[k]) for k in
                     ('kind','build_id','created_at','fields','translation','lineage','odb','excluded_runs')}
+        for key in ('dataset_name', 'name_mode', 'prepared_at', 'completed_at', 'metadata_history'):
+            if key in data:
+                portable[key] = copy.deepcopy(data[key])
         portable['tpm'] = copy.deepcopy(data['tpm'])
         portable.update(schema_version=data["schema_version"], products=products, mapping=mapping, files=list(files.values()))
         portable['sha256'] = digest(portable)
