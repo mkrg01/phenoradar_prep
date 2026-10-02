@@ -37,20 +37,42 @@ if no candidate remains. Source changes for retained runs are flagged in
 
 | Purpose | Command |
 | --- | --- |
-| Refresh NCBI metadata and curate | `sbatch run_metadata.sh update --work <new-attempt>` |
-| Reselect from saved candidates | `sbatch run_metadata.sh update --work <new-attempt> --metadata <curated.tsv>` |
+| Refresh NCBI metadata and curate | `sbatch run_metadata.sh update` |
+| Reselect from saved candidates | `sbatch run_metadata.sh update --metadata <curated.tsv>` |
 | Retry failed or unfinished processing | `./run_build.sh submit --build results/<existing-build>` |
 
 Submit from the repository root. Metadata jobs request 4 CPUs, 128 GB, and three
 days; override these with the `sbatch` options `--mem` and `--time`.
 Logs go to `slurm-metadata-<jobid>.out`. Use `./run_metadata.sh` for direct execution.
 
+`update` automatically creates `work/datasets/<name>/YYYYMMDDTHHMMSSZ/` when the
+command starts executing (after queueing for Slurm jobs). The timestamp is UTC,
+matching database build names. A name collision is an error; no suffix is added.
+An optional `--work <new-path>` retains manual naming under the project `work/`.
+Existing updates are never overwritten. A manually specified path may contain
+outputs from separately executed `fetch` or `curate` stages.
+
+The work path and candidate path are printed before processing starts. A refresh
+contains `fetch/`, `curate/`, and `candidate/`; a reselection contains
+`candidate/`. Both have a `run.json` receipt recording the dataset, execution ID,
+mode (`refresh` or `reselect`), configuration checksum, source metadata checksum,
+source run when available, start/end times, Slurm job ID, summary, and status
+(`running`, `complete`, or `failed`). `metadata_history` preserves the original
+fetch time separately from the new selection time. `accepted_at` records
+adoption, including when a preview is later adopted with `accept`.
+
+By default, `update` publishes the selected metadata immediately. With
+`--dry-run`, acquisition and selection still run and write a candidate, while
+adopted dataset tables remain unchanged. The job prints an acceptance command
+with the matching configuration and candidate path. Review the candidate and
+run that command to publish it. Adopted `provenance.json` records its source run.
+
 Reselection needs the AMALGKIT-curated table **before representative selection**.
 If curation rules changed, first run
 `sbatch run_metadata.sh curate --work <new-attempt> --metadata <saved-raw.tsv>`;
 after the job finishes, pass its output to `update --metadata`.
 
-Use a new attempt under `work/` for metadata updates. Dataset builds with
+Each metadata update uses a new work directory. Dataset builds with
 `name_mode: timestamp` automatically choose a new name for each submission;
 resume an existing build with `--build results/<printed-build-name>`.
 `reuse_from: auto` reuses verified sample stages. Retries use
@@ -68,7 +90,8 @@ to change CPU, memory, or time limits. See [builds and recovery](../docs/dataset
 | `overrides.tsv` | Optional choices with `taxid`, `run`, and `reason` |
 | `accepted_samples.tsv` | Reviewed successes registered by `record` |
 
-`update` writes `metadata.tsv`, `selection.tsv`, and `provenance.json`.
+`update` writes `metadata.tsv`, `selection.tsv`, and `provenance.json` under its
+`candidate/`, and publishes them to the dataset directory unless `--dry-run`.
 Downloads, candidates, and logs go under `work/datasets/`; builds go under
 `results/`. Configured metadata provenance is frozen into each build and copied
 to the portable database. Timestamp-mode builds publish a `<name>_latest` alias

@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -283,7 +284,8 @@ def test_invalid_slurm_cpu_allocation_fails_before_metadata_work(curated_project
 
 
 @pytest.mark.parametrize('location', ['direct', 'submit_directory', 'working_directory'])
-def test_metadata_launcher_handles_direct_and_slurm_spooled_scripts(curated_project, tmp_path, location):
+@pytest.mark.parametrize('automatic', [False, True])
+def test_metadata_launcher_handles_direct_and_slurm_spooled_scripts(curated_project, tmp_path, location, automatic):
     root, dataset, cfg = curated_project
     repository = Path(__file__).resolve().parents[1]
     shutil.copytree(repository / 'workflow/scripts', root / 'workflow/scripts',
@@ -300,11 +302,18 @@ def test_metadata_launcher_handles_direct_and_slurm_spooled_scripts(curated_proj
                    'SLURM_SUBMIT_DIR': str(root if location == 'submit_directory' else elsewhere)}
     source = root / 'curated candidates.tsv'
     write_tsv(source, FIELDS, [row(1, 'OLD1'), row(2, 'REPLACEMENT2')])
-    result = subprocess.run(['bash', str(launcher), 'update', '--config', str(cfg['_path']),
-        '--work', 'work/from_launcher', '--metadata', str(source)],
+    arguments = ['bash', str(launcher), 'update', '--config', str(cfg['_path']), '--metadata', str(source)]
+    if not automatic:
+        arguments += ['--work', 'work/from_launcher']
+    result = subprocess.run(arguments,
         cwd=root if location == 'working_directory' else elsewhere,
         env=environment, check=True, capture_output=True, text=True)
-    assert json.loads(result.stdout)['updated']['samples'] == 2
+    output = json.loads(result.stdout)
+    assert output['updated']['samples'] == 2
+    work = Path(output['work'])
+    assert work.parent == (root / 'work/datasets/leaf' if automatic else root / 'work')
+    assert json.loads((work / 'run.json').read_text())['accepted_at'] is not None
+    assert f'metadata work: {work}' in result.stderr
     assert [r['run'] for r in read_tsv(dataset / 'metadata.tsv')] == ['OLD1', 'REPLACEMENT2']
     assert not (root / 'results').exists()
 
@@ -546,3 +555,180 @@ def test_update_runs_fetch_and_curation_before_publishing(fresh_project, monkeyp
     assert actions == ['fetch', 'curate']
     assert [r['run'] for r in read_tsv(dataset / 'metadata.tsv')] == ['NEW3']
     assert not read_tsv(dataset / 'accepted_samples.tsv')
+
+
+def test_automatic_update_records_utc_work_and_later_acceptance(curated_project, monkeypatch, capsys):
+    root, dataset, cfg = curated_project
+    source = root / 'curated candidates.tsv'
+    write_tsv(source, FIELDS, [row(1, 'OLD1'), row(2, 'REPLACEMENT2')])
+    before = (dataset / 'metadata.tsv').read_bytes()
+    monkeypatch.setattr(catalog, 'now', lambda: '2026-10-02T12:15:00+09:00')
+    monkeypatch.setenv('SLURM_JOB_ID', '12345')
+
+    result = catalog.update_metadata(root, cfg, source=source, dry_run=True)
+    work = root / 'work/datasets/leaf/20261002T031500Z'
+    assert result['work'] == str(work)
+    assert result['run_id'] == work.name
+    assert (dataset / 'metadata.tsv').read_bytes() == before
+    run = json.loads((work / 'run.json').read_text())
+    assert run['mode'] == 'reselect' and run['status'] == 'complete'
+    assert run['source_metadata'] == file_record(source)
+    assert run['source_run'] is None
+    assert run['selection_config'] == file_record(cfg['_path'])
+    assert run['slurm_job_id'] == '12345'
+    assert run['accepted_at'] is None
+    assert run['metadata_history']['fetched_at'] is None
+    command = shlex.split(result['accept_command'])
+    assert command == [str(root / 'run_metadata.sh'), 'accept', '--config', str(cfg['_path']),
+                       '--candidate', str(work / 'candidate')]
+    assert f'metadata work: {work}' in capsys.readouterr().err
+
+    monkeypatch.setattr(catalog, 'now', lambda: '2026-10-02T04:00:00+00:00')
+    catalog.accept_candidate(root, cfg, work / 'candidate')
+    accepted = json.loads((work / 'run.json').read_text())
+    assert accepted['accepted_at'] == '2026-10-02T04:00:00+00:00'
+    assert accepted['metadata_history']['accepted_at'] == accepted['accepted_at']
+    assert accepted['finished_at'] == run['finished_at']
+    assert json.loads((dataset / 'provenance.json').read_text())['metadata_run'] == {
+        'run_id': work.name, 'work': str(work)}
+
+
+@pytest.mark.parametrize('occupied', ['directory', 'file', 'dangling_symlink'])
+def test_automatic_update_collision_fails_before_processing(curated_project, monkeypatch, occupied):
+    root, dataset, cfg = curated_project
+    monkeypatch.setattr(catalog, 'now', lambda: '2026-10-02T03:15:00+00:00')
+    work = root / 'work/datasets/leaf/20261002T031500Z'
+    work.parent.mkdir(parents=True)
+    if occupied == 'directory':
+        work.mkdir()
+        (work / 'sentinel').write_text('original')
+    elif occupied == 'file':
+        work.write_text('original')
+    else:
+        work.symlink_to('absent')
+    monkeypatch.setattr(catalog, 'metadata_stage', lambda *a: pytest.fail('collision must precede NCBI processing'))
+    before = (dataset / 'metadata.tsv').read_bytes()
+    with pytest.raises(ValueError, match='metadata work directory already exists'):
+        catalog.update_metadata(root, cfg)
+    assert list(work.parent.iterdir()) == [work]
+    assert (dataset / 'metadata.tsv').read_bytes() == before
+    if occupied == 'directory':
+        assert (work / 'sentinel').read_text() == 'original'
+    elif occupied == 'file':
+        assert work.read_text() == 'original'
+    else:
+        assert work.is_symlink() and not work.exists()
+
+
+def test_concurrent_updates_in_same_second_preserve_the_winning_run(curated_project, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    root, dataset, cfg = curated_project
+    source = root / 'curated.tsv'
+    write_tsv(source, FIELDS, [row(1, 'OLD1')])
+    monkeypatch.setattr(catalog, 'now', lambda: '2026-10-02T03:15:00+00:00')
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(catalog.update_metadata, root, cfg, source=source, dry_run=True)
+                   for _ in range(2)]
+    succeeded = [future.result() for future in futures if future.exception() is None]
+    errors = [future.exception() for future in futures if future.exception() is not None]
+    assert len(succeeded) == len(errors) == 1
+    assert isinstance(errors[0], ValueError)
+    assert 'already exists' in str(errors[0])
+    work = Path(succeeded[0]['work'])
+    assert json.loads((work / 'run.json').read_text())['status'] == 'complete'
+    assert [row['run'] for row in read_tsv(work / 'candidate/metadata.tsv')] == ['OLD1']
+    assert list(work.parent.iterdir()) == [work]
+
+
+def test_reselection_tracks_original_run_and_fetch_date(fresh_project, monkeypatch):
+    root, dataset, cfg = fresh_project
+    monkeypatch.setattr(catalog, 'now', lambda: '2026-10-02T03:15:00+00:00')
+    monkeypatch.setattr(catalog, 'software_identity', lambda *a: ('runtime', Path('image'), {}))
+    def execute(runtime, image, root, arguments, binds=(), **kwargs):
+        target = Path(arguments[arguments.index('--out_dir') + 1]) / 'metadata/metadata.tsv'
+        write_tsv(target, FIELDS, [row(3, 'NEW3')])
+        return ['runtime', *arguments]
+    monkeypatch.setattr(catalog, 'execute', execute)
+    first = catalog.update_metadata(root, cfg)
+    work = Path(first['work'])
+    run = json.loads((work / 'run.json').read_text())
+    assert run['mode'] == 'refresh' and run['status'] == 'complete'
+    assert run['metadata_history']['fetched_at'] == run['started_at']
+    assert run['accepted_at'] is not None
+
+    monkeypatch.setattr(catalog, 'now', lambda: '2026-10-03T03:15:00+00:00')
+    monkeypatch.setattr(catalog, 'metadata_stage', lambda *a: pytest.fail('reselection must reuse curated metadata'))
+    result = catalog.update_metadata(root, cfg, source=work / 'curate/metadata/metadata.tsv')
+    reselected = json.loads((Path(result['work']) / 'run.json').read_text())
+    assert reselected['mode'] == 'reselect'
+    assert reselected['source_run'] == {'run_id': work.name, 'work': str(work)}
+    assert reselected['metadata_history'] == {
+        'fetched_at': '2026-10-02T03:15:00+00:00',
+        'selected_at': '2026-10-03T03:15:00+00:00',
+        'accepted_at': '2026-10-03T03:15:00+00:00'}
+    assert not (Path(result['work']) / 'fetch').exists()
+    assert not (Path(result['work']) / 'curate').exists()
+
+
+def test_explicit_work_can_use_prepared_curation_and_cannot_overwrite_run(curated_project):
+    root, dataset, cfg = curated_project
+    source = root / 'work/custom attempt/curate/metadata/metadata.tsv'
+    write_tsv(source, FIELDS, [row(1, 'OLD1')])
+    result = catalog.update_metadata(root, cfg, 'work/custom attempt', source, dry_run=True)
+    work = Path(result['work'])
+    run = (work / 'run.json').read_bytes()
+    assert json.loads(run)['source_run'] is None
+    assert shlex.split(result['accept_command'])[-1] == str(work / 'candidate')
+    with pytest.raises(ValueError, match='already exists'):
+        catalog.update_metadata(root, cfg, 'work/custom attempt', source, dry_run=True)
+    assert (work / 'run.json').read_bytes() == run
+
+
+@pytest.mark.parametrize('mode', ['refresh', 'reselect'])
+def test_failed_update_preserves_run_history_and_adopted_metadata(curated_project, monkeypatch, mode):
+    root, dataset, cfg = curated_project
+    monkeypatch.setattr(catalog, 'now', lambda: '2026-10-02T03:15:00+00:00')
+    before = (dataset / 'metadata.tsv').read_bytes()
+    source = root / 'invalid.tsv' if mode == 'reselect' else None
+    if source is not None:
+        source.write_text('invalid\n')
+        message = 'curated source requires unique columns'
+    else:
+        def fail(*args):
+            raise ValueError('fetch failed')
+        monkeypatch.setattr(catalog, 'metadata_stage', fail)
+        message = 'fetch failed'
+    with pytest.raises(ValueError, match=message):
+        catalog.update_metadata(root, cfg, source=source)
+    work = root / 'work/datasets/leaf/20261002T031500Z'
+    run = json.loads((work / 'run.json').read_text())
+    assert run['status'] == 'failed' and run['mode'] == mode
+    assert run['finished_at'] is not None and message in run['error']
+    assert run['accepted_at'] is None
+    assert not (work / 'candidate').exists()
+    assert (dataset / 'metadata.tsv').read_bytes() == before
+
+
+def test_reselection_rejects_work_outside_project_work(curated_project):
+    root, dataset, cfg = curated_project
+    source = root / 'curated.tsv'
+    write_tsv(source, FIELDS, [row(1, 'OLD1')])
+    with pytest.raises(ValueError, match='must be under project work'):
+        catalog.update_metadata(root, cfg, 'outside', source, dry_run=True)
+    assert not (root / 'outside').exists()
+
+
+def test_acceptance_rejects_mismatched_run_reference_before_publishing(curated_project):
+    root, dataset, cfg = curated_project
+    source = root / 'curated.tsv'
+    write_tsv(source, FIELDS, [row(1, 'OLD1')])
+    result = catalog.update_metadata(root, cfg, 'work/preview', source, dry_run=True)
+    candidate = Path(result['candidate'])
+    provenance = json.loads((candidate / 'provenance.json').read_text())
+    provenance['metadata_run']['work'] = str(root / 'unrelated')
+    write_json(candidate / 'provenance.json', provenance)
+    before = (dataset / 'metadata.tsv').read_bytes()
+    with pytest.raises(ValueError, match='does not match its work directory'):
+        catalog.accept_candidate(root, cfg, candidate)
+    assert (dataset / 'metadata.tsv').read_bytes() == before
+    assert not (root / 'unrelated').exists()

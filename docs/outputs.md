@@ -6,6 +6,7 @@
 
 | Path | Contents |
 | --- | --- |
+| `work/datasets/<dataset>/<UTC timestamp>/` | Metadata acquisition, curation, candidates, and execution history (`run.json`) |
 | `results/<build>/database/` | Portable sample products and provenance |
 | `results/<dataset>_latest` | Newest completed timestamp-mode build, by preparation time |
 | `results/<build>/downstream/<analysis>/` | Analysis settings, inputs, and results |

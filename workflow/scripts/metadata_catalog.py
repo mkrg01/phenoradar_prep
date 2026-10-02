@@ -3,11 +3,13 @@
 import argparse
 import collections
 import csv
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -16,6 +18,7 @@ import tempfile
 import yaml
 
 from accession_exclusions import read_exclusions
+from build_versioning import metadata_history
 from common import file_record, now, read_tsv, sha256, write_json, write_tsv
 from dataset_assets import SAFE, counts, locked, verify
 from sample_identity import annotate
@@ -555,6 +558,7 @@ def accept_candidate(root, cfg, candidate, allow_review=False):
         # Recheck all decisions inside the lock, before replacing current metadata.
         if sha256(cfg['_path']) != data['selection_config']['sha256'] or selection_inputs(root, cfg) != data['inputs']:
             raise ValueError('selection inputs changed while accepting')
+        run = candidate_run(root, cfg, candidate, data)
         with tempfile.TemporaryDirectory(prefix='.accept-', dir=target.parent) as temporary:
             staged = Path(temporary) / target.name
             shutil.copyfile(candidate / 'metadata.tsv', staged)
@@ -565,6 +569,12 @@ def accept_candidate(root, cfg, candidate, allow_review=False):
         data['metadata'] = file_record(target)
         data['accepted_samples'] = file_record(path_at(root, cfg['accepted_samples']))
         write_json(target.parent / 'provenance.json', data)
+        if run is not None:
+            run.update(status='complete', accepted_at=data['accepted_at'], metadata_history=metadata_history(data))
+            if run.get('finished_at') is None or run.get('error'):
+                run['finished_at'] = data['accepted_at']
+            run.pop('error', None)
+            write_json(candidate.parent / 'run.json', run)
     return {'samples': len(rows), 'retained_success_evidence': len(evidence)}
 
 
@@ -718,19 +728,110 @@ def metadata_stage(root, cfg, action, work, source=None):
     return {'metadata': str(output), 'log': str(log_path), 'software': identity}
 
 
-def update_metadata(root, cfg, work, source=None, dry_run=False):
+def run_reference(work):
+    return {'run_id': work.name, 'work': str(work)}
+
+
+def candidate_run(root, cfg, candidate, provenance):
+    """Only update the receipt belonging to this candidate's actual directory."""
+    reference = provenance.get('metadata_run')
+    if reference is None:
+        return None
+    work = candidate.parent
+    if not work.is_relative_to(Path(root).resolve() / 'work') or reference != run_reference(work):
+        raise ValueError('candidate metadata run does not match its work directory')
+    run = json.loads((work / 'run.json').read_text())
+    if (run.get('kind') != 'metadata_run' or run.get('dataset') != cfg['name']
+            or run.get('work') != str(work) or run.get('candidate') != str(candidate)):
+        raise ValueError('candidate does not belong to its metadata run')
+    return run
+
+
+def source_run(root, cfg, source):
+    for directory in Path(source).parents:
+        if not directory.is_relative_to(Path(root).resolve() / 'work'):
+            break
+        receipt = directory / 'run.json'
+        if receipt.is_file():
+            run = json.loads(receipt.read_text())
+            if run.get('kind') == 'metadata_run' and run.get('dataset') == cfg['name']:
+                return run_reference(directory)
+    return None
+
+
+def start_metadata_run(root, cfg, work, source, dry_run):
+    root = Path(root).resolve()
+    started_at = now()
+    automatic = work is None
+    if automatic:
+        stamp = datetime.fromisoformat(started_at).astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        work = Path(root) / 'work/datasets' / cfg['name'] / stamp
+    work = work.parent.resolve() / work.name if automatic else path_at(root, work)
+    if not work.is_relative_to(Path(root).resolve() / 'work'):
+        raise ValueError('metadata work directories must be under project work/')
+    run = {'schema_version': 1, 'kind': 'metadata_run', 'dataset': cfg['name'],
+           **run_reference(work), 'mode': 'refresh' if source is None else 'reselect',
+           'status': 'running', 'started_at': started_at, 'finished_at': None,
+           'slurm_job_id': os.environ.get('SLURM_JOB_ID'), 'dry_run': dry_run,
+           'selection_config': file_record(cfg['_path']), 'source_metadata': None,
+           'source_run': None, 'candidate': str(work / 'candidate'), 'accepted_at': None}
+    try:
+        # mkdir reserves automatic names atomically, including across Slurm jobs.
+        work.mkdir(parents=True, exist_ok=not automatic)
+    except FileExistsError as error:
+        raise ValueError(f'metadata work directory already exists: {work}; specify a new --work or run again later') from error
+    if (work / 'candidate').exists():
+        raise ValueError(f'candidate directory already exists; choose a new attempt: {work / "candidate"}')
+    try:
+        # Explicit work paths may contain separately prepared fetch/curate stages.
+        # Claim their run receipt without overwriting a previous update.
+        with (work / 'run.json').open('x') as handle:
+            json.dump(run, handle, indent=2, ensure_ascii=False, allow_nan=False)
+            handle.write('\n')
+    except FileExistsError as error:
+        raise ValueError(f'metadata run already exists; choose a new --work: {work}') from error
+    return work, run
+
+
+def update_metadata(root, cfg, work=None, source=None, dry_run=False):
     """Fetch/curate/select/publish in one command, or reuse a curated download."""
-    work = path_at(root, work)
-    if source is None:
-        metadata_stage(root, cfg, 'fetch', work)
-        curated = metadata_stage(root, cfg, 'curate', work)
-        source = curated['metadata']
+    work, run = start_metadata_run(root, cfg, work, source, dry_run)
     candidate = work / 'candidate'
-    summary = select_candidates(root, cfg, source, candidate)
-    result = {'candidate': str(candidate), 'summary': summary, 'dry_run': dry_run}
-    if not dry_run:
-        result['updated'] = accept_candidate(root, cfg, candidate)
-    return result
+    print(f'metadata work: {work}\nmetadata candidate: {candidate}', file=sys.stderr, flush=True)
+    try:
+        if source is None:
+            metadata_stage(root, cfg, 'fetch', work)
+            curated = metadata_stage(root, cfg, 'curate', work)
+            source = curated['metadata']
+        source = path_at(root, source)
+        run['source_metadata'] = file_record(source)
+        if run['mode'] == 'reselect':
+            run['source_run'] = source_run(root, cfg, source)
+            if run['source_run'] == run_reference(work):
+                run['source_run'] = None
+        write_json(work / 'run.json', run)
+        summary = select_candidates(root, cfg, source, candidate)
+        provenance = json.loads((candidate / 'provenance.json').read_text())
+        provenance['metadata_run'] = run_reference(work)
+        write_json(candidate / 'provenance.json', provenance)
+        run.update(summary=summary, source_metadata=provenance['source_metadata'],
+                   metadata_history=metadata_history(provenance))
+        write_json(work / 'run.json', run)
+        result = {**run_reference(work), 'candidate': str(candidate), 'summary': summary, 'dry_run': dry_run}
+        if not dry_run:
+            result['updated'] = accept_candidate(root, cfg, candidate)
+            run = json.loads((work / 'run.json').read_text())
+        run.update(status='complete', finished_at=now())
+        write_json(work / 'run.json', run)
+        if dry_run:
+            result['accept_command'] = shlex.join([str(Path(root).resolve() / 'run_metadata.sh'), 'accept',
+                '--config', str(cfg['_path']), '--candidate', str(candidate)])
+            print(f'accept candidate: {result["accept_command"]}', file=sys.stderr, flush=True)
+        return result
+    except (Exception, KeyboardInterrupt) as error:
+        run.update(status='failed', finished_at=now(), error=str(error))
+        write_json(work / 'run.json', run)
+        raise
 
 
 def main():
@@ -741,7 +842,7 @@ def main():
         p.add_argument('--root', default='.')
         p.add_argument('--config', default='datasets/angiosperm_leaf/selection.yaml')
         if name == 'update':
-            p.add_argument('--work', required=True)
+            p.add_argument('--work', help='Work directory; default: work/datasets/<name>/<UTC timestamp>')
             p.add_argument('--metadata', help='Optional already curated AMALGKIT table; otherwise fetch and curate')
             p.add_argument('--dry-run', action='store_true', help='Write a candidate without publishing dataset metadata')
         elif name == 'record':

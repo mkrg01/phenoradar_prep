@@ -27,26 +27,42 @@ AMALGKIT runs inside the pinned image. For metadata-only work, a smaller host
 
 ## Updating metadata
 
-Edit curation rules and exclusions as needed, then choose a new attempt:
+Edit curation rules and exclusions as needed, then submit an update:
 
 ```bash
-attempt=work/datasets/angiosperm_leaf/refresh_01
-sbatch run_metadata.sh update --work "$attempt"
+sbatch run_metadata.sh update
 ```
 
-The job retrieves NCBI metadata, curates it, and writes representative metadata.
-To preview, add `--dry-run`; publish the reviewed candidate with
-`./run_metadata.sh accept --candidate "$attempt/candidate"`.
+The job retrieves NCBI metadata, curates it, and publishes representative
+metadata. At execution start it automatically creates and prints a work path,
+for example `work/datasets/angiosperm_leaf/20261002T000000Z/`. The UTC timestamp
+identifies this execution; a second run in the same second fails instead of
+overwriting it. Use `--work <new-path>` to specify a path manually.
+
+To generate a candidate for review, add `--dry-run`. This still retrieves and
+processes metadata, but leaves the adopted dataset tables unchanged. The job
+prints the exact acceptance command. After review, run it, for example:
+
+```bash
+./run_metadata.sh accept \
+  --candidate work/datasets/angiosperm_leaf/20261002T000000Z/candidate
+```
+
+Replace timestamps in these examples with the paths printed by your jobs.
 
 To select replacements after recording BUSCO failures or changing exclusions:
 
 ```bash
-sbatch run_metadata.sh update --work work/datasets/angiosperm_leaf/reselect_01 \
-  --metadata "$attempt/curate/metadata/metadata.tsv"
+sbatch run_metadata.sh update \
+  --metadata work/datasets/angiosperm_leaf/20261002T000000Z/curate/metadata/metadata.tsv
 ```
 
-This reuses the saved candidates without querying NCBI. For curation rule changes
-or processing retries, see [restart options](../README.md#choosing-where-to-restart).
+This creates a new timestamped run and reuses the saved curated candidates
+without querying NCBI. Add `--dry-run` to review before adoption. Each run's
+`run.json` records its inputs, source run when available, outcome, and adoption
+time. Fetch dates remain tied to the original NCBI acquisition. For curation
+rule changes or processing retries, see
+[restart options](../README.md#choosing-where-to-restart).
 
 ## Building the database
 
