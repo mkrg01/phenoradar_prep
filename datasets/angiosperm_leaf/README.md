@@ -44,6 +44,11 @@ effective table is retained under `rules/legacy/` for comparison.
 
 ## Updating metadata
 
+Choose between a fresh NCBI query, reselection from a saved curated source, and
+processing retries using the [restart entry points](../README.md#choosing-where-to-restart).
+Metadata updates use a new attempt directory and a new build name. Processing
+retries use the existing build and keep its selected runs unchanged.
+
 The host Python needs PyYAML (use the provided metadata environment).
 Use `WORKFLOW_PYTHON` to select another interpreter if needed. Apptainer or
 Singularity runs the pinned image; AMALGKIT does not need a host installation.
@@ -159,8 +164,8 @@ under its `database/` directory. Nothing is published automatically.
 
 ## Recording new successes for the next update
 
-Inspect completed sample stages and their BUSCO counts, even while other
-samples are incomplete:
+Inspect completed sample stages, their BUSCO counts, and proposed exclusions,
+even while other samples are incomplete:
 
 ```bash
 ./run_metadata.sh record --build results/angiosperm_leaf_20261001 --dry-run
@@ -168,29 +173,51 @@ samples are incomplete:
 
 After reviewing QC, add unusable runs to `excluded_accessions.tsv`. An accession
 and optional reason suffice; taxid and BioProject are optional context. Then
-adopt completed current representatives:
+record QC for current representatives:
 
 ```bash
 ./run_metadata.sh record --build results/angiosperm_leaf_20261001
-# To adopt only a reviewed subset:
+# To record QC only for a reviewed subset:
 ./run_metadata.sh record --build results/angiosperm_leaf_20261001 --runs SRR123 SRR456
 ```
 
 When adding rows to the supplied exclusion table, leave unused context cells
 blank while keeping the table's existing columns.
 
-`record` requires matching pinned-container provenance and verified assembly,
-BUSCO, and quantification products. It skips incomplete, excluded, and superseded
-runs and applies `(BUSCO single + duplicated) / total >= busco_threshold` before
-new adoption. `selection.yaml` sets the threshold to `0.5`; exactly 50% passes.
-Below-threshold samples are reported as `busco_below_threshold` and are not newly
-registered. Existing adoption records are preserved unless explicitly excluded;
-later threshold changes do not revoke them. It updates `accepted_samples.tsv`, not
-metadata or exclusions. Invocation without `--dry-run` means you have reviewed
-and adopted the reported BUSCO-passing completed samples. `baseline` remains
-available for importing a reviewed completed database and applies the same
-adoption threshold. Neither command automatically adds below-threshold runs to
-the exclusion table. Add them manually if they should also leave future metadata.
+`record` requires matching pinned-container provenance and verified products.
+It skips already excluded and superseded runs. New samples with completed
+assembly and BUSCO products below `busco_threshold` are reported as
+`busco_below_threshold` and automatically added to `excluded_accessions.tsv`,
+even if quantification is not finished. The recorded reason is
+`busco_completeness_below_<threshold>`, with taxid, BioProject, and source build.
+Existing rows, manual reasons, and custom columns are preserved; missing context
+columns are added. Repeating the command does not duplicate exclusions.
+
+New adoption requires completed assembly, BUSCO, and quantification products and
+`(BUSCO single + duplicated) / total >= busco_threshold`. `selection.yaml` sets
+the threshold to `0.5`; exactly 50% passes. Existing adoption records are preserved
+unless explicitly excluded; later threshold changes do not revoke them or add
+automatic exclusions for those adopted runs. Missing or failed assembly/BUSCO
+stages are reported as incomplete and remain available for retry.
+
+`record` updates the success and exclusion tables but leaves metadata unchanged.
+`--dry-run` only previews, and `--runs` limits both adoption and automatic
+exclusion to the reviewed subset. Invocation without `--dry-run` records these QC
+decisions. `baseline` imports a reviewed completed database with the same
+adoption threshold and records its below-threshold runs as exclusions.
+
+After recording QC, select replacement runs using the saved curated source and
+a new attempt directory:
+
+```bash
+./run_metadata.sh update --work work/datasets/angiosperm_leaf/reselection_01 \
+  --metadata "$attempt/curate/metadata/metadata.tsv"
+```
+
+For each excluded run's taxid, this selects the eligible run with the greatest
+`total_bases`, including candidates in the same BioProject. A taxid with no
+eligible candidate leaves the metadata. Prepare and submit a new build name to
+process the replacements; `reuse_from: auto` reuses other completed sample stages.
 
 For a sample defect, edit the exclusions, run `update` with a saved curated table,
 and prepare a new build name. With `reuse_from: auto`, successful sample stages

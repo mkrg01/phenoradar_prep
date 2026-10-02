@@ -10,6 +10,33 @@ Metadata preparation and database submission are separate commands.
 | --- | --- |
 | [angiosperm_leaf](angiosperm_leaf/README.md) | One leaf RNA-seq run per original NCBI taxid |
 
+## Choosing where to restart
+
+Choose the entry point according to what needs to change:
+
+| Purpose | Command | Work performed |
+| --- | --- | --- |
+| Refresh NCBI metadata | `./run_metadata.sh update --work <new-attempt>` | Run AMALGKIT metadata, curate, select representatives, and update dataset metadata |
+| Reselect from saved candidates | `./run_metadata.sh update --work <new-attempt> --metadata <curated.tsv>` | Reuse the AMALGKIT-curated source and select representatives using current exclusions, overrides, and adoption records |
+| Retry processing with the same samples | `./run_build.sh submit --build results/<existing-build>` | Keep the build's frozen metadata and settings; schedule failed or otherwise unfinished sample stages and missing downstream work |
+
+Both metadata update paths follow the same retention policy: adopted runs stay
+selected unless excluded or overridden. The second path needs the saved table
+**before representative selection**, not the final dataset `metadata.tsv`, so
+that alternative runs remain available. If tissue rules changed, first rerun
+`curate --work <new-attempt> --metadata <saved-raw.tsv>`, then pass its curated
+table to `update --metadata`; this also avoids another NCBI query.
+
+After either metadata update, prepare a new build name and use `reuse_from: auto`
+to retain verified stages for unchanged samples. A processing retry uses the
+existing build: completed stages are skipped and missing prerequisites run as
+needed. Resource changes can be supplied with `--resources <retry.yaml>`; sample
+selection and scientific settings stay frozen.
+
+For new BUSCO failures, run `record --build results/<build>` to add the
+below-threshold accessions, then use the reselection path and prepare a new build.
+Changes to dataset metadata or exclusions do not alter an already prepared build.
+
 ## Layout
 
 ```text
@@ -17,7 +44,7 @@ datasets/<name>/
   README.md                  # Scope, policy, and update instructions
   selection.yaml             # Search, tissue, selection paths, adoption BUSCO threshold
   build.yaml                 # Database settings and pinned GeneGalleon image
-  excluded_accessions.tsv    # Excluded run accessions; context columns optional
+  excluded_accessions.tsv    # Manual exclusions and recorded BUSCO failures
   overrides.tsv              # Optional representative choices with reasons
   rules/
     select_rules.tsv          # Effective rules; edit these before curation
@@ -30,7 +57,7 @@ It also writes `accepted_samples.tsv`, initially without success evidence;
 `record` adopts reviewed samples after their assembly, BUSCO, and quantification
 finish and their BUSCO completeness meets the adoption threshold, without
 waiting for the whole database. Use `record --dry-run` to inspect
-completion and BUSCO counts before adoption.
+completion, BUSCO counts, and proposed exclusions before recording QC.
 Absent metadata and success tables are treated as an empty initial history.
 Exporting or refreshing upstream rules creates `rules/upstream/select_rules.json`.
 
@@ -56,13 +83,23 @@ the row with the requested `sample_group` and `exclusion=no`.
    The setting may be omitted or null; an absent or empty file means no overrides.
 
 `accepted_samples.tsv` records adopted representatives; updating metadata does
-**not** mark new runs as adopted. Run `record` after reviewing their QC. Incomplete
-samples and those below `busco_threshold` are reported and skipped. Completeness
+**not** mark new runs as adopted. Run `record` after reviewing their QC. Completeness
 is `(single + duplicated) / total`, and the threshold defaults to `0.5` (inclusive).
-Explicit exclusions always prevail. No failure
-or BUSCO result automatically adds exclusions or removes metadata rows. Add
-unusable runs to `excluded_accessions.tsv`, then run `update`. Their taxids get
-the next eligible representative, or disappear if no candidate remains.
+New samples with verified assembly and BUSCO products below this threshold are
+automatically added to `excluded_accessions.tsv`, even if quantification is still
+incomplete. Their reasons include the threshold, and their taxid, BioProject, and
+source build are recorded. Existing manual decisions and custom columns are kept;
+repeating `record` does not duplicate exclusions. `--runs` limits both adoption
+and automatic exclusions; `--dry-run` changes neither table.
+
+Missing or failed assembly/BUSCO stages do not trigger automatic exclusions.
+Samples passing BUSCO still need completed quantification before adoption.
+Add other unusable runs to `excluded_accessions.tsv` manually. Explicit exclusions
+always prevail. `record` leaves metadata unchanged; run `update` afterward to
+select the next eligible representative for each excluded taxid, or remove that
+taxid if no candidate remains. A saved curated source can be reused without
+another NCBI query. Prepare a new build to assemble replacement runs and reuse
+other samples' completed stages.
 
 A retained run missing from the latest source, or newly excluded by AMALGKIT,
 remains selected with an informational review flag in `selection.tsv`. Use an
@@ -77,7 +114,9 @@ run exclusions take precedence, adopted representatives are retained, and
 otherwise the eligible run with the greatest reported total bases is selected
 (accession order breaks ties). Adoption requires successful assembly, BUSCO, and
 quantification, QC review, and complete BUSCO fraction at or above the configured
-threshold (default 50%). Document any manual overrides and QC decisions.
+threshold (default 50%). New runs with completed BUSCO results below the threshold
+are recorded as accession exclusions before the next metadata update; execution
+failures remain eligible for retry. Document any manual overrides and QC decisions.
 
 ## Adding another dataset
 

@@ -9,4 +9,4 @@ accepted_samples: datasets/angiosperm_leaf/accepted_samples.tsv
 previous_metadata: datasets/angiosperm_leaf/metadata.tsv
 excluded_accessions: datasets/angiosperm_leaf/excluded_accessions.tsv
 overrides: datasets/angiosperm_leaf/overrides.tsv
-busco_threshold: 0.5  # Minimum completeness for adoption; not reapplied to retained runs.
+busco_threshold: 0.5  # Below-threshold new runs are excluded by record; adopted runs are retained.

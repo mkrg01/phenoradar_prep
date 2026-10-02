@@ -50,8 +50,8 @@ def configuration(root, path):
     cfg.setdefault('overrides', None)
     if cfg['overrides'] is not None and (not isinstance(cfg['overrides'], str) or not cfg['overrides'].strip()):
         raise ValueError('overrides must be null or a TSV path')
-    # Apply BUSCO filtering only when adopting a sample. Existing adoption
-    # records remain authoritative during later representative selection.
+    # New samples below this threshold become run exclusions during QC recording.
+    # Existing adoption records remain authoritative during later selection.
     cfg.setdefault('busco_threshold', 0.5)
     threshold = cfg['busco_threshold']
     if type(threshold) not in (int, float) or not 0 <= threshold <= 1:
@@ -97,6 +97,28 @@ def resolved_exclusions(source, historical, source_build):
                               reason=decision.get('reason', ''),
                               source_build=decision.get('source_build') or source_build))
     return sorted(decisions, key=lambda r: r['accession'])
+
+
+def busco_exclusion(row, threshold, source_build):
+    return dict(accession=row['run'], taxid=row['taxid'], bioproject=row['bioproject'],
+                reason=f'busco_completeness_below_{threshold}', source_build=source_build)
+
+
+def append_exclusions(path, decisions):
+    """Keep existing decisions and custom columns while adding new run exclusions."""
+    if not decisions:
+        return
+    fields, rows = table(path, ['accession'])
+    existing = {row['accession'] for row in rows}
+    additions = []
+    for decision in decisions:
+        if decision['accession'] not in existing:
+            additions.append(decision)
+            existing.add(decision['accession'])
+    if additions:
+        fields = list(dict.fromkeys([*fields, *EXCLUSION_FIELDS]))
+        write_tsv(path, fields, [{key: row.get(key, '') for key in fields}
+                                 for row in [*rows, *additions]])
 
 
 def initialize_empty(root, cfg, exclusions=None, replace=False):
@@ -216,7 +238,7 @@ def matching_container(root, cfg, build):
 
 
 def record_successes(root, cfg, build_path, runs=None, dry_run=False):
-    """Explicitly adopt reviewed, completed samples, including from partial builds."""
+    """Adopt completed samples and exclude new BUSCO failures from partial builds."""
     from dataset import load, item_products
     build_path = path_at(root, build_path)
     if build_path.name == 'build.json':
@@ -226,13 +248,14 @@ def record_successes(root, cfg, build_path, runs=None, dry_run=False):
     matching_container(root, cfg, build)
     before, config_record = selection_inputs(root, cfg), file_record(cfg['_path'])
     _, previous, accepted = previous_state(root, cfg)
-    exclusions = read_exclusions(path_at(root, cfg['excluded_accessions']))
+    exclusion_path = path_at(root, cfg['excluded_accessions'])
+    exclusions = read_exclusions(exclusion_path)
     items = {item['row']['run']: item for item in build['items']}
     requested = set(runs) if runs is not None else set(items)
     if requested - items.keys():
         raise ValueError('runs absent from build: ' + ', '.join(sorted(requested - items.keys())))
     accepted = {tid: row for tid, row in accepted.items() if row['run'] not in exclusions}
-    report, recorded = [], []
+    report, recorded, decisions = [], [], []
     for run in sorted(requested):
         item = items[run]
         row = item['row']
@@ -245,7 +268,7 @@ def record_successes(root, cfg, build_path, runs=None, dry_run=False):
             report.append({'run': run, 'status': status})
             continue
         products = item_products(build, item)
-        if any(not products[key] for key in ('reference', 'busco', 'quant')):
+        if any(not products[key] for key in ('reference', 'busco')):
             report.append({'run': run, 'status': 'incomplete'})
             continue
         qc = counts(products['busco']['counts'])
@@ -253,15 +276,22 @@ def record_successes(root, cfg, build_path, runs=None, dry_run=False):
                     'busco_complete': qc['busco_cds_single'] + qc['busco_cds_duplicated'],
                     'busco_total': qc['busco_cds_total'], 'source_build': build['name']}
         if evidence['busco_complete'] / evidence['busco_total'] < cfg['busco_threshold']:
+            if tid not in accepted:
+                decisions.append(busco_exclusion(row, cfg['busco_threshold'], build['name']))
             report.append({'run': run, 'status': 'busco_below_threshold',
                            'busco_complete': evidence['busco_complete'], 'busco_total': evidence['busco_total'],
                            'retained_accepted': tid in accepted})
+            continue
+        if not products['quant']:
+            report.append({'run': run, 'status': 'incomplete'})
             continue
         accepted[tid] = evidence
         recorded.append(run)
         report.append({'run': run, 'status': 'reviewed_complete',
                        'busco_complete': evidence['busco_complete'], 'busco_total': evidence['busco_total']})
-    result = {'recorded_runs': recorded, 'accepted_samples': len(accepted), 'samples': report,
+    excluded_runs = [decision['accession'] for decision in decisions]
+    result = {'recorded_runs': recorded, 'excluded_runs': excluded_runs,
+              'accepted_samples': len(accepted), 'samples': report,
               'dry_run': dry_run, 'busco_threshold': cfg['busco_threshold']}
     if dry_run:
         return result
@@ -270,10 +300,13 @@ def record_successes(root, cfg, build_path, runs=None, dry_run=False):
         if (file_record(cfg['_path']) != config_record or selection_inputs(root, cfg) != before
                 or file_record(build_path / 'build.json') != source):
             raise ValueError('sample adoption inputs changed; repeat the review')
+        append_exclusions(exclusion_path, decisions)
         write_tsv(target, ACCEPTED_FIELDS, [accepted[tid] for tid in sorted(accepted, key=int)])
         write_json(target.with_suffix('.provenance.json'), {'kind': 'reviewed_samples', 'created_at': now(),
                    'build_manifest': source, 'selection_config': config_record, 'inputs': before,
                    'recorded_runs': recorded, 'busco_threshold': cfg['busco_threshold'],
+                   'excluded_runs': excluded_runs, 'samples': report,
+                   'excluded_accessions': file_record(exclusion_path),
                    'accepted_samples': file_record(target)})
     return result
 
@@ -300,9 +333,10 @@ def initialize(root, cfg, database, source_metadata, exclusions, replace=False):
     products = {p['row']['run']: p for p in data['products'].values()}
     _, source = table(path_at(root, source_metadata), ['run', 'taxid', 'bioproject'])
     source = unique_by(source, 'run')
+    original_exclusions = file_record(path_at(root, exclusions))
     historical = read_exclusions(path_at(root, exclusions))
     decisions = resolved_exclusions(source, historical, data['build_id'])
-    accepted, selected = [], []
+    accepted, selected, excluded_runs = [], [], []
     for row in metadata:
         product = products.get(row['run'])
         if product is None or any(row[k] != product['row'][k] for k in ('run', 'taxid', 'scientific_name')):
@@ -310,14 +344,16 @@ def initialize(root, cfg, database, source_metadata, exclusions, replace=False):
         qc = counts(product['counts'])
         complete = qc['busco_cds_single'] + qc['busco_cds_duplicated']
         total = qc['busco_cds_total']
-        if row['run'] in historical or complete / total < cfg['busco_threshold']:
+        if row['run'] in historical:
+            continue
+        if complete / total < cfg['busco_threshold']:
+            decisions.append(busco_exclusion(row, cfg['busco_threshold'], data['build_id']))
+            excluded_runs.append(row['run'])
             continue
         accepted.append({**{k: row[k] for k in ACCEPTED_FIELDS[:4]},
                          'busco_complete': complete, 'busco_total': total,
                          'source_build': data['build_id']})
         selected.append(row)
-    if not selected:
-        raise ValueError('no completed samples pass the retention criteria')
     outputs = [path_at(root, cfg[k]) for k in ('previous_metadata', 'accepted_samples', 'excluded_accessions')]
     provenance = outputs[0].parent / 'provenance.json'
     with locked(outputs[0].parent / '.metadata.lock'):
@@ -329,13 +365,15 @@ def initialize(root, cfg, database, source_metadata, exclusions, replace=False):
         write_json(provenance, {'schema_version': 1, 'kind': 'imported_completed_baseline',
                    'created_at': now(), 'database_manifest': file_record(manifest),
                    'source_metadata': file_record(path_at(root, source_metadata)),
-                   'original_exclusions': file_record(path_at(root, exclusions)),
+                   'original_exclusions': original_exclusions,
                    'selection_config': file_record(cfg['_path']),
                    'busco_threshold': cfg['busco_threshold'],
+                   'excluded_runs': excluded_runs,
                    'metadata': file_record(outputs[0]), 'accepted_samples': file_record(outputs[1]),
                    'excluded_accessions': file_record(outputs[2]), 'samples': len(selected),
                    'software_lock': lock})
-    return {'accepted_samples': len(accepted), 'exclusions': len(decisions)}
+    return {'accepted_samples': len(accepted), 'exclusions': len(decisions),
+            'excluded_runs': excluded_runs}
 
 
 def select_candidates(root, cfg, source, output):
@@ -703,8 +741,8 @@ def main():
             p.add_argument('--dry-run', action='store_true', help='Write a candidate without publishing dataset metadata')
         elif name == 'record':
             p.add_argument('--build', required=True)
-            p.add_argument('--runs', nargs='+', help='Reviewed run accessions; default: all completed current representatives')
-            p.add_argument('--dry-run', action='store_true', help='Report completion and BUSCO counts without recording adoption')
+            p.add_argument('--runs', nargs='+', help='Reviewed run accessions; default: all current representatives in the build')
+            p.add_argument('--dry-run', action='store_true', help='Preview adoption and BUSCO exclusions without changing tables')
         elif name == 'init':
             p.add_argument('--exclusions', help='Optional historical run exclusion table')
             p.add_argument('--replace', action='store_true')

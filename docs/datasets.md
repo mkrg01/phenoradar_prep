@@ -25,8 +25,10 @@ must be resolved; ODB reuse is confirmed after translation provides protein hash
 `submit` returns after scheduling Slurm jobs. A successful build publishes
 `results/leaf/database/` and a completion record.
 
-Every included sample must complete all stages. BUSCO thresholds apply later,
-in analysis; failures never exclude samples automatically.
+Every included sample must complete all stages. Build execution records BUSCO
+scores without filtering samples. For curated datasets, the separate `record`
+command applies the dataset's BUSCO threshold and adds below-threshold new runs
+to exclusions for future metadata updates. Analysis thresholds remain separate.
 
 To inspect an intermediate stage:
 
@@ -161,6 +163,10 @@ For curated representative datasets, use the
 [metadata update and adoption commands](../datasets/README.md). An excluded run
 can be replaced by another eligible run with the same original taxid, including
 the same BioProject. Adoption records can be made before a database completes.
+QC recording automatically adds new runs with completed BUSCO results below the
+dataset threshold to its accession exclusions. Update metadata and prepare a new
+build to process replacements; failed or unfinished BUSCO stages stay eligible
+for retry.
 
 ## Copying a completed build to another project
 

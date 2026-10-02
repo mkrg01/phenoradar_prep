@@ -381,19 +381,31 @@ def test_baseline_rejects_native_or_different_container(completed_baseline, prob
     assert (dataset / 'accepted_samples.tsv').read_bytes() == before
 
 
-@pytest.mark.parametrize('threshold, expected', [(0.5, ['OLD1']), (0.4, ['OLD1', 'LOW3']), (0.4001, ['OLD1'])])
+@pytest.mark.parametrize('threshold, expected', [
+    (0.5, ['OLD1']), (0.4, ['OLD1', 'LOW3']), (0.4001, ['OLD1']),
+    (0.4000001, ['OLD1']), (0.9, [])])
 def test_baseline_applies_adoption_busco_threshold(completed_baseline, threshold, expected):
     (root, dataset, cfg), database, build = completed_baseline
     definition = yaml.safe_load(cfg['_path'].read_text())
     definition['busco_threshold'] = threshold
     cfg['_path'].write_text(yaml.safe_dump(definition))
     cfg = catalog.configuration(root, cfg['_path'])
+    original_exclusions = file_record(dataset / 'excluded_accessions.tsv')
     result = catalog.initialize(root, cfg, database, root / 'original.tsv',
                                 dataset / 'excluded_accessions.tsv', replace=True)
-    assert result == {'accepted_samples': len(expected), 'exclusions': 1}
+    excluded = [run for run in ('OLD1', 'LOW3') if run not in expected]
+    assert result == {'accepted_samples': len(expected), 'exclusions': 1 + len(excluded),
+                      'excluded_runs': excluded}
     accepted = read_tsv(dataset / 'accepted_samples.tsv')
     assert [(r['run'], r['source_build']) for r in accepted] == [(run, 'fixed_build') for run in expected]
     assert [r['run'] for r in read_tsv(dataset / 'metadata.tsv')] == expected
+    decisions = {r['accession']: r for r in read_tsv(dataset / 'excluded_accessions.tsv')}
+    assert decisions['BAD2']['reason'] == 'poor_quality'
+    for run in excluded:
+        assert decisions[run]['reason'] == f'busco_completeness_below_{threshold}'
+        assert decisions[run]['source_build'] == 'fixed_build'
+    provenance = json.loads((dataset / 'provenance.json').read_text())
+    assert provenance['original_exclusions'] == original_exclusions
 
 
 @pytest.mark.parametrize('threshold', [-0.1, 1.1, None, True, '0.5', float('nan'), float('inf')])

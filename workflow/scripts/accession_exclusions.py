@@ -1,4 +1,4 @@
-"""Read manually curated run exclusions, also usable by metadata preparation tools."""
+"""Read manual and BUSCO-based run exclusions for metadata and build preparation."""
 import csv
 from pathlib import Path
 
