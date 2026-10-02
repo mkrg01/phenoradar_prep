@@ -130,7 +130,16 @@ def inspect_items(store, items, analysis, requested=None, conditions=None, reusa
             if item["species"] in (errors or {}):
                 raise ValueError(errors[item["species"]])
             if item["species"] in (reusable or {}):
-                product = reusable[item["species"]]['product']
+                chosen = reusable[item['species']]
+                if chosen.get('kind') == 'stages':
+                    products = chosen['products']
+                    result.append({'species': item['species'], 'run': item['row']['run'],
+                                   **{stage: 'reuse' if products[key] else 'pending'
+                                      for stage, key in zip(STAGES, ('reference', 'busco', 'quant'))},
+                                   'reason': '', 'mapping': 'pending_inputs',
+                                   'reference_id': products['reference']['reference_id']})
+                    continue
+                product = chosen['product']
                 result.append({"species": item["species"], "run": item["row"]["run"],
                                **{stage: "reuse" for stage in STAGES}, "reason": "", "mapping": "reuse",
                                "reference_id": product['cds']['sha256']})
@@ -252,6 +261,10 @@ def prepare(root, name, config, metadata=None, analysis_config=None):
         auxiliary['reuse.json'] = dict(record(staging / 'reuse.json'), path=str(target / 'reuse.json'))
         if needs_upstream:
             cfg["genegalleon"], gg_records, software_lock = resolve_software(cfg["genegalleon"])
+        elif selection['reusable'] and all(entry.get('software_lock') for entry in selection['reusable'].values()):
+            # Retain pinned-container evidence when every native stage is reused.
+            # These are audit receipts; no upstream software needs to run again.
+            software_lock = next(iter(selection['reusable'].values()))['software_lock']
         manifest = {"schema_version": 2, "kind": "build", "name": name, "created_at": now(), "root": str(root),
                     "config": cfg, "analysis": analysis, "fields": fields, "items": items,
                     "metadata": dict(record(frozen), path=str(target / "metadata.tsv")),
@@ -385,6 +398,27 @@ def gg_environment(manifest, item, products, stage, work, task_id):
                 "GG_COMMON_BUSCO_LINEAGE": manifest["analysis"]["phylogeny"]["lineage"],
                 "GG_COMMON_GENETIC_CODE": str(manifest["analysis"]["translation"]["table"]),
                 "GG_ARRAY_TASK_ID": str(task_id), "SLURM_ARRAY_TASK_ID": str(task_id)})
+    # sbatch --mem exposes SLURM_MEM_PER_NODE, which the pinned GeneGalleon
+    # scheduler helper does not read. Use the actual retry allocation, with a
+    # frozen-config fallback for workers invoked outside Slurm.
+    requested = manifest['config']['slurm']['stages'][stage]
+    cpus = int(env.get('SLURM_CPUS_PER_TASK') or requested['cpus'])
+    memory_mb = int(env.get('SLURM_MEM_PER_NODE') or
+                    (int(env['SLURM_MEM_PER_CPU']) * cpus if env.get('SLURM_MEM_PER_CPU')
+                     else requested['mem_gb'] * 1000))
+    if cpus < 1 or memory_mb < 1:
+        raise ValueError('worker requires a positive CPU and memory allocation')
+    total_gb = max(1, memory_mb // 1024)
+    reserve_gb = min(4, max(1, total_gb // 8)) if total_gb > 1 else 0
+    budgets = {'GG_TASK_CPUS': cpus, 'GG_MEM_TOTAL_GB': total_gb,
+               'GG_MEM_PER_CPU_GB': max(1, total_gb // cpus),
+               'GG_MEM_TOOL_RESERVE_GB': reserve_gb,
+               'GG_MEM_TOOL_GB': max(1, total_gb - reserve_gb)}
+    for key, value in budgets.items():
+        for prefix in ('', 'SINGULARITYENV_', 'APPTAINERENV_'):
+            env[prefix + key] = str(value)
+    print(f'{stage}: allocation={cpus} CPUs/{memory_mb} MB; '
+          f'GeneGalleon={total_gb} GiB, tool budget={budgets["GG_MEM_TOOL_GB"]} GiB', flush=True)
     return env
 
 

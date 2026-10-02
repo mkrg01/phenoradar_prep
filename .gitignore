@@ -5,6 +5,7 @@
 /pipeline-*.out
 /pipeline-*.err
 /resources/
+/datasets/**/.metadata.lock
 *.sif
 /.snakemake/
 
@@ -234,8 +235,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Frozen dataset plans and persistent upstream products.
-/datasets/
+# Persistent upstream products (curated datasets/ definitions are tracked).
 /resources/dataset_assets/
 /resources/odb_cache/
 

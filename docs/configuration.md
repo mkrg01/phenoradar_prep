@@ -24,7 +24,7 @@ Use a new name for changed scientific conditions. See
 | --- | --- |
 | `name` | Build directory under `results/`; `submit --name` overrides it |
 | `metadata`, `excluded_accessions` | Sample metadata and optional run exclusions |
-| `reuse_from` | Completed database path, list of paths, or `null` for a fresh build |
+| `reuse_from` | `auto` for previous sample stages; build/database path or list; `null` for a fresh build |
 | `genegalleon` | [Pinned software](datasets.md#pinned-genegalleon-source-and-sif) and assembly/quantification settings |
 | `busco.lineage` | BUSCO dataset; default `embryophyta_odb12` |
 | `translation.table` | NCBI genetic code; default `1` |

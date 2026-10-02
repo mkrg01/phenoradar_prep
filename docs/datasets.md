@@ -120,8 +120,8 @@ exclusions, effective metadata, and `excluded_runs.tsv` for review.
 
 ## Updating samples
 
-Edit metadata and submit a new build name with `reuse_from` pointing to a
-completed database. Added samples run missing work; removed samples leave the
+Edit metadata and submit a new build name with `reuse_from: auto`, or point it to
+a previous build or completed database. Added samples run missing work; removed samples leave the
 new outputs. Changing a run creates a new sample with its own assembly and
 expression. Historical builds remain available.
 
@@ -145,8 +145,22 @@ on the source paths. Missing samples run normally. Large products may share
 hard links: **do not edit generated files in place**. Reuse origins are recorded
 in `reuse.json` and the completed database's provenance.
 
-An unfinished build resumes under its own name. Finish it before using it as a
-reuse source; the workflow only uses databases explicitly listed in `reuse_from`.
+An unfinished build can resume under its own name or supply its verified
+assembly, BUSCO, and quantification stages to a new build. Set `reuse_from` to
+its build directory (or `build.json`), or use `reuse_from: auto` to discover
+previous builds under `results/`. Automatic reuse checks each sample and stage;
+incompatible settings are cache misses and conflicting or damaged matching
+products stop preparation. It never imports unregistered partial outputs.
+
+Automatic reuse copies sample-stage receipts; mapping, translation, and expression
+caches are reused through explicitly selected completed databases. `null`
+disables all reuse. Discovery is frozen during preparation, and the new build
+does not depend on source product paths afterward.
+
+For curated representative datasets, use the
+[metadata update and adoption commands](../datasets/README.md). An excluded run
+can be replaced by another eligible run with the same original taxid, including
+the same BioProject. Adoption records can be made before a database completes.
 
 ## Copying a completed build to another project
 

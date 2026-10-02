@@ -288,7 +288,8 @@ prefix = "GG_TRANSCRIPTOME_"
 out = work / "output/transcriptome_assembly"
 out.mkdir(parents=True, exist_ok=True)
 with (work / "events.jsonl").open("a") as handle:
-    handle.write(json.dumps({"species":species, "env":{k:v for k,v in os.environ.items() if k.startswith(prefix)}})+"\n")
+    handle.write(json.dumps({"species":species, "env":{k:v for k,v in os.environ.items() if k.startswith(prefix)},
+                            "budgets":{k:os.environ[k] for k in ("GG_TASK_CPUS", "GG_MEM_TOTAL_GB", "GG_MEM_TOOL_GB")}})+"\n")
 assert os.environ["LC_ALL"] == os.environ["SINGULARITYENV_LC_ALL"] == os.environ["APPTAINERENV_LC_ALL"] == "C"
 assert os.environ[prefix+"RUN_MULTISPECIES_SUMMARY"] == "0"
 assert os.environ[prefix+"REMOVE_AMALGKIT_FASTQ_AFTER_COMPLETION"] == "0"
@@ -303,6 +304,12 @@ if os.environ[prefix+"RUN_ASSEMBLY"] == "1":
 if os.environ[prefix+"RUN_BUSCO_LONGEST_CDS"] == "1":
     for directory, suffix, content in [("busco_full_longest_cds","full.tsv", "# The lineage dataset is: embryophyta_odb12 (test)\nB1\tComplete\t"+species+"_g1:0-9\t100\t3\nB2\tComplete\t"+species+"_g2:0-9\t100\t3\n"), ("busco_short_longest_cds","short.txt","C:100%[S:100%,D:0%],F:0%,M:0%,n:2\n")]:
         path = out / directory / (species+"_busco."+suffix)
+        if os.environ.get("FAKE_GG_LOW_BUSCO"):
+            content = ("# The lineage dataset is: embryophyta_odb12 (test)\nB1\tMissing\nB2\tMissing\n"
+                       if suffix == "full.tsv" else "C:0%[S:0%,D:0%],F:0%,M:100%,n:2\n")
+        elif os.environ.get("FAKE_GG_HALF_BUSCO"):
+            content = ("# The lineage dataset is: embryophyta_odb12 (test)\nB1\tDuplicated\t"+species+"_g1:0-9\t100\t3\nB1\tDuplicated\t"+species+"_g2:0-9\t100\t3\nB2\tMissing\n"
+                       if suffix == "full.tsv" else "C:50%[S:0%,D:50%],F:0%,M:50%,n:2\n")
         path.parent.mkdir(parents=True, exist_ok=True); path.write_text(content)
 if os.environ[prefix+"RUN_AMALGKIT_QUANT"] == "1":
     abundance = out / "amalgkit_quant" / species / run / (run+"_abundance.tsv")

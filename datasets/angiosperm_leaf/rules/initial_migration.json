@@ -1,0 +1,20 @@
+{
+  "kind": "initial_rule_migration",
+  "upstream": "upstream/select_rules.tsv",
+  "legacy_rules": "legacy/select_rules.tsv",
+  "legacy_upstream": "/home/mkrg01/tlight/metadata_prep/angiosperm_leaf_2/amalgkit/amalgkit/select_rule_sets/plantae/select_rules.tsv",
+  "legacy_upstream_sha256": "b758bba380e2ec21592b5952fcea93a94c5fb0dfbd4ad569bd52a3b07bd92901",
+  "updated_fields": {
+    "param_sample_group_5": {
+      "parameter_value": "leaf"
+    }
+  },
+  "added_rule_ids": [
+    "normalize_leaf_whole_frond",
+    "exclude_single_cell_extended_18",
+    "exclude_spatial_transcriptomics_19",
+    "exclude_leaf_celltype_fraction_20",
+    "exclude_special_rna_assay_21"
+  ],
+  "note": "Pinned-container rules with the historical dataset customizations. Subsequent refreshes do not overwrite effective select_rules.tsv."
+}

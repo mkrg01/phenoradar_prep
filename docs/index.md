@@ -27,6 +27,7 @@ results to PhenoRadar.
 - [Reuse or copy a database](datasets.md#reusing-completed-databases)
 - [Export a subset of completed results](species_filter.md)
 - [Reference data and updates](references.md)
+- [Curated metadata datasets and updates](../datasets/README.md)
 
 For contributors: [development and tests](development.md) · [releases](releases.md).
 

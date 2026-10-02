@@ -3,7 +3,7 @@
 name: angiosperm_leaf_20260930  # Build directory name under results/; --name overrides.
 metadata: input/metadata.tsv  # Input sample/run table (TSV).
 excluded_accessions: config/excluded_accessions.tsv  # Manual run exclusions; null disables.
-reuse_from: results/angiosperm_leaf_20260928/database  # Completed database path, a list of paths, or null for a fresh build.
+reuse_from: results/angiosperm_leaf_20260928/database  # Build/database path or list, auto for prior sample stages, null for a fresh build.
 translation:
   table: 1  # NCBI genetic code for CDS translation; 1 = standard.
 busco:

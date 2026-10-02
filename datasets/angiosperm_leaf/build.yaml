@@ -1,0 +1,50 @@
+name: angiosperm_leaf_reviewed
+metadata: datasets/angiosperm_leaf/metadata.tsv
+excluded_accessions: datasets/angiosperm_leaf/excluded_accessions.tsv
+reuse_from: auto
+translation:
+  table: 1
+busco:
+  lineage: embryophyta_odb12
+odb:
+  chunk_size: 50
+  ncbi_tax_id: 3193
+genegalleon:
+  version: 0.7.77
+  revision: 3a6460e8a8201ab1293db1fec445fd7de063e46e
+  image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:df357fc1857c737df1cdfe17fc12b7e1fcb891353e9bac9e534fb4155b98aff3
+  settings:
+    assembly_method: rnaSPAdes
+slurm:
+  partition: null
+  total_limits:
+    jobs: null
+    cpus: null
+    mem_gb: null
+  per_job_resources:
+    assembly:
+      cpus: 4
+      mem_gb: 128
+      time: 14-00:00:00
+    busco:
+      cpus: 4
+      mem_gb: 32
+      time: 1-00:00:00
+    quant:
+      cpus: 4
+      mem_gb: 32
+      time: 1-00:00:00
+    odb_map:
+      cpus: 16
+      mem_gb: 128
+      time: 2-00:00:00
+    prepare_odb_reference:
+      cpus: 1
+      mem_gb: 32
+      time: 1-00:00:00
+    controller:
+      cpus: 1
+      mem_gb: 8
+      time: 64-00:00:00
+storage:
+  keep_intermediates: false

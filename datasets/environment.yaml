@@ -1,0 +1,7 @@
+# Host orchestration only; AMALGKIT runs inside the pinned GeneGalleon SIF.
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - pyyaml=6.0.3

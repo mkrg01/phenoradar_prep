@@ -42,5 +42,11 @@ use a new name when changing samples or scientific settings.
 Reusable products are in `results/leaf/database/`. Analysis results, including
 `phenoradar_inputs/`, are in `results/leaf/downstream/carnivory/`.
 
+For maintained representative datasets, see the [dataset catalog](datasets/README.md)
+and [angiosperm leaf update instructions](datasets/angiosperm_leaf/README.md).
+Metadata acquisition, curation, review, and acceptance use `run_metadata.sh`;
+database builds start separately with `run_build.sh`. Dataset metadata can stay
+in `datasets/` and be referenced directly by the build config.
+
 [Documentation](docs/index.md) · [Build and analysis guide](docs/datasets.md) ·
 [Resources and retries](docs/running.md) · [Outputs](docs/outputs.md)

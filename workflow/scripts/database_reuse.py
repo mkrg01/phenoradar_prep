@@ -16,15 +16,24 @@ SAMPLE_FIELDS = ('scientific_name', 'taxid', 'species_id', 'analysis_sample_id',
 def normalize(root, value):
     if value is None:
         return []
+    if value == 'auto':
+        # Resolve discovery now; preparation records these sources and snapshots
+        # products locally, so an existing build never changes its reuse inputs.
+        value = [str(p) for p in sorted(Path(root, 'results').glob('*/build.json'))]
     paths = [value] if isinstance(value, str) else value
     if not isinstance(paths, list) or any(not isinstance(p, str) or not p.strip() for p in paths):
-        raise ValueError('reuse_from must be null, a database path, or a list of database paths')
+        raise ValueError('reuse_from must be null, auto, a build/database path, or a list of paths')
     result = []
     for value in paths:
         path = (Path(root) / value).resolve()
         if not path.is_relative_to(Path(root).resolve()):
             raise ValueError(f'reuse_from must be inside the project for container mounts: {path}')
-        path = completion_path(path)
+        if path.name == 'build.json' and path.is_file():
+            pass
+        elif path.is_dir() and (path / 'build.json').is_file() and not (path / 'completed.json').exists():
+            path /= 'build.json'
+        else:
+            path = completion_path(path)
         if not path.is_relative_to(Path(root).resolve()):
             raise ValueError(f'reuse_from manifest must be inside the project: {path}')
         if str(path) not in result:
@@ -80,9 +89,14 @@ def validate_product(item, product, database, tables, cfg):
 def select(paths, items, cfg):
     """Read only selected samples; duplicate sources must agree on scientific products."""
     from build_products import load_complete
+    if not items:
+        return {}, {}, []
     wanted = {item['species']: item for item in items}
     selected, errors, sources = {}, {}, []
+    stage_paths = [path for path in paths if Path(path).name == 'build.json']
     for path in paths:
+        if path in stage_paths:
+            continue
         source = record(path)
         data = load_complete(path, verify_files=False)
         verify(source)
@@ -90,6 +104,14 @@ def select(paths, items, cfg):
         names = sorted(wanted.keys() & data['products'].keys())
         if not names:
             continue
+        software_lock = None
+        provenance = Path(data['bundle_root']) / 'provenance/build.json'
+        inventory = {entry['path']: entry for entry in data['files']}
+        if str(provenance) in inventory:
+            build = json.loads(verify(inventory[str(provenance)]).read_text())
+            pins = ('image_uri', 'version', 'revision')
+            if all(build.get('config', {}).get('genegalleon', {}).get(k) == cfg['genegalleon'].get(k) for k in pins):
+                software_lock = build.get('software_lock')
         tables = load_tables(verify(data['mapping']), verify_files=False)
         if (tables['version'], tables['node']) != ('v12', cfg['odb']['ncbi_tax_id']):
             raise ValueError(f'reuse_from mapping version/node differs: {path}')
@@ -108,13 +130,15 @@ def select(paths, items, cfg):
                     raise ValueError(f'conflicting reuse_from databases for {name}: {previous["source"]["path"]} and {path}')
                 if not previous:
                     selected[name] = {'product': product, 'mapping': mapping, 'translation': translation,
-                                      'identity': identity, 'source': source}
+                                      'identity': identity, 'source': source, 'software_lock': software_lock}
             except (ValueError, OSError, KeyError) as error:
                 errors[name] = str(error)
                 selected.pop(name, None)
     references = {r for entry in selected.values() for r in entry['identity']['reference']}
     if len(references) > 1:
         raise ValueError('reuse_from databases use different ODB reference snapshots')
+    from build_stage_reuse import select as select_stages
+    select_stages(stage_paths, items, cfg, selected, errors, sources)
     return selected, errors, sources
 
 
@@ -132,6 +156,10 @@ def stage(staging, target, selected, cfg):
         return dict(entry, path=str(final / relative), stat=stat_identity(path))
 
     for name, chosen in selected.items():
+        if chosen.get('kind') == 'stages':
+            from build_stage_reuse import stage as stage_products
+            stage_products(staging, target, name, chosen)
+            continue
         product = chosen['product']
         row = product['row']
         refid = product['cds']['sha256']

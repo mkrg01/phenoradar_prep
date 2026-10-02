@@ -20,6 +20,12 @@ Only metadata is always required. Other files depend on your analysis;
 configured paths must exist, so set unused optional paths to `null`. The supplied
 configs already specify an exclusion list and trait table.
 
+The metadata path is configurable and resolves against the repository root.
+For example, `metadata: datasets/angiosperm_leaf/metadata.tsv` reads a curated
+dataset directly; copying it to `input/` is unnecessary. The
+[dataset catalog](../datasets/README.md) describes acquisition, curation, and
+representative updates independently of database execution.
+
 Additional AMALGKIT metadata columns pass through to GeneGalleon. For local
 reads, also provide these TSV columns:
 

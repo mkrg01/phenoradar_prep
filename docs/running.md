@@ -118,6 +118,13 @@ To change resources for an existing run:
 Only the supplied `slurm` settings change; scientific settings stay frozen.
 Partial resource files may contain just the changed limits or job entries.
 
+For native assembly, BUSCO, and quantification workers, the actual Slurm CPU
+and memory allocation is also forwarded to GeneGalleon and its container.
+Memory is converted conservatively from allocated MB to whole GiB, with a
+tool reserve. Worker logs report the allocation and internal tool budget;
+retry resource overrides therefore change the assembler's memory limit as well
+as the Slurm request.
+
 ## Re-running and recovery
 
 Use the run's `status` command, `squeue`, and `jobs/logs/` to inspect progress.
