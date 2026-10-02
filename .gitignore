@@ -6,7 +6,24 @@
 /pipeline-*.err
 /slurm-metadata-*.out
 /resources/
-/datasets/**/.metadata.lock
+
+# Curated definitions, reviewed decisions, and provenance are tracked.
+# Full metadata, downloads, locks, and temporary files stay local.
+/datasets/**
+!/datasets/*/
+!/datasets/README.md
+!/datasets/environment.yaml
+!/datasets/*/README.md
+!/datasets/*/selection.yaml
+!/datasets/*/build.yaml
+!/datasets/*/select_rules.tsv
+!/datasets/*/overrides.tsv
+!/datasets/*/excluded_accessions.tsv
+!/datasets/*/accepted_samples.tsv
+!/datasets/*/selection.tsv
+!/datasets/*/provenance.json
+!/datasets/*/accepted_samples.provenance.json
+
 *.sif
 /.snakemake/
 

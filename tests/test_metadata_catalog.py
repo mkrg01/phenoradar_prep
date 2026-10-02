@@ -100,11 +100,134 @@ def test_history_created_after_first_selection_requires_regeneration(fresh_proje
     assert not (dataset / 'provenance.json').exists()
 
 
-def test_success_evidence_cannot_be_used_without_previous_metadata(curated_project):
-    (curated_project[1] / 'metadata.tsv').unlink()
-    with pytest.raises(ValueError, match='accepted sample differs from previous metadata'):
+def test_rebuilds_accepted_run_from_new_metadata_without_previous_metadata(curated_project):
+    root, dataset, cfg = curated_project
+    (dataset / 'metadata.tsv').unlink()
+    evidence = (dataset / 'accepted_samples.tsv').read_bytes()
+    summary, output = select(curated_project, [row(1, 'OLD1', bases=250, instrument='new instrument'),
+                                              row(1, 'BIGGER1', bases=5000), row(2, 'NEW2')])
+    selected = {r['taxid']: r for r in read_tsv(output / 'metadata.tsv')}
+    assert selected['1']['run'] == 'OLD1'
+    assert selected['1']['total_bases'] == '250'
+    assert selected['1']['instrument'] == 'new instrument'
+    assert selected['1']['analysis_sample_id'] == 'Plant_species1_OLD1'
+    assert selected['2']['run'] == 'NEW2'
+    assert summary['review_required'] == 0
+    assert summary['unresolved_accepted_runs'] == []
+    catalog.accept_candidate(root, cfg, output)
+    assert (dataset / 'accepted_samples.tsv').read_bytes() == evidence
+    assert (dataset / 'metadata.tsv').is_file()
+
+
+@pytest.mark.parametrize('cached', [False, True])
+@pytest.mark.parametrize('change, reason', [
+    ({'taxid': '9'}, 'taxid_changed'),
+    ({'bioproject': 'P9'}, 'bioproject_changed'),
+    ({'scientific_name': 'Renamed species'}, 'scientific_name_changed'),
+    ({'taxid': 'invalid'}, 'invalid_taxid'),
+    ({'exclusion': 'new_filter'}, 'amalgkit_exclusion'),
+])
+def test_source_changes_preserve_reviewed_identity_and_are_reported(curated_project, cached, change, reason):
+    root, dataset, cfg = curated_project
+    if not cached:
+        (dataset / 'metadata.tsv').unlink()
+    evidence = (dataset / 'accepted_samples.tsv').read_bytes()
+    incoming = {**row(1, 'OLD1'), **change}
+    incoming['species_id'] = 'untrusted_source_id'
+    incoming['analysis_sample_id'] = 'untrusted_source_sample'
+    summary, output = select(curated_project, [incoming, row(1, 'BIGGER1', bases=5000)])
+    selected = read_tsv(output / 'metadata.tsv')
+    assert len(selected) == 1
+    assert {key: selected[0][key] for key in ('taxid', 'run', 'bioproject', 'scientific_name')} == {
+        'taxid': '1', 'run': 'OLD1', 'bioproject': 'P1', 'scientific_name': 'Plant species1'}
+    assert selected[0]['species_id'] == 'Plant_species1'
+    assert selected[0]['analysis_sample_id'] == 'Plant_species1_OLD1'
+    assert selected[0]['scientific_name_original'] == incoming['scientific_name']
+    report = read_tsv(output / 'selection.tsv')[0]
+    assert report['review'] == 'yes'
+    assert reason in report['reason']
+    assert report['source_taxid'] == incoming['taxid']
+    assert report['source_bioproject'] == incoming['bioproject']
+    assert report['source_scientific_name'] == incoming['scientific_name']
+    assert summary['review_required'] == 1
+    catalog.accept_candidate(root, cfg, output)
+    assert (dataset / 'accepted_samples.tsv').read_bytes() == evidence
+
+
+def test_stale_local_identity_does_not_override_acceptance(curated_project):
+    root, dataset, cfg = curated_project
+    previous = read_tsv(dataset / 'metadata.tsv')
+    previous[0]['run'] = 'STALE1'
+    previous[0]['scientific_name'] = 'Stale species'
+    write_tsv(dataset / 'metadata.tsv', list(previous[0]), previous)
+    _, output = select(curated_project, [row(1, 'OLD1')])
+    selected = read_tsv(output / 'metadata.tsv')[0]
+    assert selected['run'] == 'OLD1'
+    assert selected['scientific_name'] == 'Plant species1'
+    assert read_tsv(output / 'selection.tsv')[0]['previous_run'] == 'OLD1'
+
+
+def test_local_fallback_is_matched_by_accession_after_reviewed_taxid_correction(curated_project):
+    root, dataset, cfg = curated_project
+    evidence = read_tsv(dataset / 'accepted_samples.tsv')
+    evidence[0].update(taxid='9', scientific_name='Corrected species', bioproject='P9')
+    write_tsv(dataset / 'accepted_samples.tsv', catalog.ACCEPTED_FIELDS, evidence)
+    summary, output = select(curated_project, [row(9, 'BIGGER9', bases=5000)])
+    selected = read_tsv(output / 'metadata.tsv')[0]
+    assert selected['run'] == 'OLD1'
+    assert selected['taxid'] == '9'
+    assert selected['bioproject'] == 'P9'
+    assert selected['scientific_name'] == 'Corrected species'
+    assert selected['analysis_sample_id'] == 'Corrected_species_OLD1'
+    assert summary['unresolved_accepted_runs'] == []
+    assert summary['review_required'] == 1
+    catalog.accept_candidate(root, cfg, output)
+    assert read_tsv(dataset / 'accepted_samples.tsv')[0]['taxid'] == '9'
+
+
+def test_absent_run_without_cache_requires_resolution_before_publication(curated_project):
+    root, dataset, cfg = curated_project
+    (dataset / 'metadata.tsv').unlink()
+    evidence = (dataset / 'accepted_samples.tsv').read_bytes()
+    summary, output = select(curated_project, [row(1, 'BIGGER1', bases=5000), row(2, 'NEW2')])
+    assert summary['unresolved_accepted_runs'] == ['OLD1']
+    assert [r['run'] for r in read_tsv(output / 'metadata.tsv')] == ['NEW2']
+    report = read_tsv(output / 'selection.tsv')[0]
+    assert report['previous_run'] == 'OLD1'
+    assert report['selected_run'] == ''
+    assert report['decision'] == 'unresolved'
+    assert report['review'] == 'yes'
+    for allow_review in (False, True):
+        with pytest.raises(ValueError, match='accepted runs lack source metadata'):
+            catalog.accept_candidate(root, cfg, output, allow_review=allow_review)
+    assert not (dataset / 'metadata.tsv').exists()
+    assert (dataset / 'accepted_samples.tsv').read_bytes() == evidence
+
+
+@pytest.mark.parametrize('resolution', ['exclude', 'override'])
+def test_explicit_resolution_replaces_absent_accepted_run(curated_project, resolution):
+    root, dataset, cfg = curated_project
+    (dataset / 'metadata.tsv').unlink()
+    if resolution == 'exclude':
+        write_tsv(dataset / 'excluded_accessions.tsv', ['accession', 'reason'],
+                  [{'accession': 'OLD1', 'reason': 'unavailable'}])
+    else:
+        write_tsv(dataset / 'overrides.tsv', ['taxid', 'run', 'reason'],
+                  [{'taxid': '1', 'run': 'REPLACEMENT1', 'reason': 'reviewed replacement'}])
+    summary, output = select(curated_project, [row(1, 'REPLACEMENT1')])
+    assert summary['unresolved_accepted_runs'] == []
+    assert read_tsv(output / 'metadata.tsv')[0]['run'] == 'REPLACEMENT1'
+    catalog.accept_candidate(root, cfg, output)
+    assert read_tsv(dataset / 'accepted_samples.tsv') == []
+
+
+def test_duplicate_accepted_accession_is_rejected(curated_project):
+    root, dataset, cfg = curated_project
+    evidence = read_tsv(dataset / 'accepted_samples.tsv')
+    evidence.append({**evidence[0], 'taxid': '2'})
+    write_tsv(dataset / 'accepted_samples.tsv', catalog.ACCEPTED_FIELDS, evidence)
+    with pytest.raises(ValueError, match='duplicate run'):
         select(curated_project, [row(1, 'OLD1')])
-    assert not (curated_project[0] / 'work').exists()
 
 
 def test_retains_accepted_run_and_excludes_only_listed_accession(curated_project):
@@ -540,6 +663,36 @@ def test_single_update_previews_then_publishes_without_success_registration(cura
     catalog.update_metadata(root, cfg, 'work/update', source)
     assert {r['run'] for r in read_tsv(dataset / 'metadata.tsv')} == {'OLD1', 'REPLACEMENT2'}
     assert [r['run'] for r in read_tsv(dataset / 'accepted_samples.tsv')] == ['OLD1']
+
+
+def test_update_saves_missing_run_review_without_publishing(curated_project):
+    root, dataset, cfg = curated_project
+    (dataset / 'metadata.tsv').unlink()
+    evidence = (dataset / 'accepted_samples.tsv').read_bytes()
+    source = root / 'curated.tsv'
+    write_tsv(source, FIELDS, [row(1, 'NEW1'), row(2, 'NEW2')])
+    result = catalog.update_metadata(root, cfg, 'work/review', source)
+    assert result['status'] == 'review_required'
+    assert 'updated' not in result
+    assert 'accept_command' not in result
+    assert result['summary']['unresolved_accepted_runs'] == ['OLD1']
+    receipt = json.loads((root / 'work/review/run.json').read_text())
+    assert receipt['status'] == 'review_required'
+    assert receipt['accepted_at'] is None
+    assert Path(result['candidate']).joinpath('selection.tsv').is_file()
+    assert not (dataset / 'metadata.tsv').exists()
+    assert (dataset / 'accepted_samples.tsv').read_bytes() == evidence
+
+
+def test_update_rebuilds_and_publishes_missing_local_metadata(curated_project):
+    root, dataset, cfg = curated_project
+    (dataset / 'metadata.tsv').unlink()
+    source = root / 'curated.tsv'
+    write_tsv(source, FIELDS, [row(1, 'OLD1'), row(2, 'NEW2')])
+    result = catalog.update_metadata(root, cfg, 'work/rebuild', source)
+    assert result['updated']['retained_success_evidence'] == 1
+    assert {r['run'] for r in read_tsv(dataset / 'metadata.tsv')} == {'OLD1', 'NEW2'}
+    assert json.loads((root / 'work/rebuild/run.json').read_text())['status'] == 'complete'
 
 
 def test_excluding_last_representative_publishes_empty_metadata(curated_project):

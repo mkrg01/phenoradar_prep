@@ -6,6 +6,7 @@
 
 | Path | Contents |
 | --- | --- |
+| `datasets/<dataset>/` | Tracked definitions, reviewed accession tables, selection reports, and provenance; full `metadata.tsv` is local and ignored |
 | `work/datasets/<dataset>/<UTC timestamp>/` | [Metadata stages, candidates, and run history](../datasets/README.md#choosing-where-to-restart) |
 | `results/<build>/database/` | Portable sample products and provenance |
 | `results/<dataset>_latest` | Newest completed timestamp-mode build, by preparation time |
@@ -26,6 +27,7 @@ follow the [sample identifier conventions](inputs.md#identifiers).
 | Path | Contents |
 | --- | --- |
 | `metadata.tsv` | Metadata after run exclusions |
+| `source_metadata.tsv` | Frozen build input metadata before run exclusions |
 | `manifest.json` | Build ID, dataset name, preparation/completion dates, metadata history, and product checksums |
 | `provenance/metadata_provenance.json` | Frozen source metadata history, when configured |
 | `cds/{species}_longestCDS.fa.gz` | Longest CDS per gene |

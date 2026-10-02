@@ -31,6 +31,7 @@ ACCEPTED_FIELDS = ['taxid', 'run', 'bioproject', 'scientific_name',
 EXCLUSION_FIELDS = ['accession', 'taxid', 'bioproject', 'reason', 'source_build']
 REPORT_FIELDS = ['taxid', 'scientific_name', 'previous_run', 'selected_run', 'bioproject',
                  'previous_bioproject', 'previous_total_bases', 'selected_total_bases',
+                 'source_taxid', 'source_bioproject', 'source_scientific_name',
                  'decision', 'review', 'reason', 'eligible_candidates']
 csv.field_size_limit(32 * 1024 * 1024)
 
@@ -190,20 +191,63 @@ def normalized_row(row):
 
 
 def previous_state(root, cfg):
+    """Read optional metadata and validate the authoritative adoption registry."""
     fields, rows = history_table(path_at(root, cfg['previous_metadata']),
                                 ['scientific_name', 'taxid', 'run', 'bioproject'])
     previous = unique_by(rows, 'taxid')
     unique_by(rows, 'run')
     _, accepted_rows = history_table(path_at(root, cfg['accepted_samples']), ACCEPTED_FIELDS)
     accepted = unique_by(accepted_rows, 'taxid')
+    unique_by(accepted_rows, 'run')
     for tid, row in accepted.items():
-        prior = previous.get(tid)
-        if not prior or any(prior[key] != row[key] for key in ('run', 'bioproject', 'scientific_name')):
-            raise ValueError(f'accepted sample differs from previous metadata: taxid {tid}')
+        if not SAFE.fullmatch(row['run']) or not row['bioproject'].strip():
+            raise ValueError(f'invalid accepted sample identity: taxid {tid}')
+        annotate(row)
         complete, total = int(row['busco_complete']), int(row['busco_total'])
         if total <= 0 or not 0 <= complete <= total:
             raise ValueError(f'invalid accepted BUSCO counts: taxid {tid}')
     return fields, previous, accepted
+
+
+def retained_row(source, accepted):
+    """Refresh run attributes while preserving the reviewed sample identity."""
+    row = dict(source)
+    row['scientific_name_original'] = source.get('scientific_name_original') or source['scientific_name']
+    row.update({key: accepted[key] for key in ACCEPTED_FIELDS[:4]})
+    row['taxid'] = taxid(row['taxid'])
+    row.pop('species_id', None)
+    row.pop('analysis_sample_id', None)
+    return annotate(row)
+
+
+def retained_source_changes(source, accepted, cfg):
+    changes = []
+    try:
+        if taxid(source['taxid']) != taxid(accepted['taxid']):
+            changes.append('taxid_changed')
+    except ValueError:
+        changes.append('invalid_taxid')
+    if source['bioproject'] != accepted['bioproject']:
+        changes.append('bioproject_changed')
+    try:
+        source_name = normalized_row(source)['scientific_name']
+    except ValueError:
+        source_name = None
+    if source_name != accepted['scientific_name']:
+        changes.append('scientific_name_changed')
+    if source['sample_group'] != cfg['sample_group']:
+        changes.append('sample_group')
+    if source['exclusion'] != 'no':
+        changes.append('amalgkit_exclusion')
+    if not source['bioproject'].strip():
+        changes.append('missing_bioproject')
+    try:
+        bases = Decimal(source['total_bases'])
+        if not bases.is_finite() or bases <= 0:
+            raise InvalidOperation
+    except InvalidOperation:
+        changes.append('invalid_total_bases')
+    return changes
 
 
 def history_table(path, fields):
@@ -396,9 +440,13 @@ def select_candidates(root, cfg, source, output):
     overrides = unique_by(override_rows, 'taxid')
     if any(not r['reason'].strip() or not SAFE.fullmatch(r['run']) for r in overrides.values()):
         raise ValueError('overrides require a valid run and an explicit reason')
-    kept = {tid: previous[tid] for tid, row in accepted.items()
-            if row['run'] not in exclusions}
+    active_accepted = {tid: row for tid, row in accepted.items() if row['run'] not in exclusions}
+    accepted_by_run = {row['run']: row for row in active_accepted.values()}
+    previous_by_run = {row['run']: row for row in previous.values()}
+    kept = {tid: retained_row(previous_by_run[row['run']], row) for tid, row in active_accepted.items()
+            if row['run'] in previous_by_run}
     best, forced, observed, candidate_counts = {}, {}, {}, collections.Counter()
+    source_changes = {}
     reasons, seen_runs, observed_taxids = collections.Counter(), set(), set()
     before = file_record(source)
     with source.open(newline='') as handle:
@@ -418,6 +466,24 @@ def select_candidates(root, cfg, source, output):
             if run in seen_runs:
                 raise ValueError(f'duplicate source run: {run}')
             seen_runs.add(run)
+            if run in accepted_by_run:
+                evidence = accepted_by_run[run]
+                tid = taxid(evidence['taxid'])
+                incoming = dict(zip(source_fields, values))
+                observed[tid] = incoming
+                observed_taxids.add(tid)
+                kept[tid] = retained_row(incoming, evidence)
+                source_changes[tid] = retained_source_changes(incoming, evidence, cfg)
+                rejection = next((reason for reason in source_changes[tid]
+                                  if reason in {'invalid_taxid', 'sample_group', 'amalgkit_exclusion',
+                                                'missing_bioproject', 'invalid_total_bases'}), '')
+                if rejection:
+                    reasons[rejection] += 1
+                else:
+                    candidate_counts[tid] += 1
+                if tid in overrides and overrides[tid]['run'] == run:
+                    forced[tid] = kept[tid]
+                continue
             try:
                 tid = taxid(values[index['taxid']])
             except ValueError:
@@ -435,8 +501,6 @@ def select_candidates(root, cfg, source, output):
                 reason = 'missing_bioproject'
             if values[index['sample_group']] == cfg['sample_group']:
                 observed_taxids.add(tid)
-            if tid in kept and run == kept[tid]['run']:
-                observed[tid] = reason or ('identity_changed' if project != kept[tid]['bioproject'] else '')
             if reason:
                 reasons[reason] += 1
                 continue
@@ -448,10 +512,10 @@ def select_candidates(root, cfg, source, output):
                 reasons['invalid_total_bases'] += 1
                 continue
             candidate_counts[tid] += 1
-            # Successful prior rows are kept verbatim, even when a larger run appears.
+            # Reserve reviewed taxids even when their accession is absent from this source.
             if tid in overrides and run == overrides[tid]['run']:
                 forced[tid] = normalized_row(dict(zip(source_fields, values)))
-            if tid in kept or tid in overrides:
+            if tid in active_accepted or tid in overrides:
                 continue
             rank = (-bases, run)
             if tid not in best or rank < best[tid][0]:
@@ -469,18 +533,23 @@ def select_candidates(root, cfg, source, output):
     selected = {tid: row for tid, (_, row) in best.items()}
     selected.update(kept)
     selected.update(forced)
+    unresolved = sorted(row['run'] for tid, row in active_accepted.items()
+                        if tid not in kept and tid not in forced)
     reports = []
-    for tid in sorted(set(previous) | observed_taxids | set(selected), key=int):
-        old, new = previous.get(tid), selected.get(tid)
+    for tid in sorted(set(previous) | set(active_accepted) | observed_taxids | set(selected), key=int):
+        old, new = active_accepted.get(tid) or previous.get(tid), selected.get(tid)
+        cached = previous_by_run.get(old['run'], {}) if old else {}
+        incoming = observed.get(tid, {})
         review, reason = False, ''
         if tid in overrides:
             decision, reason = 'override', overrides[tid]['reason']
-        elif tid in kept:
-            decision, reason = 'retained', 'previous_completed_sample'
+        elif tid in active_accepted:
+            decision = 'retained' if tid in kept else 'unresolved'
+            reason = 'previous_completed_sample'
             if tid not in observed:
                 review, reason = True, 'retained_run_absent_from_source'
-            elif observed[tid]:
-                review, reason = True, 'retained_run_source_status:' + observed[tid]
+            elif source_changes[tid]:
+                review, reason = True, 'retained_run_source_status:' + ';'.join(source_changes[tid])
         elif new:
             decision = ('reselected' if old['run'] == new['run'] else 'replacement') if old else 'new'
             reason = 'largest_total_bases'
@@ -490,8 +559,11 @@ def select_candidates(root, cfg, source, output):
                         'previous_run': old['run'] if old else '', 'selected_run': new['run'] if new else '',
                         'bioproject': new['bioproject'] if new else '', 'decision': decision,
                         'previous_bioproject': old.get('bioproject', '') if old else '',
-                        'previous_total_bases': old.get('total_bases', '') if old else '',
+                        'previous_total_bases': cached.get('total_bases', ''),
                         'selected_total_bases': new.get('total_bases', '') if new else '',
+                        'source_taxid': incoming.get('taxid', ''),
+                        'source_bioproject': incoming.get('bioproject', ''),
+                        'source_scientific_name': incoming.get('scientific_name', ''),
                         'review': 'yes' if review else 'no', 'reason': reason,
                         'eligible_candidates': candidate_counts[tid]})
     merged_fields = list(dict.fromkeys([*fields, *source_fields, 'scientific_name_original',
@@ -508,7 +580,8 @@ def select_candidates(root, cfg, source, output):
         write_tsv(staging / 'metadata.tsv', merged_fields, [{k: r.get(k, '') for k in merged_fields} for r in rows])
         write_tsv(staging / 'selection.tsv', REPORT_FIELDS, reports)
         summary = {'samples': len(rows), 'decisions': dict(collections.Counter(r['decision'] for r in reports)),
-                   'review_required': sum(r['review'] == 'yes' for r in reports), 'source_rejections': dict(reasons)}
+                   'review_required': sum(r['review'] == 'yes' for r in reports), 'source_rejections': dict(reasons),
+                   'unresolved_accepted_runs': unresolved}
         provenance = {'schema_version': 1, 'kind': 'metadata_candidate', 'created_at': now(),
                       'dataset': cfg['name'], 'source_metadata': before, 'selection_config': config_record,
                       'inputs': inputs, 'generator': file_record(Path(__file__)), 'summary': summary,
@@ -545,6 +618,10 @@ def accept_candidate(root, cfg, candidate, allow_review=False):
     for key in ('metadata', 'selection'):
         if sha256(candidate / f'{key}.tsv') != data[key]['sha256']:
             raise ValueError(f'candidate {key} changed; use overrides and regenerate')
+    unresolved = data.get('summary', {}).get('unresolved_accepted_runs', [])
+    if unresolved:
+        raise ValueError('accepted runs lack source metadata and a local fallback: ' + ', '.join(unresolved)
+                         + '; restore their metadata or explicitly exclude/replace them, then regenerate')
     # Source changes remain visible in selection.tsv. An accepted representative
     # is retained until an explicit exclusion or override changes the decision.
     target = path_at(root, cfg['previous_metadata'])
@@ -813,12 +890,18 @@ def update_metadata(root, cfg, work=None, source=None, dry_run=False):
                    metadata_history=metadata_history(provenance))
         write_json(work / 'run.json', run)
         result = {**run_reference(work), 'candidate': str(candidate), 'summary': summary, 'dry_run': dry_run}
-        if not dry_run:
+        unresolved = summary['unresolved_accepted_runs']
+        if not dry_run and not unresolved:
             result['updated'] = accept_candidate(root, cfg, candidate)
             run = json.loads((work / 'run.json').read_text())
-        run.update(status='complete', finished_at=now())
+        run.update(status='review_required' if unresolved else 'complete', finished_at=now())
         write_json(work / 'run.json', run)
-        if dry_run:
+        if unresolved:
+            result['status'] = 'review_required'
+            print('metadata review required: ' + ', '.join(unresolved)
+                  + '; restore their metadata or explicitly exclude/replace them, then rerun update',
+                  file=sys.stderr, flush=True)
+        elif dry_run:
             result['accept_command'] = shlex.join([str(Path(root).resolve() / 'run_metadata.sh'), 'accept',
                 '--config', str(cfg['_path']), '--candidate', str(candidate)])
             print(f'accept candidate: {result["accept_command"]}', file=sys.stderr, flush=True)

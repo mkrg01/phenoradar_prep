@@ -16,7 +16,6 @@ and run from the repository root:
 
 ```bash
 conda activate phenoradar_prep
-export WORKFLOW_PYTHON="$(command -v python)"
 ./run_build.sh fetch-software --config datasets/angiosperm_leaf/build.yaml
 ```
 
