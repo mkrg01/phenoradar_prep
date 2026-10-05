@@ -5,7 +5,8 @@ One representative leaf Illumina RNA-seq run per original NCBI taxid.
 [build settings](build.yaml) pin the software and enable `reuse_from: auto`.
 See the [shared selection policy](../README.md#selection-policy).
 
-Uses the standard AMALGKIT `plantae` [curation rules](select_rules.tsv).
+Uses the AMALGKIT `plantae` [curation rules](select_rules.tsv), restricted to
+`leaf` before exclusion and control filtering.
 Historical exclusions are supplied; accepted runs are registered from reviewed
 builds.
 

@@ -3,7 +3,7 @@ param_min_nspots_1	yes	parameter	0								yes	min_nspots	1000000	select paramete
 param_max_sample_2	yes	parameter	0								yes	max_sample	99999	select parameter max_sample
 param_mark_missing_rank_3	yes	parameter	0								yes	mark_missing_rank	species	select parameter mark_missing_rank
 param_mark_redundant_biosamples_4	yes	parameter	0								yes	mark_redundant_biosamples	no	select parameter mark_redundant_biosamples
-param_sample_group_5	yes	parameter	0								yes	sample_group	flower,leaf,root	select parameter sample_group
+param_sample_group_5	yes	parameter	0								yes	sample_group	leaf	select parameter sample_group
 param_sampling_strategy_6	yes	parameter	0								yes	sampling_strategy	maximize_bioproject_diversity	select parameter sampling_strategy
 validate_hint_flower_1	yes	validate	5		\b(?:flower|flowers|floral|inflorescence|inflorescences|spike|spikes|panicle|panicles|tassel|tassels|ear|ears|catkin|catkins)\b	hint_organ		flower			yes			validate hint organ flower
 validate_hint_leaf_2	yes	validate	6		\b(?:leaf|leaves|flag leaf|flag leaves|lamina|laminae|leaflet|leaflets|leaf[\s_-]?blade|leaf[\s_-]?blades|seedling[\s_-]?leaf|seedling[\s_-]?leaves)\b	hint_organ		leaf			yes			validate hint organ leaf
