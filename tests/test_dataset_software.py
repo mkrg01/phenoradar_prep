@@ -210,3 +210,55 @@ def test_resolved_paths_and_receipts_bind_source_and_image(pins, source_download
     assert lock["container"]["identity"]["uri"] == pins["image_uri"]
     assert len(records) == 4  # Entry point, defaults, VERSION, and SIF.
     assert software.resolve(pins) == (resolved, records, lock)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("damaged", ["source", "container"])
+def test_transferred_cache_is_reused_offline_and_still_detects_changes(
+        pins, source_download, runtime, monkeypatch, tmp_path, legacy, damaged):
+    _, _, original_lock = software.resolve(pins)
+    original_cache = Path(pins["cache_dir"])
+    for receipt in (original_lock["source"], original_lock["container"]):
+        destination = next(parent for parent in Path(receipt["files"][0]["path"]).parents
+                           if (parent / "receipt.json").is_file())
+        stored = json.loads((destination / "receipt.json").read_text())
+        assert all(not Path(entry["path"]).is_absolute() for entry in stored["files"])
+        if legacy:
+            write_json(destination / "receipt.json", receipt)
+
+    transferred = tmp_path / "transferred/software"
+    shutil.copytree(original_cache, transferred)
+    moved_pins = dict(pins, cache_dir=str(transferred))
+    monkeypatch.setattr(software, "download", lambda *args: pytest.fail("download on transferred cache hit"))
+    monkeypatch.setattr(software.shutil, "which", lambda *args: pytest.fail("runtime lookup on transferred cache hit"))
+    resolved, records, lock = software.resolve(moved_pins)
+    assert Path(resolved["repository"]).is_relative_to(transferred)
+    assert Path(resolved["image"]).is_relative_to(transferred)
+    assert all(Path(entry["path"]).is_relative_to(transferred) for entry in records)
+    assert [entry["sha256"] for entry in records] == [
+        entry["sha256"] for key in ("source", "container") for entry in original_lock[key]["files"]]
+    for path in transferred.glob("*/*/receipt.json"):
+        assert all(not Path(entry["path"]).is_absolute()
+                   for entry in json.loads(path.read_text())["files"])
+    shutil.rmtree(original_cache)
+    assert software.resolve(moved_pins) == (resolved, records, lock)
+    Path(lock[damaged]["files"][0]["path"]).write_bytes(b"damaged transferred software")
+    with pytest.raises(ValueError, match="registered file changed"):
+        software.resolve(moved_pins)
+
+
+@pytest.mark.parametrize("kind", ["source", "container"])
+def test_missing_transferred_file_does_not_use_original_cache(
+        pins, source_download, runtime, tmp_path, kind):
+    _, _, lock = software.resolve(pins)
+    original_cache = Path(pins["cache_dir"])
+    receipt = lock[kind]
+    original = Path(receipt["files"][0]["path"])
+    destination = next(parent for parent in original.parents if (parent / "receipt.json").is_file())
+    write_json(destination / "receipt.json", receipt)
+    transferred = tmp_path / "transferred/software"
+    shutil.copytree(original_cache, transferred)
+    (transferred / original.relative_to(original_cache)).unlink()
+    assert original.is_file()
+    with pytest.raises(ValueError, match="registered file missing"):
+        software.resolve(dict(pins, cache_dir=str(transferred)))

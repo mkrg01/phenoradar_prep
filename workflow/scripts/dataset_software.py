@@ -13,7 +13,7 @@ import urllib.request
 from pathlib import Path
 
 from common import now, sha256, write_json
-from dataset_assets import digest, locked, record, verify
+from dataset_assets import digest, locked, record, stat_identity, verify
 
 SOURCE_BASE = "https://codeload.github.com/kfuku52/genegalleon/tar.gz/"
 ENTRYPOINT = "workflow/gg_transcriptome_generation_entrypoint.sh"
@@ -58,10 +58,38 @@ def source_records(repository):
 
 
 def read_receipt(destination, identity):
-    receipt = json.loads((destination / "receipt.json").read_text())
+    destination = Path(destination).resolve()
+    stored = json.loads((destination / "receipt.json").read_text())
+    receipt = copy.deepcopy(stored)
     if receipt.get("schema_version") != 1 or receipt.get("identity") != identity:
         raise ValueError(f"software cache identity differs: {destination}")
-    for entry in receipt["files"]: verify(entry)
+    for entry in receipt["files"]:
+        original = Path(entry["path"])
+        relative = original
+        if original.is_absolute():
+            try:
+                relative = original.relative_to(destination)
+            except ValueError:
+                # Legacy receipts used absolute paths under source/<revision> or images/<key>.
+                roots = [Path(*original.parts[:i + 2]) for i in range(len(original.parts) - 1)
+                         if original.parts[i:i + 2] == destination.parts[-2:]]
+                if len(roots) != 1:
+                    raise ValueError(f"software cache path cannot be relocated: {original}")
+                relative = original.relative_to(roots[0])
+        path = (destination / relative).resolve()
+        if not path.is_relative_to(destination):
+            raise ValueError(f"software cache file escapes its directory: {relative}")
+        entry["path"] = str(path)
+        if original.is_absolute() and original != path:
+            entry.pop("stat", None)  # Always hash the relocated file, even if old stat values match.
+        before = stat_identity(path) if path.is_file() else None
+        verify(entry)
+        if before != stat_identity(path):
+            raise ValueError(f"file changed while verifying software cache: {path}")
+        entry["stat"] = before
+    portable = dict(receipt, files=relocate(receipt["files"], destination, Path(".")))
+    if portable != stored:
+        write_json(destination / "receipt.json", portable)
     return receipt
 
 
@@ -107,7 +135,8 @@ def fetch_source(config):
                        "files": relocate(files, staging, destination)}
             archive.unlink()
             shutil.rmtree(extracted)
-            write_json(staging / "receipt.json", receipt)
+            write_json(staging / "receipt.json",
+                       dict(receipt, files=relocate(receipt["files"], destination, Path("."))))
             os.rename(staging, destination)
             return destination / "repository", receipt
         finally:
@@ -167,7 +196,8 @@ def fetch_image(config):
             receipt = {"schema_version": 1, "kind": "downloaded_image", "created_at": now(),
                        "identity": identity, "runtime": subprocess.check_output([runtime, "--version"], text=True).strip(),
                        "labels": labels, "files": relocate([entry], staging, destination)}
-            write_json(staging / "receipt.json", receipt)
+            write_json(staging / "receipt.json",
+                       dict(receipt, files=relocate(receipt["files"], destination, Path("."))))
             os.rename(staging, destination)
             return destination / "genegalleon.sif", receipt
         finally:
