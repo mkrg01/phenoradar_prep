@@ -23,6 +23,7 @@ from layout import run_layout
 from sample_identity import select_samples
 from dataset_software import resolve as resolve_software, validate as validate_software
 from build_versioning import metadata_history, naming_mode, timestamp_directory
+from verification_cache import verification_cache
 from dataset_assets import (COUNTS, SAFE, digest, identities, link_file, locked,
                             normalize_private_paths, record, register_busco, register_quant, register_reference, resolve, verify)
 
@@ -129,7 +130,7 @@ def check_conditions(products, conditions):
             raise ValueError(f"{stage} settings differ from registered product; set reuse_from: null and choose a new build name for a deliberate rebuild")
 
 
-def inspect_items(store, items, analysis, requested=None, conditions=None, reusable=None, errors=None):
+def inspect_items(store, items, analysis, requested=None, conditions=None, reusable=None, errors=None, resolved=None):
     result = []
     for item in items:
         try:
@@ -152,6 +153,8 @@ def inspect_items(store, items, analysis, requested=None, conditions=None, reusa
                 continue
             products = resolve(store, item, analysis["phylogeny"]["lineage"], need_full=True)
             check_conditions(products, conditions)
+            if resolved is not None:
+                resolved[item["species"]] = products
             status = {stage: "reuse" if products[key] else "pending"
                       for stage, key in zip(STAGES, ("reference", "busco", "quant"))}
             result.append({"species": item["species"], "run": item["row"]["run"], **status,
@@ -338,18 +341,23 @@ def item_products(manifest, item):
 
 
 def status(path):
-    manifest = load(path)
+    return status_report(path, load(path))
+
+
+def status_report(path, manifest):
     items = copy.deepcopy(manifest["items"])
     for item in items:
         if item.get("reference_id"): item["row"]["reference_id"] = item["reference_id"]
-    report = inspect_items(manifest["config"]["store"], items, manifest["analysis"], conditions=manifest["config"].get("conditions"))
+    resolved = {}
+    report = inspect_items(manifest["config"]["store"], items, manifest["analysis"],
+                           conditions=manifest["config"].get("conditions"), resolved=resolved)
     for item, row in zip(items, report):
         row["jobs"] = {}
         for stage in STAGES:
             receipt = Path(path) / "jobs/status" / f"{item['species']}.{stage}.json"
             if receipt.exists(): row["jobs"][stage] = json.loads(receipt.read_text())
         if row["assembly"] != "conflict":
-            product = item_products(manifest, item)
+            product = resolved[item["species"]]
             assessment = product.get("assessment") or product.get("busco")
             if assessment:
                 c = assessment["counts"]
@@ -674,7 +682,7 @@ def submit(path, until="database", species=None, dry_run=False, resources=None):
     if wanted is not None:
         if not wanted: raise ValueError("pilot species must be present in frozen metadata")
         wanted = select_samples([dict(i["row"], species=i["species"]) for i in manifest["items"]], wanted)
-    report = status(path)
+    report = status_report(path, manifest)
     if (path / "completed.json").exists():
         print("Build already complete; all recorded products verified.")
         return []
@@ -831,6 +839,12 @@ def main():
             command.add_argument("--stage", choices=STAGES, required=True)
             command.add_argument("--task-id", type=int, required=True)
     args = parser.parse_args()
+    root = Path(getattr(args, "root", Path(__file__).resolve().parents[2])).resolve()
+    with verification_cache(root / ".cache/verification.sqlite"):
+        return run_command(args, parser)
+
+
+def run_command(args, parser):
     if args.command in {"plan", "prepare", "fetch-software"}:
         root = Path(args.root).resolve()
         config = absolute(root, args.config)

@@ -15,6 +15,78 @@ from test_portable_build import completed_project, execute
 from build_products import complete, load_complete
 
 
+def test_plan_reads_each_database_manifest_once(dataset_project, monkeypatch):
+    import portable_build
+    root = dataset_project
+    source = imported(root)
+    config = configure(root, str(source))
+    manifest = source / "manifest.json"
+    portable_build._MANIFESTS.clear()
+    calls = []
+    read_text = Path.read_text
+    def counted(path, *args, **kwargs):
+        if path == manifest:
+            calls.append(path)
+        return read_text(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "read_text", counted)
+    report = dataset.plan(root, config)[-1]
+    assert all(row["mapping"] == "reuse" for row in report)
+    assert calls == [manifest]
+
+
+def test_cli_reuses_verified_files_across_plan_commands(dataset_project, monkeypatch, capsys):
+    import sys
+    import dataset_assets
+    root = dataset_project
+    source = imported(root)
+    moved = root / "resources/transferred/database"
+    shutil.copytree(source, moved)
+    config = configure(root, str(moved))
+    calls = []
+    hash_file = dataset_assets.sha256
+    def counted(path):
+        calls.append(Path(path))
+        return hash_file(path)
+    monkeypatch.setattr(dataset_assets, "sha256", counted)
+    monkeypatch.setattr(sys, "argv", ["dataset.py", "plan", "--root", str(root), "--config", str(config)])
+    assert dataset.main() == 0
+    first = capsys.readouterr().out
+    assert calls
+    calls.clear()
+    assert dataset.main() == 0
+    assert capsys.readouterr().out == first
+    assert calls == []
+    assert (root / ".cache/verification.sqlite").is_file()
+    monkeypatch.setattr(sys, "argv", ["dataset.py", "submit", "--root", str(root), "--config", str(config),
+                                     "--name", "cached_submission", "--until", "quant", "--dry-run"])
+    assert dataset.main() == 0
+    assert calls == []  # Selection and staging share the checks completed by plan.
+    capsys.readouterr()
+    damaged = next((moved / "cds").glob("*.gz"))
+    damaged.write_bytes(damaged.read_bytes() + b"changed")
+    monkeypatch.setattr(sys, "argv", ["dataset.py", "plan", "--root", str(root), "--config", str(config)])
+    assert dataset.main() == 1
+    assert "registered file changed" in capsys.readouterr().out
+
+
+def test_manifest_changes_and_mutable_results_do_not_poison_shared_reads(dataset_project):
+    import portable_build
+    root = dataset_project
+    source = imported(root)
+    manifest = source / "manifest.json"
+    loaded = load_complete(source, verify_files=False)
+    first = next(iter(loaded["products"]))
+    original_name = loaded["products"][first]["row"]["scientific_name"]
+    loaded["products"][first]["row"]["scientific_name"] = "Changed result"
+    assert load_complete(source, verify_files=False)["products"][first]["row"]["scientific_name"] == original_name
+    portable_build.completion_path(source)  # Populate the resolver's read cache.
+    bad = json.loads(manifest.read_text())
+    bad["build_id"] = "modified manifest"
+    write_json(manifest, bad)
+    with pytest.raises(ValueError, match="build completion record changed"):
+        load_complete(source, verify_files=False)
+
+
 def configure(root, sources, **values):
     path = root/'config/build.yaml'
     cfg = yaml.safe_load(path.read_text())

@@ -4,12 +4,32 @@ import json
 import os
 import shutil
 import tempfile
+from collections import OrderedDict
 from pathlib import Path
 
 from common import write_json, write_tsv
 from dataset_assets import digest, link_file, record, stat_identity, verify
 
 PRODUCT_FILES = ('cds', 'busco', 'abundance', 'protein', 'translation', 'expression', 'expression_qc')
+_MANIFESTS = OrderedDict()
+
+
+def manifest_data(path, consume=False):
+    """Reuse the resolver's parsed JSON; consume it before exposing mutable products."""
+    path = Path(path).resolve()
+    identity = stat_identity(path)
+    previous = _MANIFESTS.pop(str(path), None)
+    if previous is not None and previous[0] == identity:
+        data = previous[1]
+    else:
+        data = json.loads(path.read_text())
+        if identity != stat_identity(path):
+            raise ValueError(f'file changed while reading database manifest: {path}')
+    if not consume:
+        _MANIFESTS[str(path)] = (identity, data)
+        while len(_MANIFESTS) > 2:
+            _MANIFESTS.popitem(last=False)
+    return data
 
 
 def inside_bundle(root, relative):
@@ -33,7 +53,7 @@ def completion_path(path):
             path /= 'database/manifest.json'
     if not path.is_file():
         raise ValueError(f'build is incomplete: missing {path}; finish build through database first')
-    data = json.loads(path.read_text())
+    data = manifest_data(path)
     if data.get('kind') == 'completed_build_pointer':
         if data.get('schema_version') != 1 or digest({k:v for k,v in data.items() if k != 'sha256'}) != data.get('sha256'):
             raise ValueError('build completion record changed')

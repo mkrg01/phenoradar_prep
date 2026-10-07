@@ -33,6 +33,7 @@ def dataset_project(tmp_path, tiny_inputs, monkeypatch):
     build_config = root / "config/build.yaml"
     cfg = yaml.safe_load(build_config.read_text())
     cfg["reuse_from"] = None
+    cfg["metadata"] = "input/metadata.tsv"
     build_config.write_text(yaml.safe_dump(cfg))
     shutil.copytree(ROOT / "workflow", root / "workflow", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy2(ROOT / "run_pipeline.sh", root / "run_pipeline.sh")
@@ -209,6 +210,30 @@ def test_database_and_changed_metadata_only_reuses_products(dataset_project):
     assert not (path / "work/genegalleon").exists()
     assert load(path)["analysis"]["odb"]["incremental"] is True
     assert load(path)["software_lock"] is None  # Reuse-only preparation does not acquire software.
+
+
+def test_status_resolves_each_run_once_and_submit_loads_once(dataset_project, monkeypatch):
+    import dataset
+    root = dataset_project
+    imported(root)
+    path = prepare(root, "status_checks", root / "config/build.yaml")
+    expected = status(path)
+    calls = []
+    resolve = dataset.resolve
+    def counted(store, item, *args, **kwargs):
+        calls.append(item["species"])
+        return resolve(store, item, *args, **kwargs)
+    monkeypatch.setattr(dataset, "resolve", counted)
+    assert status(path) == expected
+    assert len(calls) == len(load(path)["items"])
+    loads = []
+    load_build = dataset.load
+    def counted_load(*args, **kwargs):
+        loads.append(args[0])
+        return load_build(*args, **kwargs)
+    monkeypatch.setattr(dataset, "load", counted_load)
+    assert submit(path, until="quant", dry_run=True) == []
+    assert loads == [path.resolve()]
 
 
 def test_removal_readdition_and_frozen_membership(dataset_project):

@@ -12,9 +12,9 @@ from build_versioning import publish_latest
 
 
 def load_complete(path, verify_files=True):
-    from portable_build import completion_path, load_products
+    from portable_build import completion_path, load_products, manifest_data
     path = completion_path(path)
-    data = json.loads(path.read_text())
+    data = manifest_data(path, consume=True)
     if data.get('kind') != 'completed_build' or data.get('schema_version') != 5:
         raise ValueError('unsupported database format: expected schema 5; prepare a new build from metadata')
     if digest({k:v for k,v in data.items() if k != 'sha256'}) != data.get('sha256'):

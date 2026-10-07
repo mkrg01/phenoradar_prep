@@ -14,6 +14,7 @@ from pathlib import Path
 from common import file_record, read_tsv, sha256, write_json
 from translate_cds import fasta_ids
 from sample_identity import annotate
+from verification_cache import active_cache
 
 COUNTS = ["busco_cds_single", "busco_cds_duplicated", "busco_cds_fragmented", "busco_cds_missing", "busco_cds_total"]
 SAFE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
@@ -87,8 +88,20 @@ def verify(entry):
     path = Path(entry["path"])
     if not path.is_file():
         raise ValueError(f"registered file missing: {path}")
-    if entry.get("stat") != stat_identity(path) and sha256(path) != entry["sha256"]:
+    before = stat_identity(path)
+    if entry.get("stat") == before:
+        return path
+    cache = active_cache()
+    if cache is not None and cache.matches(path, entry["sha256"], before):
+        return path
+    if sha256(path) != entry["sha256"]:
         raise ValueError(f"registered file changed: {path}")
+    if cache is not None:
+        try:
+            if before == stat_identity(path):
+                cache.remember(path, entry["sha256"], before)
+        except OSError:
+            pass  # Preserve verify's result, but never cache a file that changed after hashing.
     return path
 
 

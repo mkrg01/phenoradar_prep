@@ -157,6 +157,14 @@ checks identities, checksums, lineage, genetic code, ODB reference, and build
 conditions. Conflicting products stop preparation regardless of list order.
 Use compatible sources, or `null` for a fresh build.
 
+Build commands cache successful checksum verification in
+`.cache/verification.sqlite`. Cached checks require the same path, expected
+SHA256, device, inode, size, mtime, and ctime. Changed files are checked again;
+missing or corrupt files still fail validation. This cache is optional: it can
+be removed, and unavailable caches fall back to full verification. Database
+manifests and scientific reuse conditions are unchanged. The first verification
+after transferring products still reads their contents.
+
 Verified products are staged into the new build, which then no longer depends
 on the source paths. Missing samples run normally. Large products may share
 hard links: **do not edit generated files in place**. Reuse origins are recorded
