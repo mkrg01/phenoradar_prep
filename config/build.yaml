@@ -12,9 +12,9 @@ odb:
   chunk_size: 50  # Maximum samples per ODB mapping chunk.
   ncbi_tax_id: 3193  # OrthoDB mapping clade: Embryophyta (land plants); NCBI Taxonomy ID.
 genegalleon:
-  version: 0.7.77  # GeneGalleon release label.
-  revision: 3a6460e8a8201ab1293db1fec445fd7de063e46e  # Pinned source commit.
-  image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:df357fc1857c737df1cdfe17fc12b7e1fcb891353e9bac9e534fb4155b98aff3  # Container pinned by OCI digest.
+  version: 0.8.160  # GeneGalleon release label.
+  revision: 836da7d466527d48ae2d68c4c17594d6bbc539e3  # Pinned source commit.
+  image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:01b3f64930e70f451d51c7a6c0649258fddd748898c08cb5bbbbd3c0329588e4  # Container pinned by OCI digest.
   settings:
     assembly_method: rnaSPAdes  # Transcriptome assembler passed to GeneGalleon.
 slurm:
