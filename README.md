@@ -22,7 +22,8 @@ For a first build, set `reuse_from: null`. Choose the trait and optional analyse
 before submitting; the supplied analysis config enables representative trees
 and contrast pairs.
 
-Run from the repository root:
+Run from the repository root. Replace `{build_name}` with the build directory
+name and `{analysis_name}` with a name for your analysis:
 
 ```bash
 conda env create -n phenoradar_prep -f environment.yaml
@@ -30,17 +31,22 @@ conda activate phenoradar_prep
 ./run_pipeline.sh --prepare-container --cores 1 --resources mem_gb=4
 
 ./run_build.sh plan
-./run_build.sh submit --name leaf
+./run_build.sh submit
 
 # After the build completes:
-./run_analysis.sh submit --build results/leaf --name carnivory
+./run_analysis.sh submit --build results/{build_name} --name {analysis_name}
 ```
 
-The first submission saves inputs and settings. Resubmit the same name to retry;
+Build names follow `name` and `name_mode` in `config/build.yaml`; use the build
+directory reported by `submit` for `{build_name}`.
+
+The first submission saves inputs and settings for each build or analysis.
+To retry, resubmit the [saved build or analysis path](docs/datasets.md#failure-and-recovery-behavior);
 use a new name when changing samples or scientific settings.
 
-Reusable products are in `results/leaf/database/`. Analysis results, including
-`phenoradar_inputs/`, are in `results/leaf/downstream/carnivory/`.
+Reusable products are in `results/{build_name}/database/`. Analysis results,
+including `phenoradar_inputs/`, are in
+`results/{build_name}/downstream/{analysis_name}/`.
 
 For maintained representative datasets, see the [dataset catalog](datasets/README.md)
 and [angiosperm leaf update instructions](datasets/angiosperm_leaf/README.md).
