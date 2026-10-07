@@ -26,6 +26,7 @@ name reported by `submit`, and choose `{analysis_name}`:
 conda env create -n phenoradar_prep -f environment.yaml
 conda activate phenoradar_prep
 ./run_pipeline.sh --prepare-container --cores 1 --resources mem_gb=4
+./run_build.sh fetch-software
 
 ./run_build.sh plan
 ./run_build.sh submit
