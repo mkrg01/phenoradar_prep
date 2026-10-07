@@ -70,24 +70,24 @@ def test_retry_resources_do_not_change_frozen_build(dataset_project):
     build = new_dataset(root)
     before = (build/'build.json').read_bytes()
     override = root/'retry.yaml'
-    override.write_text(yaml.safe_dump({'translation':{'table':2},'slurm':{'stages':{'assembly':{'mem_gb':256,'time':'7-00:00:00'}}}}))
-    commands = dataset.submit(build,until='assembly',dry_run=True,resources=override)
+    override.write_text(yaml.safe_dump({'translation':{'table':2},'slurm':{'stages':{'sample':{'mem_gb':256,'time':'7-00:00:00'}}}}))
+    commands = dataset.submit(build,until='quant',dry_run=True,resources=override)
     assert '--mem=256000M' in commands[0] and '--time=7-00:00:00' in commands[0]
     assert (build/'build.json').read_bytes() == before
     assert dataset.load(build)['analysis']['translation']['table'] == 1
     frozen = json.loads((build/'jobs/submission_0001.resources.json').read_text())
-    assert frozen['slurm']['stages']['assembly']['mem_gb'] == 256
+    assert frozen['slurm']['stages']['sample']['mem_gb'] == 256
     for key, value in [('cpus', 0), ('mem_gb', 0), ('mem_gb', True), ('mem_gb', 1.5)]:
-        override.write_text(yaml.safe_dump({'slurm': {'stages': {'assembly': {key: value}}}}))
-        with pytest.raises(ValueError,match=f'invalid assembly.{key}'):
-            dataset.submit(build,until='assembly',dry_run=True,resources=override)
+        override.write_text(yaml.safe_dump({'slurm': {'stages': {'sample': {key: value}}}}))
+        with pytest.raises(ValueError,match=f'invalid sample.{key}'):
+            dataset.submit(build,until='quant',dry_run=True,resources=override)
 
 
 def test_new_native_products_reject_changed_biological_conditions(dataset_project):
     root = dataset_project
     build = new_dataset(root)
     dataset.submit(build,until='quant',dry_run=True)
-    for step in dataset.STAGES: dataset.worker(build,step,1)
+    dataset.worker(build, 1)
     config = root/'config/build.yaml'
     from database_fixtures import database_from_stages
     frozen = dataset.load(build)

@@ -101,9 +101,9 @@ def test_excluded_species_never_receive_array_indices(dataset_project):
     root = dataset_project; fake_genegalleon(root)
     (root/'config/excluded_accessions.tsv').write_text('accession\treason\nA1\tdownload_failed\n')
     build = prepare(root,'two_species',root/'config/build.yaml')
-    commands = submit(build,until='assembly',dry_run=True)
+    commands = submit(build,until='quant',dry_run=True)
     assert len(commands) == 1 and '--array=1,2' in commands[0]
-    for index in (1,2): worker(build,'assembly',index)
+    for index in (1,2): worker(build, index)
     events = [e['species'] for e in native_events(build)]
     assert events == ['Beta_sp-X','Gamma_plant']
     assert not (build/'work/genegalleon/Alpha_plant_A1/input/amalgkit_metadata/Alpha_plant_metadata.tsv').exists()
@@ -113,29 +113,29 @@ def test_excluded_species_never_receive_array_indices(dataset_project):
 def test_download_failure_is_retried_without_rerunning_completed_species(dataset_project, monkeypatch):
     root = dataset_project
     build = new_dataset(root,('New plant','Other plant'))
-    submit(build,until='assembly',dry_run=True)
-    worker(build,'assembly',2)
+    submit(build,until='quant',dry_run=True)
+    worker(build, 2)
     raw = build/'work/genegalleon/New_plant_SRR1/downloads/SRR1.partial'; raw.write_text('retained resumable download')
     monkeypatch.setenv('FAKE_GG_FAIL_DOWNLOAD','1')
-    with pytest.raises(subprocess.CalledProcessError): worker(build,'assembly',1)
-    receipt = json.loads((build/'jobs/status/New_plant_SRR1.assembly.json').read_text())
+    with pytest.raises(subprocess.CalledProcessError): worker(build, 1)
+    receipt = json.loads((build/'jobs/status/New_plant_SRR1.sample.json').read_text())
     assert receipt['state'] == 'failed' and receipt['run'] == 'SRR1' and receipt['stage'] == 'assembly'
     assert [r['assembly'] for r in status(build)] == ['pending','reuse']
-    assert '--array=1' in submit(build,until='assembly',dry_run=True)[0]
+    assert '--array=1' in submit(build,until='quant',dry_run=True)[0]
     monkeypatch.delenv('FAKE_GG_FAIL_DOWNLOAD')
-    worker(build,'assembly',1)
+    worker(build, 1)
     assert raw.read_text() == 'retained resumable download'
     assert [r['assembly'] for r in status(build)] == ['reuse','reuse']
-    assert submit(build,until='assembly',dry_run=True) == []
+    assert submit(build,until='quant',dry_run=True) == []
 
 
 def test_interrupted_worker_running_receipt_does_not_block_retry(dataset_project):
     build = new_dataset(dataset_project)
-    submit(build,until='assembly',dry_run=True)
+    submit(build,until='quant',dry_run=True)
     partial = build/'work/genegalleon/New_plant_SRR1/output/transcriptome_assembly/longest_cds/New_plant_longestCDS.fa.gz'
     partial.parent.mkdir(parents=True); partial.write_bytes(b'incomplete output before timeout')
-    write_json(build/'jobs/status/New_plant_SRR1.assembly.json', {'state':'running','run':'SRR1'})
+    write_json(build/'jobs/status/New_plant_SRR1.sample.json', {'state':'running','run':'SRR1'})
     assert status(build)[0]['assembly'] == 'pending'
-    worker(build,'assembly',1)
+    worker(build, 1)
     assert status(build)[0]['assembly'] == 'reuse'
-    assert list((build/'jobs/incomplete/New_plant_SRR1/assembly').rglob('*longestCDS.fa.gz'))
+    assert not (build/'jobs/incomplete').exists()

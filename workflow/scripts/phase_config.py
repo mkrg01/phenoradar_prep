@@ -42,7 +42,7 @@ def time_minutes(value):
 
 # Normalize the public layout to the historical execution schema. Saved manifests
 # and execution receipts retain their original shape and checksums on disk.
-DIRECT_JOBS = {'assembly', 'busco', 'quant', 'controller'}
+DIRECT_JOBS = {'sample', 'assembly', 'busco', 'quant', 'controller'}
 WORKER_DEFAULTS = {'mem_gb': 8, 'time': '1-00:00:00'}
 BUDGET_RESOURCES = {'cpus': 'workflow_cpus', 'mem_gb': 'workflow_mem_mb'}
 
@@ -71,6 +71,32 @@ def normalize_slurm(slurm, build=True):
             if not isinstance(target, dict): raise ValueError(f'slurm.{section} must be a mapping')
             if name in target: raise ValueError(f'duplicate resources for {name}')
             target[name] = values
+    if build and isinstance(result.get('stages'), dict):
+        stages = result['stages']
+        legacy = set(stages) & {'assembly', 'busco', 'quant'}
+        if legacy:
+            if 'sample' in stages:
+                raise ValueError('do not mix sample and legacy assembly/busco/quant resources')
+            if legacy == {'assembly', 'busco', 'quant'}:
+                for name in legacy:
+                    job = stages[name]
+                    if not isinstance(job, dict) or set(job) != {'cpus', 'mem_gb', 'time'}:
+                        raise ValueError(f'invalid resources for {name}')
+                    for key in ('cpus', 'mem_gb'):
+                        if type(job[key]) is not int or job[key] < 1:
+                            raise ValueError(f'invalid {name}.{key}')
+                minutes = sum(time_minutes(stages[name]['time']) for name in legacy)
+                days, remainder = divmod(minutes, 1440)
+                hours, minute = divmod(remainder, 60)
+                stages['sample'] = {'cpus': max(stages[name]['cpus'] for name in legacy),
+                                    'mem_gb': max(stages[name]['mem_gb'] for name in legacy),
+                                    'time': f'{days}-{hours:02d}:{minute:02d}:00'}
+                for name in legacy: del stages[name]
+            elif legacy == {'assembly'}:
+                # Existing assembly-only retry overrides now size the whole sample job.
+                stages['sample'] = stages.pop('assembly')
+            else:
+                raise ValueError('use per_job_resources.sample for full-sample retry resources')
     return result
 
 
@@ -97,7 +123,7 @@ def validate_slurm(slurm, build=True):
     for key, value in slurm.get('total_limits', {}).items():
         if value is not None and (type(value) is not int or value < 1):
             raise ValueError(f'slurm.total_limits.{key} must be a positive integer or null')
-    expected = {'assembly','busco','quant','controller'} if build else {'controller'}
+    expected = {'sample','controller'} if build else {'controller'}
     if not isinstance(slurm.get('stages'), dict) or set(slurm['stages']) != expected:
         raise ValueError(f'slurm.per_job_resources must contain {sorted(expected)}')
     for stage, job in slurm['stages'].items():

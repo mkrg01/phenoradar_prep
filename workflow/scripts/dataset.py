@@ -28,7 +28,7 @@ from dataset_assets import (COUNTS, SAFE, digest, identities, link_file, locked,
                             normalize_private_paths, record, register_busco, register_quant, register_reference, resolve, verify)
 
 STAGES = ("assembly", "busco", "quant")
-UNTIL = (*STAGES, "mapping", "database")
+UNTIL = ("quant", "mapping", "database")
 FIXED_GENEGALLEON_SETTINGS = {"amalgkit_rrna_filter": "no", "amalgkit_contam_filter": "no"}
 MANAGED = {"mode_transcriptome_assembly", "kallisto_reference", "remove_amalgkit_fastq_after_completion", "delete_tmp_dir"} | FIXED_GENEGALLEON_SETTINGS.keys()
 
@@ -356,12 +356,34 @@ def status_report(path, manifest):
         for stage in STAGES:
             receipt = Path(path) / "jobs/status" / f"{item['species']}.{stage}.json"
             if receipt.exists(): row["jobs"][stage] = json.loads(receipt.read_text())
+        sample = Path(path) / 'jobs/status' / f"{item['species']}.sample.json"
+        if sample.exists():
+            from genegalleon_run import observation
+            row['jobs']['sample'] = json.loads(sample.read_text())
+            row['native'] = observation(workspace(path, manifest, item))
+            row['stopped_at'] = None
         if row["assembly"] != "conflict":
             product = resolved[item["species"]]
             assessment = product.get("assessment") or product.get("busco")
             if assessment:
                 c = assessment["counts"]
                 row["busco_complete_fraction"] = (c[COUNTS[0]] + c[COUNTS[1]]) / c[COUNTS[-1]]
+    from genegalleon_run import scheduler_states
+    accounting = scheduler_states([r['jobs']['sample'] for r in report if 'sample' in r['jobs']])
+    for row in report:
+        job = row['jobs'].get('sample')
+        if not job: continue
+        scheduler = accounting.get(str(job.get('slurm_id') or job.get('job_id')))
+        if scheduler:
+            job['scheduler'] = scheduler
+            if scheduler['state'] in {'OUT_OF_MEMORY', 'TIMEOUT', 'CANCELLED', 'FAILED', 'NODE_FAIL', 'PREEMPTED'}:
+                job['state'] = 'failed'
+            elif scheduler['state'] == 'COMPLETED' and job['state'] == 'running':
+                job['state'] = 'interrupted'
+        if job['state'] in {'failed', 'interrupted'}:
+            row['stopped_at'] = (job.get('stage') if job.get('phase') == 'publication' else
+                                 row['native'].get('current_stage') or job.get('stage')) or next(
+                (stage for stage in STAGES if row[stage] == 'pending'), None)
     completion = Path(path) / "completed.json"
     if completion.exists():
         from build_products import load_complete
@@ -411,25 +433,26 @@ def workspace_metadata(work, item, raw_inputs, create=False):
     return row
 
 
-def gg_environment(manifest, item, products, stage, work, task_id):
+def gg_environment(manifest, item, products, work, task_id):
     # Do not inherit unrelated GeneGalleon overrides from the submission shell.
     env = {k: v for k, v in os.environ.items() if not k.startswith(("GG_TRANSCRIPTOME_", "GG_COMMON_"))}
     gg = manifest["config"]["genegalleon"]
     overrides = {**gg.get("settings", {}), **FIXED_GENEGALLEON_SETTINGS}
     ref = products["reference"]
+    keep = manifest['config'].get('storage', {}).get('keep_intermediates', False)
     overrides.update({
         "mode_transcriptome_assembly": "metadata", "run_amalgkit_metadata_or_integrate": 0,
-        "run_amalgkit_getfastq": int(stage in {"assembly", "quant"}),
-        "run_assembly": int(stage == "assembly" and not ref),
-        "run_longestcds": int(stage == "assembly" and not ref),
+        "run_amalgkit_getfastq": int(not ref or not products['quant']),
+        "run_assembly": int(not ref),
+        "run_longestcds": int(not ref),
         "run_longestcds_fx2tab": 0, "run_longestcds_mmseqs2taxonomy": 0,
         "run_longestcds_contamination_removal": 0, "run_busco_isoforms": 0,
-        "run_busco_longest_cds": int(stage == "busco"),
+        "run_busco_longest_cds": int(not products['busco']),
         "run_busco_contamination_removed_longest_cds": 0,
-        "run_assembly_stat": int(stage == "assembly"),
-        "run_amalgkit_quant": int(stage == "quant"), "run_amalgkit_merge": int(stage == "quant"),
-        "run_multispecies_summary": 0, "remove_amalgkit_fastq_after_completion": 0,
-        "kallisto_reference": "species_cds", "delete_tmp_dir": 0,
+        "run_assembly_stat": int(not ref),
+        "run_amalgkit_quant": int(not products['quant']), "run_amalgkit_merge": int(not products['quant']),
+        "run_multispecies_summary": 0, "remove_amalgkit_fastq_after_completion": int(not keep),
+        "kallisto_reference": "longest_cds", "delete_tmp_dir": int(not keep),
     })
     for key, value in overrides.items():
         env["GG_TRANSCRIPTOME_" + key.upper()] = str(int(value)) if isinstance(value, bool) else str(value)
@@ -439,11 +462,17 @@ def gg_environment(manifest, item, products, stage, work, task_id):
                 "gg_workspace_dir": str(work), "gg_container_image_path": gg["image"],
                 "GG_COMMON_BUSCO_LINEAGE": manifest["analysis"]["phylogeny"]["lineage"],
                 "GG_COMMON_GENETIC_CODE": str(manifest["analysis"]["translation"]["table"]),
-                "GG_ARRAY_TASK_ID": str(task_id), "SLURM_ARRAY_TASK_ID": str(task_id)})
+                "GG_ARRAY_TASK_ID": str(task_id), "SLURM_ARRAY_TASK_ID": str(task_id),
+                "GG_OBSERVABILITY": "1", "GG_COMMON_TMP_ROOT": "workspace"})
+    # Imported checkpoints are verified by our registry. Disabled native producers
+    # must not require their unavailable original isoforms/transcript outputs.
+    for prefix in ('', 'SINGULARITYENV_', 'APPTAINERENV_'):
+        env[prefix + 'gg_skip_disabled_artifact_checks'] = str(int(bool(ref)))
     # sbatch --mem exposes SLURM_MEM_PER_NODE, which the pinned GeneGalleon
     # scheduler helper does not read. Use the actual retry allocation, with a
     # frozen-config fallback for workers invoked outside Slurm.
-    requested = manifest['config']['slurm']['stages'][stage]
+    from phase_config import validate_slurm
+    requested = validate_slurm(manifest['config']['slurm'])['stages']['sample']
     cpus = int(env.get('SLURM_CPUS_PER_TASK') or requested['cpus'])
     memory_mb = int(env.get('SLURM_MEM_PER_NODE') or
                     (int(env['SLURM_MEM_PER_CPU']) * cpus if env.get('SLURM_MEM_PER_CPU')
@@ -459,7 +488,7 @@ def gg_environment(manifest, item, products, stage, work, task_id):
     for key, value in budgets.items():
         for prefix in ('', 'SINGULARITYENV_', 'APPTAINERENV_'):
             env[prefix + key] = str(value)
-    print(f'{stage}: allocation={cpus} CPUs/{memory_mb} MB; '
+    print(f'sample: allocation={cpus} CPUs/{memory_mb} MB; '
           f'GeneGalleon={total_gb} GiB, tool budget={budgets["GG_MEM_TOOL_GB"]} GiB', flush=True)
     return env
 
@@ -472,137 +501,171 @@ def cleanup_genegalleon(path, manifest, item, stage, products, *, apply=True):
     path = Path(path)
     work = workspace(path, manifest, item)
     relative = work.relative_to(path) / 'output/transcriptome_assembly'
-    targets = []
-    # The upstream stages share tmp/. Never clear another failed stage's work
-    # just because a previously completed stage was requested again.
-    errors = []
-    try:
-        other_failed = False
-        for other in STAGES:
-            receipt = path / 'jobs/status' / f"{item['species']}.{other}.json"
-            if other != stage and receipt.exists():
-                other_failed |= json.loads(receipt.read_text()).get('state') in {'running', 'failed'}
-        if not other_failed:
-            targets.append(relative / 'tmp')
-        # Assembly FASTQs are also used for quantification. Require both products,
-        # irrespective of which stage is being retried. Keep caller-owned input/reads.
-        if products.get('reference') and products.get('quant'):
-            reads = relative / 'amalgkit_getfastq' / item['row']['species_id']
-            # Preserve getfastq logs/QC and never descend into a linked input tree.
-            directory = owned_path(path, reads)
-            if not directory.is_symlink():
-                for root, _, names in os.walk(directory, followlinks=False):
-                    for name in names:
-                        if name.endswith(('.fastq', '.fastq.gz', '.fq', '.fq.gz', '.sra')):
-                            targets.append((Path(root) / name).relative_to(path))
-    except (OSError, ValueError) as error:
+    import fcntl
+    from contextlib import ExitStack
+    with ExitStack() as guards:
         targets = []
-        errors.append({'path': str(relative), 'error': str(error)})
-    if not apply:
-        from cleanup_work import scratch_usage
-        sizes = [scratch_usage(owned_path(path, target)) for target in targets]
-        return {'targets': [str(t) for t in targets], 'errors': errors,
-                **{key: sum(size[key] for size in sizes)
-                   for key in ('files', 'allocated_bytes', 'reclaimable_bytes')}}
-    return cleanup(path, targets, path / 'jobs/cleanup' / f"{item['species']}.{stage}.json", errors=errors)
+        # The upstream stages share tmp/. Never clear another failed stage's work
+        # just because a previously completed stage was requested again.
+        errors = []
+        try:
+            other_failed = False
+            for other in STAGES:
+                receipt = path / 'jobs/status' / f"{item['species']}.{other}.json"
+                if other != stage and receipt.exists():
+                    other_failed |= json.loads(receipt.read_text()).get('state') in {'running', 'failed'}
+            if not other_failed:
+                scratch = owned_path(path, relative / 'tmp')
+                for lock in scratch.glob('*/.gg_active.lock'):
+                    checked = owned_path(path, lock.relative_to(path))
+                    if checked.is_symlink(): raise ValueError('unsafe native scratch lock')
+                    handle = guards.enter_context(checked.open('r'))
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                targets.append(relative / 'tmp')
+            # Assembly FASTQs are also used for quantification. Require both products,
+            # irrespective of which stage is being retried. Keep caller-owned input/reads.
+            if products.get('reference') and products.get('quant'):
+                reads = relative / 'amalgkit_getfastq' / item['row']['species_id']
+                # Preserve getfastq logs/QC and never descend into a linked input tree.
+                directory = owned_path(path, reads)
+                if not directory.is_symlink():
+                    for root, _, names in os.walk(directory, followlinks=False):
+                        for name in names:
+                            if name.endswith(('.fastq', '.fastq.gz', '.fq', '.fq.gz', '.sra')):
+                                targets.append((Path(root) / name).relative_to(path))
+        except (OSError, ValueError) as error:
+            targets = []
+            errors.append({'path': str(relative), 'error': str(error)})
+        if not apply:
+            from cleanup_work import scratch_usage
+            sizes = [scratch_usage(owned_path(path, target)) for target in targets]
+            return {'targets': [str(t) for t in targets], 'errors': errors,
+                    **{key: sum(size[key] for size in sizes)
+                       for key in ('files', 'allocated_bytes', 'reclaimable_bytes')}}
+        return cleanup(path, targets, path / 'jobs/cleanup' / f"{item['species']}.{stage}.json", errors=errors)
 
 
-def worker(path, stage, task_id):
+def register_native(path, manifest, item, products, eligible, env):
+    """Publish native checkpoints; the native API proves partial-run completeness."""
+    from relabel_sample import relabel
+    work = workspace(path, manifest, item)
+    out = work / 'output/transcriptome_assembly'
+    species, native, run = item['species'], item['row']['species_id'], item['row']['run']
+    store = manifest['config']['store']
+    for entry in manifest['raw_inputs'].get(species, {}).values(): verify(entry)
+    for stage, key in zip(STAGES, ('reference', 'busco', 'quant')):
+        if stage not in eligible or products[key]:
+            continue
+        if stage != 'assembly' and not products['reference']:
+            continue
+        provenance = {'source': 'genegalleon', 'dataset': str(path), 'stage': stage,
+                      'settings': {k:v for k,v in env.items() if k.startswith(('GG_TRANSCRIPTOME_', 'GG_COMMON_'))},
+                      'software': manifest['genegalleon'], 'run': run,
+                      'raw_inputs': manifest['raw_inputs'].get(species, {}),
+                      'condition': manifest['config']['conditions'][stage]}
+        published = work / 'products'
+        name = {'assembly': f'{species}_longestCDS.fa.gz',
+                'busco': f'{species}.busco.full.tsv', 'quant': f'{run}_abundance.tsv'}[stage]
+        target = published / name
+        # This file has no registry consumer yet; discard an interrupted relabel.
+        target.unlink(missing_ok=True)
+        if stage == 'assembly':
+            provenance['relabel'] = relabel(out / 'longest_cds' / f'{native}_longestCDS.fa.gz', target, native, species)
+            products[key] = register_reference(store, item, target, provenance)
+        elif stage == 'busco':
+            provenance['relabel'] = relabel(out / 'busco_full_longest_cds' / f'{native}_busco.full.tsv',
+                                           target, native, species, 'busco')
+            products[key] = register_busco(store, products['reference'], full=target,
+                short=out / 'busco_short_longest_cds' / f'{native}_busco.short.txt',
+                lineage=manifest['analysis']['phylogeny']['lineage'], provenance=provenance)
+        else:
+            for suffix in ('eff_length', 'est_counts', 'tpm', 'metadata'):
+                p = out / 'amalgkit_merge' / native / f'{native}_{suffix}.tsv'
+                if not p.is_file() or not p.stat().st_size:
+                    raise ValueError(f'quant/merge did not finish: {p}')
+            provenance['relabel'] = relabel(out / 'amalgkit_quant' / native / run / f'{run}_abundance.tsv',
+                                           target, native, species, 'quant')
+            products[key] = register_quant(store, products['reference'], item, target, provenance)
+        write_json(Path(path) / 'jobs/status' / f'{species}.{stage}.json',
+                   {'state': 'complete', 'finished_at': now(), 'job_id': os.environ.get('SLURM_JOB_ID')})
+    return products
+
+
+def worker(path, task_id):
+    """One allocation and one native invocation per sample, including retries."""
+    from genegalleon_run import observation, verified_stages
+    from relabel_sample import relabel
     path = Path(path).resolve()
     manifest = load(path, check_code=True)
-    if stage not in STAGES or not 1 <= task_id <= len(manifest["items"]): raise ValueError("invalid stage/task index")
-    item = manifest["items"][task_id - 1]
-    species = item["species"]
-    native = item["row"]["species_id"]
-    from relabel_sample import relabel
-    receipt_dir = path / "jobs/status"
-    receipt_path = receipt_dir / f"{species}.{stage}.json"
-    # Serialize all work on a species, including jobs accidentally submitted twice.
-    with locked(Path(manifest["config"]["store"]) / species / ".worker.lock"):
+    if not 1 <= task_id <= len(manifest['items']): raise ValueError('invalid task index')
+    item = manifest['items'][task_id - 1]
+    species, native = item['species'], item['row']['species_id']
+    work = workspace(path, manifest, item)
+    receipt_path = path / 'jobs/status' / f'{species}.sample.json'
+    with locked(Path(manifest['config']['store']) / species / '.worker.lock'):
         products = item_products(manifest, item)
-        key = dict(zip(STAGES, ("reference", "busco", "quant")))[stage]
-        if products[key]:
-            write_json(receipt_path, {"state": "reused", "at": now()})
-            cleanup_genegalleon(path, manifest, item, stage, products)
+        if all(products[key] for key in ('reference', 'busco', 'quant')):
+            write_json(receipt_path, {'state': 'reused', 'at': now()})
+            cleanup_genegalleon(path, manifest, item, 'sample', products)
             return
-        work = workspace(path, manifest, item)
-        if not (work / "input/amalgkit_metadata" / f"{native}_metadata.tsv").is_file():
-            raise ValueError("prepare job workspace with submit --dry-run or submit before running workers")
-        expected_row = workspace_metadata(work, item, manifest["raw_inputs"].get(species, {}))
-        if read_tsv(work / "input/amalgkit_metadata" / f"{native}_metadata.tsv") != [expected_row]:
-            raise ValueError("staged GeneGalleon metadata changed")
-        ref = products["reference"]
-        if stage != "assembly" and not ref: raise ValueError(f"assembly prerequisite incomplete: {species}")
-        out = work / "output/transcriptome_assembly"
-        if ref:
-            # Native tools retain biological names inside this isolated workspace.
-            cds_native = out / "longest_cds" / f"{native}_longestCDS.fa.gz"
-            relabel(verify(ref["cds"]), cds_native, species, native)
-            link_file(cds_native, work / "input/species_cds" / f"{native}_longestCDS.fa.gz")
-        # Incomplete native outputs must not satisfy GeneGalleon's existence checks.
-        # Preserve them for diagnosis, and rerun only this unfinished stage.
-        patterns = {"assembly": [("assembled_transcripts_with_isoforms", f"{native}_isoform.fa.gz"), ("corset_clusters", f"{native}_corset.clusters.tsv"), ("corset_counts", f"{native}_corset.counts.tsv"), ("assembly_stat", f"{native}_assembly_stat.tsv"), ("longest_cds", f"{native}_longestCDS.fa.gz"), ("longest_cds_transcript", f"{native}_longestCDS.transcript.fa.gz")],
-                    "busco": [("busco_full_longest_cds", f"{native}_busco.full.tsv"), ("busco_short_longest_cds", f"{native}_busco.short.txt")],
-                    "quant": [("amalgkit_quant", native), ("amalgkit_merge", native)]}
-        previous = receipt_path.exists()
-        if previous and json.loads(receipt_path.read_text())["state"] in {"running", "failed"}:
-            quarantine = path / "jobs/incomplete" / species / stage / str(len(list((path / "jobs/incomplete" / species / stage).glob("*"))))
-            for directory, pattern in patterns[stage]:
-                for source in (out / directory).glob(pattern):
-                    quarantine.mkdir(parents=True, exist_ok=True)
-                    source.rename(quarantine / (directory + "-" + source.name))
-            # A failed registration can leave a relabelled file from this attempt.
-            published_name = {"assembly": f"{species}_longestCDS.fa.gz",
-                              "busco": f"{species}.busco.full.tsv",
-                              "quant": f"{item['row']['run']}_abundance.tsv"}[stage]
-            published_file = work / "products" / published_name
-            if published_file.exists():
-                quarantine.mkdir(parents=True, exist_ok=True)
-                published_file.rename(quarantine / ("products-" + published_name))
-        write_json(receipt_path, {"state": "running", "started_at": now(), "species": species, "run": item["row"]["run"],
-                                      "stage": stage, "job_id": os.environ.get("SLURM_JOB_ID")})
+        metadata = work / 'input/amalgkit_metadata' / f'{native}_metadata.tsv'
+        if not metadata.is_file():
+            raise ValueError('prepare job workspace with submit --dry-run or submit before running workers')
+        expected = workspace_metadata(work, item, manifest['raw_inputs'].get(species, {}))
+        if read_tsv(metadata) != [expected]: raise ValueError('staged GeneGalleon metadata changed')
+        actual = sorted(p.name for p in metadata.parent.iterdir() if p.is_file() and not p.name.startswith('.'))
+        if actual != [metadata.name]: raise ValueError('staged GeneGalleon metadata file set changed')
+        if products['reference']:
+            # relabel retains matching native files byte-for-byte, preserving their provenance.
+            relabel(verify(products['reference']['cds']),
+                    work / 'output/transcriptome_assembly/longest_cds' / f'{native}_longestCDS.fa.gz', species, native)
+        env = gg_environment(manifest, item, products, work, 1)
+        repository = Path(manifest['config']['genegalleon']['repository'])
+        receipt = {'state': 'running', 'started_at': now(), 'species': species,
+                   'run': item['row']['run'], 'job_id': os.environ.get('SLURM_JOB_ID')}
+        if os.environ.get('SLURM_ARRAY_JOB_ID') and os.environ.get('SLURM_ARRAY_TASK_ID'):
+            receipt['slurm_id'] = os.environ['SLURM_ARRAY_JOB_ID'] + '_' + os.environ['SLURM_ARRAY_TASK_ID']
+        previous = json.loads(receipt_path.read_text()) if receipt_path.exists() else {}
+        write_json(receipt_path, receipt)
         try:
-            actual = sorted(p.name for p in (work / "input/amalgkit_metadata").iterdir()
-                            if p.is_file() and not p.name.startswith("."))
-            if actual != [native + "_metadata.tsv"]:
-                raise ValueError("staged GeneGalleon metadata file set changed")
-            env = gg_environment(manifest, item, products, stage, work, 1)
-            repository = Path(manifest["config"]["genegalleon"]["repository"])
-            command = ["bash", str(repository / "workflow/gg_transcriptome_generation_entrypoint.sh")]
-            subprocess.run(command, cwd=repository, env=env, check=True)
-            provenance = {"source": "genegalleon", "dataset": str(path), "stage": stage,
-                          "settings": {k: v for k, v in env.items() if k.startswith(("GG_TRANSCRIPTOME_", "GG_COMMON_"))},
-                          "software": manifest["genegalleon"], "run": item["row"]["run"],
-                          "raw_inputs": manifest["raw_inputs"].get(species, {}),
-                          "condition": manifest["config"]["conditions"][stage]}
-            store = manifest["config"]["store"]
-            published = work / "products"
-            if stage == "assembly":
-                cds = published / f"{species}_longestCDS.fa.gz"
-                provenance["relabel"] = relabel(out / "longest_cds" / f"{native}_longestCDS.fa.gz", cds, native, species)
-                ref = register_reference(store, item, cds, provenance)
-            elif stage == "busco":
-                full = published / f"{species}.busco.full.tsv"
-                provenance["relabel"] = relabel(out / "busco_full_longest_cds" / f"{native}_busco.full.tsv", full, native, species, 'busco')
-                register_busco(store, ref, full=full,
-                               short=out / "busco_short_longest_cds" / f"{native}_busco.short.txt",
-                               lineage=manifest["analysis"]["phylogeny"]["lineage"], provenance=provenance)
-            else:
-                run = item["row"]["run"]
-                abundance = published / f"{run}_abundance.tsv"
-                for suffix in ("eff_length", "est_counts", "tpm", "metadata"):
-                    p = out / "amalgkit_merge" / native / f"{native}_{suffix}.tsv"
-                    if not p.is_file() or not p.stat().st_size: raise ValueError(f"quant/merge did not finish: {p}")
-                provenance["relabel"] = relabel(out / "amalgkit_quant" / native / run / f"{run}_abundance.tsv",
-                                               abundance, native, species, 'quant')
-                register_quant(store, ref, item, abundance, provenance)
-            write_json(receipt_path, {"state": "complete", "finished_at": now(), "reference_id": ref["reference_id"],
-                                      "job_id": os.environ.get("SLURM_JOB_ID")})
+            (path / 'jobs/cleanup' / f'{species}.sample.json').unlink(missing_ok=True)
+            if previous.get('native_exit_code') == 0:
+                receipt['native_exit_code'] = 0
+                eligible, _ = verified_stages(work, repository)
+                register_native(path, manifest, item, products, eligible, env)
+                if all(products[key] for key in ('reference', 'busco', 'quant')):
+                    write_json(receipt_path, dict(receipt, state='complete', finished_at=now(), native_exit_code=0))
+                    return
+            receipt.pop('native_exit_code', None)
+            subprocess.run(['bash', str(repository / 'workflow/gg_transcriptome_generation_entrypoint.sh')],
+                           cwd=repository, env=env, check=True)
+            receipt['native_exit_code'] = 0
+            write_json(receipt_path, receipt)
+            register_native(path, manifest, item, products, set(STAGES), env)
+            write_json(receipt_path, dict(receipt, state='complete', finished_at=now()))
         except BaseException as error:
-            write_json(receipt_path, {"state": "failed", "at": now(), "error": str(error), "species": species,
-                                      "run": item["row"]["run"], "stage": stage, "job_id": os.environ.get("SLURM_JOB_ID")})
+            if isinstance(error, subprocess.CalledProcessError):
+                eligible, observed = verified_stages(work, repository)
+            else:
+                eligible, observed = set(), observation(work)
+            checkpoint_error = None
+            try:
+                register_native(path, manifest, item, products, eligible, env)
+            except (OSError, ValueError) as failure:
+                checkpoint_error = str(failure)
+            pending = next((stage for stage, key in zip(STAGES, ('reference', 'busco', 'quant'))
+                            if not products[key]), None)
+            phase = 'publication' if receipt.get('native_exit_code') == 0 else 'native'
+            write_json(receipt_path, dict(receipt, state='failed', at=now(), error=str(error),
+                       stage=pending if phase == 'publication' else observed.get('current_stage') or pending,
+                       phase=phase, native=observed,
+                       checkpoint_error=checkpoint_error,
+                       native_exit_code=getattr(error, 'returncode', receipt.get('native_exit_code'))))
             raise
-        cleanup_genegalleon(path, manifest, item, stage, item_products(manifest, item))
+        finally:
+            # Scratch never provides our restart checkpoint. Keep native published
+            # outputs and completed reads for the next invocation's provenance checks.
+            cleanup_genegalleon(path, manifest, item, 'sample', products)
 
 
 def materialize(path):
@@ -676,6 +739,8 @@ def load_execution(path):
 
 
 def submit(path, until="database", species=None, dry_run=False, resources=None):
+    if until not in UNTIL:
+        raise ValueError('partial assembly/BUSCO endpoints were removed; each sample runs through quant')
     path = Path(path).resolve()
     manifest = load(path, check_code=True)
     wanted = set(Path(species).read_text().splitlines()) if species else None
@@ -687,10 +752,9 @@ def submit(path, until="database", species=None, dry_run=False, resources=None):
         print("Build already complete; all recorded products verified.")
         return []
     if any(r["assembly"] == "conflict" for r in report): raise ValueError("resolve reported input conflicts before submitting")
-    stop = STAGES.index(until) if until in STAGES else len(STAGES) - 1
-    pending = {stage: [index for index, state in enumerate(report, 1)
-                       if state[stage] == "pending" and (wanted is None or state["species"] in wanted)]
-               for stage in STAGES[:stop + 1]}
+    pending = {'sample': [index for index, state in enumerate(report, 1)
+                         if any(state[stage] == 'pending' for stage in STAGES)
+                         and (wanted is None or state['species'] in wanted)]}
     from phase_config import array_concurrency, execution_settings, resolve_array_size, worker_budgets
     slurm = execution_settings(manifest["config"]["slurm"], resources)
     caps = {stage: array_concurrency(slurm, stage) for stage, indices in pending.items() if indices}
@@ -724,6 +788,7 @@ def submit(path, until="database", species=None, dry_run=False, resources=None):
         batch = {"created_at": now(), "until": until, "pilot_species": sorted(wanted) if wanted else None, "resources": record(execution), "jobs": []}
         receipt = jobs / f"submission_{batch_number:04d}.json"
         previous = None
+        sample_jobs = []
         commands = []
         scheduled = []
         for stage, indices in pending.items():
@@ -742,7 +807,6 @@ def submit(path, until="database", species=None, dry_run=False, resources=None):
                 worker_command += ["--execution", str(execution)]
                 invocation = shlex.join(worker_command)
             else:
-                worker_command += ["--stage", stage]
                 invocation = shlex.join(worker_command) + f' --task-id "$((SLURM_ARRAY_TASK_ID + {offset}))"'
             script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + "exec " + invocation + "\n")
             script.chmod(0o755)
@@ -755,8 +819,12 @@ def submit(path, until="database", species=None, dry_run=False, resources=None):
                 array = ",".join(str(i - offset) for i in indices)
                 if caps[stage] is not None: array += "%" + str(caps[stage])
                 cmd.append("--array=" + array)
-            if previous:
-                cmd.extend(["--dependency=afterok:" + previous, "--kill-on-invalid-dep=yes"])
+            if stage == 'mapping' and sample_jobs:
+                cmd.extend(['--dependency=afterok:' + ':'.join(sample_jobs), '--kill-on-invalid-dep=yes'])
+            elif previous:
+                # Serialize batches to respect the global cap; failures in one
+                # batch must not prevent independent samples in the next batch.
+                cmd.append('--dependency=afterany:' + previous)
             cmd.append(str(script))
             commands.append(cmd)
             job = {"stage": stage, "indices": indices, "array_offset": offset, "command": cmd, "job_id": None, "state": "submitting"}
@@ -781,6 +849,7 @@ def submit(path, until="database", species=None, dry_run=False, resources=None):
                 previous = identifier
             else:
                 previous = f"JOB_ID_{label}"
+            if stage == 'sample': sample_jobs.append(previous)
         if dry_run:
             for command in commands: print(shlex.join(command))
         elif not commands:
@@ -826,7 +895,7 @@ def main():
         if name == "submit": command.add_argument("--until", choices=UNTIL, default="database")
         if name == "mapping": command.add_argument("--execution")
         if name == "status": command.add_argument("--storage", action="store_true", help="Include intermediate cleanup status")
-        if name == "cleanup": command.add_argument("--apply", action="store_true", help="Delete verified successful scratch; default is preview")
+        if name == "cleanup": command.add_argument("--apply", action="store_true", help="Delete inactive managed scratch; default is preview")
         if name == "submit":
             command.add_argument("--root", default=".")
             command.add_argument("--config", help="Settings for a new build; default: config/build.yaml")
@@ -836,7 +905,6 @@ def main():
             command.add_argument("--species-list")
             command.add_argument("--dry-run", action="store_true")
         if name == "worker":
-            command.add_argument("--stage", choices=STAGES, required=True)
             command.add_argument("--task-id", type=int, required=True)
     args = parser.parse_args()
     root = Path(getattr(args, "root", Path(__file__).resolve().parents[2])).resolve()
@@ -885,7 +953,7 @@ def run_command(args, parser):
             submit_named(args.root, args.name, args.config, args.metadata, args.until,
                          args.species_list, args.dry_run, args.resources)
     elif args.command == "materialize": print(materialize(args.dataset))
-    elif args.command == "worker": worker(args.dataset, args.stage, args.task_id)
+    elif args.command == "worker": worker(args.dataset, args.task_id)
     elif args.command == "complete":
         from build_products import complete
         print(complete(args.dataset))

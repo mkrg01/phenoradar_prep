@@ -1,4 +1,4 @@
-"""Inspect cleanup receipts and retry successful jobs without rerunning tools."""
+"""Inspect cleanup receipts and retire inactive scratch without rerunning tools."""
 import fcntl
 import json
 from collections import Counter
@@ -40,6 +40,12 @@ def job_entries(path, manifest, kind):
             work = managed(root, workspace(path, manifest, item))
             if not work.exists():
                 continue
+            sample_status = Path(path) / 'jobs/status' / f"{item['species']}.sample.json"
+            if sample_status.is_file():
+                yield {'kind': 'genegalleon', 'job': item['species'], 'stage': 'sample',
+                       'work_dir': str(work), 'status': str(sample_status),
+                       'receipt': str(Path(path) / 'jobs/cleanup' / f"{item['species']}.sample.json")}
+                continue
             for stage in STAGES:
                 status = Path(path) / 'jobs/status' / f"{item['species']}.{stage}.json"
                 if status.is_file():
@@ -50,7 +56,11 @@ def job_entries(path, manifest, kind):
 
 def entry_state(entry, keep):
     job = read(entry['status'])
-    if job.get('state') not in {'success', 'complete', 'reused'}:
+    sample = entry['kind'] == 'genegalleon' and entry['stage'] == 'sample'
+    if sample:
+        entry['job_state'] = job.get('state', 'unknown')
+    incomplete = sample and job.get('state') in {'failed', 'interrupted', 'running'}
+    if not incomplete and job.get('state') not in {'success', 'complete', 'reused'}:
         return job.get('state', 'unknown')
     if keep:
         return 'retained'
@@ -61,7 +71,11 @@ def entry_state(entry, keep):
             entry['errors'] = result.get('errors', [])
             return 'pending'
         if entry['kind'] == 'genegalleon':
-            return result.get('state', 'unknown')
+            if not incomplete:
+                return result.get('state', 'unknown')
+    if incomplete:
+        scratch = Path(entry['work_dir']) / 'output/transcriptome_assembly/tmp'
+        return 'available' if scratch.exists() or scratch.is_symlink() else 'complete'
     if entry['kind'] != 'genegalleon':
         base = Path(entry['work_dir'])
         scratch = Path(job.get('work', base / job['fingerprint']))
@@ -86,16 +100,19 @@ def retry_genegalleon(path, manifest, entry, apply):
     # Existing successful jobs have a worker lock. Preview never creates files.
     with lock.open('r') as handle:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        for stage in STAGES:
-            status = Path(path) / 'jobs/status' / f"{item['species']}.{stage}.json"
-            if status.is_file() and read(status).get('state') in {'running', 'failed'}:
-                raise ValueError(f'{stage} is running or failed; sample scratch retained')
+        if entry['stage'] != 'sample':
+            for stage in STAGES:
+                status = Path(path) / 'jobs/status' / f"{item['species']}.{stage}.json"
+                if status.is_file() and read(status).get('state') in {'running', 'failed'}:
+                    raise ValueError(f'{stage} is running or failed; sample scratch retained')
         job = read(entry['status'])
-        if job.get('state') not in {'success', 'complete', 'reused'}:
+        success = job.get('state') in {'success', 'complete', 'reused'}
+        if not success and not (entry['stage'] == 'sample' and job.get('state') in {'failed', 'interrupted', 'running'}):
             raise ValueError('cleanup requires a successful, inactive stage')
         products = item_products(manifest, item)
-        key = dict(zip(STAGES, ('reference', 'busco', 'quant')))[entry['stage']]
-        if not products.get(key):
+        keys = ('reference', 'busco', 'quant') if entry['stage'] == 'sample' else (
+            dict(zip(STAGES, ('reference', 'busco', 'quant')))[entry['stage']],)
+        if success and not all(products.get(key) for key in keys):
             raise ValueError('registered stage products are missing; scratch retained')
         result = cleanup_genegalleon(path, manifest, item, entry['stage'], products, apply=False)
         if result['errors']:

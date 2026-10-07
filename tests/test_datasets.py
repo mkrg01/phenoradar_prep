@@ -303,52 +303,103 @@ def fake_genegalleon(root):
     (repo / "workflow").mkdir(parents=True)
     (repo / "genegalleon.sif").write_text("test container identifier")
     implementation = r'''
-import csv, gzip, json, os, sys
+
+import csv, gzip, hashlib, json, os, sys, time
 from pathlib import Path
-work = Path(os.environ["gg_workspace_dir"])
-files = sorted((work / "input/amalgkit_metadata").glob("*.tsv"))
-metadata = files[int(os.environ["GG_ARRAY_TASK_ID"]) - 1]
-row = next(csv.DictReader(metadata.open(), delimiter="\t"))
-species = row["scientific_name"].replace(" ", "_")
-run = row["run"]
-prefix = "GG_TRANSCRIPTOME_"
-out = work / "output/transcriptome_assembly"
+work = Path(os.environ['gg_workspace_dir'])
+files = sorted((work / 'input/amalgkit_metadata').glob('*.tsv'))
+metadata = files[int(os.environ['GG_ARRAY_TASK_ID']) - 1]
+row = next(csv.DictReader(metadata.open(), delimiter='\t'))
+species = row['scientific_name'].replace(' ', '_')
+run = row['run']
+prefix = 'GG_TRANSCRIPTOME_'
+out = work / 'output/transcriptome_assembly'
 out.mkdir(parents=True, exist_ok=True)
-with (work / "events.jsonl").open("a") as handle:
-    handle.write(json.dumps({"species":species, "env":{k:v for k,v in os.environ.items() if k.startswith(prefix)},
-                            "budgets":{k:os.environ[k] for k in ("GG_TASK_CPUS", "GG_MEM_TOTAL_GB", "GG_MEM_TOOL_GB")}})+"\n")
-assert os.environ["LC_ALL"] == os.environ["SINGULARITYENV_LC_ALL"] == os.environ["APPTAINERENV_LC_ALL"] == "C"
-assert os.environ[prefix+"RUN_MULTISPECIES_SUMMARY"] == "0"
-assert os.environ[prefix+"REMOVE_AMALGKIT_FASTQ_AFTER_COMPLETION"] == "0"
-if os.environ[prefix+"RUN_AMALGKIT_GETFASTQ"] == "1" and os.environ.get("FAKE_GG_FAIL_DOWNLOAD"):
-    sys.exit(29)
-if os.environ[prefix+"RUN_ASSEMBLY"] == "1":
-    cds = out / "longest_cds" / (species+"_longestCDS.fa.gz")
-    cds.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(cds,"wt") as h:
-        h.write(">"+species+"_g1\nATGAAATAA\n>"+species+"_g2\nATGCCCTAA\n")
-    if os.environ.get("FAKE_GG_FAIL_ASSEMBLY"): sys.exit(23)
-if os.environ[prefix+"RUN_BUSCO_LONGEST_CDS"] == "1":
-    for directory, suffix, content in [("busco_full_longest_cds","full.tsv", "# The lineage dataset is: embryophyta_odb12 (test)\nB1\tComplete\t"+species+"_g1:0-9\t100\t3\nB2\tComplete\t"+species+"_g2:0-9\t100\t3\n"), ("busco_short_longest_cds","short.txt","C:100%[S:100%,D:0%],F:0%,M:0%,n:2\n")]:
-        path = out / directory / (species+"_busco."+suffix)
-        if os.environ.get("FAKE_GG_LOW_BUSCO"):
-            content = ("# The lineage dataset is: embryophyta_odb12 (test)\nB1\tMissing\nB2\tMissing\n"
-                       if suffix == "full.tsv" else "C:0%[S:0%,D:0%],F:0%,M:100%,n:2\n")
-        elif os.environ.get("FAKE_GG_HALF_BUSCO"):
-            content = ("# The lineage dataset is: embryophyta_odb12 (test)\nB1\tDuplicated\t"+species+"_g1:0-9\t100\t3\nB1\tDuplicated\t"+species+"_g2:0-9\t100\t3\nB2\tMissing\n"
-                       if suffix == "full.tsv" else "C:50%[S:0%,D:50%],F:0%,M:50%,n:2\n")
-        path.parent.mkdir(parents=True, exist_ok=True); path.write_text(content)
-if os.environ[prefix+"RUN_AMALGKIT_QUANT"] == "1":
-    abundance = out / "amalgkit_quant" / species / run / (run+"_abundance.tsv")
-    abundance.parent.mkdir(parents=True, exist_ok=True)
-    abundance.write_text("target_id\ttpm\n"+species+"_g1\t500000\n"+species+"_g2\t500000\n")
-    if not os.environ.get("FAKE_GG_INCOMPLETE_MERGE"):
-        for suffix in ("eff_length","est_counts","tpm","metadata"):
-            path = out / "amalgkit_merge" / species / (species+"_"+suffix+".tsv")
-            path.parent.mkdir(parents=True, exist_ok=True); path.write_text("synthetic\n")
+with (work / 'events.jsonl').open('a') as handle:
+    handle.write(json.dumps({'species':species, 'env':{k:v for k,v in os.environ.items() if k.startswith(prefix)},
+                            'budgets':{k:os.environ[k] for k in ('GG_TASK_CPUS', 'GG_MEM_TOTAL_GB', 'GG_MEM_TOOL_GB')}})+'\n')
+assert os.environ['LC_ALL'] == os.environ['SINGULARITYENV_LC_ALL'] == os.environ['APPTAINERENV_LC_ALL'] == 'C'
+assert os.environ[prefix+'RUN_MULTISPECIES_SUMMARY'] == '0'
+assert os.environ['GG_OBSERVABILITY'] == '1'
+assert os.environ['GG_COMMON_TMP_ROOT'] == 'workspace'
+scratch = out / 'tmp/1_native/large'
+scratch.parent.mkdir(parents=True, exist_ok=True)
+scratch.write_bytes(b'scratch')
+attempt = work / 'output/observations' / str(time.time_ns())
+attempt.mkdir(parents=True)
+record = {'schema':'genegalleon-observation-v1', 'attempt_id':attempt.name,
+          'workflow':'gg_transcriptome_generation', 'started_at_ns':time.time_ns(), 'execution_state':'started'}
+def save_run(): (attempt / 'run.json').write_text(json.dumps(record))
+save_run()
+def finish_run(code):
+    record.update(execution_state='exited', exit_code=code)
+    save_run()
+    sys.exit(code)
+def emit(step, operation, code, proof):
+    data={'schema':'genegalleon-contract-observation-v1','attempt_id':attempt.name,
+          'observed_at_ns':time.time_ns(),'step':step,'operation':operation,'exit_code':code,
+          'manifest_sha256':'proof' if proof.exists() else None, 'proof':str(proof)}
+    (attempt / ('contract-'+step+'.json')).write_text(json.dumps(data))
+def begin(step):
+    proof=out / 'artifact_provenance' / (step+'.json')
+    if proof.exists():
+        data=json.loads(proof.read_text())
+        if not all(Path(p).is_file() and hashlib.sha256(Path(p).read_bytes()).hexdigest()==h for p,h in data.items()):
+            emit(step, 'needs-run', 3, proof)
+            finish_run(17)
+        emit(step, 'needs-run', 1, proof)
+        return False
+    emit(step, 'needs-run', 0, proof)
+    with (work/'steps.jsonl').open('a') as log: log.write(json.dumps(step)+'\n')
+    return True
+def finish(step, paths):
+    proof=out / 'artifact_provenance' / (step+'.json')
+    proof.parent.mkdir(exist_ok=True)
+    proof.write_text(json.dumps({str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in [metadata,*paths]}))
+    emit(step, 'record', 0, proof)
+if os.environ[prefix+'RUN_AMALGKIT_GETFASTQ']=='1' and os.environ.get('FAKE_GG_FAIL_DOWNLOAD'):
+    finish_run(29)
+if os.environ[prefix+'RUN_ASSEMBLY']=='1' and begin('transcriptome_longest_cds'):
+    if os.environ.get('FAKE_GG_FAIL_ASSEMBLY'): finish_run(23)
+    cds=out/'longest_cds'/(species+'_longestCDS.fa.gz')
+    cds.parent.mkdir(parents=True,exist_ok=True)
+    with gzip.open(cds,'wt') as handle:
+        handle.write('>'+species+'_g1\nATGAAATAA\n>'+species+'_g2\nATGCCCTAA\n')
+    finish('transcriptome_longest_cds',[cds])
+if os.environ[prefix+'RUN_BUSCO_LONGEST_CDS']=='1' and begin('transcriptome_busco_longest_cds'):
+    if os.environ.get('FAKE_GG_FAIL_BUSCO'): finish_run(31)
+    outputs=[]
+    for directory,suffix,content in [('busco_full_longest_cds','full.tsv','# The lineage dataset is: embryophyta_odb12 (test)\nB1\tComplete\t'+species+'_g1:0-9\t100\t3\nB2\tComplete\t'+species+'_g2:0-9\t100\t3\n'),('busco_short_longest_cds','short.txt','C:100%[S:100%,D:0%],F:0%,M:0%,n:2\n')]:
+        path=out/directory/(species+'_busco.'+suffix)
+        if os.environ.get('FAKE_GG_LOW_BUSCO'):
+            content=('# The lineage dataset is: embryophyta_odb12 (test)\nB1\tMissing\nB2\tMissing\n' if suffix=='full.tsv' else 'C:0%[S:0%,D:0%],F:0%,M:0%,n:2\n')
+        elif os.environ.get('FAKE_GG_HALF_BUSCO'):
+            content=('# The lineage dataset is: embryophyta_odb12 (test)\nB1\tDuplicated\t'+species+'_g1:0-9\t100\t3\nB1\tDuplicated\t'+species+'_g2:0-9\t100\t3\nB2\tMissing\n' if suffix=='full.tsv' else 'C:50%[S:0%,D:50%],F:0%,M:0%,n:2\n')
+        path.parent.mkdir(parents=True,exist_ok=True); path.write_text(content); outputs.append(path)
+    finish('transcriptome_busco_longest_cds',outputs)
+if os.environ[prefix+'RUN_AMALGKIT_QUANT']=='1' and begin('transcriptome_quant'):
+    if os.environ.get('FAKE_GG_FAIL_QUANT'): finish_run(32)
+    abundance=out/'amalgkit_quant'/species/run/(run+'_abundance.tsv')
+    abundance.parent.mkdir(parents=True,exist_ok=True)
+    abundance.write_text('target_id\ttpm\n'+species+'_g1\t500000\n'+species+'_g2\t500000\n')
+    finish('transcriptome_quant',[abundance])
+if os.environ[prefix+'RUN_AMALGKIT_MERGE']=='1' and begin('transcriptome_merge'):
+    if os.environ.get('FAKE_GG_INCOMPLETE_MERGE'): finish_run(33)
+    outputs=[]
+    for suffix in ('eff_length','est_counts','tpm','metadata'):
+        path=out/'amalgkit_merge'/species/(species+'_'+suffix+'.tsv')
+        path.parent.mkdir(parents=True,exist_ok=True); path.write_text('synthetic\n'); outputs.append(path)
+    finish('transcriptome_merge',outputs)
+if os.environ[prefix+'REMOVE_AMALGKIT_FASTQ_AFTER_COMPLETION']=='1':
+    for p in (out/'amalgkit_getfastq').rglob('*'):
+        if p.is_file() and p.name.endswith(('.fastq','.fastq.gz','.fq','.fq.gz','.sra')): p.unlink()
+finish_run(0)
 '''
     script = repo / "workflow/gg_transcriptome_generation_entrypoint.sh"
     script.write_text("#!/usr/bin/env bash\nexec " + sys.executable + " - <<'PY'\n" + implementation + "\nPY\n")
+    api = repo / 'workflow/support/workflow_api.py'
+    api.parent.mkdir(parents=True)
+    api.write_text("import hashlib, json, sys\nfrom pathlib import Path\nattempt=Path(sys.argv[sys.argv.index('--attempt')+1])\ncontracts=[]\nfor p in attempt.glob('contract-*.json'):\n    r=json.loads(p.read_text()); proof=Path(r['proof'])\n    current=False\n    if proof.is_file():\n        data=json.loads(proof.read_text())\n        current=all(Path(p).is_file() and hashlib.sha256(Path(p).read_bytes()).hexdigest()==h for p,h in data.items())\n    contracts.append({'step':r['step'],'state':'verified_current' if current else 'needs_run'})\nprint(json.dumps({'schema':'genegalleon-api-v1','command':'preflight','contracts':contracts}))\n")
     cfg = yaml.safe_load((root / "config/build.yaml").read_text())
     cfg["genegalleon"]["repository"] = str(repo)
     (root / "config/build.yaml").write_text(yaml.safe_dump(cfg))
@@ -373,54 +424,61 @@ def test_read_filter_settings_are_not_configurable(dataset_project, key, value):
         plan(dataset_project, config)
 
 
-def test_staged_workers_reuse_and_native_array_filename_order(dataset_project, monkeypatch):
+def test_sample_workers_reuse_and_native_array_filename_order(dataset_project, monkeypatch):
     root = dataset_project
-    for key in ("AMALGKIT_RRNA_FILTER", "AMALGKIT_CONTAM_FILTER"):
-        monkeypatch.setenv("GG_TRANSCRIPTOME_" + key, "yes")
-    # Prefix species sort order differs from the order of *_metadata.tsv filenames.
-    path = new_dataset(root, ("New plant", "New plant alba"))
-    commands = submit(path, until="busco", dry_run=True)
-    assert len(commands) == 2
-    assert "--array=1,2" in commands[0]
-    assert "--dependency=afterok:JOB_ID_assembly" in commands[1]
-    for stage in ("assembly", "busco", "quant"):
-        for index in (1, 2): worker(path, stage, index)
+    for key in ('AMALGKIT_RRNA_FILTER', 'AMALGKIT_CONTAM_FILTER'):
+        monkeypatch.setenv('GG_TRANSCRIPTOME_' + key, 'yes')
+    path = new_dataset(root, ('New plant', 'New plant alba'))
+    commands = submit(path, until='quant', dry_run=True)
+    assert len(commands) == 1 and '--array=1,2' in commands[0]
+    assert '--stage' not in Path(commands[0][-1]).read_text()
+    for index in (1, 2): worker(path, index)
     events = native_events(path)
-    assert sorted(e["species"] for e in events) == sorted(["New_plant", "New_plant_alba"] * 3)
+    assert sorted(e['species'] for e in events) == ['New_plant', 'New_plant_alba']
     for event in events:
-        assert event["env"]["GG_TRANSCRIPTOME_AMALGKIT_RRNA_FILTER"] == "no"
-        assert event["env"]["GG_TRANSCRIPTOME_AMALGKIT_CONTAM_FILTER"] == "no"
-    assert all(r["quant"] == "reuse" for r in status(path))
-    worker(path, "assembly", 1)
-    assert len(native_events(path)) == 6
-    assert submit(path, until="quant", dry_run=True) == []
-    assert len(read_tsv(materialize(path) / "metadata.tsv")) == 2
+        assert event['env']['GG_TRANSCRIPTOME_AMALGKIT_RRNA_FILTER'] == 'no'
+        assert event['env']['GG_TRANSCRIPTOME_AMALGKIT_CONTAM_FILTER'] == 'no'
+        assert event['env']['GG_TRANSCRIPTOME_RUN_ASSEMBLY'] == '1'
+        assert event['env']['GG_TRANSCRIPTOME_RUN_BUSCO_LONGEST_CDS'] == '1'
+        assert event['env']['GG_TRANSCRIPTOME_RUN_AMALGKIT_QUANT'] == '1'
+        assert event['env']['GG_TRANSCRIPTOME_DELETE_TMP_DIR'] == '1'
+    assert all(r['quant'] == 'reuse' for r in status(path))
+    worker(path, 1)
+    assert len(native_events(path)) == 2
+    assert submit(path, until='quant', dry_run=True) == []
+    assert len(read_tsv(materialize(path) / 'metadata.tsv')) == 2
 
 
 def test_failed_stage_is_not_registered_and_retry_is_limited(dataset_project, monkeypatch):
     path = new_dataset(dataset_project)
-    submit(path, until="quant", dry_run=True)
-    monkeypatch.setenv("FAKE_GG_FAIL_ASSEMBLY", "1")
-    with pytest.raises(subprocess.CalledProcessError): worker(path, "assembly", 1)
-    assert status(path)[0]["assembly"] == "pending"
-    monkeypatch.delenv("FAKE_GG_FAIL_ASSEMBLY")
-    worker(path, "assembly", 1)
-    assert status(path)[0]["assembly"] == "reuse"
-    assert list((path / "jobs/incomplete/New_plant_SRR1/assembly").rglob("*.gz"))
-    worker(path, "busco", 1)
-    monkeypatch.setenv("FAKE_GG_INCOMPLETE_MERGE", "1")
-    with pytest.raises(ValueError, match="quant/merge did not finish"): worker(path, "quant", 1)
-    assert status(path)[0]["quant"] == "pending"
-    monkeypatch.delenv("FAKE_GG_INCOMPLETE_MERGE")
-    worker(path, "quant", 1)
-    assert status(path)[0]["quant"] == "reuse"
+    submit(path, until='quant', dry_run=True)
+    monkeypatch.setenv('FAKE_GG_FAIL_ASSEMBLY', '1')
+    with pytest.raises(subprocess.CalledProcessError): worker(path, 1)
+    first = status(path)[0]
+    assert first['assembly'] == 'pending' and first['stopped_at'] == 'assembly'
+    assert first['jobs']['sample']['state'] == 'failed'
+    assert not (path / 'work/genegalleon/New_plant_SRR1/output/transcriptome_assembly/tmp').exists()
+    monkeypatch.delenv('FAKE_GG_FAIL_ASSEMBLY')
+    monkeypatch.setenv('FAKE_GG_FAIL_QUANT', '1')
+    with pytest.raises(subprocess.CalledProcessError): worker(path, 1)
+    partial = status(path)[0]
+    assert [partial[s] for s in ('assembly', 'busco', 'quant')] == ['reuse', 'reuse', 'pending']
+    assert partial['stopped_at'] == 'quant'
+    monkeypatch.delenv('FAKE_GG_FAIL_QUANT')
+    worker(path, 1)
+    assert status(path)[0]['quant'] == 'reuse'
+    event = native_events(path)[-1]['env']
+    assert event['GG_TRANSCRIPTOME_RUN_ASSEMBLY'] == '0'
+    assert event['GG_TRANSCRIPTOME_RUN_BUSCO_LONGEST_CDS'] == '0'
+    assert event['GG_TRANSCRIPTOME_RUN_AMALGKIT_QUANT'] == '1'
+    assert not (path / 'jobs/incomplete').exists()
 
 
 def test_completed_new_species_reused_by_next_dataset(dataset_project):
     root = dataset_project
     path = new_dataset(root)
     submit(path, until="quant", dry_run=True)
-    for stage in ("assembly", "busco", "quant"): worker(path, stage, 1)
+    worker(path, 1)
     from database_fixtures import database_from_stages
     frozen = load(path)
     source = database_from_stages(root, frozen['config']['store'], frozen['items'], 'completed_source')
@@ -437,13 +495,13 @@ def test_partial_pilot_never_exports_incomplete_dataset(dataset_project):
     subset = dataset_project / "pilot.txt"
     subset.write_text("Other_plant\n")
     commands = submit(path, until="mapping", species=subset, dry_run=True)
-    assert len(commands) == 3
+    assert len(commands) == 1
     assert all("--array=2" in cmd for cmd in commands)
     assert not any("mapping" in cmd[-1] for cmd in commands)
-    for stage in ("assembly", "busco", "quant"): worker(path, stage, 2)
+    worker(path, 2)
     with pytest.raises(ValueError, match="dataset incomplete: New_plant"):
         materialize(path)
-    assert "--array=1" in submit(path, until="assembly", dry_run=True)[0]
+    assert "--array=1" in submit(path, until='quant', dry_run=True)[0]
 
 
 def test_slurm_submission_dependencies_and_duplicate_submission_guard(dataset_project, monkeypatch):
@@ -458,13 +516,12 @@ def test_slurm_submission_dependencies_and_duplicate_submission_guard(dataset_pr
     monkeypatch.setattr(subprocess, "check_output", scheduler)
     submit(path, until="mapping")
     batch = json.loads((path / "jobs/submission_0001.json").read_text())
-    assert len(batch["jobs"]) == 4
+    assert len(batch["jobs"]) == 2
     assert "--dependency=afterok:1001" in batch["jobs"][1]["command"]
-    assert "--dependency=afterok:1003" in batch["jobs"][3]["command"]
     active = True
     with pytest.raises(ValueError, match="queued/running"):
         submit(path, until="mapping")
-    assert len([c for c in calls if c[0] == "sbatch"]) == 4
+    assert len([c for c in calls if c[0] == "sbatch"]) == 2
 
 
 def test_private_relative_reads_are_frozen_and_reuse_detects_changed_bytes(dataset_project):
@@ -484,9 +541,9 @@ def test_private_relative_reads_are_frozen_and_reuse_detects_changed_bytes(datas
     original = reads.read_bytes()
     reads.write_text("changed after submission")
     with pytest.raises(ValueError, match="registered file changed"):
-        worker(path, "assembly", 1)
+        worker(path, 1)
     reads.write_bytes(original)
-    for stage in ("assembly", "busco", "quant"): worker(path, stage, 1)
+    worker(path, 1)
     from database_fixtures import database_from_stages
     frozen = load(path)
     source = database_from_stages(root, frozen['config']['store'], frozen['items'], 'private_source')
@@ -505,15 +562,15 @@ def test_private_relative_reads_are_frozen_and_reuse_detects_changed_bytes(datas
 
 def test_retry_quarantine_does_not_touch_another_species_with_same_prefix(dataset_project, monkeypatch):
     path = new_dataset(dataset_project, ("New plant", "New plant alba"))
-    submit(path, until="assembly", dry_run=True)
+    submit(path, until='quant', dry_run=True)
     monkeypatch.setenv("FAKE_GG_FAIL_ASSEMBLY", "1")
-    with pytest.raises(subprocess.CalledProcessError): worker(path, "assembly", 1)
+    with pytest.raises(subprocess.CalledProcessError): worker(path, 1)
     monkeypatch.delenv("FAKE_GG_FAIL_ASSEMBLY")
-    worker(path, "assembly", 2)
+    worker(path, 2)
     other = path / "work/genegalleon/New_plant_alba_SRR2/output/transcriptome_assembly/assembled_transcripts_with_isoforms/New_plant_alba_isoform.fa.gz"
     other.parent.mkdir(parents=True, exist_ok=True)
     other.write_bytes(b"completed output of another species")
-    worker(path, "assembly", 1)
+    worker(path, 1)
     assert other.read_bytes() == b"completed output of another species"
     assert all(r["assembly"] == "reuse" for r in status(path))
 
@@ -521,11 +578,11 @@ def test_retry_quarantine_does_not_touch_another_species_with_same_prefix(datase
 def test_split_slurm_arrays_preserve_species_identity_and_bound_concurrency(dataset_project, monkeypatch):
     path = new_dataset(dataset_project, ("Alpha new", "Beta new", "Gamma new"))
     monkeypatch.setattr('phase_config.resolve_array_size', lambda: 2)
-    commands = submit(path, until="assembly", dry_run=True)
+    commands = submit(path, until='quant', dry_run=True)
     assert len(commands) == 2
     assert "--array=1,2" in commands[0]
     assert "--array=1" in commands[1]
-    assert "--dependency=afterok:JOB_ID_assembly" in commands[1]
+    assert "--dependency=afterany:JOB_ID_sample" in commands[1]
     # Execute the generated high-index batch locally with the GeneGalleon double.
     # Local Slurm index 1 must select logical species 3, not species 1.
     subprocess.run(["bash", commands[1][-1]], cwd=dataset_project,
@@ -537,12 +594,11 @@ def test_split_slurm_arrays_preserve_species_identity_and_bound_concurrency(data
         assert command[0] == "sbatch"
         return str(1000 + len(calls)) + "\n"
     monkeypatch.setattr(subprocess, "check_output", scheduler)
-    submit(path, until="busco")
+    submit(path, until='quant')
     batch = json.loads((path / "jobs/submission_0002.json").read_text())
-    assert [j["array_offset"] for j in batch["jobs"]] == [0, 0, 2]
-    assert [j["indices"] for j in batch["jobs"]] == [[1, 2], [1, 2], [3]]
-    assert "--dependency=afterok:1001" in calls[1]
-    assert "--dependency=afterok:1002" in calls[2]
+    assert [j["array_offset"] for j in batch["jobs"]] == [0]
+    assert [j["indices"] for j in batch["jobs"]] == [[1, 2]]
+    assert not any(arg.startswith("--dependency=") for arg in calls[0])
 
 
 @pytest.mark.parametrize('limits,suffix', [({}, ''), ({'jobs': 2}, '%2'), ({'cpus': 8}, '%2')])
@@ -559,12 +615,11 @@ def test_auto_array_size_preserves_stage_dependencies_and_sparse_retry(dataset_p
         return 3
     monkeypatch.setattr('phase_config.resolve_array_size', detect)
     commands = submit(path, dry_run=True)
-    assert len(commands) == 4  # One array per stage, followed by the mapping controller.
-    assert all('--array=1,2,3' + suffix in command for command in commands[:3])
+    assert len(commands) == 2  # One sample array, followed by the mapping controller.
+    assert '--array=1,2,3' + suffix in commands[0]
     assert not any(arg.startswith('--dependency=') for arg in commands[0])
-    for command, predecessor in zip(commands[1:], ('assembly', 'busco', 'quant')):
-        assert '--dependency=afterok:JOB_ID_' + predecessor in command
-        assert '--kill-on-invalid-dep=yes' in command
+    assert '--dependency=afterok:JOB_ID_sample' in commands[1]
+    assert '--kill-on-invalid-dep=yes' in commands[1]
     # An array task failure must not change the identities of the remaining tasks.
     for task_id in (1, 2, 3):
         env = dict(os.environ, SLURM_ARRAY_TASK_ID=str(task_id))
@@ -582,10 +637,10 @@ def test_auto_array_size_preserves_stage_dependencies_and_sparse_retry(dataset_p
     monkeypatch.setattr(subprocess, 'check_output', scheduler)
     retry = submit(path)
     assert '--array=2' + suffix in retry[0]
-    assert len(retry) == 4
+    assert len(retry) == 2
     batch = json.loads((path / 'jobs/submission_0002.json').read_text())
-    assert [job['array_offset'] for job in batch['jobs']] == [0, 0, 0, 0]
-    assert [job['indices'] for job in batch['jobs']] == [[2], [1, 2, 3], [1, 2, 3], None]
+    assert [job['array_offset'] for job in batch['jobs']] == [0, 0]
+    assert [job['indices'] for job in batch['jobs']] == [[2], None]
     resources = json.loads((path / 'jobs/submission_0002.resources.json').read_text())
     assert 'array_size' not in resources['slurm']
     assert resources['resolved_array_size'] == 3
@@ -593,7 +648,7 @@ def test_auto_array_size_preserves_stage_dependencies_and_sparse_retry(dataset_p
     subprocess.run(['bash', retry[0][-1]], cwd=dataset_project,
                    env=dict(os.environ, SLURM_ARRAY_TASK_ID='2'), check=True)
     assert all(row['assembly'] == 'reuse' for row in status(path))
-    assert submit(path, until='assembly', dry_run=True) == []
+    assert submit(path, until='quant', dry_run=True) == []
     assert len(queries) == 2  # Once per submission; no query when no array is needed.
 
 
@@ -610,7 +665,7 @@ def test_legacy_array_sizes_in_saved_build_and_override_are_ignored(dataset_proj
     resources = dataset_project / 'retry.yaml'
     resources.write_text('slurm:\n  array_size: 1\n')
     monkeypatch.setattr('phase_config.resolve_array_size', lambda: 3)
-    commands = submit(path, until='assembly', dry_run=True, resources=resources)
+    commands = submit(path, until='quant', dry_run=True, resources=resources)
     assert len(commands) == 1
     assert '--array=1,2,3' in commands[0]
     saved = json.loads((path / 'jobs/submission_0001.resources.json').read_text())
@@ -631,14 +686,14 @@ def test_auto_array_size_preserves_sample_ids_when_cluster_limit_changes(dataset
         calls.append(command)
         return next(outputs)
     monkeypatch.setattr(subprocess, 'check_output', query)
-    commands = submit(path, until='assembly', dry_run=True)
+    commands = submit(path, until='quant', dry_run=True)
     assert len(commands) == 1
     assert '--array=1,2,3' in commands[0]
     for task_id in (1, 2):
         subprocess.run(['bash', commands[0][-1]], cwd=dataset_project,
                        env=dict(os.environ, SLURM_ARRAY_TASK_ID=str(task_id)), check=True)
     # A lower detected limit changes local array indices, never sample identity.
-    retry = submit(path, until='assembly', dry_run=True)
+    retry = submit(path, until='quant', dry_run=True)
     assert len(retry) == 1
     assert '--array=1' in retry[0]
     saved = json.loads((path / 'jobs/submission_0002.resources.json').read_text())
@@ -647,7 +702,7 @@ def test_auto_array_size_preserves_sample_ids_when_cluster_limit_changes(dataset
     subprocess.run(['bash', retry[0][-1]], cwd=dataset_project,
                    env=dict(os.environ, SLURM_ARRAY_TASK_ID='1'), check=True)
     assert all(row['assembly'] == 'reuse' for row in status(path))
-    assert submit(path, until='assembly', dry_run=True) == []
+    assert submit(path, until='quant', dry_run=True) == []
     assert len(calls) == 2
 
 
@@ -667,10 +722,10 @@ def test_auto_array_query_failure_prevents_submission(dataset_project, monkeypat
 
 def test_extra_native_metadata_file_cannot_shift_species_array_index(dataset_project):
     path = new_dataset(dataset_project)
-    submit(path, until="assembly", dry_run=True)
+    submit(path, until='quant', dry_run=True)
     (path / "work/genegalleon/New_plant_SRR1/input/amalgkit_metadata/Aardvark_backup.tsv").write_text("unexpected metadata")
     with pytest.raises(ValueError, match="metadata file set changed"):
-        worker(path, "assembly", 1)
+        worker(path, 1)
     assert not native_events(path)
 
 
@@ -707,8 +762,8 @@ def test_prepare_resolves_automatic_dependencies_once_and_freezes_the_lock(datas
     assert manifest["software_lock"]["source"]["identity"]["revision"] == cfg["genegalleon"]["revision"]
     cfg["genegalleon"]["revision"] = "f" * 40
     config_path.write_text(yaml.safe_dump(cfg))
-    submit(path, until="assembly", dry_run=True)
-    worker(path, "assembly", 1)
+    submit(path, until='quant', dry_run=True)
+    worker(path, 1)
     assert calls == ["source", "image"]
     assert load(path)["software_lock"] == manifest["software_lock"]
 

@@ -74,10 +74,13 @@ Keep `run.json`, branch provenance, reference snapshots, and the release's
 ODB, KofamScan, and GeneGalleon remove temporary files after saving and verifying
 their results. ODB cleans up each completed chunk. Downloaded FASTQ/SRA files are
 removed after both assembly and quantification finish. Original inputs, reusable
-results, and failed work are kept. For debugging, [retain intermediates](configuration.md#intermediate-storage)
-when preparing the run.
+results, native restart checkpoints, and logs are kept. GeneGalleon computation
+scratch is also removed after failures; completed reads may remain for retries.
+If the wrapper is killed, use `cleanup` once the sample stops. Active worker and
+native scratch locks prevent deletion while processing continues. For debugging,
+[retain intermediates](configuration.md#intermediate-storage) when preparing the run.
 
-Check cleanup status and preview files left by completed jobs:
+Check cleanup status and preview files left by inactive jobs:
 
 ```bash
 ./run_build.sh status --build results/leaf --storage

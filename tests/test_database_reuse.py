@@ -217,7 +217,9 @@ def test_database_reuse_retains_expression_without_mapper_or_translation(complet
     root, source_build, env, events = completed_project
     source = source_build/'database'
     other = root/'results/identical/database'; shutil.copytree(source, other)
-    config = configure(root, [str(root/'resources/source/database'), str(source), str(other)])
+    # This test takes historical sources offline; latest-alias management is
+    # exercised separately by the build-versioning tests.
+    config = configure(root, [str(root/'resources/source/database'), str(source), str(other)], name_mode='fixed')
     first_expression = (source/'expression/runs/A1.tsv').read_bytes()
     build = dataset.prepare(root, 'combined', config)
     assert dataset.submit(build, until='quant', dry_run=True) == []
@@ -249,9 +251,9 @@ def test_two_sources_and_one_missing_sample_only_compute_missing_work(completed_
     config = configure(root, [str(first), str(second)])
     build = dataset.prepare(root, 'mixed', config)
     commands = dataset.submit(build, until='quant', dry_run=True)
-    assert len(commands) == 3 and all('--array=3' in cmd for cmd in commands)
-    for stage in dataset.STAGES: dataset.worker(build, stage, 3)
-    assert len(native_events(build)) == 3
+    assert len(commands) == 1 and '--array=3' in commands[0]
+    dataset.worker(build, 3)
+    assert len(native_events(build)) == 1
     assert {event['species'] for event in native_events(build)} == {'Gamma_plant'}
     dataset.materialize(build)
     execute(root, build, 'database', env, mapping=True)

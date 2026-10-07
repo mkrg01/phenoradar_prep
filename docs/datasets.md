@@ -34,19 +34,17 @@ scores without filtering samples. For curated datasets, the separate `record`
 command applies the dataset's BUSCO threshold and adds below-threshold new runs
 to exclusions for future metadata updates. Analysis thresholds remain separate.
 
-To inspect an intermediate stage:
+Each sample runs assembly, longest-CDS extraction, BUSCO, quantification, and
+merge in one GeneGalleon invocation and one Slurm allocation. Samples proceed
+independently. Stopping at assembly or BUSCO is no longer supported. BUSCO scores
+are recorded; they do not prevent quantification.
 
-```bash
-./run_build.sh submit --until busco
-# After inspection, finish the same build:
-./run_build.sh submit --build results/{build_name} --until database
-```
-
-Endpoints are `assembly`, `busco`, `quant`, and `database` (default), each including
-missing prerequisites. For a subset pilot, add `--species-list pilot.txt` with
-one biological species ID or exact sample ID per line. Submit again with the same
-`--build` path and without the list to finish all samples; an incomplete pilot
-cannot publish a database.
+Use `--until quant` to finish the complete native sample workflow without starting
+the database controller; `database` remains the default (`mapping` is a legacy
+alias for the same database endpoint). For a subset pilot, add
+`--species-list pilot.txt` with one biological species ID or exact sample ID per
+line. Submit again with the same `--build` path and without the list to finish all
+samples; an incomplete pilot cannot publish a database.
 
 ## Run an analysis
 
@@ -120,16 +118,37 @@ Inspect `status`, `squeue`, and the run's `jobs/logs/`, then resubmit:
 ./run_analysis.sh submit --analysis results/{build_name}/downstream/{analysis_name}
 ```
 
-Completed work is reused and failed or missing stages are retried. Active or
-unresolved submissions block retries. Failed array tasks block dependent jobs;
-let remaining jobs finish or cancel them before resubmitting. A timed-out
-controller can leave workers running, so inspect those too.
+Completed samples are not submitted again. Incomplete samples rerun GeneGalleon
+in the same workspace; its provenance contracts reuse completed native steps.
+The wrapper also preserves verified assembly/BUSCO checkpoints from failed runs
+using GeneGalleon's read-only preflight API. An unavailable API never proves a
+partial step complete. Input or scientific-condition changes remain conflicts.
 
-A retry may restart a failed stage: rnaSPAdes assembly starts from scratch, and
-partial read downloads are not guaranteed reusable. Successful samples are
-unaffected. For repeated timeouts or memory errors, adjust
-[resources](running.md#resource-budgets). See [storage cleanup](outputs.md#storage-cleanup)
-for removing intermediates from completed jobs.
+`status` includes each sample's job receipt, native attempt evidence, and
+`stopped_at` for failed processing. Native observations cover recorded steps;
+check Slurm and `jobs/logs/` for OOM, timeouts, and jobs terminated without a final
+record. CPU/memory/time changes use `--resources` and do not rebuild registered
+checkpoints. Active or unresolved submissions block duplicate retries.
+
+A failed sample does not prevent other samples, including later array batches,
+from running. The database controller requires all sample batches to succeed.
+Retry failed samples before publishing the complete database.
+
+With `storage.keep_intermediates: false`, native successful-run cleanup is enabled
+and the wrapper removes managed computation scratch after both success and
+failure. Published native checkpoints, provenance, logs, and completed reads
+needed for retries are retained. rnaSPAdes retries rebuild their computation
+scratch; keeping that scratch does not enable continuation in this workflow.
+FASTQ/SRA files are removed when the sample completes. There is no growing
+`jobs/incomplete` quarantine of failed native outputs. Set retention to `true`
+when preparing a debugging build. See [storage cleanup](outputs.md#storage-cleanup)
+for retrying cleanup without repeating computation. If the wrapper itself is
+killed, use `cleanup` after the job stops; worker and native locks protect any
+processes still using the scratch.
+
+Builds bind to their implementation and pinned GeneGalleon source/image. After a
+code or software update, prepare a new build and reuse compatible checkpoints
+from the previous build; the old frozen execution files are not rewritten.
 
 ## Manually excluding unusable accessions
 

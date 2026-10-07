@@ -25,18 +25,10 @@ slurm:
     cpus: null  # Total CPU request budget; null adds no workflow-wide limit.
     mem_gb: null  # Total memory request budget in GB; null adds no workflow-wide limit.
   per_job_resources:  # Per-job requests; cpus = CPU count, mem_gb = GB, time = days-HH:MM:SS.
-    assembly:
+    sample:  # One GeneGalleon job runs assembly, BUSCO, quant, and merge.
       cpus: 4
       mem_gb: 128
-      time: "14-00:00:00"
-    busco:
-      cpus: 4
-      mem_gb: 32
-      time: "1-00:00:00"
-    quant:
-      cpus: 4
-      mem_gb: 32
-      time: "1-00:00:00"
+      time: "16-00:00:00"
     odb_map:
       cpus: 16
       mem_gb: 128
@@ -50,4 +42,4 @@ slurm:
       mem_gb: 8
       time: "64-00:00:00"
 storage:
-  keep_intermediates: false  # Remove verified successful job scratch; true retains it for debugging.
+  keep_intermediates: false  # Remove successful/failed computation scratch; true retains it for debugging.

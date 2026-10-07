@@ -77,6 +77,27 @@ def test_build_config_has_no_array_size_setting(public_slurm):
     assert 'array_size' not in validate_slurm(public_slurm)
 
 
+def test_legacy_stage_allocations_become_one_sample_without_mutating_snapshot(public_slurm):
+    import copy
+    legacy = copy.deepcopy(public_slurm)
+    legacy['per_job_resources'].pop('sample')
+    legacy['per_job_resources'].update(
+        assembly={'cpus': 8, 'mem_gb': 128, 'time': '14-00:00:00'},
+        busco={'cpus': 4, 'mem_gb': 32, 'time': '1-00:00:00'},
+        quant={'cpus': 16, 'mem_gb': 64, 'time': '02:00:00'})
+    before = copy.deepcopy(legacy)
+    normalized = validate_slurm(legacy)
+    assert normalized['stages']['sample'] == {'cpus': 16, 'mem_gb': 128, 'time': '15-02:00:00'}
+    assert set(normalized['stages']) == {'sample', 'controller'}
+    assert legacy == before
+
+
+def test_legacy_assembly_retry_sizes_whole_sample(public_slurm, tmp_path):
+    override = tmp_path / 'retry.yaml'
+    override.write_text('slurm:\n  per_job_resources:\n    assembly:\n      mem_gb: 256\n')
+    assert execution_settings(public_slurm, override)['stages']['sample']['mem_gb'] == 256
+
+
 @pytest.mark.parametrize('value', [None, 1, 1000])
 def test_legacy_array_size_is_ignored_without_mutation(public_slurm, value):
     public_slurm['array_size'] = value
@@ -96,7 +117,7 @@ def test_finite_public_config_preserves_legacy_profile_and_array_caps(public_slu
     assert public_slurm == saved
     assert legacy['default_resources'] == {'mem_gb': 8, 'time': '1-00:00:00'}
     for stage in ('assembly', 'busco', 'quant'):
-        assert array_concurrency(legacy, stage) == 64
+        assert array_concurrency(legacy, 'sample') == 64
 
 
 def test_new_override_updates_both_legacy_caps_without_mutation(public_slurm, tmp_path):
@@ -106,10 +127,10 @@ def test_new_override_updates_both_legacy_caps_without_mutation(public_slurm, tm
     original = copy.deepcopy(legacy)
     retry = tmp_path / 'retry.yaml'
     retry.write_text(yaml.safe_dump({'slurm': {'total_limits': {'jobs': 5, 'mem_gb': 512},
-                                             'per_job_resources': {'assembly': {'cpus': 8}}}}))
+                                             'per_job_resources': {'sample': {'cpus': 8}}}}))
     updated = execution_settings(legacy, retry)
     assert updated['concurrency'] == updated['jobs'] == 5
-    assert updated['stages']['assembly'] == {'cpus': 8, 'mem_gb': 128, 'time': '14-00:00:00'}
+    assert updated['stages']['sample'] == {'cpus': 8, 'mem_gb': 128, 'time': '16-00:00:00'}
     assert legacy == original
     assert execution_settings(legacy)['concurrency'] == 3
     assert execution_settings(legacy)['jobs'] == 7
@@ -123,17 +144,17 @@ def test_new_override_updates_both_legacy_caps_without_mutation(public_slurm, tm
 ])
 def test_array_limits_use_all_budgets(public_slurm, limits, expected):
     slurm = merge_slurm(public_slurm, {'total_limits': limits})
-    assert array_concurrency(slurm, 'assembly') == expected
+    assert array_concurrency(slurm, 'sample') == expected
     # Budgeting changes concurrency, never the job request.
-    assert slurm['stages']['assembly']['cpus'] == 4
-    assert slurm['stages']['assembly']['mem_gb'] == 128
+    assert slurm['stages']['sample']['cpus'] == 4
+    assert slurm['stages']['sample']['mem_gb'] == 128
 
 
 @pytest.mark.parametrize('key,value', [('cpus', 3), ('mem_gb', 127)])
 def test_single_array_job_must_fit_budget(public_slurm, key, value):
     slurm = merge_slurm(public_slurm, {'total_limits': {key: value}})
-    with pytest.raises(ValueError, match='assembly requires.*exceeding total_limits'):
-        array_concurrency(slurm, 'assembly')
+    with pytest.raises(ValueError, match='sample requires.*exceeding total_limits'):
+        array_concurrency(slurm, 'sample')
 
 
 def test_worker_profile_reserves_controller_and_preserves_requests(public_slurm, tmp_path):
@@ -166,8 +187,8 @@ def test_ambiguous_and_malformed_resources_rejected(public_slurm):
     with pytest.raises(ValueError, match='do not mix'):
         validate_slurm(public_slurm)
     del public_slurm['jobs']
-    public_slurm['per_job_resources']['assembly'] = None
-    with pytest.raises(ValueError, match='invalid resources for assembly'):
+    public_slurm['per_job_resources']['sample'] = None
+    with pytest.raises(ValueError, match='invalid resources for sample'):
         validate_slurm(public_slurm)
 
 
@@ -181,7 +202,7 @@ def test_null_job_limit_is_explicitly_unlimited(phase, tmp_path):
     profile = yaml.safe_load((write_profile(tmp_path / 'profile', slurm) / 'config.yaml').read_text())
     assert profile['jobs'] == 'unlimited'
     if phase == 'build':
-        assert array_concurrency(slurm, 'assembly') is None
+        assert array_concurrency(slurm, 'sample') is None
 
 
 def test_null_override_removes_legacy_count_caps_but_keeps_cpu_budget(public_slurm, tmp_path):
@@ -192,7 +213,7 @@ def test_null_override_removes_legacy_count_caps_but_keeps_cpu_budget(public_slu
     retry.write_text('slurm:\n  total_limits:\n    jobs: null\n')
     updated = execution_settings(slurm, retry)
     assert updated['jobs'] is updated['concurrency'] is None
-    assert array_concurrency(updated, 'assembly') == 4
+    assert array_concurrency(updated, 'sample') == 4
     assert slurm['jobs'] == slurm['concurrency'] == 2
 
 

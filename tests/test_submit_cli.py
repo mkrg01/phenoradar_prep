@@ -151,14 +151,14 @@ def test_public_budget_override_limits_arrays_and_preserves_saved_build(dataset_
     resources = root / 'retry.yaml'
     resources.write_text(yaml.safe_dump({'slurm': {
         'total_limits': {'jobs': 7, 'cpus': 16, 'mem_gb': 512},
-        'per_job_resources': {'assembly': {'cpus': 8}},
+        'per_job_resources': {'sample': {'cpus': 8}},
     }}))
     commands = dataset.submit(build, until='quant', resources=resources)
     assert [next(a for a in cmd if a.startswith('--array=')) for cmd in commands] == [
-        '--array=1%2', '--array=1%4', '--array=1%4']
+        '--array=1%2']
     assert '--cpus-per-task=8' in commands[0]
     assert '--mem=128000M' in commands[0]
-    assert '--dependency=afterok:1001' in commands[1]
+    assert len(commands) == 1
     assert (build / 'build.json').read_bytes() == before
 
 
@@ -168,10 +168,29 @@ def test_impossible_budget_fails_before_any_slurm_submission(dataset_project, sc
     build = new_dataset(root)
     resources = root / 'retry.yaml'
     resources.write_text('slurm:\n  total_limits:\n    mem_gb: 127\n')
-    with pytest.raises(ValueError, match='assembly requires.*total_limits.mem_gb'):
+    with pytest.raises(ValueError, match='sample requires.*total_limits.mem_gb'):
         dataset.submit(build, resources=resources)
     assert not scheduler['commands']
     assert not list((build / 'jobs').glob('submission_*.json'))
+
+
+@pytest.mark.parametrize('endpoint', ['assembly', 'busco'])
+def test_partial_native_endpoints_are_rejected_without_preparing(endpoint, monkeypatch, tmp_path):
+    with pytest.raises(SystemExit) as error:
+        invoke(monkeypatch, dataset, 'submit', '--root', tmp_path, '--until', endpoint)
+    assert error.value.code == 2
+    assert not (tmp_path / 'results').exists()
+
+
+def test_database_depends_on_every_sample_batch(dataset_project, scheduler, monkeypatch):
+    from test_datasets import new_dataset
+    build = new_dataset(dataset_project, ('Alpha new', 'Beta new', 'Gamma new'))
+    monkeypatch.setattr('phase_config.resolve_array_size', lambda: 2)
+    commands = dataset.submit(build)
+    assert len(commands) == 3
+    assert '--dependency=afterany:1001' in commands[1]
+    assert '--dependency=afterok:1001:1002' in commands[2]
+    assert '--kill-on-invalid-dep=yes' in commands[2]
 
 
 def test_analysis_partial_public_resource_override(completed_project, scheduler):

@@ -67,10 +67,10 @@ def test_two_runs_of_one_species_execute_independent_native_stages(dataset_proje
     root=dataset_project
     build=new_dataset(root,('New plant','New plant'))
     submit(build,until='quant',dry_run=True)
-    for stage in ('assembly','busco','quant'):worker(build,stage,1)
+    worker(build, 1)
     states=status(build)
     assert states[0]['quant']=='reuse' and states[1]['assembly']=='pending'
-    for stage in ('assembly','busco','quant'):worker(build,stage,2)
+    worker(build, 2)
     assert all(r['quant']=='reuse' for r in status(build))
     inputs=materialize(build)
     rows=read_tsv(inputs/'metadata.tsv')
@@ -79,7 +79,7 @@ def test_two_runs_of_one_species_execute_independent_native_stages(dataset_proje
     for row in rows:
         name=row['analysis_sample_id']
         events=(build/'work/genegalleon'/name/'events.jsonl').read_text().splitlines()
-        assert len(events)==3
+        assert len(events)==1
         with gzip.open(inputs/'cds'/f'{name}_longestCDS.fa.gz','rt') as f:assert f.readline().startswith('>'+name+'_g')
         quant=read_tsv(inputs/'quant'/name/row['run']/f'{row["run"]}_abundance.tsv')
         assert all(r['target_id'].startswith(name+'_g') for r in quant)
@@ -211,22 +211,21 @@ def test_failed_registration_can_retry_with_new_output(dataset_project, monkeypa
     import dataset
     build = new_dataset(dataset_project)
     dataset.submit(build, until="quant", dry_run=True)
-    dataset.worker(build, "assembly", 1)
-    dataset.worker(build, "busco", 1)
     register = dataset.register_quant
     def fail(*args, **kwargs):
         raise ValueError("interrupted registration")
     monkeypatch.setattr(dataset, "register_quant", fail)
     with pytest.raises(ValueError, match="interrupted registration"):
-        dataset.worker(build, "quant", 1)
+        dataset.worker(build, 1)
     staged = build / "work/genegalleon/New_plant_SRR1/products/SRR1_abundance.tsv"
     staged.write_text("previous failed attempt\n")
     monkeypatch.setattr(dataset, "register_quant", register)
-    dataset.worker(build, "quant", 1)
+    dataset.worker(build, 1)
     assert dataset.status(build)[0]["quant"] == "reuse"
     assert read_tsv(staged)[0]["target_id"] == "New_plant_SRR1_g1"
-    assert any(p.read_text() == "previous failed attempt\n" for p in
-               (build / "jobs/incomplete/New_plant_SRR1/quant").rglob("products-*.tsv"))
+    assert not (build / 'jobs/incomplete').exists()
+    from test_datasets import native_events
+    assert len(native_events(build)) == 1  # Retry publication without running native tools again.
 
 
 def test_posthoc_filter_retains_species_traits_for_remaining_samples(tmp_path):

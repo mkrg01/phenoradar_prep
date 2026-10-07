@@ -39,21 +39,19 @@ def sample_project(dataset_project):
     return root, cfg, build
 
 
-def finish(build, index, stages=dataset.STAGES):
-    for stage in stages:
-        dataset.worker(build, stage, index)
+def finish(build, index):
+    dataset.worker(build, index)
 
 
 def test_busco_failures_are_excluded_while_completed_passing_samples_are_adopted(sample_project, monkeypatch):
     root, cfg, build = sample_project
-    dataset.worker(build, 'assembly', 1)
     monkeypatch.setenv('FAKE_GG_LOW_BUSCO', '1')
-    dataset.worker(build, 'busco', 1)
+    dataset.worker(build, 1)
     monkeypatch.delenv('FAKE_GG_LOW_BUSCO')
-    dataset.worker(build, 'quant', 1)
+    dataset.worker(build, 1)
     finish(build, 2)
     monkeypatch.setenv('FAKE_GG_FAIL_ASSEMBLY', '1')
-    with pytest.raises(subprocess.CalledProcessError): dataset.worker(build, 'assembly', 3)
+    with pytest.raises(subprocess.CalledProcessError): dataset.worker(build, 3)
     before = (root / 'input/metadata.tsv').read_bytes()
     exclusions = (root / 'config/excluded_accessions.tsv').read_bytes()
     preview = catalog.record_successes(root, cfg, build, dry_run=True)
@@ -91,11 +89,10 @@ def test_busco_failures_are_excluded_while_completed_passing_samples_are_adopted
 
 def test_exact_threshold_passes_and_later_threshold_change_does_not_revoke_adoption(sample_project, monkeypatch):
     root, cfg, build = sample_project
-    dataset.worker(build, 'assembly', 1)
     monkeypatch.setenv('FAKE_GG_HALF_BUSCO', '1')
-    dataset.worker(build, 'busco', 1)
+    dataset.worker(build, 1)
     monkeypatch.delenv('FAKE_GG_HALF_BUSCO')
-    dataset.worker(build, 'quant', 1)
+    dataset.worker(build, 1)
     result = catalog.record_successes(root, cfg, build, runs=['A1'])
     assert result['recorded_runs'] == ['A1']
     assert result['excluded_runs'] == []
@@ -130,15 +127,16 @@ def test_exclusion_replaces_same_taxid_and_new_build_automatically_reuses_partia
         sample_project, monkeypatch, exclusion_mode):
     root, cfg, old = sample_project
     finish(old, 1)
-    dataset.worker(old, 'assembly', 2)
+    monkeypatch.setenv('FAKE_GG_FAIL_BUSCO', '1')
+    with pytest.raises(subprocess.CalledProcessError): dataset.worker(old, 2)
+    monkeypatch.delenv('FAKE_GG_FAIL_BUSCO')
     frozen = (old / 'build.json').read_bytes()
     if exclusion_mode == 'manual':
         write_tsv(root / 'config/excluded_accessions.tsv', ['accession', 'reason'],
                   [{'accession': 'G1', 'reason': 'unusable_reads'}])
     else:
-        dataset.worker(old, 'assembly', 3)
         monkeypatch.setenv('FAKE_GG_LOW_BUSCO', '1')
-        dataset.worker(old, 'busco', 3)
+        dataset.worker(old, 3)
         monkeypatch.delenv('FAKE_GG_LOW_BUSCO')
     result = catalog.record_successes(root, cfg, old)
     assert result['excluded_runs'] == (['G1'] if exclusion_mode == 'busco' else [])
@@ -158,11 +156,10 @@ def test_exclusion_replaces_same_taxid_and_new_build_automatically_reuses_partia
     assert (old / 'build.json').read_bytes() == frozen
     old.rename(old.with_name('source_offline'))
     commands = dataset.submit(second, until='quant', dry_run=True)
-    assert '--array=3' in commands[0]
-    assert '--array=2,3' in commands[1] and '--array=2,3' in commands[2]
-    finish(second, 2, ('busco', 'quant'))
+    assert len(commands) == 1 and '--array=2,3' in commands[0]
+    finish(second, 2)
     finish(second, 3)
-    assert len(native_events(second)) == 5
+    assert len(native_events(second)) == 2
     assert {r['run'] for r in read_tsv(dataset.materialize(second) / 'metadata.tsv')} == {'A1', 'B1', 'G2'}
 
 
@@ -173,9 +170,8 @@ def test_busco_exclusion_preserves_manual_decisions_and_custom_columns(sample_pr
         bioproject='P9', reason='misidentified', source_build='historical', reviewer='curator').items()
         if key in fields}
     write_tsv(root / cfg['excluded_accessions'], fields, [manual])
-    finish(build, 1, ('assembly',))
     monkeypatch.setenv('FAKE_GG_LOW_BUSCO', '1')
-    finish(build, 1, ('busco',))
+    finish(build, 1)
     before = (root / cfg['excluded_accessions']).read_bytes()
     preview = catalog.record_successes(root, cfg, build, runs=['A1'], dry_run=True)
     assert preview['excluded_runs'] == ['A1']
@@ -192,11 +188,9 @@ def test_busco_exclusion_preserves_manual_decisions_and_custom_columns(sample_pr
 
 def test_record_subset_only_excludes_requested_busco_failures(sample_project, monkeypatch):
     root, cfg, build = sample_project
-    for index in (1, 2):
-        dataset.worker(build, 'assembly', index)
     monkeypatch.setenv('FAKE_GG_LOW_BUSCO', '1')
     for index in (1, 2):
-        dataset.worker(build, 'busco', index)
+        dataset.worker(build, index)
     result = catalog.record_successes(root, cfg, build, runs=['B1'])
     assert result['excluded_runs'] == ['B1']
     assert [row['accession'] for row in read_tsv(root / cfg['excluded_accessions'])] == ['B1']
@@ -205,15 +199,17 @@ def test_record_subset_only_excludes_requested_busco_failures(sample_project, mo
     assert [row['accession'] for row in read_tsv(root / cfg['excluded_accessions'])] == ['B1', 'A1']
 
 
-def test_busco_passing_sample_waits_for_quantification_before_adoption(sample_project):
+def test_busco_passing_sample_waits_for_quantification_before_adoption(sample_project, monkeypatch):
     root, cfg, build = sample_project
-    finish(build, 1, ('assembly', 'busco'))
+    monkeypatch.setenv('FAKE_GG_FAIL_QUANT', '1')
+    with pytest.raises(subprocess.CalledProcessError): finish(build, 1)
     result = catalog.record_successes(root, cfg, build, runs=['A1'])
     assert result['recorded_runs'] == result['excluded_runs'] == []
     assert result['samples'][0]['status'] == 'incomplete'
     assert read_tsv(root / cfg['accepted_samples']) == []
     assert read_tsv(root / cfg['excluded_accessions']) == []
-    finish(build, 1, ('quant',))
+    monkeypatch.delenv('FAKE_GG_FAIL_QUANT')
+    finish(build, 1)
     result = catalog.record_successes(root, cfg, build, runs=['A1'])
     assert result['recorded_runs'] == ['A1']
     assert result['excluded_runs'] == []
@@ -223,27 +219,27 @@ def test_memory_retry_changes_internal_tool_budget_and_preserves_successful_samp
     root, cfg, build = sample_project
     finish(build, 1)
     monkeypatch.setenv('FAKE_GG_FAIL_ASSEMBLY', '1')
-    with pytest.raises(subprocess.CalledProcessError): dataset.worker(build, 'assembly', 2)
+    with pytest.raises(subprocess.CalledProcessError): dataset.worker(build, 2)
     monkeypatch.delenv('FAKE_GG_FAIL_ASSEMBLY')
     resources = root / 'retry.yaml'
-    resources.write_text('slurm:\n  per_job_resources:\n    assembly:\n      cpus: 8\n      mem_gb: 256\n')
+    resources.write_text('slurm:\n  per_job_resources:\n    sample:\n      cpus: 8\n      mem_gb: 256\n')
     commands = dataset.submit(build, until='quant', dry_run=True, resources=resources)
     assert '--cpus-per-task=8' in commands[0] and '--mem=256000M' in commands[0]
     assert '--array=2,3' in commands[0]
     monkeypatch.setenv('SLURM_CPUS_PER_TASK', '8')
     monkeypatch.setenv('SLURM_MEM_PER_NODE', '256000')
     monkeypatch.setenv('GG_MEM_TOTAL_GB', '12')
-    dataset.worker(build, 'assembly', 2)
+    dataset.worker(build, 2)
     budgets = native_events(build)[-1]['budgets']
     assert budgets == {'GG_TASK_CPUS': '8', 'GG_MEM_TOTAL_GB': '250', 'GG_MEM_TOOL_GB': '246'}
-    dataset.worker(build, 'assembly', 1)
-    assert sum(e['species'] == 'Alpha_plant' for e in native_events(build)) == 3
+    dataset.worker(build, 1)
+    assert sum(e['species'] == 'Alpha_plant' for e in native_events(build)) == 1
     assert read_tsv(root / 'config/excluded_accessions.tsv') == []
 
 
 def test_damaged_matching_stage_is_reported_before_reuse(sample_project):
     root, cfg, build = sample_project
-    dataset.worker(build, 'assembly', 1)
+    dataset.worker(build, 1)
     item = dataset.load(build)['items'][0]
     product = dataset.item_products(dataset.load(build), item)['reference']
     Path(product['cds']['path']).write_bytes(b'damaged')
@@ -300,17 +296,24 @@ def test_changed_assembly_settings_prevent_automatic_reuse(sample_project):
     assert dataset.plan(root, config, name='changed')[-1][0]['assembly'] == 'pending'
 
 
-def test_auto_reuse_merges_matching_stages_and_records_each_source(sample_project):
+def test_auto_reuse_merges_matching_stages_and_records_each_source(sample_project, monkeypatch):
     root, cfg, old = sample_project
-    dataset.worker(old, 'assembly', 1)
+    monkeypatch.setenv('FAKE_GG_FAIL_BUSCO', '1')
+    with pytest.raises(subprocess.CalledProcessError): dataset.worker(old, 1)
+    monkeypatch.delenv('FAKE_GG_FAIL_BUSCO')
     config = root / 'config/build.yaml'
     definition = yaml.safe_load(config.read_text()); definition['reuse_from'] = str(old)
     config.write_text(yaml.safe_dump(definition))
     providers = {}
     for stage in ('busco', 'quant'):
         provider = dataset.prepare(root, stage + '_provider', config)
-        dataset.submit(provider, until=stage, dry_run=True)
-        dataset.worker(provider, stage, 1)
+        dataset.submit(provider, until='quant', dry_run=True)
+        if stage == 'busco':
+            monkeypatch.setenv('FAKE_GG_FAIL_QUANT', '1')
+            with pytest.raises(subprocess.CalledProcessError): dataset.worker(provider, 1)
+            monkeypatch.delenv('FAKE_GG_FAIL_QUANT')
+        else:
+            dataset.worker(provider, 1)
         providers[stage] = provider
     definition['reuse_from'] = 'auto'
     config.write_text(yaml.safe_dump(definition))

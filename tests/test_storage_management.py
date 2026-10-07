@@ -68,13 +68,12 @@ def test_batch_cleanup_respects_debug_retention(odb_job, tmp_path):
 def test_build_status_and_cleanup_retry_without_rerunning_genegalleon(dataset_project):
     build = new_dataset(dataset_project)
     submit(build, until='quant', dry_run=True)
-    for stage in ('assembly', 'busco', 'quant'):
-        worker(build, stage, 1)
+    worker(build, 1)
     before = native_events(build)
     work = build / 'work/genegalleon/New_plant_SRR1/output/transcriptome_assembly/tmp'
     work.mkdir(parents=True, exist_ok=True)
     (work / 'large').write_bytes(b'x' * 8192)
-    receipt = build / 'jobs/cleanup/New_plant_SRR1.quant.json'
+    receipt = build / 'jobs/cleanup/New_plant_SRR1.sample.json'
     write_json(receipt, {'state': 'pending', 'errors': [{'path': str(work), 'error': 'temporary'}]})
     status = subprocess.run([sys.executable, str(ROOT / 'workflow/scripts/dataset.py'), 'status',
                              '--build', str(build), '--storage'], text=True, capture_output=True)

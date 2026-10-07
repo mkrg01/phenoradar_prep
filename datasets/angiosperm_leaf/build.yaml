@@ -24,18 +24,10 @@ slurm:
     cpus: null
     mem_gb: null
   per_job_resources:
-    assembly:
+    sample:  # One GeneGalleon job runs assembly, BUSCO, quant, and merge.
       cpus: 4
       mem_gb: 128
-      time: 14-00:00:00
-    busco:
-      cpus: 4
-      mem_gb: 32
-      time: 1-00:00:00
-    quant:
-      cpus: 4
-      mem_gb: 32
-      time: 1-00:00:00
+      time: "16-00:00:00"
     odb_map:
       cpus: 16
       mem_gb: 128

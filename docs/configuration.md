@@ -58,7 +58,9 @@ Trait-dependent branches also need to be disabled when traits are unused.
 ## Intermediate storage
 
 Both build and analysis configs use `storage.keep_intermediates: false` by
-default, enabling [cleanup after successful jobs](outputs.md#storage-cleanup).
+default, enabling [cleanup](outputs.md#storage-cleanup). GeneGalleon computation scratch
+is removed after successful and failed sample jobs; native restart checkpoints
+are preserved.
 Set it to `true` before preparing a run to retain intermediates for debugging.
 
 ## Optional analyses and exports

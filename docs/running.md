@@ -56,8 +56,8 @@ settings and never rebuild upstream sample products.
 
 Dating, taxonomy checks, and contrast pairs require their enabled flag even
 when targeted explicitly. `alignments` and `kegg` work without enabling their
-inclusion in `all`. See [build endpoints](datasets.md#build-a-reusable-database)
-for stopping upstream work at assembly, BUSCO, or quantification.
+inclusion in `all`. See [build execution](datasets.md#build-a-reusable-database)
+for the complete per-sample native workflow and database publication.
 
 ## Resource budgets
 
@@ -81,28 +81,35 @@ slurm:
     cpus: null
     mem_gb: 512
   per_job_resources:
-    assembly: {cpus: 8, mem_gb: 128, time: "7-00:00:00"}
+    sample: {cpus: 8, mem_gb: 128, time: "16-00:00:00"}
     odb_map: {cpus: 16, mem_gb: 128, time: "2-00:00:00"}
 ```
 
-Here the memory budget allows at most four assembly tasks at once. For Snakemake
+Here the memory budget allows at most four sample tasks at once. For Snakemake
 workers, the controller's allocation is subtracted first; queued workers also
 occupy budget. A job that cannot fit fails with an error rather than receiving
 fewer resources.
 
-Assembly, BUSCO, and quantification run as arrays, split automatically to fit
-[Slurm's array limits](https://slurm.schedmd.com/job_array.html). Array submissions
-require access to `scontrol show config`, including with `--dry-run`; if the limits
-cannot be read, no jobs are submitted.
+The full native sample workflow runs as an array, with one sample per task,
+split automatically to fit [Slurm's array limits](https://slurm.schedmd.com/job_array.html).
+Array submissions require access to `scontrol show config`, including with
+`--dry-run`; if the limits cannot be read, no jobs are submitted.
 
-A failed array task blocks later batches and stages (`afterok`). Other tasks in
-the same array can continue. Concurrency follows `total_limits` and Slurm.
+Batches are serialized with `afterany`, so a failed sample does not block later
+batches and the global concurrency cap is preserved. The database controller
+uses `afterok` on every sample batch. Other samples in the same batch continue.
+
+`per_job_resources.sample` sizes the entire assembly/BUSCO/quant allocation.
+The supplied request is 4 CPUs, 128 GB, and 16 days. Memory remains reserved during
+BUSCO and quantification. Legacy complete assembly/BUSCO/quant resource blocks
+are converted to maximum CPUs/memory and the sum of their time limits, without
+changing saved manifests. An old assembly-only retry override is accepted as a
+sample override; new retry files should use `sample`.
 
 Mapping and analysis use a controller to submit separate worker jobs.
-
-Job names include `assembly`, `busco`, `quant`, `controller`, and rule names such
-as `odb_map`. Config overrides take precedence over rule defaults; the supplied
-configs list the main requests. Optional resource entries do not enable branches.
+Job names include `sample`, `controller`, and rule names such as `odb_map`.
+Config overrides take precedence over rule defaults; optional resource entries
+do not enable branches.
 
 Memory uses positive integer GB (`mem_gb: 128` becomes `128000` MB). Quote Slurm
 walltimes, such as `"1-00:00:00"` for one day or `"02:00:00"` for two hours.
@@ -118,7 +125,7 @@ To change resources for an existing run:
 Only the supplied `slurm` settings change; scientific settings stay frozen.
 Partial resource files may contain just the changed limits or job entries.
 
-For native assembly, BUSCO, and quantification workers, the actual Slurm CPU
+For native sample workers, the actual Slurm CPU
 and memory allocation is also forwarded to GeneGalleon and its container.
 Memory is converted conservatively from allocated MB to whole GiB, with a
 tool reserve. Worker logs report the allocation and internal tool budget;

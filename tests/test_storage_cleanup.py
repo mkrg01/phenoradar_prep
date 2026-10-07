@@ -158,26 +158,21 @@ def test_genegalleon_keeps_reads_until_verified_quant(dataset_project, monkeypat
     temporary = out / 'tmp/1_New_plant/large_intermediate'
     temporary.parent.mkdir(parents=True)
     temporary.write_bytes(b'assembly scratch')
-    worker(build, 'assembly', 1)
+    monkeypatch.setenv('FAKE_GG_INCOMPLETE_MERGE', '1')
+    with pytest.raises(subprocess.CalledProcessError):
+        worker(build, 1)
     assert fastq.exists()
     assert temporary.exists() is keep
-    worker(build, 'busco', 1)
-    temporary.parent.mkdir(parents=True, exist_ok=True)
-    temporary.write_bytes(b'quant scratch')
-    monkeypatch.setenv('FAKE_GG_INCOMPLETE_MERGE', '1')
-    with pytest.raises(ValueError, match='quant/merge did not finish'):
-        worker(build, 'quant', 1)
-    assert temporary.exists() and fastq.exists()
-    worker(build, 'assembly', 1)
-    assert temporary.exists()  # another stage's failed scratch is protected
+    assert status(build)[0]['assembly'] == 'reuse'
+    assert status(build)[0]['busco'] == 'reuse'
     monkeypatch.delenv('FAKE_GG_INCOMPLETE_MERGE')
-    worker(build, 'quant', 1)
+    worker(build, 1)
     assert temporary.exists() is keep
     assert fastq.exists() is keep
     assert original.read_bytes() == b'read data'
     assert download_log.read_text() == 'download QC'
     before = native_events(build)
-    for stage in ('assembly', 'busco', 'quant'): worker(build, stage, 1)
+    worker(build, 1)
     assert native_events(build) == before
     assert status(build)[0]['quant'] == 'reuse'
     assert (materialize(build) / 'cds/New_plant_SRR1_longestCDS.fa.gz').is_file()
