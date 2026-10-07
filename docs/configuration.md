@@ -14,16 +14,16 @@ to the metadata file's directory. Keep imported databases inside the repository
 so the container can access them.
 
 The first submission saves inputs and settings, including with `--dry-run`.
-Use a new name for changed scientific conditions. See
-[saved settings](datasets.md#saved-settings-and-previews) and
+Create a new build or choose a new analysis name for changed scientific conditions.
+See [saved settings](datasets.md#saved-settings-and-previews) and
 [resource overrides](running.md#resource-budgets).
 
 ## Build settings
 
 | Setting | Purpose |
 | --- | --- |
-| `name` | Build directory name, or the dataset prefix with `name_mode: timestamp`; `--name` sets an exact build name |
-| `name_mode` | `fixed` (default) resumes the configured name; `timestamp` creates a new UTC timestamped build when `--name` is omitted |
+| `name` | Dataset prefix with `name_mode: timestamp` (no manual date suffix needed), or the build directory name with `fixed`; `--name` sets an exact build name |
+| `name_mode` | `timestamp` (supplied config) creates a new UTC timestamped build when `--name` is omitted; `fixed` resumes the configured name and is used if this setting is absent |
 | `metadata`, `excluded_accessions` | Sample metadata and optional run exclusions |
 | `metadata_provenance` | Optional JSON history matching the source metadata checksum; copied into the build and portable database |
 | `reuse_from` | `auto` for previous sample stages; build/database path or list; `null` for a fresh build |
@@ -33,6 +33,11 @@ Use a new name for changed scientific conditions. See
 | `odb.ncbi_tax_id` | [OrthoDB mapping clade](references.md#choosing-an-orthodb-mapping-clade); default `3193` (Embryophyta) |
 | `odb.chunk_size` | Maximum samples per mapping chunk; default `50` |
 | `slurm` | [Job resources and total limits](running.md#resource-budgets) |
+
+Timestamped builds use `results/{name}_YYYYMMDDTHHMMSSZ/`. Resume an existing
+build with `submit --build results/{build_name}`, using the path printed when it
+was prepared, including after `--dry-run`. See
+[saved settings](datasets.md#saved-settings-and-previews).
 
 ## Analysis settings
 

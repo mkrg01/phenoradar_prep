@@ -14,16 +14,20 @@ Complete [installation](running.md#installation-and-normal-execution), prepare
 Set `reuse_from: null` for your first build, or choose a
 [completed database](#reusing-completed-databases) to reuse.
 
+The supplied config uses `name_mode: timestamp`, so `name` is a dataset prefix
+and needs no manual date suffix. Use the build directory name printed by `submit`
+for `{build_name}` in the commands below.
+
 ```bash
 ./run_build.sh plan
-./run_build.sh submit --name leaf
-./run_build.sh status --build results/leaf
+./run_build.sh submit
+./run_build.sh status --build results/{build_name}
 ```
 
 Review the plan for `reuse`, `pending`, or `conflict` before submitting. Conflicts
 must be resolved; ODB reuse is confirmed after translation provides protein hashes.
 `submit` returns after scheduling Slurm jobs. A successful build publishes
-`results/leaf/database/` and a completion record.
+`results/{build_name}/database/` and a completion record.
 
 Every included sample must complete all stages. Build execution records BUSCO
 scores without filtering samples. For curated datasets, the separate `record`
@@ -33,15 +37,16 @@ to exclusions for future metadata updates. Analysis thresholds remain separate.
 To inspect an intermediate stage:
 
 ```bash
-./run_build.sh submit --name pilot --until busco
+./run_build.sh submit --until busco
 # After inspection, finish the same build:
-./run_build.sh submit --build results/pilot --until database
+./run_build.sh submit --build results/{build_name} --until database
 ```
 
 Endpoints are `assembly`, `busco`, `quant`, and `database` (default), each including
 missing prerequisites. For a subset pilot, add `--species-list pilot.txt` with
-one biological species ID or exact sample ID per line. Submit again without the
-list to finish all samples; an incomplete pilot cannot publish a database.
+one biological species ID or exact sample ID per line. Submit again with the same
+`--build` path and without the list to finish all samples; an incomplete pilot
+cannot publish a database.
 
 ## Run an analysis
 
@@ -50,11 +55,12 @@ Edit [config/analysis.yaml](../config/analysis.yaml): choose sample selection,
 enables representative trees and contrast pairs. For expression only, set
 `phylogeny.trees: []` and disable `phylogeny.contrast_pairs.enabled`.
 Set `inputs.species_trait: null` if traits are unused.
+Replace `{analysis_name}` with a name for your analysis.
 
 ```bash
-./run_analysis.sh plan --build results/leaf
-./run_analysis.sh submit --build results/leaf --name carnivory
-./run_analysis.sh status --analysis results/leaf/downstream/carnivory
+./run_analysis.sh plan --build results/{build_name}
+./run_analysis.sh submit --build results/{build_name} --name {analysis_name}
+./run_analysis.sh status --analysis results/{build_name}/downstream/{analysis_name}
 ```
 
 `trait` selects the column in your trait table; `--name` names the result directory.
@@ -69,16 +75,22 @@ The default target `all` runs enabled branches and collects
 
 ## Saved settings and previews
 
-The first `submit` freezes inputs and settings for that name. Repeating it uses
-the saved conditions, even if source files have changed. Use a new name for
+The first `submit` freezes inputs and settings for that build or analysis.
+Resubmitting with `--build` or `--analysis` uses the saved conditions, even if
+source files have changed. Create a new build or choose a new analysis name for
 scientific changes; use [resource overrides](running.md#resource-budgets) for
 CPU, memory, time, or concurrency changes.
 
-With `name_mode: timestamp`, `name` becomes the dataset prefix. Each `prepare`
-or new `submit` creates `results/<name>_YYYYMMDDTHHMMSSZ/` using UTC preparation
-time; same-second builds receive `_02`, `_03`, and so on. `--name` sets an exact
-name. Resume with `submit --build results/<printed-build-name>`, including after
-`--dry-run`; omitting `--build` creates a new snapshot.
+With `name_mode: timestamp` (the supplied config), `name` is the dataset prefix.
+When `--name` is omitted, each `prepare` or `submit` creates
+`results/{name}_YYYYMMDDTHHMMSSZ/` using UTC preparation time; same-second builds
+receive `_02`, `_03`, and so on. Resume with
+`submit --build results/{build_name}`, including after `--dry-run`; omitting
+`--build` creates a new snapshot.
+
+`--name` sets an exact name. With `name_mode: fixed`, or when `name_mode` is
+absent, `name` is the exact build directory name and repeating `submit` resumes
+that build.
 
 `results/<name>_latest` points to the completed timestamp-mode build with the
 newest preparation time. Use a specific build path to pin an analysis.
@@ -104,8 +116,8 @@ Snakemake DAG. Generated `pipeline.yaml` files should not be edited.
 Inspect `status`, `squeue`, and the run's `jobs/logs/`, then resubmit:
 
 ```bash
-./run_build.sh submit --build results/leaf
-./run_analysis.sh submit --analysis results/leaf/downstream/carnivory
+./run_build.sh submit --build results/{build_name}
+./run_analysis.sh submit --analysis results/{build_name}/downstream/{analysis_name}
 ```
 
 Completed work is reused and failed or missing stages are retried. Active or

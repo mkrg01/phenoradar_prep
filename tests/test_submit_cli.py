@@ -36,7 +36,7 @@ def test_build_submit_prepares_and_retries_saved_inputs(dataset_project, schedul
     root = dataset_project
     imported(root)
     config = root / 'config/build.yaml'
-    cfg = yaml.safe_load(config.read_text()); cfg['name'] = 'combined'
+    cfg = yaml.safe_load(config.read_text()); cfg.update(name='combined', name_mode='fixed')
     config.write_text(yaml.safe_dump(cfg))
     command = ('submit', '--root', root)
     invoke(monkeypatch, dataset, *command, '--dry-run')

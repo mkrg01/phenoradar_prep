@@ -3,11 +3,10 @@
 [![Snakemake](https://img.shields.io/badge/snakemake-≥9.0.0-brightgreen.svg)](https://snakemake.github.io)
 
 Prepare [PhenoRadar](https://github.com/mkrg01/phenoradar) inputs from
-[AMALGKIT](https://github.com/kfuku52/amalgkit) RNA-seq metadata.
-[GeneGalleon](https://github.com/kfuku52/genegalleon) retrieves reads, assembles
-transcripts, runs BUSCO, and quantifies expression. This workflow maps proteins
-to OrthoDB and produces OG expression, with optional alignments, KO annotation,
-and phylogenetic analyses. Completed sample data can be reused across builds.
+[AMALGKIT](https://github.com/kfuku52/amalgkit) RNA-seq metadata using
+[GeneGalleon](https://github.com/kfuku52/genegalleon). Build reusable sample
+databases, then run OG expression and optional alignments, KO annotation,
+and phylogenetic analyses.
 
 ## Requirements
 
@@ -18,12 +17,10 @@ Linux x86-64 with Conda, Slurm, and Apptainer/Singularity. See
 
 Prepare [input/metadata.tsv](docs/inputs.md), then edit
 [build.yaml](config/build.yaml) and [analysis.yaml](config/analysis.yaml).
-For a first build, set `reuse_from: null`. Choose the trait and optional analyses
-before submitting; the supplied analysis config enables representative trees
-and contrast pairs.
+For a first build, set `reuse_from: null`; review the trait and optional analyses.
 
 Run from the repository root. Replace `{build_name}` with the build directory
-name and `{analysis_name}` with a name for your analysis:
+name reported by `submit`, and choose `{analysis_name}`:
 
 ```bash
 conda env create -n phenoradar_prep -f environment.yaml
@@ -37,22 +34,16 @@ conda activate phenoradar_prep
 ./run_analysis.sh submit --build results/{build_name} --name {analysis_name}
 ```
 
-Build names follow `name` and `name_mode` in `config/build.yaml`; use the build
-directory reported by `submit` for `{build_name}`.
-
-The first submission saves inputs and settings for each build or analysis.
-To retry, resubmit the [saved build or analysis path](docs/datasets.md#failure-and-recovery-behavior);
-use a new name when changing samples or scientific settings.
+Build names include UTC timestamps by default. For retries, use the
+[saved run path](docs/datasets.md#failure-and-recovery-behavior) via `--build`
+or `--analysis`.
 
 Reusable products are in `results/{build_name}/database/`. Analysis results,
 including `phenoradar_inputs/`, are in
 `results/{build_name}/downstream/{analysis_name}/`.
 
-For maintained representative datasets, see the [dataset catalog](datasets/README.md)
-and [angiosperm leaf update instructions](datasets/angiosperm_leaf/README.md).
-Metadata acquisition, curation, review, and acceptance use `run_metadata.sh`;
-database builds start separately with `run_build.sh`. Dataset metadata can stay
-in `datasets/` and be referenced directly by the build config.
+For curated datasets and metadata updates, see the [dataset catalog](datasets/README.md)
+and [angiosperm leaf guide](datasets/angiosperm_leaf/README.md).
 
 [Documentation](docs/index.md) · [Build and analysis guide](docs/datasets.md) ·
 [Resources and retries](docs/running.md) · [Outputs](docs/outputs.md)

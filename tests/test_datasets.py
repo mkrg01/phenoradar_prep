@@ -139,6 +139,7 @@ def test_prepare_cli_uses_config_name_with_optional_override(dataset_project, ov
     imported(root)
     cfg = yaml.safe_load((root / "config/build.yaml").read_text())
     cfg["name"] = "angiosperm_leaf_20260925"
+    cfg["name_mode"] = "fixed"
     config = root / "config/named.yaml"
     config.write_text(yaml.safe_dump(cfg))
     command = [sys.executable, str(root / "workflow/scripts/dataset.py"),
@@ -169,6 +170,7 @@ def test_prepare_legacy_config_requires_explicit_name(dataset_project):
     config = root / "config/build.yaml"
     cfg = yaml.safe_load(config.read_text())
     cfg.pop("name", None)
+    cfg.pop("name_mode", None)
     config.write_text(yaml.safe_dump(cfg))
     with pytest.raises(ValueError, match="set name in build config or pass --name"):
         prepare(root, None, config)

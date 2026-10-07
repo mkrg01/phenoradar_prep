@@ -1,6 +1,7 @@
-# Reusable sample database under results/<name>/.
+# Reusable sample database under results/<build_name>/.
 # Paths are relative to the project root.
-name: angiosperm_leaf_20260930  # Build directory name under results/; --name overrides.
+name: angiosperm_leaf  # Dataset prefix; no manual date suffix needed.
+name_mode: timestamp  # New builds append UTC preparation time; --name sets an exact name.
 metadata: input/metadata.tsv  # Input sample/run table (TSV).
 excluded_accessions: config/excluded_accessions.tsv  # Manual run exclusions; null disables.
 reuse_from: results/angiosperm_leaf_20260928/database  # Build/database path or list, auto for prior sample stages, null for a fresh build.
