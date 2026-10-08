@@ -12,9 +12,9 @@ odb:
   chunk_size: 50
   ncbi_tax_id: 3193
 genegalleon:
-  version: 0.8.160
-  revision: 836da7d466527d48ae2d68c4c17594d6bbc539e3
-  image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:01b3f64930e70f451d51c7a6c0649258fddd748898c08cb5bbbbd3c0329588e4
+  version: 0.8.189  # Latest matching source/container on 2026-10-08; update explicitly.
+  revision: c3b8aad76751b3a04dc8453566a4a58184d6fd7b
+  image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:2bc90168b23435256f34a8b48a7b1a17bdf16769878ba08bf5937eb92cac2ce0
   settings:
     assembly_method: rnaSPAdes
 slurm:

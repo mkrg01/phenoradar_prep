@@ -249,9 +249,3 @@ must use `docker://<registry>/<image>@sha256:<64 lowercase hexadecimal character
 Verified downloads are cached under `resources/software/genegalleon/`;
 `repository` and `image` are optional local overrides. AMALGKIT rRNA and
 contamination filtering are disabled by this workflow.
-
-The default build configurations pin GeneGalleon 0.8.160 with its matching source
-revision and container digest, including the private FASTQ statistics fix from
-[issue #38](https://github.com/kfuku52/genegalleon/issues/38). Dependency updates are
-explicit; ordinary builds never resolve `latest`. Existing prepared builds retain
-their frozen dependency settings.
