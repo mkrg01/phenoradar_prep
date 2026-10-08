@@ -28,7 +28,8 @@ conda activate phenoradar_prep
 ./run_pipeline.sh --prepare-container --cores 1 --resources mem_gb=4
 ./run_build.sh fetch-software
 
-./run_build.sh plan
+./run_build.sh plan > plan.tsv
+# Review plan.tsv before submitting.
 ./run_build.sh submit
 
 # After the build completes:
