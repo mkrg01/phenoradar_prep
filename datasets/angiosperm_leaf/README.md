@@ -63,25 +63,29 @@ build path to pin an analysis. See [versioning and provenance](../../docs/datase
 
 ## Recording QC and retrying
 
-Inspect QC decisions, then record the reviewed results:
+Record results using the build name printed by `submit`:
 
 ```bash
-./run_metadata.sh record --build results/angiosperm_leaf_20261002T000000Z --dry-run
-./run_metadata.sh record --build results/angiosperm_leaf_20261002T000000Z
+./run_metadata.sh record --build results/{build_name}
 ```
 
-`record` updates acceptance and exclusion tables, including from partial builds.
-Use `--runs SRR123 SRR456` for a reviewed subset. New runs below the BUSCO
-threshold enter the exclusion table; the next metadata update selects alternatives.
-For manual exclusions, preserve the table's columns and leave unused cells blank.
-
-For execution failures, retry the same build:
+`record` adopts completed runs that pass BUSCO and excludes new runs below the
+threshold. Incomplete runs remain eligible for retry:
 
 ```bash
-./run_build.sh submit --build results/angiosperm_leaf_20261002T000000Z
+./run_build.sh submit --build results/{build_name}
 ```
 
-Add `--resources <retry.yaml>` for resource changes. Successful stages are reused
-and the build keeps its original sample selection. Repeating `submit --config`
-without `--build` prepares another build; use the printed path when retrying,
-including after `--dry-run`.
+Add `--resources retry.yaml` to change the allocation; completed stages are reused.
+After deciding to stop retrying, exclude remaining inactive incomplete samples
+and remove their downloaded reads and temporary work:
+
+```bash
+./run_metadata.sh record --build results/{build_name} --exclude-failed
+```
+
+Add `--dry-run` to either `record` command for an optional preview. Products and
+logs are kept; active or unresolved samples stay on hold. Then update metadata
+and prepare a new build to select replacements and reuse completed work.
+For specific accessions or an editable plan, see
+[recording results](../README.md#recording-results).

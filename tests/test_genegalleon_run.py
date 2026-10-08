@@ -1,6 +1,7 @@
 """Native evidence proves checkpoints; scheduler failures remain separate evidence."""
 import fcntl
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -159,3 +160,20 @@ def test_malformed_observation_is_unavailable(tmp_path):
     attempt.mkdir(parents=True)
     (attempt / 'run.json').write_text('[]')
     assert observation(tmp_path)['state'] == 'unavailable'
+
+
+def test_worker_passes_the_native_lock_to_its_launcher(dataset_project, monkeypatch):
+    build = new_dataset(dataset_project)
+    submit(build, until='quant', dry_run=True)
+    run = subprocess.run
+    inherited = []
+    def launch(command, **kwargs):
+        if command[0] == 'bash' and str(command[1]).endswith('gg_transcriptome_generation_entrypoint.sh'):
+            descriptor, = kwargs['pass_fds']
+            lock = build / 'work/genegalleon/New_plant_SRR1/.native.lock'
+            assert os.fstat(descriptor).st_ino == lock.stat().st_ino
+            inherited.append(descriptor)
+        return run(command, **kwargs)
+    monkeypatch.setattr(subprocess, 'run', launch)
+    worker(build, 1)
+    assert len(inherited) == 1

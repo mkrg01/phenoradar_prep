@@ -106,3 +106,35 @@ def test_bulk_cleanup_never_follows_linked_job_parent(tmp_path):
                 'pipeline': {'run_name': 'test', 'work_root': 'work', 'output_root': 'output'}}
     with pytest.raises(ValueError, match='unsafe cleanup path'):
         storage_report(tmp_path, manifest, 'analysis', inspect=True, apply=True)
+
+
+@pytest.mark.parametrize('failed', [False, True])
+def test_cleanup_finds_auxiliary_files_after_old_complete_receipt(dataset_project, monkeypatch, failed):
+    from dataset import status
+    from genegalleon_run import runtime_directory
+    build = new_dataset(dataset_project)
+    submit(build, until='quant', dry_run=True)
+    if failed:
+        monkeypatch.setenv('FAKE_GG_FAIL_QUANT', '1')
+        with pytest.raises(subprocess.CalledProcessError): worker(build, 1)
+    else:
+        worker(build, 1)
+    work = build / 'work/genegalleon/New_plant_SRR1'
+    runtime = runtime_directory(work)
+    assert not runtime.exists()
+    cache = runtime / 'pycache/helper.pyc'
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(b'x' * 8192)
+    assert not (work / 'output/transcriptome_assembly/tmp').exists()
+    receipt = build / 'jobs/cleanup/New_plant_SRR1.sample.json'
+    assert json.loads(receipt.read_text())['state'] == 'complete'
+    stages = [status(build)[0][stage] for stage in ('assembly', 'busco', 'quant')]
+    before = native_events(build)
+    assert run_storage(build, 'build')['counts'] == {'available': 1}
+    preview = run_storage(build, 'build', inspect=True)
+    assert preview['jobs'][0]['inspection']['reclaimable_bytes'] >= 8192
+    assert cache.exists()
+    applied = run_storage(build, 'build', inspect=True, apply=True)
+    assert applied['counts'] == {'complete': 1} and not runtime.exists()
+    assert native_events(build) == before
+    assert [status(build)[0][stage] for stage in ('assembly', 'busco', 'quant')] == stages

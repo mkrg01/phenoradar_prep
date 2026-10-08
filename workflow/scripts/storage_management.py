@@ -72,10 +72,16 @@ def entry_state(entry, keep):
             return 'pending'
         if entry['kind'] == 'genegalleon':
             if not incomplete:
+                from genegalleon_run import runtime_directory
+                runtime = runtime_directory(entry['work_dir'])
+                if result.get('state') == 'complete' and (runtime.exists() or runtime.is_symlink()):
+                    return 'available'
                 return result.get('state', 'unknown')
     if incomplete:
+        from genegalleon_run import runtime_directory
         scratch = Path(entry['work_dir']) / 'output/transcriptome_assembly/tmp'
-        return 'available' if scratch.exists() or scratch.is_symlink() else 'complete'
+        return 'available' if any(p.exists() or p.is_symlink()
+                                  for p in (scratch, runtime_directory(entry['work_dir']))) else 'complete'
     if entry['kind'] != 'genegalleon':
         base = Path(entry['work_dir'])
         scratch = Path(job.get('work', base / job['fingerprint']))
@@ -97,7 +103,7 @@ def retry_genegalleon(path, manifest, entry, apply):
     from dataset import STAGES, cleanup_genegalleon, item_products
     item = next(item for item in manifest['items'] if item['species'] == entry['job'])
     lock = managed(manifest['root'], Path(manifest['config']['store']) / item['species'] / '.worker.lock')
-    # Existing successful jobs have a worker lock. Preview never creates files.
+    # Workers create this lock before recording status. Preview creates no files.
     with lock.open('r') as handle:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         if entry['stage'] != 'sample':

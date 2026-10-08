@@ -107,11 +107,12 @@ def verify(entry):
 
 @contextmanager
 def locked(path):
+    """Hold an exclusive lock; its handle can be inherited by a child process."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        yield
+        yield handle
 
 
 def link_file(source, target):

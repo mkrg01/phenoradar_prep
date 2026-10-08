@@ -34,6 +34,10 @@ def sample_project(dataset_project):
     config.write_text(yaml.safe_dump(definition))
     write_tsv(root / 'config/excluded_accessions.tsv', ['accession', 'reason'], [])
     cfg = catalog.configuration(root, config)
+    build_config = root / cfg['build_config']
+    build_settings = yaml.safe_load(build_config.read_text())
+    build_settings['excluded_accessions'] = definition['excluded_accessions']
+    build_config.write_text(yaml.safe_dump(build_settings))
     build = dataset.prepare(root, 'first', root / 'config/build.yaml')
     dataset.submit(build, until='quant', dry_run=True)
     return root, cfg, build

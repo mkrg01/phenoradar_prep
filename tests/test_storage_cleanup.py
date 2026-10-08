@@ -156,6 +156,7 @@ def test_genegalleon_keeps_reads_until_verified_quant(dataset_project, monkeypat
     original.write_bytes(b'read data')
     os.link(original, fastq)
     temporary = out / 'tmp/1_New_plant/large_intermediate'
+    runtime = work / f'.genegalleon-runtime-{os.getuid()}'
     temporary.parent.mkdir(parents=True)
     temporary.write_bytes(b'assembly scratch')
     monkeypatch.setenv('FAKE_GG_INCOMPLETE_MERGE', '1')
@@ -163,11 +164,13 @@ def test_genegalleon_keeps_reads_until_verified_quant(dataset_project, monkeypat
         worker(build, 1)
     assert fastq.exists()
     assert temporary.exists() is keep
+    assert runtime.exists() is keep
     assert status(build)[0]['assembly'] == 'reuse'
     assert status(build)[0]['busco'] == 'reuse'
     monkeypatch.delenv('FAKE_GG_INCOMPLETE_MERGE')
     worker(build, 1)
     assert temporary.exists() is keep
+    assert runtime.exists() is keep
     assert fastq.exists() is keep
     assert original.read_bytes() == b'read data'
     assert download_log.read_text() == 'download QC'

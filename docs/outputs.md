@@ -71,16 +71,14 @@ Keep `run.json`, branch provenance, reference snapshots, and the release's
 
 ## Storage cleanup
 
-ODB, KofamScan, and GeneGalleon remove temporary files after saving and verifying
-their results. ODB cleans up each completed chunk. Downloaded FASTQ/SRA files are
-removed after both assembly and quantification finish. Original inputs, reusable
-results, native restart checkpoints, and logs are kept. GeneGalleon computation
-scratch is also removed after failures; completed reads may remain for retries.
-If the wrapper is killed, use `cleanup` once the sample stops. Active worker and
-native scratch locks prevent deletion while processing continues. For debugging,
-[retain intermediates](configuration.md#intermediate-storage) when preparing the run.
+Unless intermediates are retained, ODB and KofamScan remove temporary work after
+publishing results. GeneGalleon also removes computation scratch after failures,
+including its sample-specific `.genegalleon-runtime-<uid>/` temporary directory.
+Downloaded FASTQ/SRA files are removed after assembly and quantification finish.
+Original inputs, saved products, restart checkpoints and logs are kept.
 
-Check cleanup status and preview files left by inactive jobs:
+After an interrupted job stops, inspect cleanup status and preview remaining
+temporary files:
 
 ```bash
 ./run_build.sh status --build results/leaf --storage
@@ -89,8 +87,14 @@ Check cleanup status and preview files left by inactive jobs:
 ```
 
 Add `--apply` to a `cleanup` command to delete the listed files. Cleanup errors
-are reported as `pending`; retrying cleanup does not rerun computation.
-Keep the rest of `work/` for reuse.
+are reported as `pending`; repeat the command to retry without rerunning
+computation. Active jobs are protected by execution locks.
+
+Ordinary `cleanup` retains reads needed for retry. To discard an incomplete sample's
+reads and temporary work, use
+[`record --exclude-failed`](../datasets/README.md#abandoning-incomplete-samples).
+For debugging, [retain intermediates](configuration.md#intermediate-storage) when
+preparing the run.
 
 ## TPM interpretation
 

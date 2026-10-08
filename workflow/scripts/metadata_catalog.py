@@ -284,78 +284,10 @@ def matching_container(root, cfg, build):
     return lock
 
 
-def record_successes(root, cfg, build_path, runs=None, dry_run=False):
-    """Adopt completed samples and exclude new BUSCO failures from partial builds."""
-    from dataset import load, item_products
-    build_path = path_at(root, build_path)
-    if build_path.name == 'build.json':
-        build_path = build_path.parent
-    source = file_record(build_path / 'build.json')
-    build = load(build_path)
-    matching_container(root, cfg, build)
-    before, config_record = selection_inputs(root, cfg), file_record(cfg['_path'])
-    _, previous, accepted = previous_state(root, cfg)
-    exclusion_path = path_at(root, cfg['excluded_accessions'])
-    exclusions = read_exclusions(exclusion_path)
-    items = {item['row']['run']: item for item in build['items']}
-    requested = set(runs) if runs is not None else set(items)
-    if requested - items.keys():
-        raise ValueError('runs absent from build: ' + ', '.join(sorted(requested - items.keys())))
-    accepted = {tid: row for tid, row in accepted.items() if row['run'] not in exclusions}
-    report, recorded, decisions = [], [], []
-    for run in sorted(requested):
-        item = items[run]
-        row = item['row']
-        tid = taxid(row['taxid'])
-        current = previous.get(tid)
-        status = 'excluded' if run in exclusions else ''
-        if not status and (not current or any(current[k] != row[k] for k in ACCEPTED_FIELDS[:4])):
-            status = 'not_current_representative'
-        if status:
-            report.append({'run': run, 'status': status})
-            continue
-        products = item_products(build, item)
-        if any(not products[key] for key in ('reference', 'busco')):
-            report.append({'run': run, 'status': 'incomplete'})
-            continue
-        qc = counts(products['busco']['counts'])
-        evidence = {**{k: row[k] for k in ACCEPTED_FIELDS[:4]},
-                    'busco_complete': qc['busco_cds_single'] + qc['busco_cds_duplicated'],
-                    'busco_total': qc['busco_cds_total'], 'source_build': build['name']}
-        if evidence['busco_complete'] / evidence['busco_total'] < cfg['busco_threshold']:
-            if tid not in accepted:
-                decisions.append(busco_exclusion(row, cfg['busco_threshold'], build['name']))
-            report.append({'run': run, 'status': 'busco_below_threshold',
-                           'busco_complete': evidence['busco_complete'], 'busco_total': evidence['busco_total'],
-                           'retained_accepted': tid in accepted})
-            continue
-        if not products['quant']:
-            report.append({'run': run, 'status': 'incomplete'})
-            continue
-        accepted[tid] = evidence
-        recorded.append(run)
-        report.append({'run': run, 'status': 'reviewed_complete',
-                       'busco_complete': evidence['busco_complete'], 'busco_total': evidence['busco_total']})
-    excluded_runs = [decision['accession'] for decision in decisions]
-    result = {'recorded_runs': recorded, 'excluded_runs': excluded_runs,
-              'accepted_samples': len(accepted), 'samples': report,
-              'dry_run': dry_run, 'busco_threshold': cfg['busco_threshold']}
-    if dry_run:
-        return result
-    target = path_at(root, cfg['accepted_samples'])
-    with locked(path_at(root, cfg['previous_metadata']).parent / '.metadata.lock'):
-        if (file_record(cfg['_path']) != config_record or selection_inputs(root, cfg) != before
-                or file_record(build_path / 'build.json') != source):
-            raise ValueError('sample adoption inputs changed; repeat the review')
-        append_exclusions(exclusion_path, decisions)
-        write_tsv(target, ACCEPTED_FIELDS, [accepted[tid] for tid in sorted(accepted, key=int)])
-        write_json(target.with_suffix('.provenance.json'), {'kind': 'reviewed_samples', 'created_at': now(),
-                   'build_manifest': source, 'selection_config': config_record, 'inputs': before,
-                   'recorded_runs': recorded, 'busco_threshold': cfg['busco_threshold'],
-                   'excluded_runs': excluded_runs, 'samples': report,
-                   'excluded_accessions': file_record(exclusion_path),
-                   'accepted_samples': file_record(target)})
-    return result
+def record_successes(root, cfg, build_path, runs=None, dry_run=False, *, exclude_failed=False, plan=None):
+    """Record adoption, reviewed exclusions, and cleanup through one operation."""
+    from sample_review import record
+    return record(root, cfg, build_path, runs, dry_run, exclude_failed=exclude_failed, plan=plan)
 
 
 def initialize(root, cfg, database, source_metadata, exclusions, replace=False):
@@ -924,9 +856,13 @@ def main():
             p.add_argument('--metadata', help='Optional already curated AMALGKIT table; otherwise fetch and curate')
             p.add_argument('--dry-run', action='store_true', help='Write a candidate without publishing dataset metadata')
         elif name == 'record':
-            p.add_argument('--build', required=True)
+            source = p.add_mutually_exclusive_group(required=True)
+            source.add_argument('--build', help='Build to review')
+            source.add_argument('--apply', metavar='PLAN.tsv', help='Apply a saved, optionally edited review plan')
             p.add_argument('--runs', nargs='+', help='Reviewed run accessions; default: all current representatives in the build')
-            p.add_argument('--dry-run', action='store_true', help='Preview adoption and BUSCO exclusions without changing tables')
+            p.add_argument('--dry-run', action='store_true', help='Preview decisions and cleanup without changing tables or deleting files')
+            p.add_argument('--exclude-failed', action='store_true', help='Exclude all inactive incomplete samples, including unstarted runs, and remove their reads/scratch; --dry-run previews without applying')
+            p.add_argument('--plan', metavar='PLAN.tsv', help='Save an editable review plan and evidence; does not apply decisions')
         elif name == 'init':
             p.add_argument('--exclusions', help='Optional historical run exclusion table')
             p.add_argument('--replace', action='store_true')
@@ -958,7 +894,14 @@ def main():
         if args.command == 'update':
             result = update_metadata(root, cfg, args.work, args.metadata, args.dry_run)
         elif args.command == 'record':
-            result = record_successes(root, cfg, args.build, args.runs, args.dry_run)
+            if args.apply:
+                if args.runs or args.exclude_failed or args.plan:
+                    raise ValueError('--apply cannot be combined with --runs, --exclude-failed or --plan')
+                from sample_review import apply_plan
+                result = apply_plan(root, cfg, args.apply, dry_run=args.dry_run)
+            else:
+                result = record_successes(root, cfg, args.build, args.runs, args.dry_run,
+                                          exclude_failed=args.exclude_failed, plan=args.plan)
         elif args.command == 'init':
             result = initialize_empty(root, cfg, args.exclusions, args.replace)
         elif args.command == 'seed':

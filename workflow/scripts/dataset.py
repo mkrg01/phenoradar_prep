@@ -493,11 +493,12 @@ def gg_environment(manifest, item, products, work, task_id):
     return env
 
 
-def cleanup_genegalleon(path, manifest, item, stage, products, *, apply=True):
+def cleanup_genegalleon(path, manifest, item, stage, products, *, apply=True, discard_reads=False):
     """Retire only owned scratch; products and native BUSCO receipts stay valid."""
-    if manifest['config'].get('storage', {}).get('keep_intermediates', False):
+    if not discard_reads and manifest['config'].get('storage', {}).get('keep_intermediates', False):
         return
     from cleanup_work import cleanup, owned_path
+    from genegalleon_run import runtime_directory
     path = Path(path)
     work = workspace(path, manifest, item)
     relative = work.relative_to(path) / 'output/transcriptome_assembly'
@@ -509,12 +510,19 @@ def cleanup_genegalleon(path, manifest, item, stage, products, *, apply=True):
         # just because a previously completed stage was requested again.
         errors = []
         try:
+            # This lock survives a killed wrapper while its native launcher runs,
+            # including bootstrap and final reporting outside the assembly tmp/.
+            native_lock = owned_path(path, work.relative_to(path) / '.native.lock')
+            if native_lock.exists() or native_lock.is_symlink():
+                if native_lock.is_symlink(): raise ValueError('unsafe native runtime lock')
+                handle = guards.enter_context(native_lock.open('r'))
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             other_failed = False
             for other in STAGES:
                 receipt = path / 'jobs/status' / f"{item['species']}.{other}.json"
                 if other != stage and receipt.exists():
                     other_failed |= json.loads(receipt.read_text()).get('state') in {'running', 'failed'}
-            if not other_failed:
+            if discard_reads or not other_failed:
                 scratch = owned_path(path, relative / 'tmp')
                 for lock in scratch.glob('*/.gg_active.lock'):
                     checked = owned_path(path, lock.relative_to(path))
@@ -522,16 +530,23 @@ def cleanup_genegalleon(path, manifest, item, stage, products, *, apply=True):
                     handle = guards.enter_context(checked.open('r'))
                     fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 targets.append(relative / 'tmp')
+                runtime = owned_path(path, runtime_directory(work).relative_to(path))
+                if runtime.exists() or runtime.is_symlink():
+                    if (runtime.is_symlink() or not runtime.is_dir()
+                            or runtime.stat().st_uid != os.getuid()):
+                        raise ValueError('unsafe native runtime directory')
+                    targets.append(runtime.relative_to(path))
             # Assembly FASTQs are also used for quantification. Require both products,
             # irrespective of which stage is being retried. Keep caller-owned input/reads.
-            if products.get('reference') and products.get('quant'):
+            if discard_reads or (products.get('reference') and products.get('quant')):
                 reads = relative / 'amalgkit_getfastq' / item['row']['species_id']
                 # Preserve getfastq logs/QC and never descend into a linked input tree.
                 directory = owned_path(path, reads)
                 if not directory.is_symlink():
                     for root, _, names in os.walk(directory, followlinks=False):
                         for name in names:
-                            if name.endswith(('.fastq', '.fastq.gz', '.fq', '.fq.gz', '.sra')):
+                            candidate = re.sub(r'\.(?:part|partial|tmp)$', '', name) if discard_reads else name
+                            if candidate.endswith(('.fastq', '.fastq.gz', '.fq', '.fq.gz', '.sra')):
                                 targets.append((Path(root) / name).relative_to(path))
         except (OSError, ValueError) as error:
             targets = []
@@ -637,8 +652,9 @@ def worker(path, task_id):
                     write_json(receipt_path, dict(receipt, state='complete', finished_at=now(), native_exit_code=0))
                     return
             receipt.pop('native_exit_code', None)
-            subprocess.run(['bash', str(repository / 'workflow/gg_transcriptome_generation_entrypoint.sh')],
-                           cwd=repository, env=env, check=True)
+            with locked(work / '.native.lock') as native_lock:
+                subprocess.run(['bash', str(repository / 'workflow/gg_transcriptome_generation_entrypoint.sh')],
+                               cwd=repository, env=env, check=True, pass_fds=(native_lock.fileno(),))
             receipt['native_exit_code'] = 0
             write_json(receipt_path, receipt)
             register_native(path, manifest, item, products, set(STAGES), env)

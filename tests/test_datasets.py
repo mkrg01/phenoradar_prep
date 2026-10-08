@@ -322,6 +322,11 @@ assert os.environ['LC_ALL'] == os.environ['SINGULARITYENV_LC_ALL'] == os.environ
 assert os.environ[prefix+'RUN_MULTISPECIES_SUMMARY'] == '0'
 assert os.environ['GG_OBSERVABILITY'] == '1'
 assert os.environ['GG_COMMON_TMP_ROOT'] == 'workspace'
+runtime = work / ('.genegalleon-runtime-' + str(os.getuid()))
+for directory in ('tmp', 'pycache'):
+    cache = runtime / directory / 'helper'
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_bytes(b'auxiliary cache')
 scratch = out / 'tmp/1_native/large'
 scratch.parent.mkdir(parents=True, exist_ok=True)
 scratch.write_bytes(b'scratch')

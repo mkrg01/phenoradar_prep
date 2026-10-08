@@ -118,33 +118,28 @@ Inspect `status`, `squeue`, and the run's `jobs/logs/`, then resubmit:
 ./run_analysis.sh submit --analysis results/{build_name}/downstream/{analysis_name}
 ```
 
-Completed samples are not submitted again. Incomplete samples rerun GeneGalleon
-in the same workspace; its provenance contracts reuse completed native steps.
-The wrapper also preserves verified assembly/BUSCO checkpoints from failed runs
-using GeneGalleon's read-only preflight API. An unavailable API never proves a
-partial step complete. Input or scientific-condition changes remain conflicts.
+Completed samples are skipped. Incomplete samples resume in the same GeneGalleon
+workspace, reusing verified steps and saved assembly/BUSCO results. Conflicting
+inputs or scientific settings must be resolved before retrying.
 
-`status` includes each sample's job receipt, native attempt evidence, and
-`stopped_at` for failed processing. Native observations cover recorded steps;
-check Slurm and `jobs/logs/` for OOM, timeouts, and jobs terminated without a final
-record. CPU/memory/time changes use `--resources` and do not rebuild registered
-checkpoints. Active or unresolved submissions block duplicate retries.
+`status` reports sample progress and the stopped stage. Check Slurm and
+`jobs/logs/` for the failure cause. Add `--resources retry.yaml` to change CPUs,
+memory or time while keeping completed checkpoints. Active or unresolved jobs
+block duplicate submissions.
 
 A failed sample does not prevent other samples, including later array batches,
 from running. The database controller requires all sample batches to succeed.
 Retry failed samples before publishing the complete database.
 
-With `storage.keep_intermediates: false`, native successful-run cleanup is enabled
-and the wrapper removes managed computation scratch after both success and
-failure. Published native checkpoints, provenance, logs, and completed reads
-needed for retries are retained. rnaSPAdes retries rebuild their computation
-scratch; keeping that scratch does not enable continuation in this workflow.
-FASTQ/SRA files are removed when the sample completes. There is no growing
-`jobs/incomplete` quarantine of failed native outputs. Set retention to `true`
-when preparing a debugging build. See [storage cleanup](outputs.md#storage-cleanup)
-for retrying cleanup without repeating computation. If the wrapper itself is
-killed, use `cleanup` after the job stops; worker and native locks protect any
-processes still using the scratch.
+With `storage.keep_intermediates: false`, computation scratch and native auxiliary
+temporary files are removed after success or failure. Saved checkpoints and logs
+are kept, along with reads needed for retry. Downloaded FASTQ/SRA files are removed
+after assembly and quantification complete. rnaSPAdes retries rebuild computation
+scratch. Set retention to `true` when preparing a debugging build.
+
+If a job is interrupted, use [cleanup](outputs.md#storage-cleanup) after it stops.
+To abandon incomplete samples, use the curated dataset
+[`record --exclude-failed` command](../datasets/README.md#abandoning-incomplete-samples).
 
 Builds bind to their implementation and pinned GeneGalleon source/image. After a
 code or software update, prepare a new build and reuse compatible checkpoints
@@ -213,14 +208,9 @@ caches are reused through explicitly selected completed databases. `null`
 disables all reuse. Discovery is frozen during preparation, and the new build
 does not depend on source product paths afterward.
 
-For curated representative datasets, use the
-[metadata update and adoption commands](../datasets/README.md). An excluded run
-can be replaced by another eligible run with the same original taxid, including
-the same BioProject. Adoption records can be made before a database completes.
-QC recording automatically adds new runs with completed BUSCO results below the
-dataset threshold to its accession exclusions. Update metadata and prepare a new
-build to process replacements; failed or unfinished BUSCO stages stay eligible
-for retry.
+Curated datasets can [record results](../datasets/README.md#recording-results)
+before a database completes. After exclusions, update metadata and prepare a new
+build to process replacements and reuse compatible completed work.
 
 ## Copying a completed build to another project
 

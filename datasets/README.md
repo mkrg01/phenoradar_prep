@@ -21,19 +21,71 @@ For each original `taxid`:
    ascending accession.
 4. Apply any optional `overrides.tsv` choice from the eligible candidates.
 
-After QC review, `record` registers runs with completed assembly, BUSCO, and
-quantification and completeness `(single + duplicated) / total >= busco_threshold`
-(default `0.5`). New runs with completed BUSCO below the threshold are added to
-`excluded_accessions.tsv`, even before quantification finishes. Execution
-failures and unfinished stages remain eligible for retry.
-
-`record --dry-run` previews these decisions; `--runs` limits them to reviewed
-accessions. Add other unusable runs to the exclusion table manually. Run
-`update` afterward to replace excluded representatives, or drop their taxids
-if no candidate remains.
-
 Review changes to accepted samples in `selection.tsv`. Their adopted names
 and sample IDs are retained across metadata updates.
+
+## Recording results
+
+Use the build name printed by `submit` in place of `{build_name}`:
+
+```bash
+./run_metadata.sh record --build results/{build_name}
+```
+
+`record` applies the BUSCO completeness threshold in `selection.yaml`
+(`(single + duplicated) / total`, default `0.5`):
+
+| Sample result | Action |
+| --- | --- |
+| Assembly, BUSCO and quantification complete; BUSCO passes | Register in `accepted_samples.tsv` |
+| BUSCO complete; new run below the threshold | Add to `excluded_accessions.tsv`, even if quantification failed |
+| Incomplete processing | Keep eligible for retry |
+
+Add `--dry-run` to preview actions, stages, errors, BUSCO scores and cleanup sizes
+without changing records or deleting files. Use `--runs SRR123 SRR456` to limit
+the operation to specific accessions. The selection and build configurations must
+use the same exclusion table.
+
+## Abandoning incomplete samples
+
+After deciding to stop retrying, exclude the remaining inactive incomplete runs
+and clean up in one command:
+
+```bash
+./run_metadata.sh record --build results/{build_name} --exclude-failed
+```
+
+This includes unstarted runs and runs with unfinished quantification. Queued,
+running, unresolved or conflicting samples stay on hold. Add `--dry-run` for an
+optional preview; execution uses the current sample state.
+
+Excluded runs lose downloaded FASTQ/SRA copies and temporary work, including in
+builds retaining intermediates. Original inputs, saved products, restart
+checkpoints and logs are kept. Cleanup failures leave exclusions in place;
+repeat the command to retry cleanup.
+
+Next, run `update` to select replacement runs, then prepare a new build to reuse
+compatible completed products. Taxids without a replacement are dropped.
+Existing builds keep their original sample selection.
+
+## Optional review plan
+
+For an editable list of decisions, save an optional plan:
+
+```bash
+./run_metadata.sh record --build results/{build_name} \
+  --exclude-failed --plan work/reviews/{build_name}.tsv
+./run_metadata.sh record --apply work/reviews/{build_name}.tsv
+```
+
+Before applying, edit only `action` (`accept`, `exclude`, `hold`) and `reason`, or
+remove rows to leave them alone. Keep the generated JSON files with the TSV.
+Plan creation changes no dataset records and deletes no files. Applying it checks
+the saved decisions; changed metadata or selected samples require a new plan.
+Reapply the unchanged plan to retry cleanup.
+
+Completed accepted runs are retained if the BUSCO threshold changes. To withdraw
+one, explicitly choose `exclude` in a plan. Use a new plan filename for each review.
 
 ## Choosing where to restart
 
@@ -77,7 +129,7 @@ work; add `--resources <retry.yaml>` to adjust resources. See
 | `selection.yaml` | Search, tissue, paths, and adoption BUSCO threshold |
 | `build.yaml` | Build settings and pinned GeneGalleon software |
 | `select_rules.tsv` | AMALGKIT curation rules |
-| `excluded_accessions.tsv` | Manual exclusions and recorded BUSCO failures; `accession` required |
+| `excluded_accessions.tsv` | Excluded run accessions and reasons; `accession` required |
 | `overrides.tsv` | Optional choices with `taxid`, `run`, and `reason` |
 | `accepted_samples.tsv` | QC-approved runs registered by `record`; accession in `run` |
 | `selection.tsv` | Selection decisions and changes to review |

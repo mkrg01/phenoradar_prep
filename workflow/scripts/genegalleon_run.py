@@ -1,5 +1,6 @@
 """Read GeneGalleon's own attempt evidence; reuse decisions stay in GeneGalleon."""
 import json
+import os
 import re
 import subprocess
 import sys
@@ -11,6 +12,11 @@ STAGE_STEPS = {
     'busco': {'transcriptome_busco_longest_cds'},
     'quant': {'transcriptome_quant', 'transcriptome_merge'},
 }
+
+
+def runtime_directory(work):
+    """Native auxiliary tempfiles and bytecode cache, isolated by sample and UID."""
+    return Path(work) / f'.genegalleon-runtime-{os.getuid()}'
 
 
 def read_json(path):
