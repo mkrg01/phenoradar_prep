@@ -306,9 +306,5 @@ def resolve(store, item, lineage, need_full=False):
             supplied = item["row"].get(key, "")
             if supplied and value and supplied != value:
                 raise ValueError(f"run metadata changed for cached quantification: {item['row']['run']}: {key}")
-        # Retired FASTQs need not remain present. If retained, detect replacing
-        # their bytes under the same run/path before reusing native quantification.
-        for entry in quant.get("provenance", {}).get("raw_inputs", {}).values():
-            if Path(entry["path"]).exists(): verify(entry)
     return {"reference": ref, "busco": bus if bus and (not need_full or bus.get("full")) else None,
             "quant": quant, "assessment": bus}

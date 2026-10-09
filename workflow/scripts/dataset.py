@@ -267,7 +267,9 @@ def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_a
         raw_records = {}
         for item, state in zip(items, report):
             if item["row"].get("private_file", "").lower() == "yes" and any(state[s] == "pending" for s in ("assembly", "quant")):
-                raw_records[item["species"]] = {k: record(item["row"][k]) for k in ("read1_path", "read2_path") if item["row"].get(k)}
+                raw_records[item["species"]] = {
+                    k: {"path": str(private_fastq_path(item["row"][k]))}
+                    for k in ("read1_path", "read2_path") if item["row"].get(k)}
         auxiliary = {}
         for filename, entry in (("source_metadata.tsv", selection["source_metadata"]),
                                 ("metadata_provenance.json", selection['metadata_provenance']),
@@ -419,6 +421,14 @@ def stage_workspace(path, manifest):
     return workspace(path, manifest)
 
 
+def private_fastq_path(path):
+    """Require a local read file without hashing or binding its content."""
+    path = Path(path)
+    if not path.is_file():
+        raise ValueError(f"private FASTQ missing: {path}")
+    return path
+
+
 def workspace_metadata(work, item, raw_inputs, create=False):
     row = dict(item["row"])
     for key, entry in raw_inputs.items():
@@ -426,9 +436,9 @@ def workspace_metadata(work, item, raw_inputs, create=False):
         relative = Path("input/reads") / item["species"] / (key + "".join(source.suffixes))
         staged = work / relative
         if create and not staged.exists():
-            link_file(verify(entry), staged)
+            link_file(private_fastq_path(source), staged)
         else:
-            verify(dict(entry, path=str(staged)))
+            private_fastq_path(staged)
         row[key] = "/workspace/" + str(relative)
     return row
 
@@ -567,7 +577,8 @@ def register_native(path, manifest, item, products, eligible, env):
     out = work / 'output/transcriptome_assembly'
     species, native, run = item['species'], item['row']['species_id'], item['row']['run']
     store = manifest['config']['store']
-    for entry in manifest['raw_inputs'].get(species, {}).values(): verify(entry)
+    for entry in manifest['raw_inputs'].get(species, {}).values():
+        private_fastq_path(entry['path'])
     for stage, key in zip(STAGES, ('reference', 'busco', 'quant')):
         if stage not in eligible or products[key]:
             continue

@@ -529,29 +529,67 @@ def test_slurm_submission_dependencies_and_duplicate_submission_guard(dataset_pr
     assert len([c for c in calls if c[0] == "sbatch"]) == 2
 
 
-def test_private_relative_reads_are_frozen_and_reuse_detects_changed_bytes(dataset_project):
+@pytest.fixture
+def no_fastq_hashes(monkeypatch):
+    import common
+    import dataset_assets
+    hash_file = common.sha256
+
+    def checked(path):
+        assert not str(path).endswith(('.fastq', '.fastq.gz', '.fq', '.fq.gz')), f'FASTQ was hashed: {path}'
+        return hash_file(path)
+
+    monkeypatch.setattr(common, 'sha256', checked)
+    monkeypatch.setattr(dataset_assets, 'sha256', checked)
+
+
+@pytest.mark.parametrize('layout', ['single', 'paired'])
+@pytest.mark.parametrize('reuse_kind', ['database', 'stages'])
+def test_private_reads_are_staged_and_reused_without_checksums(dataset_project, no_fastq_hashes, layout, reuse_kind):
     root = dataset_project
     fake_genegalleon(root)
     reads = root / "input/local.fastq"
     reads.write_text("@r1\nATGC\n+\nIIII\n")
     fields = ["scientific_name", "run", "taxid", "private_file", "lib_layout", "read1_path"]
+    row = dict(zip(fields, ["Private plant", "LOCAL1", "42", "yes", layout, "local.fastq"]))
+    if layout == 'paired':
+        second_reads = root / 'input/local_2.fastq'
+        second_reads.write_bytes(reads.read_bytes())
+        fields.append('read2_path')
+        row['read2_path'] = second_reads.name
     write_tsv(root / "input/private.tsv", fields,
-              [dict(zip(fields, ["Private plant", "LOCAL1", "42", "yes", "single", "local.fastq"]))])
+              [row])
     cfg = root / "config/build.yaml"
     path = prepare(root, "private", cfg, "input/private.tsv")
-    submit(path, until="quant", dry_run=True)
-    staged = path / "work/genegalleon/Private_plant_LOCAL1/input/reads/Private_plant_LOCAL1/read1_path.fastq"
-    assert staged.read_bytes() == reads.read_bytes()
-    assert read_tsv(path / "work/genegalleon/Private_plant_LOCAL1/input/amalgkit_metadata/Private_plant_metadata.tsv")[0]["read1_path"] == "/workspace/input/reads/Private_plant_LOCAL1/read1_path.fastq"
-    original = reads.read_bytes()
-    reads.write_text("changed after submission")
-    with pytest.raises(ValueError, match="registered file changed"):
-        worker(path, 1)
-    reads.write_bytes(original)
-    worker(path, 1)
-    from database_fixtures import database_from_stages
     frozen = load(path)
-    source = database_from_stages(root, frozen['config']['store'], frozen['items'], 'private_source')
+    raw_inputs = frozen['raw_inputs']['Private_plant_LOCAL1']
+    assert raw_inputs == {key: {'path': str(root / 'input' / row[key])}
+                          for key in ('read1_path', 'read2_path') if row.get(key)}
+    submit(path, until="quant", dry_run=True)
+    submit(path, until="quant", dry_run=True)  # Existing staged reads also avoid hashing.
+    for key, entry in raw_inputs.items():
+        staged = path / 'work/genegalleon/Private_plant_LOCAL1/input/reads/Private_plant_LOCAL1' / f'{key}.fastq'
+        assert staged.read_bytes() == Path(entry['path']).read_bytes()
+    assert read_tsv(path / "work/genegalleon/Private_plant_LOCAL1/input/amalgkit_metadata/Private_plant_metadata.tsv")[0]["read1_path"] == "/workspace/input/reads/Private_plant_LOCAL1/read1_path.fastq"
+    reads.write_text("changed after submission")
+    worker(path, 1)
+    assert status(path)[0]['quant'] == 'reuse'
+    # Old receipts remain reusable even when their raw-input checksums are stale.
+    from dataset_assets import reference_path
+    item = frozen['items'][0]
+    products = resolve(frozen['config']['store'], item, frozen['config']['busco']['lineage'])
+    prefix = reference_path(frozen['config']['store'], item['species'], products['reference']['reference_id']).parent
+    legacy_raw = {'read1_path': {'path': str(reads), 'bytes': 1, 'sha256': '0' * 64, 'stat': [0] * 5}}
+    for receipt_path in (prefix / 'reference.json', prefix / 'quant/LOCAL1.json'):
+        receipt = json.loads(receipt_path.read_text())
+        receipt['provenance']['raw_inputs'] = legacy_raw
+        write_json(receipt_path, receipt)
+    assert status(path)[0]['quant'] == 'reuse'
+    if reuse_kind == 'database':
+        from database_fixtures import database_from_stages
+        source = database_from_stages(root, frozen['config']['store'], frozen['items'], 'private_source')
+    else:
+        source = path / 'build.json'
     config = yaml.safe_load(cfg.read_text()); config['reuse_from'] = str(source)
     cfg.write_text(yaml.safe_dump(config))
     assert plan(root, cfg, "input/private.tsv")[-1][0]["quant"] == "reuse"
@@ -559,10 +597,60 @@ def test_private_relative_reads_are_frozen_and_reuse_detects_changed_bytes(datas
     assert submit(second, until="quant", dry_run=True) == []
     reads.write_text("different reads under same run")
     report = plan(root, cfg, "input/private.tsv")[-1][0]
-    assert report["quant"] == "conflict"
-    assert "registered file changed" in report["reason"]
+    assert report['quant'] == 'reuse'
     reads.unlink()
     assert plan(root, cfg, "input/private.tsv")[-1][0]["quant"] == "reuse"
+
+
+def test_legacy_private_read_checksums_are_ignored_when_staging_and_running(tmp_path, no_fastq_hashes):
+    from dataset import workspace_metadata
+    reads = tmp_path / 'local.fastq'
+    reads.write_bytes(b'current reads')
+    item = {'species': 'Private_plant_LOCAL1', 'row': {'read1_path': str(reads)}}
+    old_record = {'read1_path': {'path': str(reads), 'bytes': 1, 'sha256': '0' * 64, 'stat': [0] * 5}}
+    work = tmp_path / 'work'
+    expected = workspace_metadata(work, item, old_record, create=True)
+    assert expected['read1_path'] == '/workspace/input/reads/Private_plant_LOCAL1/read1_path.fastq'
+    reads.write_bytes(b'changed reads')
+    assert workspace_metadata(work, item, old_record, create=True) == expected
+    assert workspace_metadata(work, item, old_record) == expected
+
+
+@pytest.mark.parametrize('layout, missing_key', [('single', 'read1_path'), ('paired', 'read2_path')])
+@pytest.mark.parametrize('directory', [False, True])
+def test_private_read_inputs_must_be_files(dataset_project, layout, missing_key, directory):
+    root = dataset_project
+    fields = ['scientific_name', 'run', 'taxid', 'private_file', 'lib_layout', 'read1_path', 'read2_path']
+    row = dict(zip(fields, ['Private plant', 'LOCAL1', '42', 'yes', layout, 'local.fastq', 'local_2.fastq']))
+    for key in ('read1_path', 'read2_path'):
+        file = root / 'input' / row[key]
+        if key != missing_key:
+            file.write_bytes(b'reads')
+        elif directory:
+            file.mkdir()
+    metadata = root / 'input/private.tsv'
+    write_tsv(metadata, fields, [row])
+    with pytest.raises(ValueError, match='private FASTQ missing:'):
+        prepare(root, 'private', root / 'config/build.yaml', metadata)
+    assert not (root / 'results/private').exists()
+
+
+def test_worker_rejects_missing_staged_private_reads(dataset_project, no_fastq_hashes):
+    root = dataset_project
+    fake_genegalleon(root)
+    reads = root / 'input/local.fastq'
+    reads.write_bytes(b'reads')
+    fields = ['scientific_name', 'run', 'taxid', 'private_file', 'lib_layout', 'read1_path']
+    metadata = root / 'input/private.tsv'
+    write_tsv(metadata, fields, [dict(zip(fields, ['Private plant', 'LOCAL1', '42', 'yes', 'single', reads.name]))])
+    build = prepare(root, 'private', root / 'config/build.yaml', metadata)
+    submit(build, until='quant', dry_run=True)
+    staged = build / 'work/genegalleon/Private_plant_LOCAL1/input/reads/Private_plant_LOCAL1/read1_path.fastq'
+    staged.unlink()
+    with pytest.raises(ValueError, match='private FASTQ missing:'):
+        worker(build, 1)
+    assert reads.is_file()
+    assert native_events(build) == []
 
 
 def test_retry_quarantine_does_not_touch_another_species_with_same_prefix(dataset_project, monkeypatch):

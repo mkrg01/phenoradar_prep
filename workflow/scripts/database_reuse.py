@@ -60,8 +60,6 @@ def validate_product(item, product, database, tables, cfg):
     for stage, condition in product.get('conditions', {}).items():
         if condition and condition != cfg['conditions'].get(stage):
             raise ValueError(f'{stage} settings differ from reuse_from product: {name}; use reuse_from: null for a fresh build')
-    for entry in product.get('raw_inputs', {}).values():
-        if Path(entry['path']).exists(): verify(entry)
     for key in PRODUCTS:
         verify(product[key])
     counts(product['counts'])

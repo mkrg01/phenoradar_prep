@@ -72,10 +72,6 @@ def select(paths, items, cfg, selected, errors, sources):
                         products[key] = None
                 if products['reference'] is None:
                     continue
-                for product in (products['reference'], products['quant']):
-                    for raw in (product or {}).get('provenance', {}).get('raw_inputs', {}).values():
-                        if Path(raw['path']).exists():
-                            verify(raw)
                 for product in products.values():
                     if product:
                         product.setdefault('provenance', {})['reused_from'] = source

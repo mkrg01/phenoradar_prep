@@ -178,18 +178,16 @@ reuse_from:
   - results/leaf_set_b/database/
 ```
 
-Only samples in the new metadata, after exclusions, are considered. The pipeline
-checks identities, checksums, lineage, genetic code, ODB reference, and build
-conditions. Conflicting products stop preparation regardless of list order.
-Use compatible sources, or `null` for a fresh build.
+Only samples in the new metadata, after exclusions, are considered. Reuse checks
+sample identities, product checksums, lineage, genetic code, ODB reference, and
+build conditions. Conflicts stop preparation regardless of source order. Set
+`reuse_from: null` to process samples from scratch.
 
-Build commands cache successful checksum verification in
-`.cache/verification.sqlite`. Cached checks require the same path, expected
-SHA256, device, inode, size, mtime, and ctime. Changed files are checked again;
-missing or corrupt files still fail validation. This cache is optional: it can
-be removed, and unavailable caches fall back to full verification. Database
-manifests and scientific reuse conditions are unchanged. The first verification
-after transferring products still reads their contents.
+Successful checks are cached for unchanged files. The first check of a copied
+database reads the product files and can take longer.
+
+Completed databases can be reused without the original FASTQs. See
+[input guidelines](inputs.md#file-formats) for private reads.
 
 Verified products are staged into the new build, which then no longer depends
 on the source paths. Missing samples run normally. Large products may share

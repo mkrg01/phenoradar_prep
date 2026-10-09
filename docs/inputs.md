@@ -36,8 +36,12 @@ reads, also provide these TSV columns:
 | `read1_path` | FASTQ path |
 | `read2_path` | Second FASTQ path for paired reads |
 
-Relative FASTQ paths resolve against the metadata directory. Use a new run ID
-when read content changes. ODB-mapper paths must avoid spaces and shell metacharacters.
+Relative FASTQ paths resolve against the metadata directory. Private FASTQs must
+exist for assembly and quantification; their contents are not checksummed.
+Use a new run ID when read content changes. For long-term datasets, deposit reads
+in SRA and use their run accessions.
+
+ODB-mapper paths must avoid spaces and shell metacharacters.
 
 ## Identifiers
 
