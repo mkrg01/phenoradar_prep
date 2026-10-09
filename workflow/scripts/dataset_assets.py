@@ -18,10 +18,32 @@ from verification_cache import active_cache
 
 COUNTS = ["busco_cds_single", "busco_cds_duplicated", "busco_cds_fragmented", "busco_cds_missing", "busco_cds_total"]
 SAFE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
+TAXONOMY_ID_FIELDS = ("taxid", "taxid_domain", "taxid_kingdom", "taxid_phylum", "taxid_class",
+                      "taxid_order", "taxid_family", "taxid_genus", "taxid_species")
 
 
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def normalize_taxonomy_ids(row):
+    """Canonicalize AMALGKIT taxids without inferring taxonomy; taxid is required."""
+    row = dict(row)
+    for field in TAXONOMY_ID_FIELDS:
+        if field not in row:
+            continue
+        original = row[field]
+        value = original.strip()
+        if not value and field != "taxid":
+            row[field] = ""
+            continue
+        match = re.fullmatch(r"([0-9]+)(?:\.0+)?", value)
+        integer = int(match.group(1)) if match else 0
+        if integer < 1:
+            expected = "positive taxid" if field == "taxid" else f"positive integer {field}"
+            raise ValueError(f"{expected} required: run={row['run']!r}, value={original!r}")
+        row[field] = str(integer)
+    return row
 
 
 def identities(metadata):
@@ -39,15 +61,13 @@ def identities(metadata):
         if None in row or any(v is None for v in row.values()):
             raise ValueError("malformed metadata row")
         name = row["scientific_name"]
-        row = annotate(row)
+        row = annotate(normalize_taxonomy_ids(row))
         label = row["analysis_sample_id"]
         odb = label.replace("-", "_")
         if not SAFE.fullmatch(label) or not SAFE.fullmatch(row["run"]):
             raise ValueError(f"unsafe species/run: {name!r}, {row['run']!r}")
         if label in species or row["run"] in runs or odb in odb_names:
             raise ValueError("dataset metadata requires unique runs and normalized sample identities")
-        if not row["taxid"].isdigit() or int(row["taxid"]) < 1:
-            raise ValueError(f"positive taxid required: {name}")
         taxon = row["species_id"]
         if taxon in taxids and taxids[taxon] != row["taxid"]:
             raise ValueError(f"conflicting taxids for the same species: {name}")
