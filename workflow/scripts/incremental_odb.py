@@ -8,7 +8,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from common import file_record, read_tsv, sha256, write_json
+from common import file_record, read_tsv, sha256, write_json, existing_product, content_sha256
 from make_manifests import make
 
 
@@ -41,7 +41,7 @@ def plan(samples, protein_dir, outdir, cache_dir, reference=None,
         record, proteins = load_snapshot(root, version, node)
         candidates = sorted(set(rows) & set(proteins))
         members = [name for name in candidates if proteins[name]['odb_species'] == rows[name]['odb_species']
-                   and proteins[name]['sha256'] == inputs[name]['sha256']]
+                   and proteins[name]['sha256'] == content_sha256(inputs[name])]
         if not members: continue
         constraints = set(record.get('reference_sha256s', []))
         if record.get('reference_sha256'): constraints.add(record['reference_sha256'])
@@ -90,11 +90,12 @@ def publish(samples, chunk_dir, protein_dir, cache_dir, label, version="v12", no
     by_odb = {r["odb_species"]: r["species"] for r in read_tsv(samples)}
     proteins = []
     for entry in identity["proteins"]:
-        odb_name = Path(entry["path"]).name.removesuffix("_protein.fa")
-        path = Path(protein_dir) / f"{odb_name}_protein.fa"
-        if odb_name not in by_odb or sha256(path) != entry["sha256"]:
+        from mapping_tables import protein_record
+        odb_name = Path(entry["path"]).name.removesuffix(".gz").removesuffix("_protein.fa")
+        path = existing_product(Path(protein_dir) / f"{odb_name}_protein.fa")
+        if odb_name not in by_odb or content_sha256(protein_record(path)) != content_sha256(entry):
             raise ValueError("mapping inputs changed before publishing cache")
-        proteins.append({"species": by_odb[odb_name], "odb_species": odb_name, **entry})
+        proteins.append({"species": by_odb[odb_name], "odb_species": odb_name, **entry, "sha256": content_sha256(entry)})
     for entry in provenance["results"]:
         if sha256(root / Path(entry["path"]).name) != entry["sha256"]:
             raise ValueError("mapping results changed before publishing cache")

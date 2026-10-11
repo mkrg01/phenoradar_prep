@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from common import atomic_writer, file_record, now, write_json, write_tsv
+from common import atomic_writer, file_record, now, write_json, write_tsv, existing_product
 from sample_identity import annotate, select_samples
 
 RANKS = ["kingdom", "phylum", "class", "order", "family", "genus"]
@@ -114,7 +114,7 @@ def prepare(metadata, busco, cds_dir, quant_dir, taxonomy_db, outdir,
     for row in selected.to_dict("records"):
         species, run = row["species"], row["run"]
         cds = (Path(cds_dir) / f"{species}_longestCDS.fa.gz").resolve()
-        abundance = (Path(quant_dir) / species / run / f"{run}_abundance.tsv").resolve()
+        abundance = existing_product(Path(quant_dir) / species / run / f"{run}_abundance.tsv").resolve()
         for path in [cds, abundance]:
             if not path.is_file() or not path.stat().st_size:
                 raise ValueError(f"input missing or empty: {path}")

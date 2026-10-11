@@ -18,6 +18,45 @@ from test_datasets import dataset_project, imported
 from verification_cache import verification_cache
 
 
+def test_verified_product_json_index_is_reused_by_deferred_preparation(dataset_project, monkeypatch):
+    import database_reuse
+    root = dataset_project
+    imported(root)
+    config = root / 'config/build.yaml'
+    cache = root / '.cache/verification.sqlite'
+    with verification_cache(cache):
+        expected = plan(root, config)[-1]
+    with verification_cache(cache), monkeypatch.context() as cached:
+        cached.setattr(database_reuse, 'product_json',
+                       lambda *_, **__: pytest.fail('unchanged product JSON should use its index'))
+        assert plan(root, config, verify_files=False)[-1] == expected
+
+
+def test_deferred_product_json_index_detects_same_size_edit_with_restored_mtime(dataset_project):
+    root = dataset_project
+    source = imported(root)
+    config = root / 'config/build.yaml'
+    cache = root / '.cache/verification.sqlite'
+    with verification_cache(cache):
+        plan(root, config)
+    product = next(iter(load_complete(source, verify_files=False)['products'].values()))
+    qc = Path(product['expression_qc']['path'])
+    previous = qc.stat()
+    original = qc.read_bytes()
+    changed = original.replace(b'"multimap": "error"', b'"multimap": "other"')
+    assert changed != original and len(changed) == len(original)
+    qc.write_bytes(changed)
+    os.utime(qc, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+    with verification_cache(cache):
+        report = plan(root, config, verify_files=False, repair=True)[-1]
+    conflicts = [row for row in report if row['assembly'] == 'conflict']
+    assert len(conflicts) == 1
+    assert 'expression identity differs' in conflicts[0]['reason']
+    with verification_cache(cache):
+        report = plan(root, config, repair=True)[-1]
+    assert sum(bool(row.get('rebuild')) for row in report) == 1
+
+
 def save_manifest(path, data):
     data['sha256'] = digest({k: v for k, v in data.items() if k != 'sha256'})
     write_json(path, data)

@@ -446,6 +446,9 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
         assert not any("<TBD>" in line for line in plan.splitlines() if "input:" in line)
     execute()
     out = tmp_path / "results/test"
+    batches = list((out / 'orthogroups/expression/batches').glob('batch_*/receipt.json'))
+    assert len(batches) == 1
+    assert set(json.loads(batches[0].read_text())['runs']) == {'A1', 'A2', 'B1'}
     run = json.loads((out / "run.json").read_text())
     assert run["container_image"] is None
     assert "container_image" not in run["config"]

@@ -245,6 +245,7 @@ def chunk_outputs(wildcards, suffix):
 
 
 def run_outputs(wildcards, suffix):
+    if suffix == "tsv": suffix = "tsv.gz"
     return [f'{TPM}/runs/{r["run"]}.{suffix}' for r in sample_rows(wildcards)]
 
 
@@ -295,7 +296,7 @@ rule kegg_references:
 
 rule proteins:
     input:
-        lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa' for r in sample_rows(wc)})
+        lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa.gz' for r in sample_rows(wc)})
 
 
 rule mapping:

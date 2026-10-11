@@ -47,7 +47,7 @@ checkpoint select_kegg_representatives:
         samples=f"{META}/samples.tsv",
         mapping=f"{MAPPING}/snapshot.json",
         tables=f"{MAPPING}/species",
-        proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa' for r in sample_rows(wc)}),
+        proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa.gz' for r in sample_rows(wc)}),
         code=f"{SCRIPTS}/select_kegg_representatives.py",
         helpers=[f"{SCRIPTS}/{name}.py" for name in [
             "common", "mapping_tables", "dataset_assets", "busco_phylogeny", "aggregate_ko_tpm", "run_kofam"]]

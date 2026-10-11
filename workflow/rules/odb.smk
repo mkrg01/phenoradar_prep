@@ -3,9 +3,9 @@ rule translate_cds:
         cds=lambda wc: species_row(wc)["cds"],
         code=f"{SCRIPTS}/translate_cds.py",
         common=f"{SCRIPTS}/common.py",
-        cache_code=[f"{SCRIPTS}/protein_cache.py", f"{SCRIPTS}/dataset_assets.py"]
+        cache_code=[f"{SCRIPTS}/protein_cache.py", f"{SCRIPTS}/dataset_assets.py", f"{SCRIPTS}/product_storage.py"]
     output:
-        protein=f"{PROTEINS}/{{species}}_protein.fa",
+        protein=f"{PROTEINS}/{{species}}_protein.fa.gz",
         provenance=f"{PROTEINS}/{{species}}_protein.json"
     params:
         seqkit="seqkit",
@@ -115,9 +115,9 @@ rule collect_odb:
         hits=lambda wc: odb_source_files(wc, "og.hits"),
         summaries=lambda wc: odb_source_files(wc, "summary.txt"),
         provenance=lambda wc: odb_source_files(wc, "provenance.json"),
-        proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa' for r in sample_rows(wc)}),
+        proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa.gz' for r in sample_rows(wc)}),
         code=f"{SCRIPTS}/mapping_tables.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/translate_cds.py", f"{SCRIPTS}/incremental_odb.py", f"{SCRIPTS}/dataset_assets.py"]
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/translate_cds.py", f"{SCRIPTS}/incremental_odb.py", f"{SCRIPTS}/dataset_assets.py", f"{SCRIPTS}/product_storage.py"]
     output:
         snapshot=f"{MAPPING}/snapshot.json",
         tables=directory(f"{MAPPING}/species")
@@ -139,7 +139,7 @@ rule collect_odb:
 checkpoint plan_incremental_odb:
     input:
         samples=f"{META}/samples.tsv",
-        proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa' for r in sample_rows(wc)}),
+        proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa.gz' for r in sample_rows(wc)}),
         code=f"{SCRIPTS}/incremental_odb.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/make_manifests.py"]
     output: directory(ODB_PLAN)

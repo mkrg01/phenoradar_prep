@@ -7,8 +7,9 @@ import tempfile
 from collections import OrderedDict
 from pathlib import Path
 
-from common import write_json, write_tsv
-from dataset_assets import digest, link_file, record, stat_identity, verify, verify_many
+from common import write_json, write_tsv, content_sha256, protein_provenance
+from product_storage import stage_product
+from dataset_assets import digest, record, stage_file, stat_identity, verify, verify_many
 from verification_cache import active_cache, compact_rows, expand_rows
 
 PRODUCT_FILES = ('cds', 'busco', 'abundance', 'protein', 'translation', 'expression', 'expression_qc')
@@ -113,7 +114,7 @@ def load_products(path, data, verify_files=True):
 
     def bind(entry):
         stored = files.get(entry['path'])
-        if stored is None or any(entry.get(k) != stored.get(k) for k in ('sha256', 'bytes')):
+        if stored is None or any(entry.get(k) != stored.get(k) for k in ('sha256', 'bytes', 'content_sha256')):
             raise ValueError('product is absent from manifest inventory')
         return copy.deepcopy(stored)
 
@@ -168,7 +169,7 @@ def publish_products(build, data):
             if any(product.get(key) != existing['products'][species].get(key) for key in ('row', 'conditions')):
                 raise ValueError('existing products have different metadata or conditions')
             for key in ('cds', 'busco', 'abundance', 'protein', 'expression'):
-                if product[key]['sha256'] != existing['products'][species][key]['sha256']:
+                if content_sha256(product[key]) != content_sha256(existing['products'][species][key]):
                     raise ValueError('existing products differ from completed build')
             if product['translation']['sha256'] != existing['products'][species]['source_translation_sha256']:
                 raise ValueError('existing translation differs from completed build')
@@ -184,10 +185,10 @@ def publish_products(build, data):
     files = {}
 
     def add(entry, relative):
-        source = verify(entry)
+        relative = Path(relative)
         destination = staging / relative
-        link_file(source, destination)
-        saved = dict(entry, path=str(relative), stat=stat_identity(destination))
+        save = stage_product if relative.parts[0] in {'quant', 'proteins', 'expression'} and relative.suffix == '.gz' else stage_file
+        saved = dict(save(entry, destination, target / relative), path=str(relative))
         files[str(relative)] = saved
         return copy.deepcopy(saved)
 
@@ -197,7 +198,10 @@ def publish_products(build, data):
         return copy.deepcopy(saved)
 
     try:
-        for entry, relative in input_entries(data): add(entry, relative)
+        for entry, relative in input_entries(data):
+            if relative.parts[0] == 'quant' and relative.suffix != '.gz':
+                relative = Path(str(relative) + '.gz')
+            add(entry, relative)
         for name in ('source_metadata.tsv', 'excluded_accessions.tsv', 'excluded_runs.tsv'):
             source = build / name
             if source.exists(): add(record(source), name)
@@ -230,18 +234,22 @@ def publish_products(build, data):
         for species, product in products.items():
             for key in ('cds', 'busco', 'abundance'):
                 relative = Path(product[key]['path']).relative_to(data['input'])
+                if key == 'abundance' and relative.suffix != '.gz':
+                    relative = Path(str(relative) + '.gz')
                 product[key] = copy.deepcopy(files[str(relative)])
             protein_relative = Path('proteins') / Path(product['protein']['path']).name
+            if protein_relative.suffix != '.gz':
+                protein_relative = Path(str(protein_relative) + '.gz')
             product['protein'] = add(product['protein'], protein_relative)
             product['source_translation_sha256'] = product['translation']['sha256']
             translation = json.loads(verify(product['translation']).read_text())
             translation['cds'] = {k:v for k,v in product['cds'].items() if k != 'stat'}
             translation['protein'] = {k:v for k,v in product['protein'].items() if k != 'stat'}
-            translation_relative = protein_relative.with_suffix('.json')
+            translation_relative = protein_provenance(protein_relative)
             write_json(staging / translation_relative, translation)
             product['translation'] = created(translation_relative)
             run = product['row']['run']
-            relative = Path('expression/runs') / f'{run}.tsv'
+            relative = Path('expression/runs') / f'{run}.tsv.gz'
             product['expression'] = add(product['expression'], relative)
             product['source_expression_qc_sha256'] = product['expression_qc']['sha256']
             qc = json.loads(verify(product['expression_qc']).read_text())
@@ -249,7 +257,7 @@ def publish_products(build, data):
             qc['expression'] = {k:v for k,v in product['expression'].items() if k != 'stat'}
             qc['mapping_table']['path'] = f"odb/species/{product['odb_species']}.tsv.gz"
             qc['mapping_table'].pop('stat', None)
-            relative = relative.with_suffix('.qc.json')
+            relative = relative.parent / f'{run}.qc.json'
             write_json(staging / relative, qc)
             product['expression_qc'] = created(relative)
         from mapping_tables import load_tables, relative_file, write_tables

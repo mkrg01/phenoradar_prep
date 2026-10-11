@@ -123,7 +123,7 @@ def test_submit_prepares_plan_cache_hits_locally_without_verification_job(reuse_
     root, source = reuse_project
     assert invoke(monkeypatch, dataset, 'plan', '--root', root) == 0
     prohibit_artifact_hashes(monkeypatch, artifact_paths(source))
-    assert invoke(monkeypatch, dataset, 'submit', '--root', root, '--name', 'cached') == 0
+    assert invoke(monkeypatch, dataset, 'submit', '--root', root, '--name', 'cached', '--prepare-locally') == 0
     build = root / 'results/cached'
     assert len(scheduler['commands']) == 1
     assert '_mapping' in next(arg for arg in scheduler['commands'][0] if arg.startswith('--job-name='))
@@ -143,13 +143,14 @@ def test_cached_submit_with_new_samples_schedules_workers_directly(reuse_project
     assert invoke(monkeypatch, dataset, 'plan', '--root', root) == 0
     prohibit_artifact_hashes(monkeypatch, artifact_paths(source))
     monkeypatch.setattr('dataset_software.resolve', lambda *_: pytest.fail('Software acquisition on cached submit'))
-    assert invoke(monkeypatch, dataset, 'submit', '--root', root, '--name', 'new_sample') == 0
+    assert invoke(monkeypatch, dataset, 'submit', '--root', root, '--name', 'new_sample', '--prepare-locally') == 0
     commands = scheduler['commands']
     assert len(commands) == 2
     assert '_sample' in next(arg for arg in commands[0] if arg.startswith('--job-name='))
     assert next(arg for arg in commands[0] if arg.startswith('--array=')).split('%')[0] == '--array=3'
     assert '--dependency=afterok:1001' in commands[1]
     assert not (root / 'results/new_sample/jobs/0001_verify.sh').exists()
+    assert {p.name for p in (root / 'results/new_sample/work/genegalleon').iterdir()} == {'Delta_new_NEW1'}
 
 
 def test_cached_products_with_uncached_software_still_use_slurm(reuse_project, scheduler, monkeypatch):
@@ -161,7 +162,7 @@ def test_cached_products_with_uncached_software_still_use_slurm(reuse_project, s
     assert invoke(monkeypatch, dataset, 'plan', '--root', root) == 0
     prohibit_artifact_hashes(monkeypatch, artifact_paths(source))
     monkeypatch.setattr('dataset_software.download', lambda *_: pytest.fail('Local software download'))
-    assert invoke(monkeypatch, dataset, 'submit', '--root', root, '--name', 'uncached_software') == 0
+    assert invoke(monkeypatch, dataset, 'submit', '--root', root, '--name', 'uncached_software', '--prepare-locally') == 0
     assert len(scheduler['commands']) == 1
     assert '_verify' in next(arg for arg in scheduler['commands'][0] if arg.startswith('--job-name='))
     assert not (root / 'results/uncached_software/runtime.json').exists()
@@ -180,9 +181,44 @@ def test_file_changed_after_cache_probe_defers_reads_to_slurm(reuse_project, sch
         return result
     monkeypatch.setattr(build_dispatch, 'cached_preparation', changed)
     prohibit_artifact_hashes(monkeypatch, artifact_paths(source))
-    assert invoke(monkeypatch, dataset, 'submit', '--root', root, '--name', 'race') == 0
+    assert invoke(monkeypatch, dataset, 'submit', '--root', root, '--name', 'race', '--prepare-locally') == 0
     assert len(scheduler['commands']) == 1
     assert '_verify' in next(arg for arg in scheduler['commands'][0] if arg.startswith('--job-name='))
+
+
+def test_cached_submit_defers_file_preparation_and_dispatch_keeps_cache_hits(reuse_project, scheduler, monkeypatch):
+    import build_dispatch
+    root, source = reuse_project
+    fake_genegalleon(root)
+    metadata = root / 'input/metadata.tsv'
+    rows = read_tsv(metadata)
+    rows.append(dict.fromkeys(rows[0], '') | {'scientific_name': 'Delta new', 'run': 'NEW1', 'taxid': '42'})
+    write_tsv(metadata, list(rows[0]), rows)
+    assert invoke(monkeypatch, dataset, 'plan', '--root', root) == 0
+    prohibit_artifact_hashes(monkeypatch, artifact_paths(source))
+    with monkeypatch.context() as local:
+        local.setattr(build_dispatch, 'cached_preparation', lambda *_: pytest.fail('Local cache scan before sbatch'))
+        local.setattr(build_dispatch, 'verify_and_stage', lambda *_, **__: pytest.fail('Local import before sbatch'))
+        local.setattr(dataset, 'stage_workspace', lambda *_: pytest.fail('Local workspace preparation before sbatch'))
+        assert invoke(local, dataset, 'submit', '--root', root, '--name', 'fast') == 0
+    build = root / 'results/fast'
+    assert len(scheduler['commands']) == 1
+    assert not (build / 'work').exists()
+    assert not (build / 'runtime.json').exists()
+    assert json.loads((build / 'jobs/verification.json').read_text())['state'] == 'queued'
+    # A second submit uses the saved snapshot and rejects active preparation.
+    scheduler['running'] = True
+    with pytest.raises(ValueError, match='queued/running'):
+        invoke(monkeypatch, dataset, 'submit', '--root', root, '--build', build)
+    scheduler['running'] = False
+    monkeypatch.setenv('SLURM_JOB_ID', '1001')
+    commands = dispatch(build)
+    assert len(commands) == 2
+    assert '--array=3' in commands[0]
+    assert '--dependency=afterok:1001' in commands[0]
+    assert '--dependency=afterok:1002' in commands[1]
+    assert {p.name for p in (build / 'work/genegalleon').iterdir()} == {'Delta_new_NEW1'}
+    assert sum(row['state'] == 'reused' for row in progress(build, read_context(build))['samples']) == 3
 
 
 def test_completed_build_with_verified_cache_needs_no_slurm_job(completed_project, scheduler, monkeypatch):
@@ -269,7 +305,7 @@ def test_retry_invalidates_only_bad_imports_and_downstream_work(reuse_project):
     verify_and_stage(build, dataset.load(build))
     saved = runtime_data(build)
     files = saved['verified_files']['Alpha_plant_A1']
-    missing = next(Path(entry['path']) for entry in files if Path(entry['path']).name == 'abundance.tsv')
+    missing = next(Path(entry['path']) for entry in files if Path(entry['path']).name == 'abundance.tsv.gz')
     missing.unlink()
     (build / 'work/input').mkdir()
     (build / 'work/input/old.txt').write_text('stale')

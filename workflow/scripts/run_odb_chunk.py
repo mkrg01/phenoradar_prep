@@ -14,6 +14,7 @@ from pathlib import Path
 from common import atomic_writer, file_record, now, sha256, write_json
 from odb_environment import command_path, odb_environment, software_records
 from cleanup_work import cleanup
+from product_storage import decoded_sha256, stage_product
 
 
 def publish_tree(source, destination):
@@ -82,11 +83,13 @@ def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper_v1
         if not re.fullmatch(r"[A-Za-z0-9_./+-]+", str(Path(path).absolute())):
             raise ValueError(f"ODB path contains unsupported characters: {path}")
     scripts = Path(__file__).resolve().parent
-    identity = {"manifest": file_record(manifest), "proteins": [file_record(p) for p in proteins],
+    protein_entries = [dict(file_record(p), content_sha256=decoded_sha256(p)) if p.endswith('.gz')
+                       else file_record(p) for p in proteins]
+    identity = {"manifest": file_record(manifest), "proteins": protein_entries,
                 "reference": file_record(reference), "node": node, "version": version,
                 "jobs": jobs, "batch_size": batch_size, "software": software_records(command, prefix),
                 "implementation": [file_record(scripts / name) for name in
-                                   ["run_odb_chunk.py", "odb_map.sh", "odb_environment.py", "common.py", "cleanup_work.py"]]}
+                                   ["run_odb_chunk.py", "odb_map.sh", "odb_environment.py", "common.py", "cleanup_work.py", "product_storage.py"]]}
     fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     out, work_root = Path(output_dir).absolute(), Path(work_dir).absolute()
     if out.is_symlink() or work_root.is_symlink():
@@ -119,7 +122,20 @@ def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper_v1
         write_json(work / "identity.json", identity)
         write_json(status, {"state": "running", "started_at": now(), "fingerprint": fingerprint, "work": str(work)})
         try:
-            subprocess.run(["bash", str(scripts / "odb_map.sh"), command, str(Path(manifest).resolve()),
+            tool_manifest = Path(manifest).resolve()
+            if any(p.endswith('.gz') for p in proteins):
+                tool_manifest = work / 'proteins.fs'
+                tool_inputs = []
+                for entry in protein_entries:
+                    path = Path(entry['path'])
+                    if path.suffix == '.gz':
+                        destination = work / 'inputs' / path.name.removesuffix('.gz')
+                        stage_product(entry, destination)
+                        path = destination
+                    tool_inputs.append(str(path))
+                with atomic_writer(tool_manifest) as handle:
+                    handle.write('\n'.join(tool_inputs) + '\n')
+            subprocess.run(["bash", str(scripts / "odb_map.sh"), command, str(tool_manifest),
                             label, str(node), version, str(data), str(work), str(jobs), str(batch_size)],
                            env=env, check=True)
             project = work / "odbmapper" / version / "pipeline"

@@ -3,7 +3,8 @@ import copy
 import json
 from pathlib import Path
 
-from common import write_json
+from common import write_json, content_sha256
+from product_storage import stage_product
 from dataset_assets import (ProductIntegrityError, counts, product_file,
                             product_json, record, stage_file, stat_identity, verify, verify_many)
 from mapping_tables import load_tables, relative_file, write_tables
@@ -13,6 +14,31 @@ from verification_cache import active_cache
 PRODUCTS = ('cds', 'busco', 'abundance', 'protein', 'translation', 'expression', 'expression_qc')
 SAMPLE_FIELDS = ('scientific_name', 'taxid', 'species_id', 'analysis_sample_id', 'run',
                  'private_file', 'lib_layout', 'read1_path', 'read2_path')
+
+
+def indexed_product_json(entry, documents):
+    """Reuse verified small JSON files while their full file identity agrees."""
+    if documents is None:
+        return product_json(entry, verify_files=False)
+    try:
+        before = stat_identity(entry['path'])
+    except OSError as error:
+        raise ProductIntegrityError(f'registered file unavailable: {entry["path"]}: {error}') from error
+    indexed = documents.get(entry['path'], {})
+    if (indexed.get('sha256') == entry['sha256'] and indexed.get('stat') == before
+            and isinstance(indexed.get('value'), dict)):
+        return indexed['value']
+    value = product_json(entry, verify_files=False)
+    if before != stat_identity(entry['path']):
+        raise ProductIntegrityError(f'registered file changed while reading: {entry["path"]}')
+    cache = active_cache()
+    # A deferred preview may parse an unchecked file. Persist only values whose
+    # bytes have already been verified, in one index per source database.
+    if entry.get('stat') == before or (cache is not None and cache.matches(entry['path'], entry['sha256'], before)):
+        documents[entry['path']] = {'sha256': entry['sha256'], 'stat': before, 'value': value}
+    else:
+        documents.pop(entry['path'], None)
+    return value
 
 
 def software_provenance(entry):
@@ -83,25 +109,28 @@ def validate_conditions(item, product, database, cfg):
             raise ValueError(f'{stage} settings differ from reuse_from product: {name}; use reuse_from: null for a fresh build')
 
 
-def validate_product(item, product, database, tables, cfg, verify_files=True, mapping_root=None):
+def validate_product(item, product, database, tables, cfg, verify_files=True, mapping_root=None,
+                     json_documents=None, check_files=True):
     validate_conditions(item, product, database, cfg)
     name, reference = item['species'], product['cds']['sha256']
-    for key in PRODUCTS:
-        product_file(product[key], verify_files)
+    if check_files:
+        for key in PRODUCTS:
+            product_file(product[key], verify_files)
     counts(product['counts'])
-    translation = product_json(product['translation'], verify_files=False)
+    translation = indexed_product_json(product['translation'], json_documents)
     mapping = tables['tables'][name]
     if (translation['cds']['sha256'] != reference or
             translation['protein']['sha256'] != product['protein']['sha256'] or
             translation['translation_table'] != cfg['translation']['table'] or
-            mapping['protein_sha256'] != product['protein']['sha256'] or
+            mapping['protein_sha256'] != content_sha256(product['protein']) or
             mapping['odb_species'] != item['odb_species'] or
             product['odb_species'] != item['odb_species']):
         raise ValueError(f'reuse_from translation/mapping identity differs: {name}')
     root = mapping_root if mapping_root is not None else Path(database['mapping']['path']).parent.resolve()
     table = relative_file(root, mapping['table'], resolved_root=root)
-    product_file(table, verify_files)
-    qc = product_json(product['expression_qc'], verify_files=False)
+    if check_files:
+        product_file(table, verify_files)
+    qc = indexed_product_json(product['expression_qc'], json_documents)
     if (qc.get('species') != name or qc.get('run') != item['row']['run'] or
             qc.get('multimap') != 'error' or
             qc.get('abundance', {}).get('sha256') != product['abundance']['sha256'] or
@@ -126,6 +155,10 @@ def select(paths, items, cfg, verify_files=True, rebuilds=None):
         data = load_complete(path, verify_files=False)
         verify(source)
         sources.append(source)
+        cache = active_cache()
+        json_index_kind = 'reuse-product-json-v1'
+        indexed = cache.document(path, json_index_kind, source['stat'], source['sha256']) if cache else None
+        json_documents = dict(indexed or {}) if cache else None
         names = sorted(wanted.keys() & data['products'].keys())
         if not names:
             continue
@@ -171,8 +204,9 @@ def select(paths, items, cfg, verify_files=True, rebuilds=None):
                 if name in failures:
                     raise failures[name]
                 mapping, translation = validate_product(wanted[name], product, data, tables, cfg, False,
-                                                        mapping_root=mapping_root)
-                identity = {'files': {k: product[k]['sha256'] for k in ('cds', 'busco', 'abundance', 'protein', 'expression')},
+                                                        mapping_root=mapping_root, json_documents=json_documents,
+                                                        check_files=False)
+                identity = {'files': {k: content_sha256(product[k]) for k in ('cds', 'busco', 'abundance', 'protein', 'expression')},
                             'mapping': mapping['table']['sha256'], 'counts': product['counts'],
                             'conditions': {stage: product.get('conditions', {}).get(stage) for stage in ('assembly', 'busco', 'quant')},
                             'reference': sorted(tables.get('reference_sha256s', []))}
@@ -191,6 +225,8 @@ def select(paths, items, cfg, verify_files=True, rebuilds=None):
             except (ValueError, OSError, KeyError) as error:
                 errors[name] = str(error)
                 selected.pop(name, None)
+        if cache and json_documents != (indexed or {}):
+            cache.remember_document(path, json_index_kind, source['stat'], source['sha256'], json_documents)
     references = {r for entry in selected.values() for r in entry['identity']['reference']}
     if len(references) > 1:
         raise ValueError('reuse_from databases use different ODB reference snapshots')
@@ -203,7 +239,7 @@ def select(paths, items, cfg, verify_files=True, rebuilds=None):
     return selected, errors, sources
 
 
-def stage(staging, target, selected, cfg):
+def stage(staging, target, selected, cfg, progress=None):
     """Snapshot validated products locally so retries do not depend on source databases."""
     from aggregate_tpm import cache_identity
     base = Path(staging) / 'work/cache'
@@ -214,15 +250,18 @@ def stage(staging, target, selected, cfg):
 
     def saved(entry, relative):
         path = base / relative
-        saved = stage_file(entry, path, final / relative)
+        save = stage_product if relative.name in ('abundance.tsv.gz', 'protein.fa.gz', 'tpm.tsv.gz') else stage_file
+        saved = save(entry, path, final / relative)
         files[name].append(saved)
         return saved
 
-    for name, chosen in selected.items():
+    for index, (name, chosen) in enumerate(selected.items(), 1):
         files[name] = []
         if chosen.get('kind') == 'stages':
             from build_stage_reuse import stage as stage_products
             files[name] = stage_products(staging, target, name, chosen)
+            if progress:
+                progress(index, len(selected))
             continue
         product = chosen['product']
         row = product['row']
@@ -230,7 +269,7 @@ def stage(staging, target, selected, cfg):
         prefix = Path('products') / name / refid
         cds = saved(product['cds'], prefix / 'cds.fa.gz')
         full = saved(product['busco'], prefix / ('busco.tsv.gz' if product['busco']['path'].endswith('.gz') else 'busco.tsv'))
-        abundance = saved(product['abundance'], prefix / 'abundance.tsv')
+        abundance = saved(product['abundance'], prefix / 'abundance.tsv.gz')
         def provenance(stage):
             return {'source': 'database', 'database': chosen['source'],
                     'condition': product.get('conditions', {}).get(stage),
@@ -245,16 +284,16 @@ def stage(staging, target, selected, cfg):
                    'reference_id': refid, 'run': row['run'], 'abundance': abundance,
                    'sample': {k: row.get(k, '') for k in SAMPLE_FIELDS[5:]}, 'provenance': provenance('quant')})
         protein_dir = Path('proteins') / refid / f'table_{cfg["translation"]["table"]}'
-        protein = saved(product['protein'], protein_dir / 'protein.fa')
+        protein = saved(product['protein'], protein_dir / 'protein.fa.gz')
         info = chosen['translation']
         write_json(base / protein_dir / 'receipt.json', {'schema_version': 1, 'cds_sha256': refid,
                    'translation_table': cfg['translation']['table'], 'seqkit': info['seqkit'],
-                   'sequences': info['sequences'], 'protein': dict(protein, path='protein.fa')})
+                   'sequences': info['sequences'], 'protein': dict(protein, path='protein.fa.gz')})
         tables[name] = chosen['mapping']
         references.update(chosen['identity']['reference'])
         identity = cache_identity({'species': name, 'run': row['run']}, abundance, chosen['mapping']['table'])
         expression_dir = Path('expression') / identity
-        expression = saved(product['expression'], expression_dir / 'tpm.tsv')
+        expression = saved(product['expression'], expression_dir / 'tpm.tsv.gz')
         qc = copy.deepcopy(json.loads(verify(product['expression_qc']).read_text()))
         qc.update(abundance=abundance, expression=expression)
         qc['mapping_table'] = dict(chosen['mapping']['table'],
@@ -262,11 +301,13 @@ def stage(staging, target, selected, cfg):
         write_json(base / expression_dir / 'qc.json', qc)
         qc_entry = record(base / expression_dir / 'qc.json')
         write_json(base / expression_dir / 'receipt.json', {'identity': identity,
-            'files': {'tpm.tsv': dict(expression, path='tpm.tsv'), 'qc.json': dict(qc_entry, path='qc.json')},
+            'files': {'tpm.tsv.gz': dict(expression, path='tpm.tsv.gz'), 'qc.json': dict(qc_entry, path='qc.json')},
             'reused_from': chosen['source']})
         for relative in (prefix / 'reference.json', prefix / 'busco.json', prefix / 'quant' / (row['run'] + '.json'),
                          protein_dir / 'receipt.json', expression_dir / 'qc.json', expression_dir / 'receipt.json'):
             files[name].append(dict(record(base / relative), path=str(final / relative)))
+        if progress:
+            progress(index, len(selected))
     if tables:
         snapshot = write_tables(base / 'odb' / f'v12_{cfg["odb"]["ncbi_tax_id"]}' / 'reused', tables,
                                 node=cfg['odb']['ncbi_tax_id'], references=references)

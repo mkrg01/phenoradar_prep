@@ -44,8 +44,9 @@ def test_build_submit_prepares_and_retries_saved_inputs(dataset_project, schedul
     before = (build / 'build.json').read_bytes()
     assert scheduler['commands'] == []
     assert 'sbatch' in capsys.readouterr().out
-    assert (build / 'jobs/0001_mapping.sh').is_file()
-    assert not (build / 'jobs/0001_verify.sh').exists()
+    assert (build / 'jobs/0001_verify.sh').is_file()
+    assert not (build / 'jobs/0001_mapping.sh').exists()
+    assert not (build / 'work/cache').exists()
     # Retry uses the snapshot, even when live inputs are gone or invalid.
     (root / 'input/metadata.tsv').unlink()
     cfg['translation']['table'] = 2
@@ -192,6 +193,24 @@ def test_database_depends_on_every_sample_batch(dataset_project, scheduler, monk
     assert '--dependency=afterany:1001' in commands[1]
     assert '--dependency=afterok:1001:1002' in commands[2]
     assert '--kill-on-invalid-dep=yes' in commands[2]
+
+
+def test_pilot_submission_prepares_only_selected_workspaces(dataset_project, scheduler):
+    from test_datasets import new_dataset
+    build = new_dataset(dataset_project, ('Alpha new', 'Beta new', 'Gamma new'))
+    items = dataset.load(build)['items']
+    pilot = dataset_project / 'pilot.txt'
+    pilot.write_text(items[1]['species'] + '\n')
+    commands = dataset.submit(build, species=pilot)
+    assert len(commands) == 1
+    assert '--array=2' in commands[0]
+    workspaces = build / 'work/genegalleon'
+    assert {p.name for p in workspaces.iterdir()} == {items[1]['species']}
+    # Adding the other samples later preserves the original task indices.
+    scheduler['running'] = False
+    commands = dataset.submit(build, until='quant')
+    assert '--array=1,2,3' in commands[0]
+    assert {p.name for p in workspaces.iterdir()} == {item['species'] for item in items}
 
 
 def test_analysis_partial_public_resource_override(completed_project, scheduler):

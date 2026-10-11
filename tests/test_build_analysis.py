@@ -125,7 +125,7 @@ def test_complete_build_multiple_analyses_and_species_updates(dataset_project,fa
     with pytest.raises(ValueError, match='expression incomplete'):
         complete(build)
     execute(build,'database',mapping=True)
-    assert (build/'work/database/orthogroups/expression/runs/A1.tsv').is_file()
+    assert (build/'work/database/orthogroups/expression/runs/A1.tsv.gz').is_file()
     assert not (root/'builds').exists()
     receipt = complete(build)
     original = receipt.read_bytes()
@@ -147,7 +147,7 @@ def test_complete_build_multiple_analyses_and_species_updates(dataset_project,fa
         output = run
         assert 'tpm' not in analysis.load(run)['pipeline']
         assert load_complete(build)['tpm'] == {'multimap': 'error'}
-        assert (output/'orthogroups/expression/runs/A1.tsv').samefile(build/'database/expression/runs/A1.tsv')
+        assert (output/'orthogroups/expression/runs/A1.tsv.gz').samefile(build/'database/expression/runs/A1.tsv.gz')
         assert {r['species'] for r in read_tsv(output/'orthogroups/expression/tpm.tsv')} == expected
         assert {r['species'] for r in read_tsv(output/'phenoradar_inputs/tpm.tsv')} == expected
         # Expression-only downstream runs do not even stage proteins or mappings.
@@ -188,7 +188,7 @@ def test_complete_build_multiple_analyses_and_species_updates(dataset_project,fa
             execute(subset,'all'); execute(subset,'phenoradar_inputs')
             assert {r['species'] for r in read_tsv(subset/'phenoradar_inputs/tpm.tsv')} == {'Alpha_plant_A1'}
             assert not events.exists()
-        assert (updated/'database/expression/runs/A1.tsv').samefile(build/'database/expression/runs/A1.tsv')
+        assert (updated/'database/expression/runs/A1.tsv.gz').samefile(build/'database/expression/runs/A1.tsv.gz')
         assert analysis.prepare(root,'loose',config,updated) == updated/'downstream/loose'
     assert not (root/'analyses').exists()
     assert not (root/'work').exists()

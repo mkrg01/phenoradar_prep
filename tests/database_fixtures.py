@@ -43,7 +43,8 @@ def database_from_stages(root, store, items, name='source'):
     mapping = write_tables(build / 'bound_mapping', entries)
     # Materialize the stage products using the production publication layout.
     input_root = build / 'input'
-    from dataset_assets import link_file
+    from dataset_assets import stage_file
+    from product_storage import stage_product
     from common import write_tsv
     files = []
     for species, p in products.items():
@@ -51,8 +52,9 @@ def database_from_stages(root, store, items, name='source'):
                               ('busco', f'busco/full/{species}.busco.full.tsv'),
                               ('abundance', f'quant/{species}/{p["row"]["run"]}/{p["row"]["run"]}_abundance.tsv')]:
             target = input_root / relative
-            link_file(p[key]['path'], target)
-            p[key] = record(target); files.append(p[key])
+            stage = stage_product if key == 'abundance' else stage_file
+            p[key] = stage(p[key], target)
+            files.append(p[key])
     rows = [i['row'] for i in items]
     write_tsv(input_root/'metadata.tsv', list(rows[0]), rows)
     from dataset_assets import COUNTS

@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from common import read_tsv, write_tsv
+from common import read_tsv, write_tsv, existing_product
 
 
 def merge(samples, run_dir, outdir):
@@ -13,7 +13,7 @@ def merge(samples, run_dir, outdir):
     groups = set()
     for sample in manifest:
         run = sample["run"]
-        rows = read_tsv(Path(run_dir) / f"{run}.tsv")
+        rows = read_tsv(existing_product(Path(run_dir) / f"{run}.tsv"))
         if not rows or any(row["run"] != run or row["species"] != sample["species"] for row in rows):
             raise ValueError(f"per-run table does not match manifest: {run}")
         if len({row["orthogroup"] for row in rows}) != len(rows):

@@ -3,7 +3,7 @@
 import argparse
 from pathlib import Path
 
-from common import atomic_writer, read_tsv, write_json
+from common import atomic_writer, read_tsv, write_json, existing_product
 
 
 def chunk_plan(rows, protein_dir, chunk_size):
@@ -19,7 +19,7 @@ def chunk_plan(rows, protein_dir, chunk_size):
     for start in range(0, len(ordered), chunk_size):
         label = f"chunk_{start // chunk_size:03d}"
         members = ordered[start:start + chunk_size]
-        proteins = [str((Path(protein_dir) / f"{species[s]}_protein.fa").resolve()) for s in members]
+        proteins = [str(existing_product(Path(protein_dir) / f"{species[s]}_protein.fa", default_gzip=True).resolve()) for s in members]
         chunks.append({"chunk": label, "species": members, "proteins": proteins})
     return chunks
 

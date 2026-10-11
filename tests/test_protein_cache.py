@@ -42,7 +42,7 @@ def test_reuse_without_seqkit_and_corruption_detection(tmp_path, cds, seqkit, mo
     assert first.read_bytes() == second.read_bytes()
     receipt = json.loads(second.with_suffix('.json').read_text())
     assert receipt['reused'] is True
-    cached = next(cache.glob('*/table_1/protein.fa'))
+    cached = next(cache.glob('*/table_1/protein.fa.gz'))
     cached.write_text('>Species_g1\nWRONG\n')
     with pytest.raises(ValueError, match='registered file changed'):
         protein_cache.cached_translate(cds, second, second.with_suffix('.json'), cache)

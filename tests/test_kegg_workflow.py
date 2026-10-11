@@ -293,8 +293,8 @@ def test_kegg_reuses_completed_database_without_mapping_or_translation(
     assert len(reps) == 2
     assert {r["member_count"] for r in reps} == {"2"}
     assert len(events.read_text().splitlines()) == 1
-    assert (run / "orthogroups/expression/runs/A1.tsv").samefile(
-        build / "database/expression/runs/A1.tsv")
+    assert (run / "orthogroups/expression/runs/A1.tsv.gz").samefile(
+        build / "database/expression/runs/A1.tsv.gz")
     values = {(r["run"], r["ko"]): float(r["tpm_sum"])
               for r in read_tsv(run / "kegg/ko_tpm_sum.tsv")}
     assert values["A1", "K00001"] == 20

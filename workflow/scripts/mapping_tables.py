@@ -13,7 +13,8 @@ from pathlib import Path
 import shutil
 import tempfile
 
-from common import file_record, read_tsv, species_from_gene_id, write_json
+from common import file_record, read_tsv, species_from_gene_id, write_json, existing_product, protein_provenance, content_sha256
+from product_storage import product_record
 from dataset_assets import SAFE, digest, link_file, record, stage_file, stat_identity, verify
 from translate_cds import fasta_ids
 
@@ -54,13 +55,13 @@ def checked(entry, cache_dir):
 
 
 def protein_record(path):
-    path = Path(path).resolve()
-    provenance = path.with_suffix('.json')
+    path = existing_product(path).resolve()
+    provenance = protein_provenance(path)
     if provenance.is_file():
         entry = dict(json.loads(provenance.read_text())['protein'], path=str(path))
         verify(entry)
         return dict(entry, stat=stat_identity(path))
-    return record(path)
+    return product_record(path)
 
 
 @lru_cache(maxsize=8)
@@ -162,13 +163,13 @@ def partition(annotation, members, cache_dir):
 
 
 def species_table(name, odb_name, protein, annotation, parts, cache_dir, version, node, shard=None):
-    identity = digest([name, protein['sha256'], annotation['sha256'], version, node])
+    identity = digest([name, content_sha256(protein), annotation['sha256'], version, node])
     target = Path(cache_dir) / '.tables' / identity
     with lock(target.with_suffix('.lock')):
         receipt = target / 'receipt.json'
         if receipt.is_file():
             entry = json.loads(receipt.read_text())
-            if entry['protein_sha256'] != protein['sha256'] or entry['annotation_sha256'] != annotation['sha256'] or entry['odb_species'] != odb_name:
+            if entry['protein_sha256'] != content_sha256(protein) or entry['annotation_sha256'] != annotation['sha256'] or entry['odb_species'] != odb_name:
                 raise ValueError('cached species mapping identity differs')
             verify(relative_file(target, entry['table']))
             return dict(entry, table=relative_file(target, entry['table']))
@@ -195,7 +196,7 @@ def species_table(name, odb_name, protein, annotation, parts, cache_dir, version
                     for og in sorted(pairs.get(gene, ())) or ['']:
                         handle.write(f'{gene}\t{og}\n'.encode())
             verify(protein)
-            entry = {'odb_species':odb_name, 'protein_sha256':protein['sha256'],
+            entry = {'odb_species':odb_name, 'protein_sha256':content_sha256(protein),
                      'table':dict(record(output), path='table.tsv.gz'),
                      'qc':{'protein_genes':len(genes), 'input_annotation_rows':rows,
                            'unique_gene_og_pairs':unique, 'duplicate_pairs_removed':rows-unique,
@@ -245,7 +246,7 @@ def collect(samples, chunks, chunk_dir, protein_dir, outdir, cache_dir,
         plan = json.loads(Path(source_plan).read_text())
         if plan['version'] != version or plan['node'] != node or set(plan['proteins']) != set(species):
             raise ValueError('ODB plan differs from selected inputs')
-        if any(proteins[s]['sha256'] != plan['proteins'][s]['sha256'] for s in species):
+        if any(content_sha256(proteins[s]) != content_sha256(plan['proteins'][s]) for s in species):
             raise ValueError('protein changed after ODB planning')
         members = plan['sources']
     else:
@@ -260,7 +261,7 @@ def collect(samples, chunks, chunk_dir, protein_dir, outdir, cache_dir,
                 raise ValueError('ODB snapshot changed after planning')
             if set(chunk['species']) - original.keys(): raise ValueError('existing ODB snapshot has missing selected species')
             for name in chunk['species']:
-                if original[name]['odb_species'] != species[name] or original[name]['sha256'] != proteins[name]['sha256']:
+                if original[name]['odb_species'] != species[name] or original[name]['sha256'] != content_sha256(proteins[name]):
                     raise ValueError(f'protein differs from existing ODB input: {name}; remapping is required')
             references.update(snapshot.get('reference_sha256s', []))
             if snapshot.get('reference_sha256'): references.add(snapshot['reference_sha256'])

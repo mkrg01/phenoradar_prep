@@ -8,7 +8,7 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from common import file_record, now, write_json, write_tsv
+from common import file_record, now, write_json, write_tsv, text_open
 
 
 HIT_FIELDS = ["species", "gene_id", "ko", "score", "threshold", "evalue", "assignment_status", "accepted"]
@@ -25,7 +25,7 @@ QC_FIELDS += [f"{status}_{suffix}" for status in STATUSES
 
 
 def table(path, fields):
-    with open(path, encoding="utf-8", newline="") as handle:
+    with text_open(path, encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         header = reader.fieldnames or []
         if len(header) != len(set(header)) or not set(fields).issubset(header):

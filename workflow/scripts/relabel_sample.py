@@ -72,7 +72,7 @@ def relabel(source, target, old, new, kind='fasta'):
     count = 0
     try:
         with os.fdopen(fd, 'wb') as raw:
-            output = gzip.GzipFile(filename='', fileobj=raw, mode='wb', compresslevel=1, mtime=0) if target.suffix == '.gz' else raw
+            output = gzip.GzipFile(filename='', fileobj=raw, mode='wb', compresslevel=(6 if kind == "quant" else 1), mtime=0) if target.suffix == '.gz' else raw
             try:
                 for line in lines(source, old, new, kind):
                     data = line.encode('utf-8')

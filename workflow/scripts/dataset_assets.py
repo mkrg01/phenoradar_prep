@@ -8,12 +8,13 @@ import math
 import os
 import re
 import shutil
+import stat
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import ContextVar
 from pathlib import Path
 
-from common import file_record, read_tsv, sha256, write_json
+from common import file_record, read_tsv, sha256, write_json, text_open
 from translate_cds import fasta_ids
 from sample_identity import annotate
 from verification_cache import active_cache, compact_rows, expand_rows
@@ -153,6 +154,17 @@ def stat_identity(path):
     return [s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns]
 
 
+def file_identity(path):
+    """Check file type and identity with a single filesystem lookup."""
+    try:
+        s = Path(path).stat()
+    except (FileNotFoundError, NotADirectoryError) as error:
+        raise ProductIntegrityError(f'registered file missing: {path}') from error
+    if not stat.S_ISREG(s.st_mode):
+        raise ProductIntegrityError(f'registered file missing: {path}')
+    return [s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns]
+
+
 def record(path):
     path = Path(path).resolve()
     before = stat_identity(path)
@@ -168,9 +180,7 @@ def record(path):
 
 def verify(entry):
     path = Path(entry["path"])
-    if not path.is_file():
-        raise ProductIntegrityError(f"registered file missing: {path}")
-    before = stat_identity(path)
+    before = file_identity(path)
     if entry.get("stat") == before:
         cache = active_cache()
         if cache is not None:
@@ -195,11 +205,9 @@ def verify(entry):
 def verification_cached(entry):
     """Check receipts/cache using stat alone, without reading file contents."""
     path = Path(entry['path'])
-    if not path.is_file():
-        return False
     try:
-        identity = stat_identity(path)
-    except OSError:
+        identity = file_identity(path)
+    except (OSError, ProductIntegrityError):
         return False
     cache = active_cache()
     return (entry.get('stat') == identity or
@@ -219,9 +227,7 @@ def verify_many(entries, workers=4, progress=None):
     for index, entry in enumerate(entries):
         path = Path(entry['path'])
         try:
-            if not path.is_file():
-                raise ProductIntegrityError(f'registered file missing: {path}')
-            identity = stat_identity(path)
+            identity = file_identity(path)
             if (entry.get('stat') == identity or
                     (cache is not None and cache.matches(path, entry['sha256'], identity))):
                 if cache is not None:
@@ -386,7 +392,7 @@ def busco_full(path, lineage, cds):
 def validate_abundance(path, cds):
     ids = set(fasta_ids(cds, compressed=str(cds).endswith(".gz")))
     observed, total = set(), 0.0
-    with open(path) as handle:
+    with text_open(path) as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         if not {"target_id", "tpm"} <= set(reader.fieldnames or []):
             raise ValueError(f"abundance requires target_id and tpm: {path}")
@@ -450,17 +456,19 @@ def register_busco(store, ref, summary=None, full=None, short=None, lineage="emb
 
 
 def register_quant(store, ref, item, abundance, provenance=None):
+    from common import content_sha256
+    from product_storage import product_record
     validate_abundance(abundance, verify(ref["cds"]))
     path = reference_path(store, ref["species"], ref["reference_id"]).parent / "quant" / (item["row"]["run"] + ".json")
     receipt = {"schema_version": 1, "reference_id": ref["reference_id"], "run": item["row"]["run"],
-               "abundance": record(abundance), "sample": {k: item["row"].get(k, "") for k in
+               "abundance": product_record(abundance), "sample": {k: item["row"].get(k, "") for k in
                ("private_file", "lib_layout", "read1_path", "read2_path")},
                "provenance": provenance or {"source": "legacy"}}
     with locked(path.parent / ".lock"):
         if path.exists():
             old = json.loads(path.read_text())
             verify(old["abundance"])
-            if old["abundance"]["sha256"] != receipt["abundance"]["sha256"]:
+            if content_sha256(old["abundance"]) != content_sha256(receipt["abundance"]):
                 raise ValueError("quantification differs from registered run/reference")
             return old
         write_json(path, receipt)

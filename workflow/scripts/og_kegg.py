@@ -11,7 +11,7 @@ import re
 
 from aggregate_ko_tpm import (AMBIGUITY_POLICIES, HIT_FIELDS, load_annotation, number,
                               selected_samples, summed, table, verify_file)
-from common import atomic_writer, file_record, now, write_json, write_tsv
+from common import existing_product, atomic_writer, file_record, now, write_json, write_tsv
 from select_kegg_representatives import FIELDS as REPRESENTATIVE_FIELDS
 
 ANNOTATION_LABEL = "orthogroup_representatives"
@@ -161,7 +161,7 @@ def aggregate(samples, annotation_dir, og_run_dir, outdir, ambiguity="duplicate"
         wide = writer("ko_tpm_sum_wide.tsv", ["species", "run", *all_kos])
         for sample in manifest:
             species, run = sample["species"], sample["run"]
-            path = Path(og_run_dir) / f"{run}.tsv"
+            path = existing_product(Path(og_run_dir) / f"{run}.tsv")
             qc_path = Path(og_run_dir) / f"{run}.qc.json"
             qc = json.loads(qc_path.read_text())
             if qc.get("species") != species or qc.get("run") != run:

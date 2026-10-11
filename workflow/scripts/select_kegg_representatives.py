@@ -10,9 +10,9 @@ import tempfile
 
 from aggregate_ko_tpm import selected_samples
 from busco_phylogeny import fasta_records
-from common import file_record, now, species_from_gene_id, write_json, write_tsv
+from common import file_record, now, species_from_gene_id, write_json, write_tsv, existing_product, content_sha256
 from dataset_assets import record, stat_identity
-from mapping_tables import load_tables, read_species
+from mapping_tables import load_tables, read_species, protein_record
 from run_kofam import _publish
 
 FIELDS = ["orthogroup", "representative_gene_id", "representative_species", "length",
@@ -58,9 +58,9 @@ def select(samples, mapping, protein_dir, outdir, batch_size=5000):
     lengths, counts = defaultdict(lambda: array("I")), Counter()
     sources = []
     for name, odb_name in sorted(species.items()):
-        path = Path(protein_dir) / f"{odb_name}_protein.fa"
-        source = record(path)
-        if source["sha256"] != snapshot["tables"][name]["protein_sha256"]:
+        path = existing_product(Path(protein_dir) / f"{odb_name}_protein.fa")
+        source = protein_record(path)
+        if content_sha256(source) != snapshot["tables"][name]["protein_sha256"]:
             raise ValueError(f"protein differs from ODB mapping: {name}")
         sources.append((name, path, source))
         for og, gene, sequence in members(mapping, name, path):

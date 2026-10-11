@@ -11,7 +11,7 @@ import shutil
 import sqlite3
 import tempfile
 
-from common import RANDOM_SEED, file_record, now, species_from_gene_id, write_json, write_tsv
+from common import existing_product, RANDOM_SEED, file_record, now, species_from_gene_id, write_json, write_tsv
 from mapping_tables import load_tables, read_species, relative_file, subset
 from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
                     PHYLOGENY_BRANCHES, REPRESENTATIVES)
@@ -127,7 +127,7 @@ def discover(source, traits=None):
                      "kegg/representatives/provenance.json"]:
         if (source / relative).is_file():
             files.add(source / relative)
-    proteins = [source / "proteins" / f"{r['odb_species']}_protein.fa" for r in species.values()]
+    proteins = [existing_product(source / "proteins" / f"{r['odb_species']}_protein.fa") for r in species.values()]
     existing_proteins = [p for p in proteins if p.is_file()]
     sections["proteins"] = {"status": "ready" if len(existing_proteins) == len(proteins) else "incomplete" if existing_proteins else "absent",
                             "files_present": len(existing_proteins), "files_expected": len(proteins)}
@@ -304,7 +304,7 @@ class Export:
         destination = self.stage / "proteins"
         destination.mkdir()
         for name in sorted(self.keep):
-            path = self.source / "proteins" / f"{self.by_species[name]['odb_species']}_protein.fa"
+            path = existing_product(self.source / "proteins" / f"{self.by_species[name]['odb_species']}_protein.fa")
             (destination / path.name).symlink_to(self.input(path))
         self.counts["protein_files"] = dict(before=len(self.species), after=len(self.keep))
 

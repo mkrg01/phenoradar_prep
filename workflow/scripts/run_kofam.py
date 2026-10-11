@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import tempfile
 
-from common import file_record, now, sha256, write_json, write_tsv
+from common import text_open, file_record, now, sha256, write_json, write_tsv
 from cleanup_work import cleanup
 from prepare_kegg_reference import read_ko_list
 from verify_kegg_reference import verify
@@ -52,7 +52,7 @@ def normalize_protein(source, destination):
             handle.write(value[start:start + 80] + "\n")
         records.append({"gene_id": gene, "terminal_stop_stripped": int(stripped)})
 
-    with open(source, encoding="utf-8") as inp, open(destination, "w", encoding="utf-8") as out:
+    with text_open(source, encoding="utf-8") as inp, open(destination, "w", encoding="utf-8") as out:
         for line in inp:
             line = line.rstrip("\r\n")
             if not line.strip():

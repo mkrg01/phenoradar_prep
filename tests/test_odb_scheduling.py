@@ -70,8 +70,9 @@ def test_hundred_species_chunks_and_cpu_dependent_batches(
         for name, filename in zip(row["species"], row["proteins"]):
             path = Path(filename)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f">{name}_g1\nMK\n")
-            path.with_suffix(".json").write_text("{}\n")
+            with gzip.open(path, 'wt') as handle:
+                handle.write(f">{name}_g1\nMK\n")
+            path.with_suffix("").with_suffix(".json").write_text("{}\n")
     targets = [str((mapping / "chunks" / row["chunk"] / f'{row["chunk"]}.og.annotations')
                    .relative_to(workflow_project)) for row in chunks]
     # An 8-thread override is capped by the two available CPUs; batch size follows the cap.
@@ -103,7 +104,7 @@ def test_translation_rules_use_individual_slurm_jobs(tiny_inputs, workflow_proje
     prepare(**tiny_inputs, outdir=workflow_project/'results/grouped/metadata')
     override = tmp_path/'grouped.yaml'
     override.write_text('run_name: grouped\n')
-    targets = [str((workflow_project/'results/grouped/proteins'/f'{name}_protein.fa').resolve())
+    targets = [str((workflow_project/'results/grouped/proteins'/f'{name}_protein.fa.gz').resolve())
                for name in ('Alpha_plant','Beta_sp_X')]
     from phase_config import write_profile
     slurm = yaml.safe_load((ROOT/'config/build.yaml').read_text())['slurm']

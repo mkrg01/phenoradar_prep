@@ -79,6 +79,40 @@ def test_cache_is_bound_to_expected_checksum(tmp_path, moved):
     assert calls == [target, target]
 
 
+@pytest.mark.parametrize('check', ['verify', 'verify_many', 'verification_cached'])
+def test_cache_hits_need_only_one_file_attribute_lookup(tmp_path, monkeypatch, check):
+    path = tmp_path / 'product'
+    path.write_bytes(b'verified contents')
+    entry = assets.record(path)
+    lookups, original_stat = [], Path.stat
+    def counted(target, *args, **kwargs):
+        if target == path:
+            lookups.append(target)
+        return original_stat(target, *args, **kwargs)
+    monkeypatch.setattr(Path, 'stat', counted)
+    monkeypatch.setattr(assets, 'sha256', lambda *_: pytest.fail('Unexpected hash on cache hit'))
+    with verification_cache(tmp_path / 'cache.sqlite'):
+        if check == 'verify_many':
+            assert assets.verify_many([entry]) == [None]
+        elif check == 'verification_cached':
+            assert assets.verification_cached(entry)
+        else:
+            assert assets.verify(entry) == path
+    assert lookups == [path]
+
+
+def test_cached_verification_rejects_directory_replacement(tmp_path):
+    path = tmp_path / 'product'
+    path.write_bytes(b'verified contents')
+    entry = assets.record(path)
+    path.unlink()
+    path.mkdir()
+    assert not assets.verification_cached(entry)
+    with pytest.raises(assets.ProductIntegrityError, match='registered file missing'):
+        assets.verify(entry)
+    assert isinstance(assets.verify_many([entry])[0], assets.ProductIntegrityError)
+
+
 @pytest.mark.parametrize("unavailable", ["corrupt", "parent_is_file"])
 def test_unavailable_cache_falls_back_to_verification(tmp_path, moved, unavailable):
     target, entry, calls = moved

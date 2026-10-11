@@ -2,13 +2,17 @@
 """Translate CDS with seqkit, preserving and validating the original IDs."""
 import argparse
 import gzip
+import os
 import subprocess
+import tempfile
+from pathlib import Path
 
-from common import atomic_writer, file_record, now, write_json
+from common import file_record, now, write_json
+from product_storage import product_record, stage_product
 
 
 def fasta_ids(path, compressed=False):
-    opener = gzip.open if compressed else open
+    opener = gzip.open if compressed or str(path).endswith('.gz') else open
     ids = []
     with opener(path, "rt") as handle:
         for line in handle:
@@ -24,13 +28,19 @@ def fasta_ids(path, compressed=False):
 
 def translate(cds, output, provenance, seqkit="seqkit", table=1, threads=1):
     ids = fasta_ids(cds, compressed=str(cds).endswith(".gz"))
-    with atomic_writer(output) as handle:
-        subprocess.run([seqkit, "translate", "--threads", str(threads), "--transl-table", str(table), cds],
-                       stdout=handle, check=True)
-    if fasta_ids(output) != ids:
-        raise ValueError("translation changed FASTA identifiers")
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.translate-', dir=Path(output).parent) as tmp:
+        plain = Path(tmp) / 'protein.fa'
+        with plain.open('w') as handle:
+            subprocess.run([seqkit, "translate", "--threads", str(threads), "--transl-table", str(table), cds],
+                           stdout=handle, check=True)
+        staged = Path(tmp) / ('output.fa.gz' if str(output).endswith('.gz') else 'output.fa')
+        stage_product(product_record(plain), staged)
+        if fasta_ids(staged) != ids:
+            raise ValueError("translation changed FASTA identifiers")
+        os.replace(staged, output)
     version = subprocess.check_output([seqkit, "version"], text=True).strip()
-    write_json(provenance, {"created_at": now(), "cds": file_record(cds), "protein": file_record(output),
+    write_json(provenance, {"created_at": now(), "cds": file_record(cds), "protein": product_record(output),
                             "seqkit": version, "translation_table": table, "sequences": len(ids)})
 
 

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import yaml
 
-from common import file_record, now, read_tsv, write_json, write_tsv
+from common import existing_product, file_record, now, read_tsv, write_json, write_tsv
 from configuration import validate_analysis, validate_keys
 from accession_exclusions import partition, read_exclusions
 from phase_config import read_yaml
@@ -25,7 +25,7 @@ from dataset_software import resolve as resolve_software, validate as validate_s
 from build_versioning import metadata_history, naming_mode, timestamp_directory
 from verification_cache import active_cache, verification_cache
 from dataset_assets import (COUNTS, SAFE, ProductIntegrityError, digest, identities, link_file, locked,
-                            normalize_private_paths, record, register_busco, register_quant, register_reference, resolve, stat_identity, verify)
+                            normalize_private_paths, record, register_busco, register_quant, register_reference, resolve, stage_file, stat_identity, verify)
 
 STAGES = ("assembly", "busco", "quant")
 UNTIL = ("quant", "mapping", "database")
@@ -470,9 +470,10 @@ def workspace(path, manifest, item=None):
     return base / item["species"] if item else base
 
 
-def stage_workspace(path, manifest):
+def stage_workspace(path, manifest, indices):
     # GeneGalleon owns species-named files. Isolate every run before invoking it.
-    for item in manifest["items"]:
+    for index in indices:
+        item = manifest['items'][index - 1]
         work = workspace(path, manifest, item)
         for directory in ("input/amalgkit_metadata", "input/species_cds", "output", "downloads"):
             (work / directory).mkdir(parents=True, exist_ok=True)
@@ -655,7 +656,7 @@ def register_native(path, manifest, item, products, eligible, env):
                       'condition': manifest['config']['conditions'][stage]}
         published = work / 'products'
         name = {'assembly': f'{species}_longestCDS.fa.gz',
-                'busco': f'{species}.busco.full.tsv', 'quant': f'{run}_abundance.tsv'}[stage]
+                'busco': f'{species}.busco.full.tsv', 'quant': f'{run}_abundance.tsv.gz'}[stage]
         target = published / name
         # This file has no registry consumer yet; discard an interrupted relabel.
         target.unlink(missing_ok=True)
@@ -779,12 +780,16 @@ def materialize(path):
         if not selected: raise ValueError("build metadata has no species")
         target.parent.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix=".input-", dir=target.parent))
+        files = []
+        def add(entry, relative, stage=stage_file):
+            files.append(stage(entry, staging / relative, target / relative))
         try:
             for item in selected:
                 species, run = item["species"], item["row"]["run"]
                 p = products[species]
-                link_file(verify(p["reference"]["cds"]), staging / "cds" / f"{species}_longestCDS.fa.gz")
-                link_file(verify(p["quant"]["abundance"]), staging / "quant" / species / run / f"{run}_abundance.tsv")
+                add(p["reference"]["cds"], Path("cds") / f"{species}_longestCDS.fa.gz")
+                from product_storage import stage_product
+                add(p["quant"]["abundance"], Path("quant") / species / run / f"{run}_abundance.tsv.gz", stage_product)
                 if p["busco"].get("full"):
                     source = verify(p["busco"]["full"])
                     dest = staging / "busco/full" / f"{species}.busco.full.tsv"
@@ -792,15 +797,18 @@ def materialize(path):
                         import gzip
                         dest.parent.mkdir(parents=True, exist_ok=True)
                         with gzip.open(source, "rb") as src, dest.open("wb") as dst: shutil.copyfileobj(src, dst)
-                    else: link_file(source, dest)
+                        files.append(dict(record(dest), path=str(target / dest.relative_to(staging))))
+                    else: add(p["busco"]["full"], dest.relative_to(staging))
                 rows.append(item["row"])
                 summaries.append({"Species": species, **p["busco"]["counts"]})
             write_tsv(staging / "metadata.tsv", manifest["fields"], rows)
             write_tsv(staging / "busco/summary.tsv", ["Species", *COUNTS], summaries)
+            for relative in ("metadata.tsv", "busco/summary.tsv"):
+                files.append(dict(record(staging / relative), path=str(target / relative)))
             if target.exists(): raise ValueError("unpublished input directory exists; inspect it before retrying")
             os.rename(staging, target)
             receipt = {"created_at": now(), "species": [i["species"] for i in selected], "excluded": excluded,
-                       "files": [record(p) for p in sorted(target.rglob("*")) if p.is_file()]}
+                       "files": sorted(files, key=lambda entry: entry["path"])}
             write_json(path / "input_receipt.json", receipt)
         finally:
             if staging.exists(): shutil.rmtree(staging)
@@ -837,13 +845,14 @@ def load_execution(path):
     return wrapper["slurm"]
 
 
-def submit(path, until="database", species=None, dry_run=False, resources=None, defer=False, dispatch_dependency=None):
+def submit(path, until="database", species=None, dry_run=False, resources=None, defer=False, dispatch_dependency=None,
+           prepare_locally=False):
     if until not in UNTIL:
         raise ValueError('partial assembly/BUSCO endpoints were removed; each sample runs through quant')
     path = Path(path).resolve()
     if defer:
         from build_dispatch import submit_verification
-        return submit_verification(path, until, species, dry_run, resources)
+        return submit_verification(path, until, species, dry_run, resources, prepare_locally=prepare_locally)
     manifest = load(path, check_code=True)
     wanted = set(Path(species).read_text().splitlines()) if species else None
     if wanted is not None:
@@ -883,7 +892,7 @@ def submit(path, until="database", species=None, dry_run=False, resources=None, 
         if any(pending.values()):
             array_size = resolve_array_size()
             print(f"Using Slurm array limit: {array_size} sample index slots per batch", flush=True)
-            stage_workspace(path, manifest)
+            stage_workspace(path, manifest, pending['sample'])
         batch_number = 1 + max([int(p.name.split("_")[1].split(".")[0]) for p in jobs.glob("submission_*.resources.json")] + [0])
         execution = jobs / f"submission_{batch_number:04d}.resources.json"
         write_json(execution, {"slurm": slurm, "sha256": digest(slurm),
@@ -970,7 +979,7 @@ def submit(path, until="database", species=None, dry_run=False, resources=None, 
 
 
 def submit_named(root, name=None, config=None, metadata=None, until="database", species=None, dry_run=False, resources=None,
-                 defer=False):
+                 defer=False, prepare_locally=False):
     """Freeze a new build, or submit an existing name with its saved conditions."""
     root = Path(root).resolve()
     config = absolute(root, config or "config/build.yaml")
@@ -978,7 +987,7 @@ def submit_named(root, name=None, config=None, metadata=None, until="database", 
         target = prepare(root, None, config, metadata, defer=defer)
         print(f"Prepared build: {target}. Resume with --build {target}.", flush=True)
         return submit(target, until, absolute(root, species) if species else None, dry_run,
-                      absolute(root, resources) if resources else None, defer=defer)
+                      absolute(root, resources) if resources else None, defer=defer, prepare_locally=prepare_locally)
     target = build_directory(root, name, config)
     with locked(target.parent / f".{target.name}.prepare.lock"):
         if target.exists():
@@ -989,7 +998,7 @@ def submit_named(root, name=None, config=None, metadata=None, until="database", 
             target = prepare(root, target.name, config, metadata, defer=defer)
             print(f"Prepared build: {target}", flush=True)
     return submit(target, until, absolute(root, species) if species else None, dry_run,
-                  absolute(root, resources) if resources else None, defer=defer)
+                  absolute(root, resources) if resources else None, defer=defer, prepare_locally=prepare_locally)
 
 
 def main():
@@ -1032,6 +1041,8 @@ def main():
             command.add_argument("--resources")
             command.add_argument("--species-list")
             command.add_argument("--dry-run", action="store_true")
+            command.add_argument('--prepare-locally', action='store_true',
+                                 help='Prepare verified cache hits locally; otherwise prepare on Slurm')
         if name == "worker":
             command.add_argument("--task-id", type=int, required=True)
     args = parser.parse_args()
@@ -1090,10 +1101,12 @@ def run_command(args, parser):
                 parser.error("--build cannot be combined with --name, --config, or --metadata; use --resources for retry resources")
             submit(absolute(args.root, args.dataset), args.until,
                    absolute(args.root, args.species_list) if args.species_list else None, args.dry_run,
-                   absolute(args.root, args.resources) if args.resources else None, defer=True)
+                   absolute(args.root, args.resources) if args.resources else None, defer=True,
+                   prepare_locally=args.prepare_locally)
         else:
             submit_named(args.root, args.name, args.config, args.metadata, args.until,
-                         args.species_list, args.dry_run, args.resources, defer=True)
+                         args.species_list, args.dry_run, args.resources, defer=True,
+                         prepare_locally=args.prepare_locally)
     elif args.command == 'dispatch':
         from build_dispatch import dispatch
         dispatch(args.dataset, args.until, args.species_list,

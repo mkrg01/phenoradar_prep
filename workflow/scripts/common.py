@@ -1,6 +1,8 @@
 """Small shared helpers; no workflow-engine dependency."""
 import csv
+import gzip
 import hashlib
+import io
 import json
 import os
 import re
@@ -37,6 +39,28 @@ def file_record(path):
     return {"path": str(path), "bytes": path.stat().st_size, "sha256": sha256(path)}
 
 
+def text_open(path, mode="rt", **kwargs):
+    opener = gzip.open if str(path).endswith(".gz") else open
+    return opener(path, mode, **kwargs)
+
+
+def existing_product(path, default_gzip=False):
+    """Resolve a compressed product, accepting historical plain products."""
+    path = Path(path)
+    compressed = Path(str(path) + ".gz")
+    return compressed if compressed.is_file() or (default_gzip and not path.is_file()) else path
+
+
+def content_sha256(entry):
+    """Scientific identity is independent of the product's storage encoding."""
+    return entry.get("content_sha256", entry["sha256"])
+
+
+def protein_provenance(path):
+    path = Path(path)
+    return (path.with_suffix("") if path.suffix == ".gz" else path).with_suffix(".json")
+
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -47,9 +71,15 @@ def atomic_writer(path, mode="w"):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
-        kwargs = {} if "b" in mode else {"encoding": "utf-8", "newline": ""}
-        with os.fdopen(fd, mode, **kwargs) as handle:
-            yield handle
+        if "b" not in mode and path.suffix == ".gz":
+            with os.fdopen(fd, "wb") as raw:
+                with gzip.GzipFile(filename="", fileobj=raw, mode="wb", compresslevel=6, mtime=0) as zipped:
+                    with io.TextIOWrapper(zipped, encoding="utf-8", newline="") as handle:
+                        yield handle
+        else:
+            kwargs = {} if "b" in mode else {"encoding": "utf-8", "newline": ""}
+            with os.fdopen(fd, mode, **kwargs) as handle:
+                yield handle
         os.replace(name, path)
     finally:
         if os.path.exists(name):
@@ -66,7 +96,7 @@ def write_json(path, value, compact=False):
 
 
 def read_tsv(path):
-    with open(path, newline="") as handle:
+    with text_open(path, newline="") as handle:
         return list(csv.DictReader(handle, delimiter="\t"))
 
 

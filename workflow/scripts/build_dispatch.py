@@ -164,11 +164,11 @@ def verify_and_stage(path, manifest, workers=4, software=None, cached_only=False
     local_files = (previous or {}).get('verified_files', {})
     last_update = 0
 
-    def progress(checked, total):
+    def progress(checked, total, phase='checksums'):
         nonlocal last_update
         current = time.monotonic()
         if current - last_update >= 1 or checked == total:
-            update_verification(path, 'running', phase='checksums', checked=checked,
+            update_verification(path, 'running', phase=phase, checked=checked,
                                 total=total, current_sample=None)
             last_update = current
 
@@ -194,11 +194,13 @@ def verify_and_stage(path, manifest, workers=4, software=None, cached_only=False
             if name not in damaged:
                 chosen['software_lock'] = saved['software_locks'].get(chosen['source']['path'])
                 selected[name] = chosen
-        update_verification(path, 'running', phase='staging', checked=len(saved['samples']),
-                            total=len(saved['samples']), current_sample=None)
+        update_verification(path, 'running', phase='staging', checked=0,
+                            total=len(selected), current_sample=None)
+        last_update = 0
         staging = Path(tempfile.mkdtemp(prefix='.verify-', dir=path))
         try:
-            local_files = stage(staging, path, selected, manifest['config'])
+            local_files = stage(staging, path, selected, manifest['config'],
+                                progress=lambda checked, total: progress(checked, total, 'staging'))
             incoming = staging / 'work/cache'
             from cleanup_work import owned_path
             destination = owned_path(path, 'work/cache')
@@ -353,8 +355,8 @@ def cached_preparation(path, manifest, context):
     return True, software
 
 
-def submit_verification(path, until, species=None, dry_run=False, resources=None):
-    """Prepare cache hits locally; allocate checksum misses and downloads to Slurm."""
+def submit_verification(path, until, species=None, dry_run=False, resources=None, prepare_locally=False):
+    """Submit preparation to Slurm, optionally preparing verified cache hits locally."""
     from build_reports import print_plan, read_context
     from dataset import load, submit
     from phase_config import array_concurrency, execution_settings, worker_budgets
@@ -378,6 +380,10 @@ def submit_verification(path, until, species=None, dry_run=False, resources=None
     jobs.mkdir(exist_ok=True)
     (jobs / 'logs').mkdir(exist_ok=True)
     with locked(path / '.verification.lock'):
+        # A cache hit still involves thousands of links and receipts. Keep that
+        # work off the submit host unless local preparation was requested.
+        if not prepare_locally and not (path / 'completed.json').exists():
+            return submit_verification_job(path, manifest, context, slurm, until, species, dry_run)
         with locked(jobs / '.submit.lock'):
             if not dry_run:
                 check_submissions(jobs)
@@ -396,6 +402,7 @@ def submit_verification(path, until, species=None, dry_run=False, resources=None
                         rebuilds = {}
                     else:
                         rebuilds = verify_and_stage(path, manifest, software=software, cached_only=True)
+                    update_verification(path, 'running', phase='scheduling', location='local')
                     # Status and workspace checks also precede sbatch and must
                     # fall back to Slurm if a file changes after preparation.
                     commands = submit(path, until, species, dry_run, resources)

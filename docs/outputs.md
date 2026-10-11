@@ -33,10 +33,18 @@ follow the [sample identifier conventions](inputs.md#identifiers).
 | `provenance/metadata_provenance.json` | Frozen source metadata history, when configured |
 | `cds/{species}_longestCDS.fa.gz` | Longest CDS per gene |
 | `busco/summary.tsv`, `busco/full/` | Per-sample counts and full BUSCO tables |
-| `quant/{species}/{run}/{run}_abundance.tsv` | Gene expression: `target_id`, `tpm` |
-| `proteins/{odb_species}_protein.fa` | Translated proteins |
+| `quant/{species}/{run}/{run}_abundance.tsv.gz` | Gene expression: `target_id`, `tpm`, and all other source columns |
+| `proteins/{odb_species}_protein.fa.gz` | Translated proteins |
 | `odb/snapshot.json`, `odb/species/*.tsv.gz` | Mapping provenance and gene/OG tables |
-| `expression/runs/{run}.tsv`, `{run}.qc.json` | Saved OG expression and QC |
+| `expression/runs/{run}.tsv.gz`, `{run}.qc.json` | Saved OG expression and QC |
+
+New databases and build caches gzip protein FASTA and expression tables,
+preserving all values and source columns. Combined analysis tables and
+PhenoRadar exports remain plain TSV.
+
+Existing uncompressed databases remain readable and reusable; no conversion is
+needed. New builds compress imported products and leave the source database
+unchanged.
 
 ## Result files
 

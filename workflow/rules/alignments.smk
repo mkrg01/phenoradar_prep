@@ -17,7 +17,7 @@ checkpoint collect_orthogroup_proteins:
         samples=f"{META}/samples.tsv",
         mapping=f"{MAPPING}/snapshot.json",
         tables=f"{MAPPING}/species",
-        proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa' for r in sample_rows(wc)}),
+        proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa.gz' for r in sample_rows(wc)}),
         code=f"{SCRIPTS}/align_orthogroups.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/busco_phylogeny.py"]
     output: fasta=directory(ALIGNMENT_INPUTS)

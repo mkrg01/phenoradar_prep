@@ -8,7 +8,7 @@ import math
 from pathlib import Path
 import tempfile
 
-from common import read_tsv, sha256, species_from_gene_id
+from common import existing_product, read_tsv, sha256, species_from_gene_id
 from export_species_tpm import export as export_species_tpm
 from filter_species import fasta_records, manifest, safe_name, table, validate_exclusions
 from phenoradar_metadata import read_base, with_pairs
@@ -130,7 +130,7 @@ def discover(source, exclusions=()):
     # Species/run identity comes from the selected manifest, never stale files.
     _, samples, _, _ = manifest(source / "metadata/samples.tsv")
     for name in sorted({r["odb_species"] for r in samples}):
-        protein = f"proteins/{name}_protein.fa"
+        protein = str(existing_product(source / f"proteins/{name}_protein.fa").relative_to(source))
         report = f"proteins/{name}_protein.json"
         if branch(f"proteins/{name}", [protein] if filtered else [protein, report]):
             publish(protein)

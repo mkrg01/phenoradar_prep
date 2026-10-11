@@ -105,6 +105,10 @@ that manage mapping and analysis jobs. The default build controller requests
 four CPUs. Checksum verification uses up to four threads, limited to allocated
 CPUs.
 
+OG expression aggregation processes up to 50 runs per Slurm job. Set
+`per_job_resources.aggregate_tpm` for each batch (default: one CPU and 2 GB).
+Logs are named `orthogroups/expression/batch_*.log`; retries reuse completed runs.
+
 Resource overrides take precedence over rule defaults. Enable optional
 branches in the analysis settings.
 

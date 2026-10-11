@@ -58,7 +58,7 @@ def test_bundle_relocation_and_analysis(completed_project):
     original = json.loads((source/'manifest.json').read_text())
     assert original['schema_version'] == 5
     assert original['tpm'] == {'multimap': 'error'}
-    assert (source/'expression/runs/A1.tsv').is_file()
+    assert (source/'expression/runs/A1.tsv.gz').is_file()
     odb_snapshot = json.loads((source/'odb/snapshot.json').read_text())
     assert odb_snapshot['reference_sha256s'] == []
     assert all(not Path(r['path']).is_absolute() for r in original['files'])
@@ -128,6 +128,41 @@ def test_unsupported_database_schema_is_rejected(tmp_path, schema):
             load_complete(path)
     with pytest.raises(ValueError, match='build is incomplete'):
         load_complete(legacy.parent)
+
+
+def test_publishing_preserves_source_verification_after_hard_links(completed_project, tmp_path, monkeypatch):
+    import common
+    import dataset_assets as assets
+    from portable_build import publish_products
+    from verification_cache import verification_cache
+    _, build, _, _ = completed_project
+    before = (build / 'database/manifest.json').read_bytes()
+    with verification_cache(tmp_path / 'verification.sqlite') as cache:
+        source = load_complete(build)
+        entries = [product[key] for product in source['products'].values()
+                   for key in ('cds', 'busco', 'abundance', 'protein', 'expression')]
+        identities = {tuple(assets.stat_identity(entry['path'])[:2]) for entry in entries}
+        hash_file = common.sha256
+        def forbid_payload_reads(path):
+            stat = Path(path).stat()
+            if (stat.st_dev, stat.st_ino) in identities:
+                pytest.fail(f'published source payload was rehashed: {path}')
+            return hash_file(path)
+        monkeypatch.setattr(common, 'sha256', forbid_payload_reads)
+        monkeypatch.setattr(assets, 'sha256', forbid_payload_reads)
+        new_build = tmp_path / 'new-publication'
+        new_build.mkdir()
+        published = publish_products(new_build, source)
+        for entry in entries:
+            assets.verify(entry)
+        moved = load_complete(published)
+        for species, product in source['products'].items():
+            for key in ('cds', 'busco', 'abundance', 'protein', 'expression'):
+                old, new = product[key], moved['products'][species][key]
+                assert old['sha256'] == new['sha256']
+                assert Path(old['path']).samefile(new['path'])
+                assert cache.matches(old['path'], old['sha256'], assets.stat_identity(old['path']))
+    assert (build / 'database/manifest.json').read_bytes() == before
 
 
 def test_database_expression_and_policy_are_required(completed_project):

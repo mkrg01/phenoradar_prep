@@ -7,8 +7,9 @@ from pathlib import Path
 from contextlib import contextmanager
 
 from common import file_record, now, write_json
-from dataset_assets import link_file, record, verify
+from dataset_assets import record, verify
 from translate_cds import translate
+from product_storage import stage_product
 
 
 @contextmanager
@@ -29,9 +30,9 @@ def cache_path(cache_dir, cds, table):
 def load_cached(path, cds, table):
     data = json.loads((path / 'receipt.json').read_text())
     if (data.get('schema_version') != 1 or data['cds_sha256'] != cds['sha256']
-            or data['translation_table'] != table or data['protein']['path'] != 'protein.fa'):
+            or data['translation_table'] != table or data['protein']['path'] not in ('protein.fa', 'protein.fa.gz')):
         raise ValueError(f'translation cache identity differs: {path}')
-    verify(dict(data['protein'], path=str(path / 'protein.fa')))
+    verify(dict(data['protein'], path=str(path / data['protein']['path'])))
     return data
 
 
@@ -45,11 +46,13 @@ def publish(path, cds, protein, provenance):
     with tempfile.TemporaryDirectory(prefix='.protein-', dir=path.parent) as tmp:
         staged = Path(tmp) / 'entry'
         staged.mkdir()
-        link_file(verify(source), staged / 'protein.fa')
+        if 'content_sha256' in info['protein']:
+            source['content_sha256'] = info['protein']['content_sha256']
+        protein_entry = stage_product(source, staged / 'protein.fa.gz')
         data = {'schema_version': 1, 'cds_sha256': cds['sha256'],
                 'translation_table': info['translation_table'], 'seqkit': info['seqkit'],
                 'sequences': info['sequences'],
-                'protein': dict(record(staged / 'protein.fa'), path='protein.fa')}
+                'protein': dict(protein_entry, path='protein.fa.gz')}
         write_json(staged / 'receipt.json', data)
         os.rename(staged, path)
     return data
@@ -64,17 +67,17 @@ def cached_translate(cds, output, provenance, cache_dir, seqkit='seqkit', table=
             data = load_cached(path, cds, table)
         else:
             with tempfile.TemporaryDirectory(prefix='.translate-', dir=path.parent) as tmp:
-                protein, receipt = Path(tmp) / 'protein.fa', Path(tmp) / 'translation.json'
+                protein, receipt = Path(tmp) / 'protein.fa.gz', Path(tmp) / 'translation.json'
                 translate(cds['path'], protein, receipt, seqkit=seqkit, table=table, threads=threads)
                 data = publish(path, cds, protein, receipt)
         output = Path(output)
         output.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix='.protein-', dir=output.parent) as tmp:
-            staged = Path(tmp) / 'protein.fa'
-            link_file(path / 'protein.fa', staged)
+            staged = Path(tmp) / ('protein.fa.gz' if output.suffix == '.gz' else 'protein.fa')
+            protein_entry = stage_product(dict(data['protein'], path=str(path / data['protein']['path'])), staged)
             os.replace(staged, output)
         verify(cds)
         write_json(provenance, {'created_at': now(), 'cds': file_record(cds['path']),
-                    'protein': record(output), 'seqkit': data['seqkit'],
+                    'protein': dict(protein_entry, path=str(output.resolve()), stat=record(output)['stat']), 'seqkit': data['seqkit'],
                     'translation_table': table, 'sequences': data['sequences'], 'reused': reused})
     return reused

@@ -11,7 +11,7 @@ import tempfile
 
 from busco_phylogeny import fasta_records
 from mapping_tables import load_tables, read_species
-from common import atomic_writer, file_record, now, read_tsv, species_from_gene_id, write_json
+from common import existing_product, atomic_writer, file_record, now, read_tsv, species_from_gene_id, write_json
 
 
 SAFE_OG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
@@ -47,7 +47,7 @@ def collect(samples, mapping, protein_dir, outdir):
                     if any(not SAFE_OG.fullmatch(og) for og in ogs):
                         raise ValueError('orthogroup IDs must be safe, nonempty filename components')
                     groups.update(ogs)
-                source = Path(protein_dir) / f"{odb_name}_protein.fa"
+                source = existing_product(Path(protein_dir) / f"{odb_name}_protein.fa")
                 seen = set()
                 for gene, sequence in fasta_records(source):
                     if gene in seen:

@@ -222,7 +222,7 @@ def test_database_reuse_retains_expression_without_mapper_or_translation(complet
     # This test takes historical sources offline; latest-alias management is
     # exercised separately by the build-versioning tests.
     config = configure(root, [str(root/'resources/source/database'), str(source), str(other)], name_mode='fixed')
-    first_expression = (source/'expression/runs/A1.tsv').read_bytes()
+    first_expression = (source/'expression/runs/A1.tsv.gz').read_bytes()
     build = dataset.prepare(root, 'combined', config)
     assert dataset.submit(build, until='quant', dry_run=True) == []
     # Neither a mapper nor a translator is available to silently redo reused work.
@@ -234,8 +234,8 @@ def test_database_reuse_retains_expression_without_mapper_or_translation(complet
     dataset.materialize(build)
     execute(root, build, 'database', env, mapping=True)
     complete(build)
-    assert (build/'database/expression/runs/A1.tsv').read_bytes() == first_expression
-    assert (build/'database/expression/runs/A1.tsv').samefile(root/'results/source_unavailable/database/expression/runs/A1.tsv')
+    assert (build/'database/expression/runs/A1.tsv.gz').read_bytes() == first_expression
+    assert (build/'database/expression/runs/A1.tsv.gz').samefile(root/'results/source_unavailable/database/expression/runs/A1.tsv.gz')
     assert all(json.loads(p.read_text())['reused'] for p in (build/'work/database/proteins').glob('*.json'))
     assert load_complete(build)['products'].keys() == load_complete(root/'results/source_unavailable')['products'].keys()
     assert not events.exists()

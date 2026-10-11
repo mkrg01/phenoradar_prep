@@ -81,7 +81,7 @@ def test_two_runs_of_one_species_execute_independent_native_stages(dataset_proje
         events=(build/'work/genegalleon'/name/'events.jsonl').read_text().splitlines()
         assert len(events)==1
         with gzip.open(inputs/'cds'/f'{name}_longestCDS.fa.gz','rt') as f:assert f.readline().startswith('>'+name+'_g')
-        quant=read_tsv(inputs/'quant'/name/row['run']/f'{row["run"]}_abundance.tsv')
+        quant=read_tsv(inputs/'quant'/name/row['run']/f'{row["run"]}_abundance.tsv.gz')
         assert all(r['target_id'].startswith(name+'_g') for r in quant)
 
 
@@ -217,7 +217,7 @@ def test_failed_registration_can_retry_with_new_output(dataset_project, monkeypa
     monkeypatch.setattr(dataset, "register_quant", fail)
     with pytest.raises(ValueError, match="interrupted registration"):
         dataset.worker(build, 1)
-    staged = build / "work/genegalleon/New_plant_SRR1/products/SRR1_abundance.tsv"
+    staged = build / "work/genegalleon/New_plant_SRR1/products/SRR1_abundance.tsv.gz"
     staged.write_text("previous failed attempt\n")
     monkeypatch.setattr(dataset, "register_quant", register)
     dataset.worker(build, 1)

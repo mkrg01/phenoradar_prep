@@ -8,9 +8,9 @@ if config.get("build_manifest"):
             expression=lambda wc: BUILD_RUNS[wc.run]['expression']['path'],
             qc=lambda wc: BUILD_RUNS[wc.run]['expression_qc']['path'],
             code=f"{SCRIPTS}/build_products.py",
-            helpers=[f"{SCRIPTS}/portable_build.py", f"{SCRIPTS}/dataset_assets.py"]
+            helpers=[f"{SCRIPTS}/portable_build.py", f"{SCRIPTS}/dataset_assets.py", f"{SCRIPTS}/product_storage.py"]
         output:
-            tpm=f"{TPM}/runs/{{run}}.tsv",
+            tpm=f"{TPM}/runs/{{run}}.tsv.gz",
             qc=f"{TPM}/runs/{{run}}.qc.json"
         conda: "../envs/analysis.yaml"
         # Each import loads the complete database manifest, including sample metadata.
@@ -20,26 +20,55 @@ if config.get("build_manifest"):
             "--samples {input.samples:q} --run {wildcards.run:q} --output {output.tpm:q} "
             "--qc {output.qc:q}"
 else:
+    from sample_table import expression_batches
+
+    def expression_plan(wc):
+        return expression_batches(checkpoints.select_metadata.get().output.samples)
+
+    def expression_batch(wc):
+        rows = expression_plan(wc)[0].get(wc.batch)
+        if rows is None:
+            raise WorkflowError(f'unknown expression batch: {wc.batch}')
+        return rows
+
     rule aggregate_tpm:
         input:
             samples=f"{META}/samples.tsv",
-            abundance=lambda wc: run_row(wc)["abundance"],
+            abundance=lambda wc: [row['abundance'] for row in expression_batch(wc)],
             mapping=f"{MAPPING}/snapshot.json",
             tables=f"{MAPPING}/species",
             code=f"{SCRIPTS}/aggregate_tpm.py",
-            common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/mapping_tables.py", f"{SCRIPTS}/dataset_assets.py"]
-        output:
-            tpm=f"{TPM}/runs/{{run}}.tsv",
-            qc=f"{TPM}/runs/{{run}}.qc.json"
+            common=[f"{SCRIPTS}/{name}.py" for name in
+                    ("common", "mapping_tables", "dataset_assets", "product_storage", "sample_table")]
+        output: directory(f"{TPM}/batches/{{batch}}")
+        wildcard_constraints: batch=r"batch_[0-9]+"
         params:
-            cache=config.get("expression_cache") or ""
-        log: f"{LOG}/{ORTHOGROUP_EXPRESSION}/{{run}}.log"
+            cache=config.get("expression_cache") or "",
+            runs=lambda wc: [row['run'] for row in expression_batch(wc)]
+        log: f"{LOG}/{ORTHOGROUP_EXPRESSION}/{{batch}}.log"
         conda: "../envs/analysis.yaml"
         resources: mem_mb=2000
         shell:
-            "{PYTHON:q} {input.code:q} --samples {input.samples:q} --run {wildcards.run:q} "
-            "--mapping {input.mapping:q} --output {output.tpm:q} --qc {output.qc:q} "
-            "--cache-dir={params.cache:q} > {log:q} 2>&1"
+            "{PYTHON:q} {input.code:q} --samples {input.samples:q} --runs {params.runs:q} "
+            "--mapping {input.mapping:q} --outdir {output:q} "
+            "--cache-dir={params.cache:q} --gzip > {log:q} 2>&1"
+
+    localrules: publish_tpm_run
+
+    rule publish_tpm_run:
+        input:
+            batch=lambda wc: f'{TPM}/batches/{expression_plan(wc)[1][wc.run]}',
+            code=f'{SCRIPTS}/aggregate_tpm.py',
+            helpers=[f'{SCRIPTS}/{name}.py' for name in
+                     ('common', 'mapping_tables', 'dataset_assets', 'product_storage', 'sample_table')]
+        output:
+            tpm=f'{TPM}/runs/{{run}}.tsv.gz',
+            qc=f'{TPM}/runs/{{run}}.qc.json'
+        conda: '../envs/analysis.yaml'
+        resources: mem_mb=256
+        shell:
+            '{PYTHON:q} {input.code:q} --batch-dir {input.batch:q} --run {wildcards.run:q} '
+            '--output {output.tpm:q} --qc {output.qc:q}'
 
 
 rule merge_tpm:

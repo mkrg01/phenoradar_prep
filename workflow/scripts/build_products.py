@@ -4,8 +4,9 @@ import argparse
 import json
 from pathlib import Path
 
-from common import atomic_writer, now, read_tsv, write_json
-from dataset_assets import link_file, locked, record, verify
+from common import now, read_tsv, write_json, existing_product, protein_provenance, content_sha256
+from product_storage import product_record, stage_product
+from dataset_assets import locked, record, verify
 from mapping_tables import load_tables, protein_record, relative_file, subset
 from layout import run_layout
 from build_versioning import publish_latest
@@ -47,14 +48,14 @@ def complete(path):
             species = item['species']; run = item['row']['run']
             product = item_products(manifest, item)
             odb_species = species.replace('-', '_')
-            protein = results / 'proteins' / f'{odb_species}_protein.fa'
-            provenance = protein.with_suffix('.json')
+            protein = existing_product(results / 'proteins' / f'{odb_species}_protein.fa')
+            provenance = protein_provenance(protein)
             translation = json.loads(provenance.read_text())
             protein_entry = protein_record(protein)
             if (translation['cds']['sha256'] != product['reference']['cds']['sha256'] or
                 translation['protein']['sha256'] != protein_entry['sha256'] or
                 translation['translation_table'] != manifest['analysis']['translation']['table'] or
-                protein_entry['sha256'] != tables['tables'][species]['protein_sha256']):
+                content_sha256(protein_entry) != tables['tables'][species]['protein_sha256']):
                 raise ValueError(f'build translation differs from reference: {species}')
             if sample_map[species]['run'] != run: raise ValueError(f'mapping run differs: {species}')
             products[species] = {'row':item['row'], 'reference_id':product['reference']['reference_id'],
@@ -64,13 +65,13 @@ def complete(path):
                 'raw_inputs':product['quant'].get('provenance', {}).get('raw_inputs', {}),
                 'cds':inventory[str(inputs / 'cds' / f'{species}_longestCDS.fa.gz')],
                 'busco':inventory[str(inputs / 'busco/full' / f'{species}.busco.full.tsv')],
-                'abundance':inventory[str(inputs / 'quant' / species / run / f'{run}_abundance.tsv')],
+                'abundance':inventory[str(existing_product(inputs / 'quant' / species / run / f'{run}_abundance.tsv'))],
                 'protein':protein_entry, 'translation':record(provenance)}
-            expression = results / 'orthogroups/expression/runs' / f'{run}.tsv'
-            qc_path = expression.with_suffix('.qc.json')
+            expression = existing_product(results / 'orthogroups/expression/runs' / f'{run}.tsv')
+            qc_path = expression.parent / f'{run}.qc.json'
             if not expression.is_file() or not qc_path.is_file():
                 raise ValueError(f'build expression incomplete: {run}; run the database target before complete')
-            expression_entry = record(expression)
+            expression_entry = product_record(expression)
             qc = json.loads(qc_path.read_text())
             expected_table = tables['tables'][species]['table']
             if (qc.get('species') != species or qc.get('run') != run or
@@ -105,9 +106,10 @@ def import_protein(completion, species, protein, provenance):
     data = load_complete(completion, verify_files=False)
     selected = [p for p in data['products'].values() if p['odb_species'] == species]
     if len(selected) != 1: raise ValueError(f'protein absent from completed build: {species}')
-    link_file(verify(selected[0]['protein']), protein)
-    with atomic_writer(provenance, 'wb') as handle:
-        handle.write(verify(selected[0]['translation']).read_bytes())
+    entry = stage_product(selected[0]['protein'], protein)
+    info = json.loads(verify(selected[0]['translation']).read_text())
+    info['protein'] = entry
+    write_json(provenance, info)
 
 
 def subset_mapping(completion, samples, outdir):
@@ -133,10 +135,10 @@ def import_expression(completion, samples, run, output, qc):
     if product is None or product['row']['run'] != run:
         raise ValueError('expression sample is absent from the database')
     verify(dict(product['abundance'], path=row['abundance']))
-    link_file(verify(product['expression']), output)
-    # A separate small receipt prevents output touches from changing another input's mtime.
-    with atomic_writer(qc, 'wb') as handle:
-        handle.write(verify(product['expression_qc']).read_bytes())
+    entry = stage_product(product['expression'], output)
+    report = json.loads(verify(product['expression_qc']).read_text())
+    report['expression'] = entry
+    write_json(qc, report)
 
 
 if __name__ == '__main__':

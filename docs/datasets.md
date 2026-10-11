@@ -28,9 +28,11 @@ Use the build directory name printed by `submit` for `{build_name}` below.
 | `submit` | Save the build and submit required work |
 | `status --build PATH` | Show sample progress and database status |
 
-`submit` skips the Slurm preparation job when it can use verified, unchanged
-files and software locally. Otherwise, preparation runs on Slurm before
-sample and mapping jobs.
+`submit` saves the build and runs preparation on Slurm before submitting sample
+and mapping jobs. Preparation verifies inputs and imports reusable products.
+
+Add `--prepare-locally` to prepare on the submit host when inputs and software
+are already verified and unchanged. Otherwise, preparation runs on Slurm.
 
 Monitor submitted work with `status`. The completed database is saved in
 `results/{build_name}/database/`. Builds record BUSCO scores without filtering samples.

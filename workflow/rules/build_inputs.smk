@@ -9,9 +9,9 @@ rule import_build_protein:
         protein=lambda wc: BUILD_PROTEINS[wc.species]['protein']['path'],
         provenance=lambda wc: BUILD_PROTEINS[wc.species]['translation']['path'],
         code=f'{SCRIPTS}/build_products.py',
-        helpers=[f'{SCRIPTS}/portable_build.py', f'{SCRIPTS}/dataset_assets.py']
+        helpers=[f'{SCRIPTS}/portable_build.py', f'{SCRIPTS}/dataset_assets.py', f'{SCRIPTS}/product_storage.py']
     output:
-        protein=f'{PROTEINS}/{{species}}_protein.fa',
+        protein=f'{PROTEINS}/{{species}}_protein.fa.gz',
         provenance=f'{PROTEINS}/{{species}}_protein.json'
     conda: '../envs/analysis.yaml'
     # Each import loads the complete database manifest, including sample metadata.
@@ -25,9 +25,9 @@ rule import_build_mapping:
         completion=config['build_manifest'],
         mapping=COMPLETED_BUILD['mapping']['path'],
         samples=f'{META}/samples.tsv',
-        proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa' for r in sample_rows(wc)}),
+        proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa.gz' for r in sample_rows(wc)}),
         code=f'{SCRIPTS}/build_products.py',
-        helpers=[f'{SCRIPTS}/portable_build.py', f'{SCRIPTS}/dataset_assets.py']
+        helpers=[f'{SCRIPTS}/portable_build.py', f'{SCRIPTS}/dataset_assets.py', f'{SCRIPTS}/product_storage.py']
     output:
         snapshot=f'{MAPPING}/snapshot.json',
         tables=directory(f'{MAPPING}/species')

@@ -2,7 +2,8 @@
 import copy
 from pathlib import Path
 
-from common import write_json
+from common import write_json, content_sha256
+from product_storage import stage_product
 from dataset_assets import ProductIntegrityError, record, resolve, stage_file, verify
 
 STAGES = {'assembly': 'reference', 'busco': 'busco', 'quant': 'quant'}
@@ -13,13 +14,13 @@ IDENTITY_FIELDS = ('scientific_name', 'taxid', 'species_id', 'analysis_sample_id
 def fingerprints(entry):
     if entry.get('kind') != 'stages':
         product = entry['product']
-        return {key: product[key]['sha256'] for key in ('cds', 'busco', 'abundance')}
+        return {key: content_sha256(product[key]) for key in ('cds', 'busco', 'abundance')}
     products = entry['products']
     result = {'cds': products['reference']['cds']['sha256']}
     if products['busco']:
         result['busco'] = products['busco']['full']['sha256']
     if products['quant']:
-        result['abundance'] = products['quant']['abundance']['sha256']
+        result['abundance'] = content_sha256(products['quant']['abundance'])
     return result
 
 
@@ -100,7 +101,8 @@ def stage(staging, target, name, chosen):
 
     def saved(entry, filename):
         path = Path(staging) / prefix / filename
-        saved = stage_file(entry, path, Path(target) / prefix / filename)
+        save = stage_product if filename == 'abundance.tsv.gz' else stage_file
+        saved = save(entry, path, Path(target) / prefix / filename)
         files.append(saved)
         return saved
 
@@ -119,7 +121,7 @@ def stage(staging, target, name, chosen):
                     suffix = '.gz' if receipt[field]['path'].endswith('.gz') else ''
                     receipt[field] = saved(receipt[field], 'busco.' + field + suffix)
         else:
-            receipt['abundance'] = saved(receipt['abundance'], 'abundance.tsv')
+            receipt['abundance'] = saved(receipt['abundance'], 'abundance.tsv.gz')
         write_json(Path(staging) / prefix / filename, receipt)
         files.append(dict(record(Path(staging) / prefix / filename),
                           path=str(Path(target) / prefix / filename)))
