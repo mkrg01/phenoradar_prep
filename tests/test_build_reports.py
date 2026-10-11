@@ -1,4 +1,4 @@
-"""Exercise lightweight previews, Slurm verification, repair and progress reporting."""
+"""Exercise verified plans, Slurm preparation, repair and progress reporting."""
 import fcntl
 import json
 import shutil
@@ -42,15 +42,24 @@ def prohibit_artifact_hashes(monkeypatch, paths):
     monkeypatch.setattr(dataset_assets, 'sha256', checked)
 
 
-def test_plan_prints_counts_and_saves_unverified_details(reuse_project, monkeypatch, capsys):
+@pytest.mark.parametrize('options', [(), ('--verify',)])
+def test_plan_verifies_products_by_default_and_saves_details(reuse_project, monkeypatch, capsys, options):
     root, source = reuse_project
-    prohibit_artifact_hashes(monkeypatch, artifact_paths(source))
-    assert invoke(monkeypatch, dataset, 'plan', '--root', root, '--split', '--outdir', 'preview') == 0
+    paths = artifact_paths(source)
+    calls = []
+    hash_file = dataset_assets.sha256
+    def counted(path):
+        calls.append(Path(path))
+        return hash_file(path)
+    monkeypatch.setattr(dataset_assets, 'sha256', counted)
+    assert invoke(monkeypatch, dataset, 'plan', '--root', root, '--split', '--outdir', 'preview', *options) == 0
     output = capsys.readouterr().out
-    assert 'Reuse candidates: 3' in output
+    assert paths <= set(calls)
+    assert 'Reuse: 3' in output
+    assert 'pending verification' not in output
     assert '\tspecies\t' not in output
     rows = read_tsv(root / 'preview/plan.tsv')
-    assert {row['verification'] for row in rows} == {'pending'}
+    assert {row['verification'] for row in rows} == {'verified'}
     assert len(read_tsv(root / 'preview/reuse.tsv')) == 3
     assert read_tsv(root / 'preview/needs_attention.tsv') == []
     assert not (root / 'results').exists()
@@ -64,7 +73,7 @@ def test_plan_verified_damage_becomes_rebuild(reuse_project, monkeypatch, capsys
         damaged.unlink()
     else:
         damaged.write_bytes(damaged.read_bytes() + b'changed')
-    assert invoke(monkeypatch, dataset, 'plan', '--root', root, '--verify') == 0
+    assert invoke(monkeypatch, dataset, 'plan', '--root', root) == 0
     assert 'rebuild: 1' in capsys.readouterr().out
     rows = read_tsv(root / 'reports/plan/needs_attention.tsv')
     assert len(rows) == 1
@@ -92,6 +101,20 @@ def test_submit_only_schedules_verification_locally(reuse_project, scheduler, mo
     assert len(scheduler['commands']) == 1
     assert '_verify' in next(arg for arg in scheduler['commands'][0] if arg.startswith('--job-name='))
     assert 'Verification job: 1001' in capsys.readouterr().out
+
+
+def test_slurm_preparation_uses_default_plan_verification_cache(reuse_project, scheduler, monkeypatch):
+    root, source = reuse_project
+    assert invoke(monkeypatch, dataset, 'plan', '--root', root) == 0
+    prohibit_artifact_hashes(monkeypatch, artifact_paths(source))
+    assert invoke(monkeypatch, dataset, 'submit', '--root', root, '--name', 'cached') == 0
+    build = root / 'results/cached'
+    monkeypatch.setenv('SLURM_JOB_ID', '1001')
+    # Slurm launches this project's script, whose default cache root is root.
+    monkeypatch.setattr(dataset, '__file__', str(root / 'workflow/scripts/dataset.py'))
+    assert invoke(monkeypatch, dataset, 'dispatch', '--build', build,
+                  '--execution', build / 'jobs/submission_0001.resources.json') == 0
+    assert {row['state'] for row in progress(build, read_context(build))['samples']} == {'reused'}
 
 
 def test_dispatch_verifies_stages_and_schedules_dependents(reuse_project, scheduler, monkeypatch):
@@ -144,6 +167,7 @@ def test_dispatch_rejects_changed_submission_resources(reuse_project, scheduler,
 def test_dispatch_repairs_only_damaged_candidate(reuse_project, scheduler, monkeypatch):
     root, source = reuse_project
     fake_genegalleon(root)
+    assert invoke(monkeypatch, dataset, 'plan', '--root', root) == 0
     build = dataset.prepare(root, 'repair', root / 'config/build.yaml', defer=True)
     source_cds = source / 'cds/Alpha_plant_A1_longestCDS.fa.gz'
     source_cds.write_bytes(source_cds.read_bytes() + b'changed')
@@ -278,6 +302,7 @@ def test_new_private_sample_does_not_hash_reads(dataset_project, scheduler, monk
            'private_file': 'yes', 'lib_layout': 'single', 'read1_path': reads.name}
     write_tsv(metadata, list(row), [row])
     prohibit_artifact_hashes(monkeypatch, {reads})
+    assert invoke(monkeypatch, dataset, 'plan', '--root', root, '--metadata', metadata) == 0
     invoke(monkeypatch, dataset, 'submit', '--root', root, '--name', 'private', '--metadata', metadata)
     build = root / 'results/private'
     dispatch(build, until='quant')

@@ -36,8 +36,8 @@ conda activate phenoradar_prep
 ./run_analysis.sh submit --build results/{build_name} --name {analysis_name}
 ```
 
-`plan` shows reuse and processing counts; `status` shows progress. `submit`
-verifies reusable products on Slurm. Use `plan --verify` for a local check.
+`plan` verifies reusable products and shows reuse and processing counts.
+`submit` submits the build to Slurm, and `status` shows progress.
 Build names include UTC timestamps by default. Retry with the
 [saved run path](docs/datasets.md#failure-and-recovery-behavior) via `--build`
 or `--analysis`.

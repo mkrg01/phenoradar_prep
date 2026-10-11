@@ -980,7 +980,7 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True,
                                metavar='{plan,submit,status,cleanup,fetch-software}')
     for name in ("plan", "prepare", "fetch-software"):
-        help_text = {'plan': 'Preview reuse and processing counts',
+        help_text = {'plan': 'Verify reusable products and preview processing counts',
                      'fetch-software': 'Download and pin GeneGalleon software'}
         command = sub.add_parser(name, **({'help': help_text[name]} if name in help_text else {}))
         command.add_argument("--root", default=".")
@@ -988,7 +988,8 @@ def main():
         if name != "fetch-software": command.add_argument("--metadata")
         if name == "prepare": command.add_argument("--name", help="Explicit build name; otherwise follow name/name_mode in the build config")
         if name == 'plan':
-            command.add_argument('--verify', action='store_true', help='Verify reusable product checksums now')
+            # Keep the former opt-in flag compatible; plans now always verify.
+            command.add_argument('--verify', action='store_true', default=True, help=argparse.SUPPRESS)
             command.add_argument('--outdir', default='reports/plan', help='Directory for detailed TSV reports (default: reports/plan)')
             command.add_argument('--split', action='store_true', help='Also write reports grouped by planned action')
     for name in ("status", "cleanup", "submit", "materialize", "worker", "mapping", "complete", "dispatch"):

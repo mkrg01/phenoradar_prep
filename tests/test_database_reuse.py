@@ -48,7 +48,7 @@ def test_cli_reuses_verified_files_across_plan_commands(dataset_project, monkeyp
         calls.append(Path(path))
         return hash_file(path)
     monkeypatch.setattr(dataset_assets, "sha256", counted)
-    monkeypatch.setattr(sys, "argv", ["dataset.py", "plan", "--root", str(root), "--config", str(config), '--verify'])
+    monkeypatch.setattr(sys, "argv", ["dataset.py", "plan", "--root", str(root), "--config", str(config)])
     assert dataset.main() == 0
     first = capsys.readouterr().out
     assert calls
@@ -64,7 +64,7 @@ def test_cli_reuses_verified_files_across_plan_commands(dataset_project, monkeyp
     capsys.readouterr()
     damaged = next((moved / "cds").glob("*.gz"))
     damaged.write_bytes(damaged.read_bytes() + b"changed")
-    monkeypatch.setattr(sys, "argv", ["dataset.py", "plan", "--root", str(root), "--config", str(config), '--verify'])
+    monkeypatch.setattr(sys, "argv", ["dataset.py", "plan", "--root", str(root), "--config", str(config)])
     assert dataset.main() == 0
     assert 'rebuild: 1' in capsys.readouterr().out
     attention = read_tsv(root / 'reports/plan/needs_attention.tsv')
