@@ -23,6 +23,7 @@ results to PhenoRadar.
 
 ## Managing runs
 
+- [Build previews and progress](datasets.md#check-a-plan-or-progress)
 - [Slurm resources, targets, and retries](running.md)
 - [Reuse or copy a database](datasets.md#reusing-completed-databases)
 - [Export a subset of completed results](species_filter.md)
