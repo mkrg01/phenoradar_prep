@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from common import atomic_writer, now, read_tsv, write_json
-from dataset_assets import digest, link_file, locked, record, verify
+from dataset_assets import link_file, locked, record, verify
 from mapping_tables import load_tables, protein_record, relative_file, subset
 from layout import run_layout
 from build_versioning import publish_latest
@@ -14,11 +14,7 @@ from build_versioning import publish_latest
 def load_complete(path, verify_files=True):
     from portable_build import completion_path, load_products, manifest_data
     path = completion_path(path)
-    data = manifest_data(path, consume=True)
-    if data.get('kind') != 'completed_build' or data.get('schema_version') != 5:
-        raise ValueError('unsupported database format: expected schema 5; prepare a new build from metadata')
-    if digest({k:v for k,v in data.items() if k != 'sha256'}) != data.get('sha256'):
-        raise ValueError('build completion record changed')
+    data = manifest_data(path, consume=True, validate=True)
     return load_products(path, data, verify_files=verify_files)
 
 

@@ -37,7 +37,7 @@ slurm:
       mem_gb: 32
       time: 1-00:00:00
     controller:
-      cpus: 1
+      cpus: 4  # Preparation checksums use up to 4 threads.
       mem_gb: 8
       time: 64-00:00:00
 storage:

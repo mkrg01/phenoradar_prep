@@ -9,18 +9,39 @@ import os
 import re
 import shutil
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import ContextVar
 from pathlib import Path
 
 from common import file_record, read_tsv, sha256, write_json
 from translate_cds import fasta_ids
 from sample_identity import annotate
-from verification_cache import active_cache
+from verification_cache import active_cache, compact_rows, expand_rows
 
 COUNTS = ["busco_cds_single", "busco_cds_duplicated", "busco_cds_fragmented", "busco_cds_missing", "busco_cds_total"]
+_CACHE_ONLY = ContextVar('cache_only_verification', default=False)
 
 
 class ProductIntegrityError(ValueError):
     """A registered artifact is missing or no longer matches its recorded content."""
+
+
+class UncachedVerification(ValueError):
+    """Preparation needs a file read and must move to an allocated Slurm job."""
+
+
+@contextmanager
+def cached_verification():
+    token = _CACHE_ONLY.set(True)
+    try:
+        yield
+    finally:
+        _CACHE_ONLY.reset(token)
+
+
+def verification_workers(requested=4):
+    allocated = os.environ.get('SLURM_CPUS_PER_TASK')
+    return max(1, min(requested, int(allocated))) if allocated else max(1, requested)
 
 
 SAFE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
@@ -52,7 +73,37 @@ def normalize_taxonomy_ids(row):
     return row
 
 
-def identities(metadata):
+def identities(metadata, source=None):
+    path = Path(metadata).resolve()
+    before = stat_identity(path)
+    if source is not None and source.get('stat') != before:
+        raise ValueError(f'file changed while reading sample metadata: {path}')
+    cache = active_cache()
+    checksum = source['sha256'] if source is not None else None
+    indexed = cache.document(path, 'sample-metadata-v1', before, checksum) if cache is not None else None
+    if indexed is not None:
+        try:
+            items = indexed['items']
+            rows = expand_rows(indexed['columns'], [i['row'] for i in items])
+            result = [dict(item, row=row) for item, row in zip(items, rows)]
+            if before != stat_identity(path):
+                raise ValueError(f'file changed while reading sample metadata: {path}')
+            return indexed['fields'], result
+        except (KeyError, TypeError, IndexError):
+            pass
+    fields, result = _read_identities(path)
+    if cache is not None:
+        checksum = checksum or sha256(path)
+        columns, rows = compact_rows(i['row'] for i in result)
+        indexed = {'fields': fields, 'columns': columns,
+                   'items': [dict(item, row=row) for item, row in zip(result, rows)]}
+        if before != stat_identity(path):
+            raise ValueError(f'file changed while reading sample metadata: {path}')
+        cache.remember_document(path, 'sample-metadata-v1', before, checksum, indexed)
+    return fields, result
+
+
+def _read_identities(metadata):
     with open(metadata, newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         fields = reader.fieldnames
@@ -103,10 +154,15 @@ def stat_identity(path):
 
 
 def record(path):
+    path = Path(path).resolve()
     before = stat_identity(path)
-    entry = file_record(path)
+    cache = active_cache()
+    checksum = cache.checksum(before) if cache is not None else None
+    entry = {'path': str(path), 'bytes': before[2], 'sha256': checksum} if checksum else file_record(path)
     if before != stat_identity(path):
         raise ValueError(f"file changed while registering: {path}")
+    if cache is not None:
+        cache.remember(path, entry['sha256'], before)
     return dict(entry, stat=before)
 
 
@@ -116,10 +172,15 @@ def verify(entry):
         raise ProductIntegrityError(f"registered file missing: {path}")
     before = stat_identity(path)
     if entry.get("stat") == before:
+        cache = active_cache()
+        if cache is not None:
+            cache.remember(path, entry['sha256'], before)
         return path
     cache = active_cache()
     if cache is not None and cache.matches(path, entry["sha256"], before):
         return path
+    if _CACHE_ONLY.get():
+        raise UncachedVerification(f'uncached file verification: {path}')
     if sha256(path) != entry["sha256"]:
         raise ProductIntegrityError(f"registered file changed: {path}")
     if cache is not None:
@@ -129,6 +190,82 @@ def verify(entry):
         except OSError:
             pass  # Preserve verify's result, but never cache a file that changed after hashing.
     return path
+
+
+def verification_cached(entry):
+    """Check receipts/cache using stat alone, without reading file contents."""
+    path = Path(entry['path'])
+    if not path.is_file():
+        return False
+    try:
+        identity = stat_identity(path)
+    except OSError:
+        return False
+    cache = active_cache()
+    return (entry.get('stat') == identity or
+            (cache is not None and cache.matches(path, entry['sha256'], identity)))
+
+
+def verify_many(entries, workers=4, progress=None):
+    """Hash cache misses concurrently; all SQLite access stays on the caller thread.
+
+    Return an error per entry, so a damaged sample does not discard healthy ones.
+    Aliases with the same checksum and full file identity share a single read.
+    """
+    entries = list(entries)
+    errors, pending = [None] * len(entries), {}
+    cache = active_cache()
+    checked = 0
+    for index, entry in enumerate(entries):
+        path = Path(entry['path'])
+        try:
+            if not path.is_file():
+                raise ProductIntegrityError(f'registered file missing: {path}')
+            identity = stat_identity(path)
+            if (entry.get('stat') == identity or
+                    (cache is not None and cache.matches(path, entry['sha256'], identity))):
+                if cache is not None:
+                    cache.remember(path, entry['sha256'], identity)
+                checked += 1
+                continue
+            key = (entry['sha256'], tuple(identity))
+            pending.setdefault(key, []).append((index, path))
+        except OSError as error:
+            errors[index] = ProductIntegrityError(f'registered file unavailable: {path}: {error}')
+            checked += 1
+        except ProductIntegrityError as error:
+            errors[index] = error
+            checked += 1
+    if progress:
+        progress(checked, len(entries))
+    if pending:
+        if _CACHE_ONLY.get():
+            raise UncachedVerification('uncached product verification')
+        with ThreadPoolExecutor(max_workers=verification_workers(workers)) as executor:
+            futures = {executor.submit(sha256, aliases[0][1]): (key, aliases)
+                       for key, aliases in pending.items()}
+            for future in as_completed(futures):
+                (expected, identity), aliases = futures[future]
+                try:
+                    actual = future.result()
+                    error = None
+                except OSError as failure:
+                    actual, error = None, str(failure)
+                for index, path in aliases:
+                    if actual != expected:
+                        errors[index] = ProductIntegrityError(
+                            f'registered file unavailable: {path}: {error}' if error else
+                            f'registered file changed: {path}')
+                    elif cache is not None:
+                        try:
+                            if tuple(stat_identity(path)) == identity:
+                                cache.remember(path, expected, identity)
+                        except OSError:
+                            pass
+                checked += len(aliases)
+                if progress:
+                    progress(checked, len(entries))
+    return errors
 
 
 def product_file(entry, verify_files=True):
@@ -163,6 +300,8 @@ def link_file(source, target):
     source, target = Path(source), Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
+        if os.path.samefile(source, target):
+            return
         if sha256(source) != sha256(target):
             raise ValueError(f"refusing to replace different staged input: {target}")
         return
@@ -170,6 +309,38 @@ def link_file(source, target):
         os.link(source, target)
     except OSError:
         shutil.copy2(source, target)
+
+
+def stage_file(entry, target, final=None):
+    """Import verified bytes and record the identity after our hard-link operation."""
+    source = Path(entry['path'])
+    before = stat_identity(source)
+    verify(entry)
+    if before != stat_identity(source):
+        raise ProductIntegrityError(f'registered file changed while staging: {source}')
+    target = Path(target)
+    link_file(source, target)
+    after, identity = stat_identity(source), stat_identity(target)
+    if before[:4] != after[:4]:
+        raise ProductIntegrityError(f'registered file changed while staging: {source}')
+    if identity[:2] == after[:2]:
+        # os.link changes ctime without writing bytes. Register that controlled
+        # change, then keep requiring the complete identity on subsequent use.
+        if identity != after:
+            raise ProductIntegrityError(f'registered file changed while staging: {source}')
+    else:
+        # Cross-filesystem copies must be checked; only a hard link shares proof.
+        if _CACHE_ONLY.get():
+            raise UncachedVerification(f'copied file needs verification: {target}')
+        if before != after or sha256(target) != entry['sha256']:
+            raise ProductIntegrityError(f'registered file changed while staging: {source}')
+        if identity != stat_identity(target):
+            raise ProductIntegrityError(f'copied file changed while staging: {target}')
+    cache = active_cache()
+    if cache is not None:
+        cache.remember(source, entry['sha256'], after)
+        cache.remember(final or target, entry['sha256'], identity)
+    return dict(entry, path=str(final or target), stat=identity)
 
 
 def counts(values):

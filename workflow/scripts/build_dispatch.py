@@ -1,4 +1,4 @@
-"""Verify reusable artifacts on Slurm, then schedule the required sample work."""
+"""Prepare cached reuse locally, or verify on Slurm, then schedule sample work."""
 import copy
 import json
 import os
@@ -8,9 +8,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 from common import now, write_json
-from dataset_assets import ProductIntegrityError, digest, locked, record, verify
+from dataset_assets import (ProductIntegrityError, UncachedVerification, cached_verification,
+                            digest, locked, record, verification_cached, verify, verify_many)
 
 
 def save_candidates(directory, selection):
@@ -28,7 +30,7 @@ def save_candidates(directory, selection):
         selected[name] = chosen
     write_json(Path(directory) / 'reuse_candidates.json',
                {'samples': selected, 'sources': selection['reuse_sources'],
-                'software_locks': locks, 'rebuilds': selection.get('rebuilds', {})})
+                'software_locks': locks, 'rebuilds': selection.get('rebuilds', {})}, compact=True)
 
 
 def runtime_data(path):
@@ -149,7 +151,7 @@ def candidate_files(chosen):
     return [chosen['product'][key] for key in PRODUCTS] + [chosen['mapping']['table']]
 
 
-def verify_and_stage(path, manifest):
+def verify_and_stage(path, manifest, workers=4, software=None, cached_only=False):
     """Validate frozen candidates before importing any of their products."""
     from database_reuse import stage
     from dataset import item_products, private_fastq_path
@@ -160,6 +162,24 @@ def verify_and_stage(path, manifest):
     planned = {row['species']: row for row in read_context(path)['items']}
     references, rebuilds = {}, {}
     local_files = (previous or {}).get('verified_files', {})
+    last_update = 0
+
+    def progress(checked, total):
+        nonlocal last_update
+        current = time.monotonic()
+        if current - last_update >= 1 or checked == total:
+            update_verification(path, 'running', phase='checksums', checked=checked,
+                                total=total, current_sample=None)
+            last_update = current
+
+    def failures(samples):
+        entries = [(name, entry) for name, files in samples.items() for entry in files]
+        result = {}
+        for (name, _), error in zip(entries, verify_many((entry for _, entry in entries), workers, progress)):
+            if error is not None:
+                result.setdefault(name, str(error))
+        return result
+
     for entry in (previous or {}).get('shared_files', []):
         verify(entry)
     if previous is None and manifest.get('deferred_verification'):
@@ -168,16 +188,12 @@ def verify_and_stage(path, manifest):
             verify(source)  # A changed shared manifest is not a per-sample repair.
         selected = {}
         rebuilds.update(saved['rebuilds'])
-        for index, (name, chosen) in enumerate(saved['samples'].items(), 1):
-            update_verification(path, 'running', phase='checksums', checked=index - 1,
-                                total=len(saved['samples']), current_sample=name)
-            try:
-                for entry in candidate_files(chosen):
-                    verify(entry)
+        damaged = failures({name: candidate_files(chosen) for name, chosen in saved['samples'].items()})
+        rebuilds.update(damaged)
+        for name, chosen in saved['samples'].items():
+            if name not in damaged:
                 chosen['software_lock'] = saved['software_locks'].get(chosen['source']['path'])
                 selected[name] = chosen
-            except ProductIntegrityError as error:
-                rebuilds[name] = str(error)
         update_verification(path, 'running', phase='staging', checked=len(saved['samples']),
                             total=len(saved['samples']), current_sample=None)
         staging = Path(tempfile.mkdtemp(prefix='.verify-', dir=path))
@@ -197,12 +213,7 @@ def verify_and_stage(path, manifest):
         finally:
             shutil.rmtree(staging)
     else:
-        for name, entries in local_files.items():
-            try:
-                for entry in entries:
-                    verify(entry)
-            except ProductIntegrityError as error:
-                rebuilds[name] = str(error)
+        rebuilds.update(failures(local_files))
     pending = False
     raw_inputs = copy.deepcopy(manifest['raw_inputs'])
     for item in manifest['items']:
@@ -239,8 +250,16 @@ def verify_and_stage(path, manifest):
             write_json(receipt, {'state': 'reused' if reused else 'complete',
                                  'verification': 'verified', 'finished_at': now()})
     if pending:
-        manifest['config']['genegalleon'], manifest['genegalleon'], manifest['software_lock'] = resolve_software(
-            manifest['config']['genegalleon'])
+        if cached_only and software is None:
+            from dataset_software import resolve_cached
+            software = resolve_cached(manifest['config']['genegalleon'])
+            if software is None:
+                raise UncachedVerification('uncached software preparation')
+        if software is not None:
+            for entry in software[1]:
+                verify(entry)
+        manifest['config']['genegalleon'], manifest['genegalleon'], manifest['software_lock'] = (
+            software if software is not None else resolve_software(manifest['config']['genegalleon']))
     if rebuilds and previous is not None:
         invalidate_mapping(path, manifest, rebuilds)
     save_runtime(path, manifest, references, raw_inputs, local_files, rebuilds)
@@ -256,14 +275,15 @@ def dispatch(path, until='database', species=None, execution=None):
         update_verification(path, 'running', started_at=now(), job_id=os.environ.get('SLURM_JOB_ID'))
         try:
             manifest = load(path, check_code=True)
-            if execution:
-                load_execution(execution)
+            from phase_config import execution_settings
+            slurm = load_execution(execution) if execution else manifest['config']['slurm']
+            slurm = execution_settings(slurm)
             if (path / 'completed.json').exists():
                 load_complete(path)
                 update_verification(path, 'complete', finished_at=now())
                 print('Database already complete; recorded products verified.')
                 return []
-            rebuilds = verify_and_stage(path, manifest)
+            rebuilds = verify_and_stage(path, manifest, workers=min(4, slurm['stages']['controller']['cpus']))
             update_verification(path, 'running', phase='scheduling')
             commands = submit(path, until, species, resources=execution,
                               dispatch_dependency=os.environ.get('SLURM_JOB_ID'))
@@ -283,10 +303,60 @@ def save_database_submission(path, batch):
                        {'state': 'queued', 'job_id': job['job_id'], 'updated_at': now()})
 
 
+def check_submissions(jobs):
+    """Reject active or ambiguous submissions before changing imported products."""
+    ids = []
+    for receipt in jobs.glob('submission_*.json'):
+        if receipt.name.endswith('.resources.json'):
+            continue
+        for job in json.loads(receipt.read_text())['jobs']:
+            if job['state'] in {'submitting', 'unknown'}:
+                raise ValueError(f'unresolved submission in {receipt}; inspect Slurm before retrying')
+            if job.get('job_id'):
+                ids.append(job['job_id'])
+    if ids:
+        import pwd
+        queued = subprocess.check_output(['squeue', '--noheader', '--user', pwd.getpwuid(os.getuid()).pw_name,
+                                          '--format=%i'], text=True).splitlines()
+        if any(identifier.strip().split('_', 1)[0] in ids for identifier in queued):
+            raise ValueError('dataset still has queued/running jobs; wait before resubmitting')
+
+
+def cached_preparation(path, manifest, context):
+    """Stat-only eligibility; do not start importing before all candidates agree."""
+    from dataset_software import resolve_cached
+    previous = runtime_data(path)
+    if (path / 'completed.json').exists():
+        from build_products import load_complete
+        completed = load_complete(path, verify_files=False)
+        return all(verification_cached(entry) for entry in completed['files']), None
+    if previous is not None:
+        entries = [*previous.get('shared_files', []),
+                   *(entry for files in previous.get('verified_files', {}).values() for entry in files)]
+    elif manifest.get('deferred_verification'):
+        saved = json.loads(verify(manifest['auxiliary']['reuse_candidates.json']).read_text())
+        products = [entry for chosen in saved['samples'].values() for entry in candidate_files(chosen)]
+        # Avoid a large cross-filesystem copy on the submit host.
+        device = path.stat().st_dev
+        if any(not Path(entry['path']).is_file() or Path(entry['path']).stat().st_dev != device for entry in products):
+            return False, None
+        entries = [*saved['sources'], *products]
+    else:
+        entries = []
+    if not all(verification_cached(entry) for entry in entries):
+        return False, None
+    software = None
+    if any(row['action'] in {'new', 'partial', 'rebuild'} for row in context['items']):
+        software = resolve_cached(manifest['config']['genegalleon'])
+        if software is None:
+            return False, None
+    return True, software
+
+
 def submit_verification(path, until, species=None, dry_run=False, resources=None):
-    """Submit a small preparation job; checksum I/O happens after allocation."""
+    """Prepare cache hits locally; allocate checksum misses and downloads to Slurm."""
     from build_reports import print_plan, read_context
-    from dataset import load
+    from dataset import load, submit
     from phase_config import array_concurrency, execution_settings, worker_budgets
     path = Path(path).resolve()
     context = read_context(path)
@@ -307,23 +377,51 @@ def submit_verification(path, until, species=None, dry_run=False, resources=None
     jobs = path / 'jobs'
     jobs.mkdir(exist_ok=True)
     (jobs / 'logs').mkdir(exist_ok=True)
+    with locked(path / '.verification.lock'):
+        with locked(jobs / '.submit.lock'):
+            if not dry_run:
+                check_submissions(jobs)
+        with cached_verification():
+            try:
+                ready, software = cached_preparation(path, manifest, context)
+            except UncachedVerification:
+                ready, software = False, None
+        if ready:
+            update_verification(path, 'running', started_at=now(), job_id=None, location='local')
+            try:
+                with cached_verification():
+                    if (path / 'completed.json').exists():
+                        from build_products import load_complete
+                        load_complete(path)
+                        rebuilds = {}
+                    else:
+                        rebuilds = verify_and_stage(path, manifest, software=software, cached_only=True)
+                    # Status and workspace checks also precede sbatch and must
+                    # fall back to Slurm if a file changes after preparation.
+                    commands = submit(path, until, species, dry_run, resources)
+            except UncachedVerification:
+                # A file changed after the stat-only check. Let Slurm reverify it.
+                pass
+            except BaseException as error:
+                update_verification(path, 'failed', error=str(error), job_id=None)
+                raise
+            else:
+                update_verification(path, 'complete', phase='finished', finished_at=now(), rebuilds=rebuilds,
+                                    job_id=None, location='local')
+                print_plan([dict(row, verification='verified') if row['verification'] == 'pending' else row
+                            for row in context['items']])
+                print('Product checksums matched verified receipts/cache; preparation completed locally.')
+                print(f'Status: ./run_build.sh status --build {path}')
+                return commands
+        return submit_verification_job(path, manifest, context, slurm, until, species, dry_run)
+
+
+def submit_verification_job(path, manifest, context, slurm, until, species, dry_run):
+    from build_reports import print_plan
+    jobs = path / 'jobs'
     with locked(jobs / '.submit.lock'):
         if not dry_run:
-            ids = []
-            for receipt in jobs.glob('submission_*.json'):
-                if receipt.name.endswith('.resources.json'):
-                    continue
-                for job in json.loads(receipt.read_text())['jobs']:
-                    if job['state'] in {'submitting', 'unknown'}:
-                        raise ValueError(f'unresolved submission in {receipt}; inspect Slurm before retrying')
-                    if job.get('job_id'):
-                        ids.append(job['job_id'])
-            if ids:
-                import pwd
-                queued = subprocess.check_output(['squeue', '--noheader', '--user', pwd.getpwuid(os.getuid()).pw_name,
-                                                  '--format=%i'], text=True).splitlines()
-                if any(identifier.strip().split('_', 1)[0] in ids for identifier in queued):
-                    raise ValueError('dataset still has queued/running jobs; wait before resubmitting')
+            check_submissions(jobs)
         number = 1 + max([int(p.name.split('_')[1].split('.')[0])
                           for p in jobs.glob('submission_*.resources.json')] + [0])
         execution = jobs / f'submission_{number:04d}.resources.json'

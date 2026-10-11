@@ -212,6 +212,23 @@ def test_resolved_paths_and_receipts_bind_source_and_image(pins, source_download
     assert software.resolve(pins) == (resolved, records, lock)
 
 
+def test_cached_resolution_never_acquires_or_hashes_uncached_software(pins, source_download, runtime, monkeypatch):
+    from dataset_assets import cached_verification
+    from verification_cache import verification_cache
+    with verification_cache(Path(pins['cache_dir']).parent / 'checks.sqlite'):
+        with cached_verification():
+            assert software.resolve_cached(pins) is None
+        expected = software.resolve(pins)
+        monkeypatch.setattr(software, 'download', lambda *_: pytest.fail('download on cached resolve'))
+        monkeypatch.setattr(software.shutil, 'which', lambda *_: pytest.fail('runtime lookup on cached resolve'))
+        with cached_verification():
+            assert software.resolve_cached(pins) == expected
+        image = Path(expected[0]['image'])
+        image.write_bytes(b'changed cached image')
+        with cached_verification():
+            assert software.resolve_cached(pins) is None
+
+
 @pytest.mark.parametrize("legacy", [False, True])
 @pytest.mark.parametrize("damaged", ["source", "container"])
 def test_transferred_cache_is_reused_offline_and_still_detects_changes(

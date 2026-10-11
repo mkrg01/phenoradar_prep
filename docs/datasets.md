@@ -24,18 +24,25 @@ Use the build directory name printed by `submit` for `{build_name}` below.
 
 | Build command | Purpose |
 | --- | --- |
-| `plan` | Verify reusable products, show processing counts, and save `reports/plan/plan.tsv` |
-| `submit` | Save settings, verify reuse candidates on Slurm, then schedule required work |
-| `status --build PATH` | Show recorded sample progress and database publication state |
+| `plan` | Check reuse and save `reports/plan/plan.tsv` |
+| `submit` | Save the build and submit required work |
+| `status --build PATH` | Show sample progress and database status |
+
+`submit` skips the Slurm preparation job when it can use verified, unchanged
+files and software locally. Otherwise, preparation runs on Slurm before
+sample and mapping jobs.
 
 Monitor submitted work with `status`. The completed database is saved in
 `results/{build_name}/database/`. Builds record BUSCO scores without filtering samples.
 
 ## Plans and progress
 
-`plan` checks sample identities, processing conditions, and product checksums.
-Successful checks are cached for unchanged files. `status` reports progress;
-use `status --verify` when you also need to check product integrity.
+`plan` checks reuse compatibility and product checksums. Cached checks apply
+only to unchanged files. Metadata updates, including new columns or values in
+previously empty columns, are detected automatically. Settings and exclusions
+are checked on every plan.
+
+`status` shows recorded progress. Add `--verify` to check product integrity.
 
 | Option | Command | Result |
 | --- | --- | --- |
@@ -65,18 +72,17 @@ to run a single branch.
 
 ## Saved settings and previews
 
-The first submission saves inputs and settings. Resume with `--build` or
-`--analysis`; source config edits do not change a saved run. Create a new run
-for changed scientific settings, code, or software. Use
+The first submission saves inputs and settings. Builds keep complete sample
+metadata in `metadata.tsv`. Resume with `--build` or `--analysis`; source config
+edits do not change a saved run. Create a new run for changed scientific
+settings, code, or software. Use
 [resource overrides](running.md#resource-budgets) to change job resources.
 
 Build names include UTC timestamps by default; retry with the path printed by
 `submit`. `--name` sets an exact name. With `name_mode: fixed`, repeating `submit`
 resumes the configured name. See [build settings](configuration.md#build-settings).
 
-`submit --dry-run` saves a build and previews its preparation job without
-submitting. Sample jobs are created during preparation. Resume with `--build`
-to use that saved build.
+Add `--dry-run` to save a run and preview its jobs without submitting.
 
 ## Failure and recovery behavior
 
@@ -140,8 +146,8 @@ reuse_from:
 Reuse requires matching sample identities and processing conditions. Intact
 products can be reused without the original FASTQs.
 
-Keep source databases available until Slurm preparation finishes verifying and
-importing their products. The new build then uses its own cache.
+Keep source databases available until preparation finishes importing their
+products. The new build then uses its own cache.
 
 Set `reuse_from: auto` to discover previous builds under `results/`, or select an
 unfinished build by its directory or `build.json`. Only registered assembly,

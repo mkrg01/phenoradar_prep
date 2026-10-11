@@ -44,7 +44,8 @@ def test_build_submit_prepares_and_retries_saved_inputs(dataset_project, schedul
     before = (build / 'build.json').read_bytes()
     assert scheduler['commands'] == []
     assert 'sbatch' in capsys.readouterr().out
-    assert (build / 'jobs/0001_verify.sh').is_file()
+    assert (build / 'jobs/0001_mapping.sh').is_file()
+    assert not (build / 'jobs/0001_verify.sh').exists()
     # Retry uses the snapshot, even when live inputs are gone or invalid.
     (root / 'input/metadata.tsv').unlink()
     cfg['translation']['table'] = 2

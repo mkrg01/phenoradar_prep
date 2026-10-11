@@ -14,7 +14,7 @@ import shutil
 import tempfile
 
 from common import file_record, read_tsv, species_from_gene_id, write_json
-from dataset_assets import SAFE, digest, link_file, record, stat_identity, verify
+from dataset_assets import SAFE, digest, link_file, record, stage_file, stat_identity, verify
 from translate_cds import fasta_ids
 
 
@@ -26,10 +26,11 @@ def lock(path):
         yield
 
 
-def relative_file(root, entry):
+def relative_file(root, entry, resolved_root=None):
     relative = Path(entry['path'])
     path = (Path(root) / relative).resolve()
-    if relative.is_absolute() or '..' in relative.parts or not path.is_relative_to(Path(root).resolve()):
+    if relative.is_absolute() or '..' in relative.parts or not path.is_relative_to(
+            resolved_root if resolved_root is not None else Path(root).resolve()):
         raise ValueError('mapping table path escapes snapshot')
     return dict(entry, path=str(path))
 
@@ -65,6 +66,7 @@ def protein_record(path):
 @lru_cache(maxsize=8)
 def _read_tables(path, identity):
     path = Path(path)
+    root = path.parent.resolve()
     data = json.loads(path.read_text())
     if data.get('schema_version') != 2 or data.get('kind') != 'odb_tables':
         raise ValueError(f'expected species mapping tables: {path}')
@@ -75,7 +77,7 @@ def _read_tables(path, identity):
         if (not SAFE.fullmatch(name) or entry['odb_species'] != name.replace('-', '_')
                 or entry['protein_sha256'] != proteins[name]['sha256']):
             raise ValueError('mapping table identity differs from protein')
-        relative_file(path.parent, entry['table'])
+        relative_file(root, entry['table'], resolved_root=root)
     return data
 
 
@@ -212,9 +214,9 @@ def write_tables(outdir, entries, version='v12', node=3193, qc=None, references=
         saved = {}
         for name, entry in sorted(entries.items()):
             filename = entry['odb_species'] + '.tsv.gz'
-            source = verify(entry['table']); destination = staged / filename
-            link_file(source, destination)
-            saved[name] = dict(entry, table=dict(entry['table'], path=f'species/{filename}', stat=stat_identity(destination)))
+            destination = staged / filename
+            table = stage_file(entry['table'], destination)
+            saved[name] = dict(entry, table=dict(table, path=f'species/{filename}'))
         if (out / 'species').exists(): shutil.rmtree(out / 'species')
         os.rename(staged, out / 'species')
         data = {'schema_version':2, 'kind':'odb_tables', 'version':version, 'node':node,

@@ -13,7 +13,8 @@ import urllib.request
 from pathlib import Path
 
 from common import now, sha256, write_json
-from dataset_assets import digest, locked, record, stat_identity, verify
+from dataset_assets import digest, locked, record, stat_identity, verification_cached, verify
+from verification_cache import active_cache
 
 SOURCE_BASE = "https://codeload.github.com/kfuku52/genegalleon/tar.gz/"
 ENTRYPOINT = "workflow/gg_transcriptome_generation_entrypoint.sh"
@@ -46,7 +47,7 @@ def download(url, target):
         shutil.copyfileobj(response, output, length=8 * 1024 * 1024)
 
 
-def source_records(repository):
+def source_paths(repository):
     repository = Path(repository)
     if not (repository / ENTRYPOINT).is_file():
         raise ValueError(f"GeneGalleon transcriptome entrypoint not found: {repository}")
@@ -54,10 +55,14 @@ def source_records(repository):
     paths = sorted(p for p in (repository / "workflow").rglob("*")
                    if p.is_file() and not runtime_dirs.intersection(p.parts) and p.suffix not in {".pyc", ".pyo"})
     if (repository / "VERSION").is_file(): paths.append(repository / "VERSION")
-    return [record(p) for p in paths]
+    return paths
 
 
-def read_receipt(destination, identity):
+def source_records(repository):
+    return [record(p) for p in source_paths(repository)]
+
+
+def read_receipt(destination, identity, cached_only=False):
     destination = Path(destination).resolve()
     stored = json.loads((destination / "receipt.json").read_text())
     receipt = copy.deepcopy(stored)
@@ -83,12 +88,14 @@ def read_receipt(destination, identity):
         if original.is_absolute() and original != path:
             entry.pop("stat", None)  # Always hash the relocated file, even if old stat values match.
         before = stat_identity(path) if path.is_file() else None
+        if cached_only and not verification_cached(entry):
+            return None
         verify(entry)
         if before != stat_identity(path):
             raise ValueError(f"file changed while verifying software cache: {path}")
         entry["stat"] = before
     portable = dict(receipt, files=relocate(receipt["files"], destination, Path(".")))
-    if portable != stored:
+    if portable != stored and not cached_only:
         write_json(destination / "receipt.json", portable)
     return receipt
 
@@ -236,3 +243,60 @@ def resolve(config):
     cfg["repository"], cfg["image"] = str(repository), str(image)
     lock = {"schema_version": 1, "source": source, "container": container}
     return cfg, [*source["files"], *container["files"]], lock
+
+
+def resolve_cached(config):
+    """Resolve already verified software without downloads or large file reads."""
+    validate(config)
+    cfg = copy.deepcopy(config)
+    cache = active_cache()
+
+    def cached_records(paths):
+        if cache is None or any(not Path(p).is_file() or cache.checksum(stat_identity(p)) is None for p in paths):
+            return None
+        return [record(p) for p in paths]
+
+    try:
+        if cfg.get('repository'):
+            repository = Path(cfg['repository'])
+            # The source was registered during condition checking for this plan.
+            files = cached_records(source_paths(repository))
+            if files is None:
+                return None
+            source = {'kind': 'local_source', 'files': files}
+            if (repository / 'VERSION').is_file():
+                source['version'] = (repository / 'VERSION').read_text().strip()
+        else:
+            if not cfg.get('revision') or not cfg.get('version'):
+                return None
+            identity = {'revision': cfg['revision'], 'version': cfg['version'],
+                        'url': SOURCE_BASE + cfg['revision']}
+            destination = Path(cfg['cache_dir']) / 'source' / cfg['revision']
+            source = read_receipt(destination, identity, cached_only=True)
+            if source is None:
+                return None
+            repository = destination / 'repository'
+        local_image = cfg.get('image')
+        if not local_image and cfg.get('repository') and (repository / 'genegalleon.sif').is_file():
+            local_image = repository / 'genegalleon.sif'
+        if local_image:
+            image = Path(local_image)
+            files = cached_records([image])
+            if files is None:
+                return None
+            container = {'kind': 'local_image', 'files': files}
+        else:
+            if source['kind'] == 'local_source' and source.get('version') != cfg.get('version'):
+                return None
+            identity = {'uri': cfg['image_uri'], 'architecture': architecture(), 'expected_sha256': None}
+            destination = Path(cfg['cache_dir']) / 'images' / digest(identity)
+            container = read_receipt(destination, identity, cached_only=True)
+            if container is None:
+                return None
+            check_image_labels(container['labels'], cfg)
+            image = destination / 'genegalleon.sif'
+        cfg['repository'], cfg['image'] = str(repository), str(image)
+        lock = {'schema_version': 1, 'source': source, 'container': container}
+        return cfg, [*source['files'], *container['files']], lock
+    except (OSError, ValueError, KeyError):
+        return None

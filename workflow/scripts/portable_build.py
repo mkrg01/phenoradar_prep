@@ -8,36 +8,70 @@ from collections import OrderedDict
 from pathlib import Path
 
 from common import write_json, write_tsv
-from dataset_assets import digest, link_file, record, stat_identity, verify
+from dataset_assets import digest, link_file, record, stat_identity, verify, verify_many
+from verification_cache import active_cache, compact_rows, expand_rows
 
 PRODUCT_FILES = ('cds', 'busco', 'abundance', 'protein', 'translation', 'expression', 'expression_qc')
 _MANIFESTS = OrderedDict()
+_INDEX_KIND = 'completed-manifest-v1'
 
 
-def manifest_data(path, consume=False):
+def manifest_data(path, consume=False, validate=False):
     """Reuse the resolver's parsed JSON; consume it before exposing mutable products."""
     path = Path(path).resolve()
     identity = stat_identity(path)
     previous = _MANIFESTS.pop(str(path), None)
+    cache = active_cache()
+    checked = False
     if previous is not None and previous[0] == identity:
         data = previous[1]
+        checked = previous[2]
     else:
-        data = json.loads(path.read_text())
+        indexed = cache.document(path, _INDEX_KIND, identity) if cache is not None else None
+        data = None
+        if indexed is not None:
+            try:
+                data = indexed['data']
+                products = list(data['products'].values())
+                rows = expand_rows(indexed['columns'], [p['row'] for p in products])
+                for product, row in zip(products, rows):
+                    product['row'] = row
+                checked = True
+            except (KeyError, TypeError, IndexError):
+                data = None
+        if data is None:
+            data = json.loads(path.read_text())
+            checked = False
         if identity != stat_identity(path):
             raise ValueError(f'file changed while reading database manifest: {path}')
+    if validate:
+        if data.get('kind') != 'completed_build' or data.get('schema_version') != 5:
+            raise ValueError('unsupported database format: expected schema 5; prepare a new build from metadata')
+        if not checked:
+            if digest({k: v for k, v in data.items() if k != 'sha256'}) != data.get('sha256'):
+                raise ValueError('build completion record changed')
+            checked = True
+            if cache is not None:
+                columns, rows = compact_rows(p['row'] for p in data['products'].values())
+                compact = dict(data, products={name: dict(product, row=row)
+                               for (name, product), row in zip(data['products'].items(), rows)})
+                if identity != stat_identity(path):
+                    raise ValueError(f'file changed while reading database manifest: {path}')
+                cache.remember_document(path, _INDEX_KIND, identity, data['sha256'],
+                                        {'columns': columns, 'data': compact})
     if not consume:
-        _MANIFESTS[str(path)] = (identity, data)
+        _MANIFESTS[str(path)] = (identity, data, checked)
         while len(_MANIFESTS) > 2:
             _MANIFESTS.popitem(last=False)
     return data
 
 
-def inside_bundle(root, relative):
+def inside_bundle(root, relative, resolved_root=None):
     relative = Path(relative)
     if relative.is_absolute() or '..' in relative.parts or relative == Path('.'):
         raise ValueError(f'invalid relative product path: {relative}')
     path = (root / relative).resolve()
-    if not path.is_relative_to(root.resolve()):
+    if not path.is_relative_to(resolved_root if resolved_root is not None else root.resolve()):
         raise ValueError(f'product path escapes bundle: {relative}')
     return path
 
@@ -74,9 +108,8 @@ def load_products(path, data, verify_files=True):
         relative = entry['path']
         if relative in files:
             raise ValueError('duplicate product manifest path')
-        entry['path'] = str(inside_bundle(root, relative))
+        entry['path'] = str(inside_bundle(root, relative, resolved_root=root))
         files[relative] = entry
-        if verify_files: verify(entry)
 
     def bind(entry):
         stored = files.get(entry['path'])
@@ -87,6 +120,7 @@ def load_products(path, data, verify_files=True):
     bound['mapping'] = bind(bound['mapping'])
     for species, product in bound['products'].items():
         from sample_identity import annotate
+        product['row'] = dict(product['row'])
         if annotate(product['row']) != product['row'] or product['row']['analysis_sample_id'] != species:
             raise ValueError('product sample identity differs from metadata')
         for key in PRODUCT_FILES:
@@ -96,6 +130,10 @@ def load_products(path, data, verify_files=True):
         if required not in files: raise ValueError(f'incomplete product bundle: {required}')
     if data.get('tpm', {}).get('multimap') != 'error':
         raise ValueError('database TPM policy must be error')
+    if verify_files:
+        for error in verify_many(bound['files']):
+            if error is not None:
+                raise error
     bound['input'] = str(root)
     bound['bundle_root'] = str(root)
     return bound

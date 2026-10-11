@@ -100,10 +100,13 @@ budget. Preparation must read these limits through `scontrol show config` before
 submitting arrays. Failed samples do not block other samples; database publication
 waits for all of them to succeed.
 
-Build preparation uses `per_job_resources.controller` to verify and import
-products before sample tasks start. Mapping and analysis also use a controller
-to submit worker jobs. Resource overrides take precedence over rule defaults;
-they do not enable optional branches.
+`per_job_resources.controller` sizes Slurm preparation and the controllers
+that manage mapping and analysis jobs. The default build controller requests
+four CPUs. Checksum verification uses up to four threads, limited to allocated
+CPUs.
+
+Resource overrides take precedence over rule defaults. Enable optional
+branches in the analysis settings.
 
 Memory uses positive integer GB (`mem_gb: 128` becomes `128000` MB). Quote Slurm
 walltimes, such as `"1-00:00:00"` for one day or `"02:00:00"` for two hours.

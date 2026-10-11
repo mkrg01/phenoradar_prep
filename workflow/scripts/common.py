@@ -56,9 +56,12 @@ def atomic_writer(path, mode="w"):
             os.unlink(name)
 
 
-def write_json(path, value):
+def write_json(path, value, compact=False):
     with atomic_writer(path) as handle:
-        json.dump(value, handle, indent=2, ensure_ascii=False, allow_nan=False)
+        if compact:
+            handle.write(json.dumps(value, separators=(",", ":"), ensure_ascii=False, allow_nan=False))
+        else:
+            json.dump(value, handle, indent=2, ensure_ascii=False, allow_nan=False)
         handle.write("\n")
 
 

@@ -23,9 +23,9 @@ from layout import run_layout
 from sample_identity import select_samples
 from dataset_software import resolve as resolve_software, validate as validate_software
 from build_versioning import metadata_history, naming_mode, timestamp_directory
-from verification_cache import verification_cache
+from verification_cache import active_cache, verification_cache
 from dataset_assets import (COUNTS, SAFE, ProductIntegrityError, digest, identities, link_file, locked,
-                            normalize_private_paths, record, register_busco, register_quant, register_reference, resolve, verify)
+                            normalize_private_paths, record, register_busco, register_quant, register_reference, resolve, stat_identity, verify)
 
 STAGES = ("assembly", "busco", "quant")
 UNTIL = ("quant", "mapping", "database")
@@ -115,7 +115,7 @@ def stage_conditions(cfg):
         software["repository"] = [{"path": str(Path(p["path"]).relative_to(gg["repository"])), "sha256": p["sha256"]}
                                   for p in source_records(gg["repository"])]
     image = gg.get("image") or (str(Path(gg["repository"]) / "genegalleon.sif") if gg.get("repository") else None)
-    if image and Path(image).is_file(): software["image"] = file_record(image)["sha256"]
+    if image and Path(image).is_file(): software["image"] = record(image)["sha256"]
     effective_settings = {**gg.get("settings", {}), **FIXED_GENEGALLEON_SETTINGS}
     base = {"software": software, "settings": effective_settings, "translation": cfg["translation"]}
     return {s: digest(dict(base, **({"lineage": cfg["busco"]["lineage"]} if s == "busco" else {}))) for s in STAGES}
@@ -198,7 +198,7 @@ def plan(root, config, metadata=None, analysis_config=None, name=None, verify_fi
             raise ValueError('metadata provenance does not match the input metadata; update metadata or use its matching provenance')
     policy_record = record(cfg["excluded_accessions"]) if cfg["excluded_accessions"] else None
     policy = read_exclusions(cfg["excluded_accessions"])
-    fields, items = identities(metadata)
+    fields, items = identities(metadata, source=source)
     items, excluded = partition(items, policy)
     normalize_private_paths(items, metadata)
     verify(source)
@@ -351,12 +351,13 @@ def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_a
                     "auxiliary": auxiliary, "excluded": selection["excluded"], "raw_inputs": raw_records, "implementation": implementation(root),
                     "genegalleon": gg_records, "software_lock": software_lock}
         manifest['deferred_verification'] = defer
-        write_json(staging / "build.json", manifest)
+        from build_snapshot import compact_build
+        write_json(staging / "build.json", compact_build(manifest), compact=True)
         from build_reports import write_plan
         write_plan(report, staging, verified=not defer)
         with (staging / "pipeline.yaml").open("w") as handle:
             yaml.safe_dump(analysis, handle, sort_keys=False)
-        write_json(staging / "checksums.json", {p.name: file_record(p)["sha256"] for p in
+        write_json(staging / "checksums.json", {p.name: record(p)["sha256"] for p in
                                               (staging / "build.json", staging / "pipeline.yaml")})
         from build_reports import save_context
         save_context(staging, manifest, report, deferred=defer)
@@ -370,8 +371,24 @@ def load(path, check_code=False):
     path = Path(path).resolve()
     hashes = json.loads((path / "checksums.json").read_text())
     for name, expected in hashes.items():
-        if file_record(path / name)["sha256"] != expected: raise ValueError(f"frozen dataset changed: {name}")
-    manifest = json.loads((path / "build.json").read_text())
+        try:
+            verify({'path': str(path / name), 'sha256': expected})
+        except ProductIntegrityError as error:
+            raise ValueError(f"frozen dataset changed: {name}") from error
+    from build_snapshot import compact_build, expand_build
+    filename = path / 'build.json'
+    before = stat_identity(filename)
+    cache = active_cache()
+    indexed = cache.document(filename, 'prepared-build-v1', before, hashes['build.json']) if cache is not None else None
+    if indexed is None:
+        indexed = json.loads(filename.read_text())
+        if before != stat_identity(filename):
+            raise ValueError('frozen dataset changed: build.json')
+        if cache is not None and 'row_columns' not in indexed:
+            version = indexed['schema_version']
+            indexed = dict(compact_build(indexed), schema_version=version)
+            cache.remember_document(filename, 'prepared-build-v1', before, hashes['build.json'], indexed)
+    manifest = expand_build(indexed)
     from build_dispatch import apply_runtime
     apply_runtime(path, manifest)
     verify(manifest["metadata"])

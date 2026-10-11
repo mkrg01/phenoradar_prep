@@ -160,7 +160,7 @@ def test_single_array_job_must_fit_budget(public_slurm, key, value):
 def test_worker_profile_reserves_controller_and_preserves_requests(public_slurm, tmp_path):
     slurm = merge_slurm(public_slurm, {'total_limits': {'cpus': 33, 'mem_gb': 512}})
     profile = yaml.safe_load((write_profile(tmp_path / 'profile', slurm) / 'config.yaml').read_text())
-    assert profile['resources'] == {'workflow_cpus': 32, 'workflow_mem_mb': 504000}
+    assert profile['resources'] == {'workflow_cpus': 29, 'workflow_mem_mb': 504000}
     assert profile['set-resource-scopes'] == {'workflow_cpus': 'global', 'workflow_mem_mb': 'global'}
     assert profile['set-threads']['odb_map'] == 16
     assert profile['set-resources']['odb_map']['mem_mb'] == 128000

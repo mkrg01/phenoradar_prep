@@ -37,8 +37,8 @@ slurm:
       cpus: 1
       mem_gb: 32
       time: "1-00:00:00"
-    controller:  # Runs Snakemake and manages its worker jobs.
-      cpus: 1
+    controller:  # Verifies uncached products (up to 4 threads) and manages worker jobs.
+      cpus: 4
       mem_gb: 8
       time: "64-00:00:00"
 storage:

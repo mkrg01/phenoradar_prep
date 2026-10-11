@@ -3,7 +3,7 @@ import copy
 from pathlib import Path
 
 from common import write_json
-from dataset_assets import ProductIntegrityError, link_file, record, resolve, stat_identity, verify
+from dataset_assets import ProductIntegrityError, record, resolve, stage_file, verify
 
 STAGES = {'assembly': 'reference', 'busco': 'busco', 'quant': 'quant'}
 IDENTITY_FIELDS = ('scientific_name', 'taxid', 'species_id', 'analysis_sample_id', 'run',
@@ -100,8 +100,7 @@ def stage(staging, target, name, chosen):
 
     def saved(entry, filename):
         path = Path(staging) / prefix / filename
-        link_file(verify(entry), path)
-        saved = dict(entry, path=str(Path(target) / prefix / filename), stat=stat_identity(path))
+        saved = stage_file(entry, path, Path(target) / prefix / filename)
         files.append(saved)
         return saved
 

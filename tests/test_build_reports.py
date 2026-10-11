@@ -89,6 +89,22 @@ def test_plan_scientific_conflicts_still_block(reuse_project, monkeypatch, capsy
     assert {row['action'] for row in read_tsv(root / 'reports/plan/needs_attention.tsv')} == {'blocked'}
 
 
+def test_plan_rebuilds_damaged_json_before_interpreting_its_scientific_identity(reuse_project, monkeypatch):
+    from build_products import load_complete
+    root, source = reuse_project
+    products = load_complete(source, verify_files=False)['products']
+    product = next(iter(products.values()))
+    qc = Path(product['expression_qc']['path'])
+    changed = json.loads(qc.read_text())
+    changed['expression']['sha256'] = '0' * 64
+    write_json(qc, changed)
+    assert invoke(monkeypatch, dataset, 'plan', '--root', root) == 0
+    attention = read_tsv(root / 'reports/plan/needs_attention.tsv')
+    assert len(attention) == 1
+    assert attention[0]['action'] == 'rebuild'
+    assert 'registered file changed' in attention[0]['reason']
+
+
 def test_submit_only_schedules_verification_locally(reuse_project, scheduler, monkeypatch, capsys):
     root, source = reuse_project
     prohibit_artifact_hashes(monkeypatch, artifact_paths(source))
@@ -103,18 +119,81 @@ def test_submit_only_schedules_verification_locally(reuse_project, scheduler, mo
     assert 'Verification job: 1001' in capsys.readouterr().out
 
 
-def test_slurm_preparation_uses_default_plan_verification_cache(reuse_project, scheduler, monkeypatch):
+def test_submit_prepares_plan_cache_hits_locally_without_verification_job(reuse_project, scheduler, monkeypatch, capsys):
     root, source = reuse_project
     assert invoke(monkeypatch, dataset, 'plan', '--root', root) == 0
     prohibit_artifact_hashes(monkeypatch, artifact_paths(source))
     assert invoke(monkeypatch, dataset, 'submit', '--root', root, '--name', 'cached') == 0
     build = root / 'results/cached'
-    monkeypatch.setenv('SLURM_JOB_ID', '1001')
-    # Slurm launches this project's script, whose default cache root is root.
-    monkeypatch.setattr(dataset, '__file__', str(root / 'workflow/scripts/dataset.py'))
-    assert invoke(monkeypatch, dataset, 'dispatch', '--build', build,
-                  '--execution', build / 'jobs/submission_0001.resources.json') == 0
+    assert len(scheduler['commands']) == 1
+    assert '_mapping' in next(arg for arg in scheduler['commands'][0] if arg.startswith('--job-name='))
+    assert not (build / 'jobs/0001_verify.sh').exists()
+    assert json.loads((build / 'jobs/verification.json').read_text())['location'] == 'local'
+    assert 'preparation completed locally' in capsys.readouterr().out
     assert {row['state'] for row in progress(build, read_context(build))['samples']} == {'reused'}
+
+
+def test_cached_submit_with_new_samples_schedules_workers_directly(reuse_project, scheduler, monkeypatch):
+    root, source = reuse_project
+    fake_genegalleon(root)
+    metadata = root / 'input/metadata.tsv'
+    rows = read_tsv(metadata)
+    rows.append(dict.fromkeys(rows[0], '') | {'scientific_name': 'Delta new', 'run': 'NEW1', 'taxid': '42'})
+    write_tsv(metadata, list(rows[0]), rows)
+    assert invoke(monkeypatch, dataset, 'plan', '--root', root) == 0
+    prohibit_artifact_hashes(monkeypatch, artifact_paths(source))
+    monkeypatch.setattr('dataset_software.resolve', lambda *_: pytest.fail('Software acquisition on cached submit'))
+    assert invoke(monkeypatch, dataset, 'submit', '--root', root, '--name', 'new_sample') == 0
+    commands = scheduler['commands']
+    assert len(commands) == 2
+    assert '_sample' in next(arg for arg in commands[0] if arg.startswith('--job-name='))
+    assert next(arg for arg in commands[0] if arg.startswith('--array=')).split('%')[0] == '--array=3'
+    assert '--dependency=afterok:1001' in commands[1]
+    assert not (root / 'results/new_sample/jobs/0001_verify.sh').exists()
+
+
+def test_cached_products_with_uncached_software_still_use_slurm(reuse_project, scheduler, monkeypatch):
+    root, source = reuse_project
+    metadata = root / 'input/metadata.tsv'
+    rows = read_tsv(metadata)
+    rows.append(dict.fromkeys(rows[0], '') | {'scientific_name': 'Delta new', 'run': 'NEW1', 'taxid': '42'})
+    write_tsv(metadata, list(rows[0]), rows)
+    assert invoke(monkeypatch, dataset, 'plan', '--root', root) == 0
+    prohibit_artifact_hashes(monkeypatch, artifact_paths(source))
+    monkeypatch.setattr('dataset_software.download', lambda *_: pytest.fail('Local software download'))
+    assert invoke(monkeypatch, dataset, 'submit', '--root', root, '--name', 'uncached_software') == 0
+    assert len(scheduler['commands']) == 1
+    assert '_verify' in next(arg for arg in scheduler['commands'][0] if arg.startswith('--job-name='))
+    assert not (root / 'results/uncached_software/runtime.json').exists()
+
+
+def test_file_changed_after_cache_probe_defers_reads_to_slurm(reuse_project, scheduler, monkeypatch):
+    import build_dispatch
+    root, source = reuse_project
+    assert invoke(monkeypatch, dataset, 'plan', '--root', root) == 0
+    probe = build_dispatch.cached_preparation
+    def changed(path, manifest, context):
+        result = probe(path, manifest, context)
+        assert result[0]
+        cds = next((source / 'cds').glob('*.gz'))
+        cds.write_bytes(cds.read_bytes() + b'changed after probe')
+        return result
+    monkeypatch.setattr(build_dispatch, 'cached_preparation', changed)
+    prohibit_artifact_hashes(monkeypatch, artifact_paths(source))
+    assert invoke(monkeypatch, dataset, 'submit', '--root', root, '--name', 'race') == 0
+    assert len(scheduler['commands']) == 1
+    assert '_verify' in next(arg for arg in scheduler['commands'][0] if arg.startswith('--job-name='))
+
+
+def test_completed_build_with_verified_cache_needs_no_slurm_job(completed_project, scheduler, monkeypatch):
+    from build_products import load_complete
+    from verification_cache import verification_cache
+    root, build, _, _ = completed_project
+    with verification_cache(root / '.cache/verification.sqlite'):
+        completed = load_complete(build)
+    prohibit_artifact_hashes(monkeypatch, {Path(entry['path']) for entry in completed['files']})
+    assert invoke(monkeypatch, dataset, 'submit', '--root', root, '--build', build) == 0
+    assert scheduler['commands'] == []
 
 
 def test_dispatch_verifies_stages_and_schedules_dependents(reuse_project, scheduler, monkeypatch):
