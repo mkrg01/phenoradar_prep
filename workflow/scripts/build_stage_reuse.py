@@ -3,7 +3,7 @@ import copy
 from pathlib import Path
 
 from common import write_json
-from dataset_assets import link_file, record, resolve, stat_identity, verify
+from dataset_assets import ProductIntegrityError, link_file, record, resolve, stat_identity, verify
 
 STAGES = {'assembly': 'reference', 'busco': 'busco', 'quant': 'quant'}
 IDENTITY_FIELDS = ('scientific_name', 'taxid', 'species_id', 'analysis_sample_id', 'run',
@@ -40,7 +40,7 @@ def merge(selected, name, entry):
                     previous['products'][key] = entry['products'][key]
 
 
-def select(paths, items, cfg, selected, errors, sources):
+def select(paths, items, cfg, selected, errors, sources, verify_files=True, rebuilds=None):
     from dataset import load
     wanted = {item['species']: item for item in items}
     for path in paths:
@@ -60,7 +60,8 @@ def select(paths, items, cfg, selected, errors, sources):
                 continue
             try:
                 products = resolve(build['config']['store'], old,
-                                   build['config']['busco']['lineage'], need_full=True)
+                                   build['config']['busco']['lineage'], need_full=True,
+                                   verify_files=verify_files)
                 if products['reference'] is None:
                     continue
                 requested = item['row'].get('reference_id')
@@ -78,6 +79,12 @@ def select(paths, items, cfg, selected, errors, sources):
                 merge(selected, name, {'kind': 'stages', 'products': products,
                                        'row': old['row'], 'source': source,
                                        'software_lock': build.get('software_lock')})
+            except ProductIntegrityError as error:
+                if rebuilds is None or item['row'].get('reference_id'):
+                    errors[name] = str(error)
+                else:
+                    rebuilds[name] = str(error)
+                selected.pop(name, None)
             except (ValueError, OSError, KeyError) as error:
                 errors[name] = str(error)
                 selected.pop(name, None)
@@ -89,11 +96,14 @@ def stage(staging, target, name, chosen):
     products = chosen['products']
     reference = products['reference']
     prefix = Path('work/cache/products') / name / reference['reference_id']
+    files = []
 
     def saved(entry, filename):
         path = Path(staging) / prefix / filename
         link_file(verify(entry), path)
-        return dict(entry, path=str(Path(target) / prefix / filename), stat=stat_identity(path))
+        saved = dict(entry, path=str(Path(target) / prefix / filename), stat=stat_identity(path))
+        files.append(saved)
+        return saved
 
     for key, filename in (('reference', 'reference.json'), ('busco', 'busco.json'),
                           ('quant', 'quant/' + chosen['row']['run'] + '.json')):
@@ -112,3 +122,6 @@ def stage(staging, target, name, chosen):
         else:
             receipt['abundance'] = saved(receipt['abundance'], 'abundance.tsv')
         write_json(Path(staging) / prefix / filename, receipt)
+        files.append(dict(record(Path(staging) / prefix / filename),
+                          path=str(Path(target) / prefix / filename)))
+    return files

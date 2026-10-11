@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 
 from common import write_json
-from dataset_assets import counts, link_file, record, stat_identity, verify
+from dataset_assets import (ProductIntegrityError, counts, link_file, product_file,
+                            product_json, record, stat_identity, verify)
 from mapping_tables import load_tables, relative_file, write_tables
 from portable_build import completion_path
 
@@ -41,7 +42,7 @@ def normalize(root, value):
     return result
 
 
-def validate_product(item, product, database, tables, cfg):
+def validate_product(item, product, database, tables, cfg, verify_files=True):
     name = item['species']
     if database['translation'] != cfg['translation'] or database['lineage'] != cfg['busco']['lineage']:
         raise ValueError(f'reuse_from genetic code or BUSCO lineage differs: {name}')
@@ -61,9 +62,9 @@ def validate_product(item, product, database, tables, cfg):
         if condition and condition != cfg['conditions'].get(stage):
             raise ValueError(f'{stage} settings differ from reuse_from product: {name}; use reuse_from: null for a fresh build')
     for key in PRODUCTS:
-        verify(product[key])
+        product_file(product[key], verify_files)
     counts(product['counts'])
-    translation = json.loads(Path(product['translation']['path']).read_text())
+    translation = product_json(product['translation'], verify_files=False)
     mapping = tables['tables'][name]
     if (translation['cds']['sha256'] != reference or
             translation['protein']['sha256'] != product['protein']['sha256'] or
@@ -73,8 +74,8 @@ def validate_product(item, product, database, tables, cfg):
             product['odb_species'] != item['odb_species']):
         raise ValueError(f'reuse_from translation/mapping identity differs: {name}')
     table = relative_file(Path(database['mapping']['path']).parent, mapping['table'])
-    verify(table)
-    qc = json.loads(Path(product['expression_qc']['path']).read_text())
+    product_file(table, verify_files)
+    qc = product_json(product['expression_qc'], verify_files=False)
     if (qc.get('species') != name or qc.get('run') != item['row']['run'] or
             qc.get('multimap') != 'error' or
             qc.get('abundance', {}).get('sha256') != product['abundance']['sha256'] or
@@ -84,7 +85,7 @@ def validate_product(item, product, database, tables, cfg):
     return dict(mapping, table=table), translation
 
 
-def select(paths, items, cfg):
+def select(paths, items, cfg, verify_files=True, rebuilds=None):
     """Read only selected samples; duplicate sources must agree on scientific products."""
     from build_products import load_complete
     if not items:
@@ -118,7 +119,7 @@ def select(paths, items, cfg):
                 continue
             try:
                 product = data['products'][name]
-                mapping, translation = validate_product(wanted[name], product, data, tables, cfg)
+                mapping, translation = validate_product(wanted[name], product, data, tables, cfg, verify_files)
                 identity = {'files': {k: product[k]['sha256'] for k in ('cds', 'busco', 'abundance', 'protein', 'expression')},
                             'mapping': mapping['table']['sha256'], 'counts': product['counts'],
                             'conditions': {stage: product.get('conditions', {}).get(stage) for stage in ('assembly', 'busco', 'quant')},
@@ -129,6 +130,12 @@ def select(paths, items, cfg):
                 if not previous:
                     selected[name] = {'product': product, 'mapping': mapping, 'translation': translation,
                                       'identity': identity, 'source': source, 'software_lock': software_lock}
+            except ProductIntegrityError as error:
+                if rebuilds is None or wanted[name]['row'].get('reference_id'):
+                    errors[name] = str(error)
+                else:
+                    rebuilds[name] = str(error)
+                selected.pop(name, None)
             except (ValueError, OSError, KeyError) as error:
                 errors[name] = str(error)
                 selected.pop(name, None)
@@ -136,7 +143,11 @@ def select(paths, items, cfg):
     if len(references) > 1:
         raise ValueError('reuse_from databases use different ODB reference snapshots')
     from build_stage_reuse import select as select_stages
-    select_stages(stage_paths, items, cfg, selected, errors, sources)
+    select_stages(stage_paths, items, cfg, selected, errors, sources,
+                  verify_files=verify_files, rebuilds=rebuilds)
+    if rebuilds is not None:
+        for name in selected:
+            rebuilds.pop(name, None)
     return selected, errors, sources
 
 
@@ -147,16 +158,20 @@ def stage(staging, target, selected, cfg):
     final = Path(target) / 'work/cache'
     tables = {}
     references = set()
+    files = {}
 
     def saved(entry, relative):
         path = base / relative
         link_file(verify(entry), path)
-        return dict(entry, path=str(final / relative), stat=stat_identity(path))
+        saved = dict(entry, path=str(final / relative), stat=stat_identity(path))
+        files[name].append(saved)
+        return saved
 
     for name, chosen in selected.items():
+        files[name] = []
         if chosen.get('kind') == 'stages':
             from build_stage_reuse import stage as stage_products
-            stage_products(staging, target, name, chosen)
+            files[name] = stage_products(staging, target, name, chosen)
             continue
         product = chosen['product']
         row = product['row']
@@ -198,6 +213,14 @@ def stage(staging, target, selected, cfg):
         write_json(base / expression_dir / 'receipt.json', {'identity': identity,
             'files': {'tpm.tsv': dict(expression, path='tpm.tsv'), 'qc.json': dict(qc_entry, path='qc.json')},
             'reused_from': chosen['source']})
+        for relative in (prefix / 'reference.json', prefix / 'busco.json', prefix / 'quant' / (row['run'] + '.json'),
+                         protein_dir / 'receipt.json', expression_dir / 'qc.json', expression_dir / 'receipt.json'):
+            files[name].append(dict(record(base / relative), path=str(final / relative)))
     if tables:
-        write_tables(base / 'odb' / f'v12_{cfg["odb"]["ncbi_tax_id"]}' / 'reused', tables,
-                     node=cfg['odb']['ncbi_tax_id'], references=references)
+        snapshot = write_tables(base / 'odb' / f'v12_{cfg["odb"]["ncbi_tax_id"]}' / 'reused', tables,
+                                node=cfg['odb']['ncbi_tax_id'], references=references)
+        saved_tables = load_tables(snapshot, verify_files=False)
+        destination = final / 'odb' / f'v12_{cfg["odb"]["ncbi_tax_id"]}' / 'reused'
+        for name, table in saved_tables['tables'].items():
+            files[name].append(relative_file(destination, table['table']))
+    return files

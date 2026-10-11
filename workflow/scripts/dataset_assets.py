@@ -17,6 +17,12 @@ from sample_identity import annotate
 from verification_cache import active_cache
 
 COUNTS = ["busco_cds_single", "busco_cds_duplicated", "busco_cds_fragmented", "busco_cds_missing", "busco_cds_total"]
+
+
+class ProductIntegrityError(ValueError):
+    """A registered artifact is missing or no longer matches its recorded content."""
+
+
 SAFE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 TAXONOMY_ID_FIELDS = ("taxid", "taxid_domain", "taxid_kingdom", "taxid_phylum", "taxid_class",
                       "taxid_order", "taxid_family", "taxid_genus", "taxid_species")
@@ -107,7 +113,7 @@ def record(path):
 def verify(entry):
     path = Path(entry["path"])
     if not path.is_file():
-        raise ValueError(f"registered file missing: {path}")
+        raise ProductIntegrityError(f"registered file missing: {path}")
     before = stat_identity(path)
     if entry.get("stat") == before:
         return path
@@ -115,7 +121,7 @@ def verify(entry):
     if cache is not None and cache.matches(path, entry["sha256"], before):
         return path
     if sha256(path) != entry["sha256"]:
-        raise ValueError(f"registered file changed: {path}")
+        raise ProductIntegrityError(f"registered file changed: {path}")
     if cache is not None:
         try:
             if before == stat_identity(path):
@@ -123,6 +129,24 @@ def verify(entry):
         except OSError:
             pass  # Preserve verify's result, but never cache a file that changed after hashing.
     return path
+
+
+def product_file(entry, verify_files=True):
+    """Allow previews to check presence without claiming content verification."""
+    if verify_files:
+        return verify(entry)
+    path = Path(entry['path'])
+    if not path.is_file():
+        raise ProductIntegrityError(f'registered file missing: {path}')
+    return path
+
+
+def product_json(entry, verify_files=True):
+    path = product_file(entry, verify_files)
+    try:
+        return json.loads(path.read_text())
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ProductIntegrityError(f'registered JSON file damaged: {path}') from error
 
 
 @contextmanager
@@ -272,7 +296,7 @@ def register_quant(store, ref, item, abundance, provenance=None):
     return receipt
 
 
-def resolve(store, item, lineage, need_full=False):
+def resolve(store, item, lineage, need_full=False, verify_files=True):
     root = Path(store) / item["species"]
     requested = item["row"].get("reference_id", "")
     candidates = [root / requested / "reference.json"] if requested else sorted(root.glob("*/reference.json"))
@@ -282,26 +306,35 @@ def resolve(store, item, lineage, need_full=False):
         raise ValueError(f"multiple references for {item['species']}; specify reference_id in metadata")
     if not candidates:
         return {"reference": None, "busco": None, "quant": None}
-    ref = json.loads(candidates[0].read_text())
+    try:
+        ref = json.loads(candidates[0].read_text())
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ProductIntegrityError(f'registered JSON file damaged: {candidates[0]}') from error
     if ref["taxid"] != item["row"]["taxid"] or ref["species"] != item["species"]:
         raise ValueError(f"registered identity differs: {item['species']}")
     if ref.get("schema_version", 1) >= 2 and any(ref[k] != item["row"][k] for k in ("species_id", "run")):
         raise ValueError("registered sample identity differs from metadata")
-    verify(ref["cds"])
+    product_file(ref["cds"], verify_files)
     bus = candidates[0].parent / "busco.json"
-    bus = json.loads(bus.read_text()) if bus.exists() else None
+    try:
+        bus = json.loads(bus.read_text()) if bus.exists() else None
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ProductIntegrityError(f'registered JSON file damaged: {bus}') from error
     if bus:
         if bus["reference_id"] != ref["reference_id"] or bus["lineage"] != lineage:
             raise ValueError(f"registered BUSCO reference/lineage differs: {item['species']}")
         counts(bus["counts"])
         for key in ("full", "short"):
-            if bus.get(key): verify(bus[key])
+            if bus.get(key): product_file(bus[key], verify_files)
     quant = candidates[0].parent / "quant" / (item["row"]["run"] + ".json")
-    quant = json.loads(quant.read_text()) if quant.exists() else None
+    try:
+        quant = json.loads(quant.read_text()) if quant.exists() else None
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ProductIntegrityError(f'registered JSON file damaged: {quant}') from error
     if quant:
         if quant["reference_id"] != ref["reference_id"] or quant["run"] != item["row"]["run"]:
             raise ValueError("quantification receipt identity differs")
-        verify(quant["abundance"])
+        product_file(quant["abundance"], verify_files)
         for key, value in quant.get("sample", {}).items():
             supplied = item["row"].get(key, "")
             if supplied and value and supplied != value:

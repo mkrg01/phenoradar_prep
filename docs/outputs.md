@@ -14,6 +14,7 @@
 | `results/<build>/work/` | GeneGalleon workspaces, computation, and build caches |
 | `results/<build>/logs/` | Rule logs and benchmarks for the database and analyses |
 | `results/<build>/jobs/`, `<analysis>/jobs/` | Submission records, stage status, and launcher logs |
+| `reports/plan/` | Build preview reports; use `plan --outdir DIR` to choose another location |
 | `resources/` | Shared reference and software caches |
 
 Keep generated products unchanged: published databases may share hard links with
@@ -71,11 +72,11 @@ Keep `run.json`, branch provenance, reference snapshots, and the release's
 
 ## Storage cleanup
 
-Unless intermediates are retained, ODB and KofamScan remove temporary work after
-publishing results. GeneGalleon also removes computation scratch after failures,
-including its sample-specific `.genegalleon-runtime-<uid>/` temporary directory.
-Downloaded FASTQ/SRA files are removed after assembly and quantification finish.
-Original inputs, saved products, restart checkpoints and logs are kept.
+With the default `storage.keep_intermediates: false`, ODB and KofamScan remove
+temporary work after publishing results. GeneGalleon removes computation scratch
+after success or failure. Downloaded FASTQ/SRA files are removed after assembly
+and quantification finish. Original inputs, products, restart checkpoints, and
+logs are kept.
 
 After an interrupted job stops, inspect cleanup status and preview remaining
 temporary files:

@@ -172,7 +172,22 @@ def publish_products(build, data):
         # These are historical records; their original paths are never dereferenced.
         for name in ('build.json', 'pipeline.yaml', 'checksums.json', 'reuse.json', 'metadata_provenance.json'):
             source = build / name
-            if source.exists(): add(record(source), Path('provenance') / name)
+            if name == 'build.json' and (build / 'runtime.json').is_file():
+                from dataset import load
+                add(record(source), Path('provenance/prepared_build.json'))
+                relative = Path('provenance') / name
+                write_json(staging / relative, load(build))
+                created(relative)
+                add(record(build / 'runtime.json'), Path('provenance/runtime.json'))
+            elif name == 'checksums.json' and (build / 'runtime.json').is_file():
+                add(record(source), Path('provenance/prepared_checksums.json'))
+                hashes = json.loads(source.read_text())
+                hashes['build.json'] = files['provenance/build.json']['sha256']
+                relative = Path('provenance') / name
+                write_json(staging / relative, hashes)
+                created(relative)
+            elif source.exists():
+                add(record(source), Path('provenance') / name)
         products = copy.deepcopy(data['products'])
         for species, product in products.items():
             for key in ('cds', 'busco', 'abundance'):

@@ -48,7 +48,7 @@ def test_cli_reuses_verified_files_across_plan_commands(dataset_project, monkeyp
         calls.append(Path(path))
         return hash_file(path)
     monkeypatch.setattr(dataset_assets, "sha256", counted)
-    monkeypatch.setattr(sys, "argv", ["dataset.py", "plan", "--root", str(root), "--config", str(config)])
+    monkeypatch.setattr(sys, "argv", ["dataset.py", "plan", "--root", str(root), "--config", str(config), '--verify'])
     assert dataset.main() == 0
     first = capsys.readouterr().out
     assert calls
@@ -60,13 +60,15 @@ def test_cli_reuses_verified_files_across_plan_commands(dataset_project, monkeyp
     monkeypatch.setattr(sys, "argv", ["dataset.py", "submit", "--root", str(root), "--config", str(config),
                                      "--name", "cached_submission", "--until", "quant", "--dry-run"])
     assert dataset.main() == 0
-    assert calls == []  # Selection and staging share the checks completed by plan.
+    assert calls == []  # Submission does not verify or stage large products locally.
     capsys.readouterr()
     damaged = next((moved / "cds").glob("*.gz"))
     damaged.write_bytes(damaged.read_bytes() + b"changed")
-    monkeypatch.setattr(sys, "argv", ["dataset.py", "plan", "--root", str(root), "--config", str(config)])
-    assert dataset.main() == 1
-    assert "registered file changed" in capsys.readouterr().out
+    monkeypatch.setattr(sys, "argv", ["dataset.py", "plan", "--root", str(root), "--config", str(config), '--verify'])
+    assert dataset.main() == 0
+    assert 'rebuild: 1' in capsys.readouterr().out
+    attention = read_tsv(root / 'reports/plan/needs_attention.tsv')
+    assert 'registered file changed' in attention[0]['reason']
 
 
 def test_manifest_changes_and_mutable_results_do_not_poison_shared_reads(dataset_project):

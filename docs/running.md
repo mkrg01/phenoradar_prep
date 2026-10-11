@@ -24,9 +24,9 @@ prepare the image matching [VERSION](../VERSION):
 ./run_pipeline.sh --prepare-container --cores 1 --resources mem_gb=4
 ```
 
-Do this before the first mapping or analysis job, after changing releases, or
-when the image cache has been cleared. Snakemake 9.8 may check the image before
-its automatic pull. GeneGalleon's separate software is fetched automatically.
+Prepare the image before the first mapping or analysis job, after changing
+releases, or when the image cache has been cleared. GeneGalleon uses
+[separate software](datasets.md#pinned-genegalleon-source-and-sif).
 
 Continue with [building a database and running analyses](datasets.md).
 
@@ -90,26 +90,20 @@ workers, the controller's allocation is subtracted first; queued workers also
 occupy budget. A job that cannot fit fails with an error rather than receiving
 fewer resources.
 
-The full native sample workflow runs as an array, with one sample per task,
-split automatically to fit [Slurm's array limits](https://slurm.schedmd.com/job_array.html).
-Array submissions require access to `scontrol show config`, including with
-`--dry-run`; if the limits cannot be read, no jobs are submitted.
+`per_job_resources.sample` sizes the entire assembly/BUSCO/quantification job.
+The supplied config requests 4 CPUs, 128 GB, and 16 days per sample; the allocation
+remains reserved throughout processing.
 
-Batches are serialized with `afterany`, so a failed sample does not block later
-batches and the global concurrency cap is preserved. The database controller
-uses `afterok` on every sample batch. Other samples in the same batch continue.
+Samples run as array tasks, split into sequential batches to fit
+[Slurm's array limits](https://slurm.schedmd.com/job_array.html) and the workflow
+budget. Preparation must read these limits through `scontrol show config` before
+submitting arrays. Failed samples do not block other samples; database publication
+waits for all of them to succeed.
 
-`per_job_resources.sample` sizes the entire assembly/BUSCO/quant allocation.
-The supplied request is 4 CPUs, 128 GB, and 16 days. Memory remains reserved during
-BUSCO and quantification. Legacy complete assembly/BUSCO/quant resource blocks
-are converted to maximum CPUs/memory and the sum of their time limits, without
-changing saved manifests. An old assembly-only retry override is accepted as a
-sample override; new retry files should use `sample`.
-
-Mapping and analysis use a controller to submit separate worker jobs.
-Job names include `sample`, `controller`, and rule names such as `odb_map`.
-Config overrides take precedence over rule defaults; optional resource entries
-do not enable branches.
+Build preparation uses `per_job_resources.controller` to verify and import
+products before sample tasks start. Mapping and analysis also use a controller
+to submit worker jobs. Resource overrides take precedence over rule defaults;
+they do not enable optional branches.
 
 Memory uses positive integer GB (`mem_gb: 128` becomes `128000` MB). Quote Slurm
 walltimes, such as `"1-00:00:00"` for one day or `"02:00:00"` for two hours.
@@ -125,12 +119,9 @@ To change resources for an existing run:
 Only the supplied `slurm` settings change; scientific settings stay frozen.
 Partial resource files may contain just the changed limits or job entries.
 
-For native sample workers, the actual Slurm CPU
-and memory allocation is also forwarded to GeneGalleon and its container.
-Memory is converted conservatively from allocated MB to whole GiB, with a
-tool reserve. Worker logs report the allocation and internal tool budget;
-retry resource overrides therefore change the assembler's memory limit as well
-as the Slurm request.
+GeneGalleon derives its tool limits from the actual Slurm allocation. Worker logs
+show the allocation and tool budgets; retry resource overrides also change the
+assembler's limits.
 
 ## Re-running and recovery
 

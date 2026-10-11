@@ -2,6 +2,7 @@
 /results/
 /work/
 /logs/
+/reports/
 /pipeline-*.out
 /pipeline-*.err
 /slurm-metadata-*.out

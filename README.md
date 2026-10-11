@@ -26,17 +26,19 @@ name reported by `submit`, and choose `{analysis_name}`:
 conda env create -n phenoradar_prep -f environment.yaml
 conda activate phenoradar_prep
 ./run_pipeline.sh --prepare-container --cores 1 --resources mem_gb=4
-./run_build.sh fetch-software
 
-./run_build.sh plan > plan.tsv
-# Review plan.tsv before submitting.
+./run_build.sh plan
+# Review reports/plan/plan.tsv before submitting.
 ./run_build.sh submit
+./run_build.sh status --build results/{build_name}
 
 # After the build completes:
 ./run_analysis.sh submit --build results/{build_name} --name {analysis_name}
 ```
 
-Build names include UTC timestamps by default. For retries, use the
+`plan` shows reuse and processing counts; `status` shows progress. `submit`
+verifies reusable products on Slurm. Use `plan --verify` for a local check.
+Build names include UTC timestamps by default. Retry with the
 [saved run path](docs/datasets.md#failure-and-recovery-behavior) via `--build`
 or `--analysis`.
 

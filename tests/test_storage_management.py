@@ -76,7 +76,7 @@ def test_build_status_and_cleanup_retry_without_rerunning_genegalleon(dataset_pr
     receipt = build / 'jobs/cleanup/New_plant_SRR1.sample.json'
     write_json(receipt, {'state': 'pending', 'errors': [{'path': str(work), 'error': 'temporary'}]})
     status = subprocess.run([sys.executable, str(ROOT / 'workflow/scripts/dataset.py'), 'status',
-                             '--build', str(build), '--storage'], text=True, capture_output=True)
+                             '--build', str(build), '--storage', '--json'], text=True, capture_output=True)
     assert status.returncode == 0, status.stderr
     assert json.loads(status.stdout)['storage']['counts']['pending'] == 1
     before_receipt = receipt.read_bytes()

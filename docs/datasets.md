@@ -4,8 +4,8 @@
 
 A **build** produces reusable sample data: assembly, BUSCO, quantification,
 OrthoDB mapping, and OG expression. An **analysis** selects samples from a
-completed build and combines their results. Changing a trait, BUSCO threshold,
-or species selection needs a new analysis, while keeping the same database.
+completed database. Change traits, sample selection, or the analysis BUSCO
+threshold by creating a new analysis from the same database.
 
 ## Build a reusable database
 
@@ -14,9 +14,7 @@ Complete [installation](running.md#installation-and-normal-execution), prepare
 Set `reuse_from: null` for your first build, or choose a
 [completed database](#reusing-completed-databases) to reuse.
 
-The supplied config uses `name_mode: timestamp`, so `name` is a dataset prefix
-and needs no manual date suffix. Use the build directory name printed by `submit`
-for `{build_name}` in the commands below.
+Use the build directory name printed by `submit` for `{build_name}` below.
 
 ```bash
 ./run_build.sh plan
@@ -24,32 +22,49 @@ for `{build_name}` in the commands below.
 ./run_build.sh status --build results/{build_name}
 ```
 
-Review the plan for `reuse`, `pending`, or `conflict` before submitting. Conflicts
-must be resolved; ODB reuse is confirmed after translation provides protein hashes.
-`submit` returns after scheduling Slurm jobs. A successful build publishes
-`results/{build_name}/database/` and a completion record.
+| Build command | Purpose |
+| --- | --- |
+| `plan` | Preview reuse and processing counts; save details to `reports/plan/plan.tsv` |
+| `submit` | Save settings, verify reuse candidates on Slurm, then schedule required work |
+| `status --build PATH` | Show recorded sample progress and database publication state |
 
-Every included sample must complete all stages. Build execution records BUSCO
-scores without filtering samples. For curated datasets, the separate `record`
-command applies the dataset's BUSCO threshold and adds below-threshold new runs
-to exclusions for future metadata updates. Analysis thresholds remain separate.
+`plan` creates reports without creating a build. Reuse counts are candidates
+until verified. `submit` returns after scheduling preparation; monitor the build
+with `status`. A successful build publishes `results/{build_name}/database/`.
 
 Each sample runs assembly, longest-CDS extraction, BUSCO, quantification, and
-merge in one GeneGalleon invocation and one Slurm allocation. Samples proceed
-independently. Stopping at assembly or BUSCO is no longer supported. BUSCO scores
-are recorded; they do not prevent quantification.
+merge in one Slurm allocation. All included samples must finish before publication.
+BUSCO scores are recorded without filtering samples. Curated datasets apply
+their threshold when [recording results](../datasets/README.md#recording-results).
 
-Use `--until quant` to finish the complete native sample workflow without starting
-the database controller; `database` remains the default (`mapping` is a legacy
-alias for the same database endpoint). For a subset pilot, add
-`--species-list pilot.txt` with one biological species ID or exact sample ID per
-line. Submit again with the same `--build` path and without the list to finish all
-samples; an incomplete pilot cannot publish a database.
+Use `--until quant` to finish sample processing without publishing a database.
+For a pilot, add `--species-list pilot.txt` with one species or sample ID per line.
+Resume with the same `--build` path and without the list to finish all samples.
+
+## Check a plan or progress
+
+For builds, `plan` checks identities and settings; `status` reads progress records.
+Neither hashes large product files by default. Add `--verify` to check product
+integrity immediately:
+
+```bash
+./run_build.sh plan --verify
+./run_build.sh status --build results/{build_name} --verify
+```
+
+`submit` verifies reusable products on Slurm even when `plan` skipped checksums.
+
+| Option | Command | Result |
+| --- | --- | --- |
+| `--outdir DIR` | `plan` | Write `plan.tsv` and `needs_attention.tsv` to `DIR` |
+| `--split` | `plan` | Also write `reuse.tsv`, `pending.tsv`, `conflicts.tsv`, and `excluded.tsv` |
+| `--outdir DIR` | `status` | Write `status.tsv` and `failed.tsv` to `DIR` |
+| `--json` | `status` | Print the detailed report as JSON |
 
 ## Run an analysis
 
-Edit [config/analysis.yaml](../config/analysis.yaml): choose sample selection,
-`trait`, and optional branches. The supplied config uses `trait: carnivory` and
+Edit [config/analysis.yaml](../config/analysis.yaml) to choose samples, the trait
+column, and optional branches. The supplied config uses `trait: carnivory` and
 enables representative trees and contrast pairs. For expression only, set
 `phylogeny.trees: []` and disable `phylogeny.contrast_pairs.enabled`.
 Set `inputs.species_trait: null` if traits are unused.
@@ -61,11 +76,9 @@ Replace `{analysis_name}` with a name for your analysis.
 ./run_analysis.sh status --analysis results/{build_name}/downstream/{analysis_name}
 ```
 
-`trait` selects the column in your trait table; `--name` names the result directory.
-Analysis inherits the build's lineage, genetic code, and ODB mapping clade.
-It reuses verified sample products and reports missing or modified products as
-errors. Several analyses can share a database; optional alignment, KO, and tree
-results are computed separately for each analysis.
+Analyses inherit the database's lineage, genetic code, and ODB clade and require
+intact sample products. Several analyses can share a database; optional alignment,
+KO, and tree results are computed separately for each analysis.
 
 The default target `all` runs enabled branches and collects
 [PhenoRadar inputs](phenoradar_inputs.md). To run one branch, use an
@@ -73,18 +86,15 @@ The default target `all` runs enabled branches and collects
 
 ## Saved settings and previews
 
-The first `submit` freezes inputs and settings for that build or analysis.
-Resubmitting with `--build` or `--analysis` uses the saved conditions, even if
-source files have changed. Create a new build or choose a new analysis name for
-scientific changes; use [resource overrides](running.md#resource-budgets) for
-CPU, memory, time, or concurrency changes.
+The first submission saves inputs and settings. Resume with `--build` or
+`--analysis` to use those saved conditions. Create a new build or analysis for
+scientific changes; use [resource overrides](running.md#resource-budgets) to
+change CPU, memory, time, or concurrency.
 
 With `name_mode: timestamp` (the supplied config), `name` is the dataset prefix.
-When `--name` is omitted, each `prepare` or `submit` creates
-`results/{name}_YYYYMMDDTHHMMSSZ/` using UTC preparation time; same-second builds
-receive `_02`, `_03`, and so on. Resume with
-`submit --build results/{build_name}`, including after `--dry-run`; omitting
-`--build` creates a new snapshot.
+Each build submission without `--name` creates `results/{name}_YYYYMMDDTHHMMSSZ/`
+using UTC preparation time, with numbered suffixes for same-second builds.
+Use `--build` to retry, including after `--dry-run`.
 
 `--name` sets an exact name. With `name_mode: fixed`, or when `name_mode` is
 absent, `name` is the exact build directory name and repeating `submit` resumes
@@ -93,57 +103,40 @@ that build.
 `results/<name>_latest` points to the completed timestamp-mode build with the
 newest preparation time. Use a specific build path to pin an analysis.
 
-Set `metadata_provenance` to the adopted metadata's `provenance.json`. The
-recorded metadata checksum must match the input table, including with
-`--metadata`. Build and database manifests preserve preparation and metadata
-history; database manifests also record completion. Fetch dates require
-acquisition evidence, and reused products retain their original history.
+Set `metadata_provenance` to the adopted metadata's `provenance.json`; its
+checksum must match the input table. The build preserves metadata history and
+the origins of reused products.
 
-| Command | Effect |
-| --- | --- |
-| `plan` | Preview current inputs and settings without saving a run |
-| `prepare` | Save inputs and settings without submitting |
-| `submit --dry-run` | Save inputs/settings and preview job scripts without submitting |
-| `submit` | Save a new run or resume an existing one, then submit jobs |
-
-`--dry-run` fixes the conditions for that name; it does not check the full
-Snakemake DAG. Generated `pipeline.yaml` files should not be edited.
+`./run_build.sh submit --dry-run` saves a build and previews its preparation job
+without submitting. Sample jobs are determined after verification, so this is
+not a full workflow preview. Keep generated `pipeline.yaml` unchanged. The legacy
+build `prepare` command remains available for compatibility.
 
 ## Failure and recovery behavior
 
-Inspect `status`, `squeue`, and the run's `jobs/logs/`, then resubmit:
+Check the run's `status` and `jobs/logs/`, then retry with its saved path:
 
 ```bash
 ./run_build.sh submit --build results/{build_name}
 ./run_analysis.sh submit --analysis results/{build_name}/downstream/{analysis_name}
 ```
 
-Completed samples are skipped. Incomplete samples resume in the same GeneGalleon
-workspace, reusing verified steps and saved assembly/BUSCO results. Conflicting
-inputs or scientific settings must be resolved before retrying.
+Completed samples are skipped; incomplete samples resume from verified
+checkpoints. A failed sample does not block other samples, but all must succeed
+before the database is published. Active or unresolved Slurm submissions block
+duplicate submissions. Add `--resources retry.yaml` to adjust job resources.
 
-`status` reports sample progress and the stopped stage. Check Slurm and
-`jobs/logs/` for the failure cause. Add `--resources retry.yaml` to change CPUs,
-memory or time while keeping completed checkpoints. Active or unresolved jobs
-block duplicate submissions.
+During build preparation, missing or modified sample products are rebuilt when
+their reads are available. Metadata, settings, or shared manifest conflicts stop
+the build. Check `needs_attention.tsv` for issues found by `plan`, or `status`
+for preparation failures. If a damaged reference is pinned by `reference_id`,
+create a new build without that pin.
 
-A failed sample does not prevent other samples, including later array batches,
-from running. The database controller requires all sample batches to succeed.
-Retry failed samples before publishing the complete database.
-
-With `storage.keep_intermediates: false`, computation scratch and native auxiliary
-temporary files are removed after success or failure. Saved checkpoints and logs
-are kept, along with reads needed for retry. Downloaded FASTQ/SRA files are removed
-after assembly and quantification complete. rnaSPAdes retries rebuild computation
-scratch. Set retention to `true` when preparing a debugging build.
-
-If a job is interrupted, use [cleanup](outputs.md#storage-cleanup) after it stops.
-To abandon incomplete samples, use the curated dataset
-[`record --exclude-failed` command](../datasets/README.md#abandoning-incomplete-samples).
-
-Builds bind to their implementation and pinned GeneGalleon source/image. After a
-code or software update, prepare a new build and reuse compatible checkpoints
-from the previous build; the old frozen execution files are not rewritten.
+After a code or software update, create a new build and reuse compatible products
+from the previous one. Existing builds remain bound to their saved implementation.
+For interrupted jobs, see [storage cleanup](outputs.md#storage-cleanup). To abandon
+incomplete samples, use
+[`record --exclude-failed`](../datasets/README.md#abandoning-incomplete-samples).
 
 ## Manually excluding unusable accessions
 
@@ -155,18 +148,17 @@ SRR123456	download_failed_repeatedly
 LOCAL_BAD1	unusable_reads
 ```
 
-`accession` matches the metadata `run` exactly; `reason` is optional. Select this
-file with `excluded_accessions` in build settings, or use `null` to disable it.
-Exclusions apply before computation or reuse. Prepare a new build after edits;
-previous builds remain unchanged. The build saves the original metadata,
-exclusions, effective metadata, and `excluded_runs.tsv` for review.
+`accession` matches the metadata `run` exactly; `reason` is optional. Set
+`excluded_accessions` to this file, or `null` to disable exclusions. Exclusions
+apply before computation and reuse. After edits, create a new build; review its
+excluded samples in `excluded_runs.tsv`.
 
 ## Updating samples
 
-Edit metadata and submit a new build name with `reuse_from: auto`, or point it to
-a previous build or completed database. Added samples run missing work; removed samples leave the
-new outputs. Changing a run creates a new sample with its own assembly and
-expression. Historical builds remain available.
+Edit metadata and submit a new build with `reuse_from: auto`, or select a
+previous build or database. Added samples run missing work; removed samples
+are omitted from the new outputs. Changing a run creates a new sample.
+Previous builds remain available.
 
 ## Reusing completed databases
 
@@ -178,37 +170,24 @@ reuse_from:
   - results/leaf_set_b/database/
 ```
 
-Only samples in the new metadata, after exclusions, are considered. Reuse checks
-sample identities, product checksums, lineage, genetic code, ODB reference, and
-build conditions. Conflicts stop preparation regardless of source order. Set
-`reuse_from: null` to process samples from scratch.
+Reuse considers samples in the new metadata after exclusions and requires
+matching identities, lineage, genetic code, ODB reference, and build conditions.
+Intact products can be reused without the original FASTQs; see
+[private input guidelines](inputs.md#file-formats).
 
-Successful checks are cached for unchanged files. The first check of a copied
-database reads the product files and can take longer.
+Product checksums are verified on Slurm. Successful checks are cached for
+unchanged files; the first check of a copied database can take longer. Keep
+source databases available until preparation finishes importing their products.
+The new build then uses its own cache.
 
-Completed databases can be reused without the original FASTQs. See
-[input guidelines](inputs.md#file-formats) for private reads.
+Set `reuse_from: auto` to discover previous builds under `results/`, or select an
+unfinished build by its directory or `build.json`. Only registered assembly,
+BUSCO, and quantification checkpoints are reused; incompatible stages run again.
+Translation, mapping, and expression caches are reused from explicitly selected
+completed databases. Set `reuse_from: null` to process samples from scratch.
 
-Verified products are staged into the new build, which then no longer depends
-on the source paths. Missing samples run normally. Large products may share
-hard links: **do not edit generated files in place**. Reuse origins are recorded
-in `reuse.json` and the completed database's provenance.
-
-An unfinished build can resume under its own name or supply its verified
-assembly, BUSCO, and quantification stages to a new build. Set `reuse_from` to
-its build directory (or `build.json`), or use `reuse_from: auto` to discover
-previous builds under `results/`. Automatic reuse checks each sample and stage;
-incompatible settings are cache misses and conflicting or damaged matching
-products stop preparation. It never imports unregistered partial outputs.
-
-Automatic reuse copies sample-stage receipts; mapping, translation, and expression
-caches are reused through explicitly selected completed databases. `null`
-disables all reuse. Discovery is frozen during preparation, and the new build
-does not depend on source product paths afterward.
-
-Curated datasets can [record results](../datasets/README.md#recording-results)
-before a database completes. After exclusions, update metadata and prepare a new
-build to process replacements and reuse compatible completed work.
+Reuse origins are saved in `reuse.json` and database provenance. Products may
+share hard links: **do not edit generated files in place**.
 
 ## Copying a completed build to another project
 
@@ -225,15 +204,15 @@ traits, software, and reference resources.
 
 ## Pinned GeneGalleon source and SIF
 
-GeneGalleon software is fetched automatically when assembly, BUSCO, or
-quantification needs it. To download in advance:
+Slurm preparation fetches GeneGalleon when sample processing needs it. To download
+in advance:
 
 ```bash
 ./run_build.sh fetch-software
 ```
 
-Build settings pin the source revision and container. `genegalleon.image_uri`
+Build settings pin the source revision and container; downloads are cached under
+`resources/software/genegalleon/`. `genegalleon.image_uri`
 must use `docker://<registry>/<image>@sha256:<64 lowercase hexadecimal characters>`.
-Verified downloads are cached under `resources/software/genegalleon/`;
 `repository` and `image` are optional local overrides. AMALGKIT rRNA and
 contamination filtering are disabled by this workflow.
