@@ -29,24 +29,32 @@ def load_snapshot(root, version, node):
 
 
 def plan(samples, protein_dir, outdir, cache_dir, reference=None,
-         version="v12", node=3193, chunk_size=50):
+         version="v12", node=3193, chunk_size=50, reference_pin=None):
     rows = {r["species"]: r for r in read_tsv(samples)}
-    from mapping_tables import checked, protein_record, relative_file
+    from mapping_tables import checked, protein_record, reference_for, relative_file
     inputs = {s: protein_record(Path(protein_dir) / f'{r["odb_species"]}_protein.fa') for s, r in rows.items()}
     roots = [p.parent for p in sorted((Path(cache_dir) / f"{version}_{node}").glob("*/snapshot.json"))]
     roots = [p for p in roots if not p.name.startswith(".")]
     assigned, sources = {}, []
     reference_hash = sha256(reference) if reference and Path(reference).is_file() else None
-    for root in roots:
-        record, proteins = load_snapshot(root, version, node)
+    snapshots = [(root, *load_snapshot(root, version, node)) for root in roots]
+    if reference_pin:
+        from odb_settings import pin_reference
+        pinned = pin_reference(reference_pin, version, node)
+        preferred = pinned.get('reference_sha256') or reference_hash
+        def priority(snapshot):
+            record = snapshot[1]
+            refs = {reference_for(record, name) for name in snapshot[2]}
+            refs.discard(None)
+            return (0 if preferred and refs == {preferred} else 1 if len(refs) == 1 else 2)
+        # A newly mapped copy supersedes legacy cache entries without reference
+        # evidence. Otherwise an old unknown entry could cause every retry to map.
+        snapshots.sort(key=priority)
+    for root, record, proteins in snapshots:
         candidates = sorted(set(rows) & set(proteins))
         members = [name for name in candidates if proteins[name]['odb_species'] == rows[name]['odb_species']
                    and proteins[name]['sha256'] == content_sha256(inputs[name])]
         if not members: continue
-        constraints = set(record.get('reference_sha256s', []))
-        if record.get('reference_sha256'): constraints.add(record['reference_sha256'])
-        if reference_hash and any(expected != reference_hash for expected in constraints):
-            raise ValueError(f'ODB reference changed since cached mapping: {root}; use a new reference/cache namespace')
         members = [s for s in members if s not in assigned]
         if not members:
             continue
@@ -61,6 +69,11 @@ def plan(samples, protein_dir, outdir, cache_dir, reference=None,
         sources.append({"kind": "existing", "root": str(root.resolve()), "species": members,
                         "snapshot_sha256": sha256(root / "snapshot.json")})
     missing = sorted(set(rows) - set(assigned))
+    if reference_pin:
+        # Reuse is determined by release, clade and protein content. Pin only
+        # the reference used by new mapping jobs; historical marker hashes can
+        # differ because the marker also records creation time and local paths.
+        pin_reference(reference_pin, version, node, reference_hash if missing else None)
     out = Path(outdir)
     out.mkdir(parents=True, exist_ok=True)
     if missing:
@@ -77,6 +90,8 @@ def plan(samples, protein_dir, outdir, cache_dir, reference=None,
     result = {"schema_version": 1, "version": version, "node": node,
               "proteins": inputs, "sources": sources, "chunks": chunks,
               "reused_species": sorted(assigned), "mapped_species": missing}
+    if reference_pin:
+        result['reference_pin'] = str(Path(reference_pin).resolve())
     write_json(out / "plan.json", result)
     return result
 
@@ -132,6 +147,7 @@ if __name__ == "__main__":
     for name in ("samples", "protein-dir", "outdir", "cache-dir"):
         p.add_argument(f"--{name}", required=True)
     p.add_argument("--reference")
+    p.add_argument("--reference-pin")
     p.add_argument("--chunk-size", type=int, default=50)
     q = sub.add_parser("publish")
     for name in ("samples", "chunk-dir", "protein-dir", "cache-dir", "label"):

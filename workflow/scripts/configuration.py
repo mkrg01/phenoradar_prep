@@ -5,7 +5,7 @@ KEYS = {
     "storage": "keep_intermediates",
     "selection": "busco_threshold species_list",
     "translation": "table",
-    "odb": "ncbi_tax_id incremental cache_dir chunk_size",
+    "odb": "ncbi_tax_id incremental cache_dir chunk_size version",
     "alignment": "enabled",
     "kegg": "enabled ambiguity",
     "phylogeny": "trees lineage "
@@ -41,6 +41,8 @@ def validate_keys(config):
     if type(config.get("storage", {}).get("keep_intermediates", False)) is not bool:
         raise ValueError("storage.keep_intermediates must be true or false")
     odb = config.get("odb", {})
+    from odb_settings import validate as validate_odb
+    validate_odb(odb)
     if "ncbi_tax_id" in odb and (type(odb["ncbi_tax_id"]) is not int or odb["ncbi_tax_id"] < 1):
         raise ValueError("odb.ncbi_tax_id must be a positive integer")
     if type(odb.get("incremental", False)) is not bool:

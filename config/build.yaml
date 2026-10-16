@@ -5,11 +5,13 @@ name_mode: timestamp  # New builds append UTC preparation time; --name sets an e
 metadata: input/metadata.tsv  # Input sample/run table (TSV).
 excluded_accessions: config/excluded_accessions.tsv  # Manual run exclusions; null disables.
 reuse_from: results/angiosperm_leaf_20260928/database  # Build/database path or list, auto for prior sample stages, null for a fresh build.
+rebuild_samples: []  # Sample IDs or run accessions to process from scratch in this new build.
 translation:
   table: 1  # NCBI genetic code for CDS translation; 1 = standard.
 busco:
   lineage: embryophyta_odb12  # BUSCO lineage dataset for completeness and marker extraction.
 odb:
+  version: v12  # OrthoDB release; samples already processed with this release are reused.
   chunk_size: 50  # Maximum samples per ODB mapping chunk.
   ncbi_tax_id: 3193  # OrthoDB mapping clade: Embryophyta (land plants); NCBI Taxonomy ID.
 genegalleon:

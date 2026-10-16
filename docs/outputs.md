@@ -30,7 +30,9 @@ follow the [sample identifier conventions](inputs.md#identifiers).
 | `metadata.tsv` | Metadata after run exclusions |
 | `source_metadata.tsv` | Build input metadata before run exclusions |
 | `manifest.json` | Build ID, dataset name, preparation/completion dates, metadata history, and product checksums |
+| `sample_processing.tsv` | One row per included sample, with generating versions, methods, references, and BUSCO completeness |
 | `provenance/metadata_provenance.json` | Frozen source metadata history, when configured |
+| `provenance/odb_reference_pin.json` | Shared reference checksum for new mapping runs |
 | `cds/{species}_longestCDS.fa.gz` | Longest CDS per gene |
 | `busco/summary.tsv`, `busco/full/` | Per-sample counts and full BUSCO tables |
 | `quant/{species}/{run}/{run}_abundance.tsv.gz` | Gene expression: `target_id`, `tpm`, and all other source columns |
@@ -45,6 +47,31 @@ PhenoRadar exports remain plain TSV.
 Existing uncompressed databases remain readable and reusable; no conversion is
 needed. New builds compress imported products and leave the source database
 unchanged.
+
+## Sample processing table
+
+`sample_processing.tsv` has one row per sample, ready for use as a supplementary
+table. Reused products retain their generating versions.
+
+| Column | Meaning |
+| --- | --- |
+| `sample_id` | Sample identifier used in analysis results |
+| `scientific_name` | Biological species name |
+| `run_accession` | Input run accession or private run identifier |
+| `genegalleon_version` | Version that produced the sample's assembly, BUSCO, and quantification |
+| `assembly_method` | Recorded assembler method |
+| `busco_lineage` | BUSCO lineage dataset |
+| `busco_complete_percent` | Complete BUSCOs (single-copy + duplicated) as a percentage of total |
+| `phenoradar_prep_version` | Version that produced the saved OG expression |
+| `orthodb_release` | OrthoDB release used for mapping |
+| `orthodb_clade` | Mapping clade; uncommon groups use an NCBI Taxonomy ID |
+
+Unrecorded methods and versions are `unknown`. Local GeneGalleon sources append
+`+local.<content ID>` to the version. Detailed revisions, container identities,
+settings, and reuse history are kept in machine-readable provenance.
+
+For older databases, [export this table](datasets.md#supplementary-sample-table)
+to a separate directory.
 
 ## Result files
 

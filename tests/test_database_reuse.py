@@ -244,11 +244,13 @@ def test_database_reuse_retains_expression_without_mapper_or_translation(complet
 
 def test_two_sources_and_one_missing_sample_only_compute_missing_work(completed_project):
     from test_datasets import fake_genegalleon, native_events
+    from common import sha256
     root, baseline, env, events = completed_project
     frozen = dataset.load(baseline)
     items = frozen['items']
-    first = database_from_stages(root, frozen['config']['store'], items[:1], 'alpha_source')
-    second = database_from_stages(root, frozen['config']['store'], items[1:2], 'beta_source')
+    reference = sha256(root / 'resources/orthodb/v12_3193/reference.json')
+    first = database_from_stages(root, frozen['config']['store'], items[:1], 'alpha_source', reference)
+    second = database_from_stages(root, frozen['config']['store'], items[1:2], 'beta_source', reference)
     fake_genegalleon(root)
     config = configure(root, [str(first), str(second)])
     build = dataset.prepare(root, 'mixed', config)

@@ -2,17 +2,19 @@
 
 [Documentation](index.md) · [Configuration](configuration.md)
 
-A **build** produces reusable sample data: assembly, BUSCO, quantification,
-OrthoDB mapping, and OG expression. An **analysis** selects samples from a
-completed database. Change traits, sample selection, or the analysis BUSCO
-threshold by creating a new analysis from the same database.
+[Build](#build-a-reusable-database) · [Analyze](#run-an-analysis) ·
+[Reuse](#reusing-completed-databases) · [Reprocess samples](#reprocess-selected-samples) ·
+[Update OrthoDB](#update-orthodb-for-all-samples)
+
+A **build** produces a reusable sample database: assembly, BUSCO, quantification,
+OrthoDB mapping, and OG expression. An **analysis** uses that database with its
+own sample selection, traits, and optional analyses.
 
 ## Build a reusable database
 
 Complete [installation](running.md#installation-and-normal-execution), prepare
 [metadata](inputs.md), and edit [config/build.yaml](../config/build.yaml).
-Set `reuse_from: null` for your first build, or choose a
-[completed database](#reusing-completed-databases) to reuse.
+Set `reuse_from: null` for your first build, or [reuse existing results](#reusing-completed-databases).
 
 Use the build directory name printed by `submit` for `{build_name}` below.
 
@@ -22,35 +24,26 @@ Use the build directory name printed by `submit` for `{build_name}` below.
 ./run_build.sh status --build results/{build_name}
 ```
 
-| Build command | Purpose |
-| --- | --- |
-| `plan` | Check reuse and save `reports/plan/plan.tsv` |
-| `submit` | Save the build and submit required work |
-| `status --build PATH` | Show sample progress and database status |
+`submit` saves inputs and settings, verifies reusable products on Slurm, then
+submits the required jobs. Add `--prepare-locally` to import already verified
+inputs on the submit host.
 
-`submit` saves the build and runs preparation on Slurm before submitting sample
-and mapping jobs. Preparation verifies inputs and imports reusable products.
-
-Add `--prepare-locally` to prepare on the submit host when inputs and software
-are already verified and unchanged. Otherwise, preparation runs on Slurm.
-
-Monitor submitted work with `status`. The completed database is saved in
-`results/{build_name}/database/`. Builds record BUSCO scores without filtering samples.
+The completed database is `results/{build_name}/database/`. Builds record BUSCO
+scores for every sample; filtering belongs to the analysis.
 
 ## Plans and progress
 
-`plan` checks reuse compatibility and product checksums. Cached checks apply
-only to unchanged files. Metadata, settings, and exclusions are checked each time.
+`plan` shows sample and mapping reuse and saves `reports/plan/plan.tsv`. It checks
+compatibility and checksums, reusing checks only for unchanged files.
+`status` shows progress and log paths for failed jobs;
+`status --verify` also checks product integrity.
 
-`status` shows recorded progress and full `.err` and `.out` log paths for failed
-jobs. Add `--verify` to check product integrity.
-
-| Command | Option | Result |
-| --- | --- | --- |
-| `plan` | `--outdir DIR` | Save `plan.tsv` and `needs_attention.tsv` in `DIR` |
-| `plan` | `--split` | Also save `reuse.tsv`, `pending.tsv`, `conflicts.tsv`, and `excluded.tsv` |
-| `status` | `--outdir DIR` | Save `status.tsv` and `failed.tsv` in `DIR` |
-| `status` | `--json` | Print the detailed report as JSON |
+| Option | Result |
+| --- | --- |
+| `plan --outdir DIR` | Save `plan.tsv` and `needs_attention.tsv` in `DIR` |
+| `plan --split` | Also group reports by reuse, pending, conflict, and exclusion |
+| `status --outdir DIR` | Save `status.tsv` and `failed.tsv` in `DIR` |
+| `status --json` | Print the detailed report as JSON |
 
 ## Run an analysis
 
@@ -66,24 +59,24 @@ Replace `{analysis_name}` with a name for your analysis.
 ./run_analysis.sh status --analysis results/{build_name}/downstream/{analysis_name}
 ```
 
-Analyses inherit the database's lineage, genetic code, and ODB clade. The default
-target `all` runs enabled analyses and collects [PhenoRadar inputs](phenoradar_inputs.md).
-Several analyses can share one database. Use an [analysis target](running.md#targets)
-to run a single branch.
+Analyses inherit the database's BUSCO lineage, genetic code, and OrthoDB reference.
+The default target `all` runs enabled analyses and collects
+[PhenoRadar inputs](phenoradar_inputs.md). Several analyses can share one database;
+use an [analysis target](running.md#targets) to run a single branch.
 
 ## Saved settings and previews
 
-The first submission saves inputs and settings. Builds keep complete sample
-metadata in `metadata.tsv`. Resume with `--build` or `--analysis`; source config
-edits do not change a saved run. Create a new run for changed scientific
-settings, code, or software. Use
-[resource overrides](running.md#resource-budgets) to change job resources.
+Inputs and settings are saved at first submission. Config edits do not change
+a saved run: resume with `--build` or `--analysis`, or create a new run for
+changed software or scientific settings. Use
+[resource overrides](running.md#resource-budgets) for job resources.
 
-Build names include UTC timestamps by default; retry with the path printed by
-`submit`. `--name` sets an exact name. With `name_mode: fixed`, repeating `submit`
-resumes the configured name. See [build settings](configuration.md#build-settings).
-
-Add `--dry-run` to save a run and preview its jobs without submitting.
+| Naming or preview option | Behavior |
+| --- | --- |
+| Default naming | New builds append a UTC timestamp; resume using the printed path |
+| `--name NAME` | Use an exact name |
+| `name_mode: fixed` | Repeated `submit` resumes the configured build |
+| `--dry-run` | Save the run and preview jobs without submitting |
 
 ## Failure and recovery behavior
 
@@ -95,14 +88,14 @@ Check the run's `status` and `jobs/logs/`, then retry with its saved path:
 ```
 
 Completed samples are skipped; incomplete samples resume from verified
-checkpoints. A failed sample does not block other samples, but all must succeed
-before publication. Active or unresolved Slurm jobs block duplicate submissions.
-Add `--resources retry.yaml` to adjust job resources.
+checkpoints. Add `--resources retry.yaml` to adjust resources. Active or unresolved
+Slurm jobs block duplicate submissions.
 
-Missing or modified sample products are rebuilt when their reads are available.
-Metadata, settings, or shared manifest conflicts stop the build; check
-`needs_attention.tsv` or `status` for the reason. A damaged reference pinned by
-`reference_id` requires a new build without that pin.
+Missing or modified sample products are rebuilt when reads are available.
+Conflicting metadata, settings, or shared manifests stop the build; check
+`needs_attention.tsv` or `status`. For a damaged reference pinned by `reference_id`,
+create a new build without that pin. Publication requires every included sample
+to succeed; other samples can continue after one fails.
 
 For interrupted jobs, see [storage cleanup](outputs.md#storage-cleanup).
 To abandon incomplete samples in a curated dataset, use
@@ -125,10 +118,9 @@ excluded samples in `excluded_runs.tsv`.
 
 ## Updating samples
 
-Edit metadata and submit a new build with `reuse_from: auto`, or select a
-previous build or database. Added samples run missing work; removed samples
-are omitted from the new outputs. Changing a run creates a new sample.
-Previous builds remain available.
+Edit metadata and submit a new build with `reuse_from` pointing to previous
+results. Added samples run missing work; removed samples are omitted. Changing
+a run creates a new sample. Previous builds remain available.
 
 For a pilot, add `--species-list pilot.txt` with one species or sample ID per line.
 Resume with the same `--build` path and without the list to finish all samples.
@@ -136,27 +128,93 @@ Use `--until quant` to finish sample processing without publishing a database.
 
 ## Reusing completed databases
 
-Set `reuse_from` in `config/build.yaml` to a completed database or a list:
+Set `reuse_from` in [config/build.yaml](../config/build.yaml):
+
+| Value | Reusable results |
+| --- | --- |
+| `results/previous_build/database` | Sample processing, translated proteins, mapping, and OG expression |
+| `results/previous_build/build.json` | Registered sample processing checkpoints |
+| `auto` | Sample processing checkpoints discovered under `results/` |
+| `null` | Process all samples from scratch |
+
+A list of paths is also accepted. Reuse requires matching sample identities and
+scientific settings. Assembly, BUSCO, and quantification form one sample unit:
+
+| Sample state | Behavior in a new build |
+| --- | --- |
+| Complete | Reuse across GeneGalleon releases; retain the generating version |
+| Incomplete, same software | Resume verified checkpoints |
+| Incomplete, updated software | Restart from assembly |
+
+Keep sources available until preparation finishes importing products; the new
+build then uses its own cache. Complete products can be reused without FASTQs.
+Published products may share hard links: **do not edit them in place**.
+
+### Reprocess selected samples
+
+For a fix affecting existing results, list exact sample IDs or run accessions:
 
 ```yaml
-reuse_from:
-  - results/leaf_set_a/database/
-  - results/leaf_set_b/database/
+reuse_from: results/previous_build/database
+rebuild_samples: [SRR123456, Species_name_SRR789012]
 ```
 
-Reuse requires matching sample identities and processing conditions. Intact
-products can be reused without the original FASTQs.
+Submit a new build. Selected samples restart from assembly; other compatible
+samples are reused. Unknown IDs are rejected. Remove any explicit metadata
+`reference_id` for a sample being rebuilt.
 
-Keep source databases available until preparation finishes importing their
-products. The new build then uses its own cache.
+For subsequent builds, clear `rebuild_samples` and point `reuse_from` to the fixed
+database. `auto` stops on conflicting products from different builds.
 
-Set `reuse_from: auto` to discover previous builds under `results/`, or select an
-unfinished build by its directory or `build.json`. Only registered assembly,
-BUSCO, and quantification checkpoints are reused; incompatible stages run again.
-Translation, mapping, and expression caches are reused from explicitly selected
-completed databases. Set `reuse_from: null` to process samples from scratch.
+### Update OrthoDB for all samples
 
-Products may share hard links: **do not edit generated files in place**.
+Set `odb.version` in the build config, then submit a **new build**. Each sample's
+recorded OrthoDB version is checked automatically:
+
+| Existing result | Action |
+| --- | --- |
+| Same release and clade | Reuse mapping and OG expression |
+| Different release or clade | Redo mapping and OG expression |
+| No mapping yet | Run mapping and OG expression |
+
+Compatible assembly, BUSCO, quantification, and translated proteins are reused.
+Example for OrthoDB v12:
+
+```yaml
+reuse_from: results/previous_build/database
+rebuild_samples: []
+odb:
+  version: v12
+  ncbi_tax_id: 3193
+  chunk_size: 50
+```
+
+```bash
+./run_build.sh plan
+./run_build.sh submit --name orthodb_refresh
+```
+
+If earlier builds used different releases, only samples with a different release
+or clade are remapped. The finished database uses the configured release for all
+samples. BUSCO lineage is independent; the mapper must support the selected release.
+
+Resume this build with `submit --build results/orthodb_refresh`; completed chunks
+remain reusable. Run downstream analyses against the new database to use its
+updated OGs. See [reference storage and checks](references.md#preparing-and-verifying-the-reference).
+
+### Supplementary sample table
+
+New builds include `database/sample_processing.tsv`: one row per sample with
+generating versions, methods, references, and BUSCO completeness.
+To export it from an older database without rerunning analyses:
+
+```bash
+./run_build.sh export-processing --build results/{build_name} \
+  --outdir reports/supplementary
+```
+
+Reused samples keep their generating versions; missing historical records are
+`unknown`. See the [column definitions](outputs.md#sample-processing-table).
 
 ## Copying a completed build to another project
 

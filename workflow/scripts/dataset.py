@@ -51,9 +51,12 @@ def settings(root, config, analysis_config=None, name=None):
     cfg = read_yaml(config)
     if analysis_config is not None:
         raise ValueError("build does not accept analysis overrides; use run_analysis.sh")
-    unknown = set(cfg) - {"name", "name_mode", "metadata", "metadata_provenance", "reuse_from", "translation", "busco", "odb", "genegalleon", "slurm", "excluded_accessions", "storage"}
+    unknown = set(cfg) - {"name", "name_mode", "metadata", "metadata_provenance", "reuse_from", "rebuild_samples", "translation", "busco", "odb", "genegalleon", "slurm", "excluded_accessions", "storage"}
     if unknown: raise ValueError(f"unknown build settings: {sorted(unknown)}; use config/build.yaml for build settings")
     cfg['name_mode'] = naming_mode(cfg)
+    rebuild = cfg.setdefault('rebuild_samples', [])
+    if not isinstance(rebuild, list) or any(not isinstance(s, str) or not s.strip() for s in rebuild):
+        raise ValueError('rebuild_samples must be a list of sample IDs or run accessions')
     provenance = cfg.get('metadata_provenance')
     if provenance is not None and (not isinstance(provenance, str) or not provenance.strip()):
         raise ValueError('metadata_provenance must be null or a JSON path')
@@ -68,7 +71,7 @@ def settings(root, config, analysis_config=None, name=None):
     analysis["translation"] = cfg["translation"]
     if set(cfg["busco"]) != {"lineage"} or not isinstance(cfg["busco"]["lineage"], str) or not cfg["busco"]["lineage"].strip():
         raise ValueError("busco.lineage must be a nonempty string")
-    if set(cfg["odb"]) - {"ncbi_tax_id", "chunk_size"}:
+    if set(cfg["odb"]) - {"ncbi_tax_id", "chunk_size", "version"}:
         raise ValueError("unknown build.odb settings")
     analysis["odb"].update(cfg["odb"], incremental=True)
     analysis["phylogeny"]["lineage"] = cfg["busco"]["lineage"]
@@ -123,11 +126,19 @@ def stage_conditions(cfg):
 
 def check_conditions(products, conditions):
     if not conditions: return
+    complete = all(products[key] for key in ('reference', 'busco', 'quant'))
     for stage, key in zip(STAGES, ("reference", "busco", "quant")):
         product = products[key]
-        previous = product.get("provenance", {}).get("condition") if product else None
+        provenance = product.get('provenance', {}) if product else {}
+        previous = provenance.get('accepted_condition', provenance.get('condition'))
         if previous and previous != conditions[stage]:
             raise ValueError(f"{stage} settings differ from registered product; set reuse_from: null and choose a new build name for a deliberate rebuild")
+        if (product and not complete and provenance.get('accepted_condition')
+                and provenance.get('condition') != conditions[stage]):
+            raise ProductIntegrityError('incomplete reused sample requires a complete restart under the current GeneGalleon software')
+    if complete:
+        from sample_processing import native_processing
+        native_processing(products)
 
 
 def inspect_items(store, items, analysis, requested=None, conditions=None, reusable=None, errors=None, resolved=None,
@@ -154,7 +165,8 @@ def inspect_items(store, items, analysis, requested=None, conditions=None, reusa
                     continue
                 product = chosen['product']
                 result.append({"species": item["species"], "run": item["row"]["run"],
-                               **{stage: "reuse" for stage in STAGES}, "reason": "", "mapping": "reuse",
+                               **{stage: "reuse" for stage in STAGES}, "reason": "",
+                               "mapping": "pending_inputs" if chosen.get('reuse_mapping') is False else "reuse",
                                "reference_id": product['cds']['sha256']})
                 continue
             products = resolve(store, item, analysis["phylogeny"]["lineage"], need_full=True, verify_files=verify_files)
@@ -205,7 +217,17 @@ def plan(root, config, metadata=None, analysis_config=None, name=None, verify_fi
     if policy_record: verify(policy_record)
     from database_reuse import select
     rebuilds = {} if repair else None
-    reusable, errors, sources = select(cfg['reuse_from'], items, cfg, verify_files=verify_files, rebuilds=rebuilds)
+    aliases = {alias: item for item in items for alias in (item['species'], item['row']['run'])}
+    unknown = set(cfg['rebuild_samples']) - aliases.keys()
+    if unknown:
+        raise ValueError(f'unknown rebuild_samples: {sorted(unknown)}')
+    forced = {aliases[alias]['species'] for alias in cfg['rebuild_samples']}
+    if any(i['species'] in forced and i['row'].get('reference_id') for i in items):
+        raise ValueError('remove reference_id from metadata before rebuilding a pinned sample')
+    reusable, errors, sources = select(cfg['reuse_from'], [i for i in items if i['species'] not in forced],
+                                      cfg, verify_files=verify_files, rebuilds=rebuilds)
+    if forced:
+        rebuilds = {**(rebuilds or {}), **dict.fromkeys(forced, 'explicitly requested by rebuild_samples')}
     selection = {"source_metadata": source, "metadata_provenance": provenance_record, "exclusion_policy": policy_record, "excluded": excluded,
                  "reusable": reusable, "reuse_sources": sources, "rebuilds": rebuilds or {}}
     report = inspect_items(cfg["store"], items, analysis, conditions=cfg["conditions"],
@@ -350,6 +372,8 @@ def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_a
                     "metadata": dict(record(frozen), path=str(target / "metadata.tsv")),
                     "auxiliary": auxiliary, "excluded": selection["excluded"], "raw_inputs": raw_records, "implementation": implementation(root),
                     "genegalleon": gg_records, "software_lock": software_lock}
+        from sample_processing import software_version
+        manifest['phenoradar_prep_version'] = software_version(root)
         manifest['deferred_verification'] = defer
         from build_snapshot import compact_build
         write_json(staging / "build.json", compact_build(manifest), compact=True)
@@ -394,7 +418,15 @@ def load(path, check_code=False):
     verify(manifest["metadata"])
     for entry in manifest["auxiliary"].values(): verify(entry)
     if check_code:
-        for entry in manifest["implementation"] + manifest["genegalleon"]: verify(entry)
+        # Retain full historical receipts, but reporting and release labels do
+        # not affect the computation being resumed. Applies to old builds too.
+        reporting = {Path(manifest['root']) / 'VERSION',
+                     Path(manifest['root']) / 'workflow/scripts/build_reports.py'}
+        for entry in manifest["implementation"]:
+            if Path(entry['path']) not in reporting:
+                verify(entry)
+        for entry in manifest['genegalleon']:
+            verify(entry)
     return manifest
 
 
@@ -654,6 +686,8 @@ def register_native(path, manifest, item, products, eligible, env):
                       'software': manifest['genegalleon'], 'run': run,
                       'raw_inputs': manifest['raw_inputs'].get(species, {}),
                       'condition': manifest['config']['conditions'][stage]}
+        from sample_processing import generating_conditions
+        provenance['processing'] = generating_conditions(manifest)
         published = work / 'products'
         name = {'assembly': f'{species}_longestCDS.fa.gz',
                 'busco': f'{species}.busco.full.tsv', 'quant': f'{run}_abundance.tsv.gz'}[stage]
@@ -1004,7 +1038,7 @@ def submit_named(root, name=None, config=None, metadata=None, until="database", 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True,
-                               metavar='{plan,submit,status,cleanup,fetch-software}')
+                               metavar='{plan,submit,status,export-processing,cleanup,fetch-software}')
     for name in ("plan", "prepare", "fetch-software"):
         help_text = {'plan': 'Verify reusable products and preview processing counts',
                      'fetch-software': 'Download and pin GeneGalleon software'}
@@ -1018,14 +1052,17 @@ def main():
             command.add_argument('--verify', action='store_true', default=True, help=argparse.SUPPRESS)
             command.add_argument('--outdir', default='reports/plan', help='Directory for detailed TSV reports (default: reports/plan)')
             command.add_argument('--split', action='store_true', help='Also write reports grouped by planned action')
-    for name in ("status", "cleanup", "submit", "materialize", "worker", "mapping", "complete", "dispatch"):
+    for name in ("status", "export-processing", "cleanup", "submit", "materialize", "worker", "mapping", "complete", "dispatch"):
         help_text = {'status': 'Summarize recorded progress', 'cleanup': 'Inspect or remove inactive scratch',
+                     'export-processing': 'Export sample_processing.tsv from a completed database',
                      'submit': 'Save build inputs and submit Slurm preparation'}
         command = sub.add_parser(name, **({'help': help_text[name]} if name in help_text else {}))
         command.add_argument("--build", "--dataset", dest="dataset", required=name != "submit",
                              help="Path to an already prepared build")
         if name in {'submit', 'dispatch'}: command.add_argument("--until", choices=UNTIL, default="database")
         if name in {'mapping', 'dispatch'}: command.add_argument("--execution")
+        if name == 'export-processing':
+            command.add_argument('--outdir', required=True, help='Directory for sample_processing.tsv')
         if name == "status":
             command.add_argument("--storage", action="store_true", help="Include intermediate cleanup status")
             command.add_argument('--verify', action='store_true', help='Also verify registered product checksums')
@@ -1090,6 +1127,15 @@ def run_command(args, parser):
         return int(any(r['state'] in {'failed', 'blocked'} or r['verification'] == 'failed'
                        for r in report['samples']) or report['database']['state'] == 'failed'
                    or report['verification'].get('state') == 'failed')
+    elif args.command == 'export-processing':
+        from build_products import load_complete
+        from sample_processing import write_summary
+        data = load_complete(args.dataset, verify_files=False)
+        output = Path(args.outdir) / 'sample_processing.tsv'
+        if output.resolve().is_relative_to(Path(data['bundle_root']).resolve()):
+            raise ValueError('export outside the immutable database directory')
+        write_summary(output, data)
+        print(output)
     elif args.command == "cleanup":
         from storage_management import run_storage
         report = run_storage(args.dataset, 'build', inspect=True, apply=args.apply)

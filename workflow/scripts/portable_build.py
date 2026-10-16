@@ -230,6 +230,9 @@ def publish_products(build, data):
                 created(relative)
             elif source.exists():
                 add(record(source), Path('provenance') / name)
+        pin = build / 'work/mapping/odb_reference_pin.json'
+        if pin.is_file():
+            add(record(pin), Path('provenance/odb_reference_pin.json'))
         products = copy.deepcopy(data['products'])
         for species, product in products.items():
             for key in ('cds', 'busco', 'abundance'):
@@ -278,6 +281,9 @@ def publish_products(build, data):
             if key in data:
                 portable[key] = copy.deepcopy(data[key])
         portable['tpm'] = copy.deepcopy(data['tpm'])
+        from sample_processing import write_summary
+        write_summary(staging / 'sample_processing.tsv', dict(data, products=products))
+        created('sample_processing.tsv')
         portable.update(schema_version=data["schema_version"], products=products, mapping=mapping, files=list(files.values()))
         portable['sha256'] = digest(portable)
         write_json(staging / 'manifest.json', portable)

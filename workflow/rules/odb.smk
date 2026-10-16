@@ -39,7 +39,7 @@ rule make_manifests:
 rule prepare_odb_reference:
     input:
         code=f"{SCRIPTS}/prepare_odb_reference.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/odb_environment.py"]
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/odb_environment.py", f"{SCRIPTS}/odb_settings.py"]
     output:
         reference=f"{REFERENCE}/reference.json",
         inventory=f"{REFERENCE}/files.json",
@@ -67,7 +67,7 @@ rule odb_map:
         reference=f"{REFERENCE}/reference.json",
         inventory=f"{REFERENCE}/files.json",
         code=f"{SCRIPTS}/run_odb_chunk.py",
-        helpers=[f"{SCRIPTS}/cleanup_work.py", f"{SCRIPTS}/odb_map.sh", f"{SCRIPTS}/odb_environment.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/make_manifests.py", f"{SCRIPTS}/incremental_odb.py"],
+        helpers=[f"{SCRIPTS}/cleanup_work.py", f"{SCRIPTS}/odb_map.sh", f"{SCRIPTS}/odb_environment.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/make_manifests.py", f"{SCRIPTS}/incremental_odb.py", f"{SCRIPTS}/odb_settings.py"],
         samples=f"{META}/samples.tsv"
     output:
         annotations=f"{CHUNKS}/{{chunk}}/{{chunk}}.og.annotations",
@@ -87,6 +87,7 @@ rule odb_map:
         keep_work=int(config["storage"]["keep_intermediates"]),
         cleanup=[PYTHON, f"{SCRIPTS}/cleanup_work.py", "odb"],
         incremental=int(INCREMENTAL_ODB),
+        pin=["--reference-pin", f"{WORK}/odb_reference_pin.json"],
         publish=([PYTHON, f"{SCRIPTS}/incremental_odb.py", "publish", "--samples", f"{META}/samples.tsv",
                   "--protein-dir", PROTEINS, "--cache-dir", ODB_CACHE, "--version", ODB_VERSION,
                   "--node", str(config["odb"]["ncbi_tax_id"])] if INCREMENTAL_ODB else [])
@@ -99,7 +100,7 @@ rule odb_map:
         "{PYTHON:q} {input.code:q} --manifest {params.manifest:q} --reference {input.reference:q} "
         "--output-dir {params.out:q} --work-dir {params.work:q} --label {wildcards.chunk:q} "
         "--command {params.command:q} --prefix={params.prefix:q} --version {params.version:q} "
-        "--node {params.node} --jobs {threads} --batch-size {params.batch} --defer-cleanup {params.keep:q} > {log:q} 2>&1; "
+        "{params.pin:q} --node {params.node} --jobs {threads} --batch-size {params.batch} --defer-cleanup {params.keep:q} > {log:q} 2>&1; "
         "if [ {params.incremental} -eq 1 ]; then "
         "{params.publish:q} --chunk-dir {params.out:q} --label {wildcards.chunk:q} >> {log:q} 2>&1; fi; "
         "if [ {params.keep_work} -eq 0 ]; then "
@@ -117,7 +118,7 @@ rule collect_odb:
         provenance=lambda wc: odb_source_files(wc, "provenance.json"),
         proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa.gz' for r in sample_rows(wc)}),
         code=f"{SCRIPTS}/mapping_tables.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/translate_cds.py", f"{SCRIPTS}/incremental_odb.py", f"{SCRIPTS}/dataset_assets.py", f"{SCRIPTS}/product_storage.py"]
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/translate_cds.py", f"{SCRIPTS}/incremental_odb.py", f"{SCRIPTS}/dataset_assets.py", f"{SCRIPTS}/product_storage.py", f"{SCRIPTS}/odb_settings.py"]
     output:
         snapshot=f"{MAPPING}/snapshot.json",
         tables=directory(f"{MAPPING}/species")
@@ -141,15 +142,16 @@ checkpoint plan_incremental_odb:
         samples=f"{META}/samples.tsv",
         proteins=lambda wc: sorted({f'{PROTEINS}/{r["odb_species"]}_protein.fa.gz' for r in sample_rows(wc)}),
         code=f"{SCRIPTS}/incremental_odb.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/make_manifests.py"]
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/make_manifests.py", f"{SCRIPTS}/odb_settings.py"]
     output: directory(ODB_PLAN)
     params:
         proteins=PROTEINS, cache=ODB_CACHE, reference=f"{REFERENCE}/reference.json",
+        pin=f"{WORK}/odb_reference_pin.json",
         version=ODB_VERSION, node=config["odb"]["ncbi_tax_id"], chunk_size=config["odb"].get("chunk_size", 50)
     log: f"{LOG}/{ORTHOGROUP_MAPPING}/incremental_plan.log"
     conda: "../envs/analysis.yaml"
     resources: mem_mb=2000
     shell:
         "{PYTHON:q} {input.code:q} plan --samples {input.samples:q} --protein-dir {params.proteins:q} "
-        "--outdir {output:q} --cache-dir {params.cache:q} --reference {params.reference:q} "
+        "--outdir {output:q} --cache-dir {params.cache:q} --reference {params.reference:q} --reference-pin {params.pin:q} "
         "--version {params.version:q} --node {params.node} --chunk-size {params.chunk_size} > {log:q} 2>&1"

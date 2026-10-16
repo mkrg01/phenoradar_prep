@@ -11,6 +11,7 @@ import tempfile
 import time
 
 from common import now, write_json
+from odb_settings import cache_namespace
 from dataset_assets import (ProductIntegrityError, UncachedVerification, cached_verification,
                             digest, locked, record, verification_cached, verify, verify_many)
 
@@ -60,7 +61,7 @@ def apply_runtime(path, manifest):
 
 
 def save_runtime(path, manifest, references, raw_inputs, files, rebuilds):
-    snapshot = Path(path) / 'work/cache/odb' / f'v12_{manifest["config"]["odb"]["ncbi_tax_id"]}' / 'reused/snapshot.json'
+    snapshot = Path(path) / 'work/cache/odb' / cache_namespace(manifest["config"]["odb"]) / 'reused/snapshot.json'
     data = {'schema_version': 1,
             'prepared_sha256': json.loads((Path(path) / 'checksums.json').read_text())['build.json'],
             'genegalleon_config': manifest['config']['genegalleon'], 'genegalleon': manifest['genegalleon'],
@@ -123,7 +124,7 @@ def invalidate_mapping(path, manifest, rebuilds):
     """Keep healthy imported tables, and discard downstream work using bad inputs."""
     from mapping_tables import load_tables, relative_file, write_tables
     path = Path(path)
-    directory = path / 'work/cache/odb' / f'v12_{manifest["config"]["odb"]["ncbi_tax_id"]}' / 'reused'
+    directory = path / 'work/cache/odb' / cache_namespace(manifest["config"]["odb"]) / 'reused'
     snapshot = directory / 'snapshot.json'
     if snapshot.is_file():
         data = load_tables(snapshot, verify_files=False)
@@ -147,7 +148,9 @@ def candidate_files(chosen):
         if products.get('quant'):
             result.append(products['quant']['abundance'])
         return result
-    from database_reuse import PRODUCTS
+    from database_reuse import PRODUCTS, UPSTREAM
+    if chosen.get('reuse_mapping') is False:
+        return [chosen['product'][key] for key in UPSTREAM]
     return [chosen['product'][key] for key in PRODUCTS] + [chosen['mapping']['table']]
 
 

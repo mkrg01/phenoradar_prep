@@ -32,7 +32,8 @@ if USE_CONTAINER:
 
 containerized: CONTAINER_IMAGE
 
-ODB_VERSION = "v12"
+from odb_settings import reference_directory
+ODB_VERSION = config["odb"].get("version", "v12")
 INCREMENTAL_ODB = config["odb"].get("incremental", False)
 ODB_CACHE = config["odb"].get("cache_dir", "resources/odb_cache")
 PYTHON = "python"
@@ -95,7 +96,7 @@ TPM = f"{OUT}/{ORTHOGROUP_EXPRESSION}"
 ALIGNMENTS = f"{OUT}/{ORTHOGROUP_ALIGNMENTS}"
 ALIGNMENT_INPUTS = f"{WORK}/{ORTHOGROUP_ALIGNMENTS}/inputs"
 ALIGNMENT_FINAL = [f"{ALIGNMENTS}/provenance.json"]
-REFERENCE = f'resources/orthodb/{ODB_VERSION}_{config["odb"]["ncbi_tax_id"]}'
+REFERENCE = reference_directory(config["odb"])
 KEGG = f"{OUT}/kegg"
 KEGG_REPRESENTATIVES = f"{KEGG}/representatives"
 KEGG_ANNOTATIONS = f"{KEGG}/annotation"

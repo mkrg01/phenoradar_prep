@@ -2,10 +2,10 @@
 
 [Documentation](index.md) · [Input formats](inputs.md)
 
-Edit [config/build.yaml](../config/build.yaml) for reusable sample products and
-[config/analysis.yaml](../config/analysis.yaml) for downstream analyses. The
-launchers load these files by default; `--config` selects another file. Analysis
-configs may partially override the default analysis config.
+Edit [config/build.yaml](../config/build.yaml) for sample processing and
+[config/analysis.yaml](../config/analysis.yaml) for downstream analyses.
+`--config PATH` selects another file. Analysis overrides can contain only the
+settings you want to change.
 
 ## Loading settings and paths
 
@@ -14,30 +14,39 @@ to the metadata file's directory. Keep imported databases inside the repository
 so the container can access them.
 
 The first submission saves inputs and settings, including with `--dry-run`.
-Create a new build or choose a new analysis name for changed scientific conditions.
-See [saved settings](datasets.md#saved-settings-and-previews) and
-[resource overrides](running.md#resource-budgets).
+Use a new run for changed scientific conditions; use
+[resource overrides](running.md#resource-budgets) for job resources.
 
 ## Build settings
 
 | Setting | Purpose |
 | --- | --- |
-| `name` | Dataset prefix with `name_mode: timestamp` (no manual date suffix needed), or the build directory name with `fixed`; `--name` sets an exact build name |
-| `name_mode` | `timestamp` (supplied config) creates a new UTC timestamped build when `--name` is omitted; `fixed` resumes the configured name and is used if this setting is absent |
+| `name` | Dataset prefix; exact directory name with `name_mode: fixed`. `--name` overrides it |
+| `name_mode` | `timestamp` (supplied config) creates dated builds; `fixed` resumes the named build |
 | `metadata`, `excluded_accessions` | Sample metadata and optional run exclusions |
-| `metadata_provenance` | Optional JSON history matching the source metadata checksum; copied into the build and portable database |
-| `reuse_from` | `auto` for previous sample stages; build/database path or list; `null` for a fresh build |
+| `metadata_provenance` | Optional metadata history JSON, matched by checksum and copied into the database |
+| `reuse_from` | Previous build/database path, list of paths, `auto`, or `null`; see [reuse](datasets.md#reusing-completed-databases) |
+| `rebuild_samples` | Sample IDs or run accessions to restart from assembly in a new build; default `[]` |
 | `genegalleon` | [Pinned software](datasets.md#pinned-genegalleon-source-and-sif) and assembly/quantification settings |
 | `busco.lineage` | BUSCO dataset; default `embryophyta_odb12` |
 | `translation.table` | NCBI genetic code; default `1` |
-| `odb.ncbi_tax_id` | [OrthoDB mapping clade](references.md#choosing-an-orthodb-mapping-clade); default `3193` (Embryophyta) |
-| `odb.chunk_size` | Maximum samples per mapping chunk; default `50` |
 | `slurm` | [Job resources and total limits](running.md#resource-budgets) |
 
-Timestamped builds use `results/{name}_YYYYMMDDTHHMMSSZ/`. Resume an existing
-build with `submit --build results/{build_name}`, using the path printed when it
-was prepared, including after `--dry-run`. See
-[saved settings](datasets.md#saved-settings-and-previews).
+Resume saved builds with `submit --build PATH`. See
+[naming and previews](datasets.md#saved-settings-and-previews).
+
+### OrthoDB
+
+All samples use the selected release and clade. In a **new build**, samples already
+processed with that reference are reused; the others are mapped automatically.
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `odb.version` | `v12` | Fixed release supported by the installed ODB-mapper |
+| `odb.ncbi_tax_id` | `3193` | [Mapping clade](references.md#choosing-an-orthodb-mapping-clade); `3193` is Embryophyta |
+| `odb.chunk_size` | `50` | Maximum samples per mapping chunk |
+
+See [OrthoDB update examples](datasets.md#update-orthodb-for-all-samples).
 
 ## Analysis settings
 
@@ -51,9 +60,8 @@ was prepared, including after `--dry-run`. See
 | `inputs.calibrations` | Age bounds when dating uses `calibration_source: file` |
 | `slurm` | Job resources and total limits for this analysis |
 
-Lineage, genetic code, and ODB clade are inherited from the build.
-Configured input paths must exist; set unused optional paths to `null`.
-Trait-dependent branches also need to be disabled when traits are unused.
+BUSCO lineage, genetic code, and OrthoDB reference are inherited from the build.
+Set unused input paths to `null` and disable branches that require those inputs.
 
 ## Intermediate storage
 

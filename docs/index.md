@@ -25,7 +25,10 @@ results to PhenoRadar.
 
 - [Plans and progress](datasets.md#plans-and-progress)
 - [Slurm resources, targets, and retries](running.md)
-- [Reuse or copy a database](datasets.md#reusing-completed-databases)
+- [Reuse a database](datasets.md#reusing-completed-databases) · [Copy to another project](datasets.md#copying-a-completed-build-to-another-project)
+- [Reprocess selected samples](datasets.md#reprocess-selected-samples)
+- [Update OrthoDB for all samples](datasets.md#update-orthodb-for-all-samples)
+- [Supplementary sample table](outputs.md#sample-processing-table)
 - [Export a subset of completed results](species_filter.md)
 - [Reference data and updates](references.md)
 - [Curated metadata datasets and updates](../datasets/README.md)

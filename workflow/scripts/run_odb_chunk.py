@@ -15,6 +15,7 @@ from common import atomic_writer, file_record, now, sha256, write_json
 from odb_environment import command_path, odb_environment, software_records
 from cleanup_work import cleanup
 from product_storage import decoded_sha256, stage_product
+from odb_settings import pin_reference
 
 
 def publish_tree(source, destination):
@@ -54,8 +55,9 @@ def completed_output(output, fingerprint, label):
         return None
 
 
-def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper_v12", prefix="",
-        version="v12", node=3193, jobs=16, *, batch_size, keep_intermediates=False, defer_cleanup=False):
+def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper", prefix="",
+        version="v12", node=3193, jobs=16, *, batch_size, keep_intermediates=False, defer_cleanup=False,
+        reference_pin=None):
     if not re.fullmatch(r"chunk_[0-9]+", label) or jobs < 1 or batch_size < jobs:
         raise ValueError("invalid chunk label or concurrency settings")
     if jobs > int(os.environ.get("SLURM_CPUS_PER_TASK", jobs)):
@@ -63,6 +65,9 @@ def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper_v1
     ref = json.loads(Path(reference).read_text())
     if ref["version"] != version or ref["node"] != node:
         raise ValueError("reference node/version differs from requested mapping")
+    reference_entry = file_record(reference)
+    if reference_pin:
+        pin_reference(reference_pin, version, node, reference_entry['sha256'])
     data = Path(ref["data_dir"]).resolve()
     inventory_path = Path(ref["inventory"]["path"])
     if not data.is_dir() or sha256(inventory_path) != ref["inventory"]["sha256"]:
@@ -86,10 +91,10 @@ def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper_v1
     protein_entries = [dict(file_record(p), content_sha256=decoded_sha256(p)) if p.endswith('.gz')
                        else file_record(p) for p in proteins]
     identity = {"manifest": file_record(manifest), "proteins": protein_entries,
-                "reference": file_record(reference), "node": node, "version": version,
+                "reference": reference_entry, "node": node, "version": version,
                 "jobs": jobs, "batch_size": batch_size, "software": software_records(command, prefix),
                 "implementation": [file_record(scripts / name) for name in
-                                   ["run_odb_chunk.py", "odb_map.sh", "odb_environment.py", "common.py", "cleanup_work.py", "product_storage.py"]]}
+                                   ["run_odb_chunk.py", "odb_map.sh", "odb_environment.py", "odb_settings.py", "common.py", "cleanup_work.py", "product_storage.py"]]}
     fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     out, work_root = Path(output_dir).absolute(), Path(work_dir).absolute()
     if out.is_symlink() or work_root.is_symlink():
@@ -181,7 +186,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ["manifest", "reference", "output-dir", "work-dir", "label"]:
         parser.add_argument(f"--{flag}", required=True)
-    parser.add_argument("--command", default="ODB-mapper_v12")
+    parser.add_argument("--command", default="ODB-mapper")
+    parser.add_argument("--reference-pin")
     parser.add_argument("--prefix", default="")
     parser.add_argument("--version", default="v12")
     parser.add_argument("--node", type=int, default=3193)

@@ -7,9 +7,10 @@ from pathlib import Path
 from common import now, read_tsv, write_json, existing_product, protein_provenance, content_sha256
 from product_storage import product_record, stage_product
 from dataset_assets import locked, record, verify
-from mapping_tables import load_tables, protein_record, relative_file, subset
+from mapping_tables import load_tables, protein_record, reference_for, relative_file, subset
 from layout import run_layout
 from build_versioning import publish_latest
+from odb_settings import identity as odb_identity
 
 
 def load_complete(path, verify_files=True):
@@ -38,12 +39,24 @@ def complete(path):
         names = {i['species'] for i in manifest['items']}
         if len(samples) != len(names) or {r['species'] for r in samples} != names or set(tables['tables']) != names:
             raise ValueError('build mapping does not cover the complete metadata species set')
-        if tables['node'] != manifest['analysis']['odb']['ncbi_tax_id'] or tables['version'] != 'v12':
+        odb = manifest['analysis']['odb']
+        if tables['node'] != odb['ncbi_tax_id'] or tables['version'] != odb.get('version', 'v12'):
             raise ValueError('mapping reference differs from build')
+        references = tables.get('reference_sha256s', [])
+        odb_record = odb_identity(odb)
+        if len(references) == 1 and all(reference_for(tables, name) for name in names):
+            odb_record['reference_sha256'] = references[0]
+        pin = Path(manifest['root']) / run_layout(manifest['analysis'])[1] / 'odb_reference_pin.json'
+        if pin.is_file():
+            from odb_settings import pin_reference
+            pinned = pin_reference(pin, tables['version'], tables['node'])
+            if pinned.get('reference_sha256') and pinned['reference_sha256'] not in references:
+                raise ValueError('completed mapping differs from pinned OrthoDB reference')
         sample_map = {r['species']:r for r in samples}
         input_files = json.loads((path / 'input_receipt.json').read_text())['files']
         inventory = {entry['path']:entry for entry in input_files}
         products = {}
+        from sample_processing import native_processing
         for item in manifest['items']:
             species = item['species']; run = item['row']['run']
             product = item_products(manifest, item)
@@ -59,6 +72,7 @@ def complete(path):
                 raise ValueError(f'build translation differs from reference: {species}')
             if sample_map[species]['run'] != run: raise ValueError(f'mapping run differs: {species}')
             products[species] = {'row':item['row'], 'reference_id':product['reference']['reference_id'],
+                'processing': native_processing(product, manifest),
                 'odb_species':odb_species, 'counts':product['busco']['counts'],
                 'conditions':{stage:product[key].get('provenance', {}).get('condition')
                               for stage,key in [('assembly','reference'),('busco','busco'),('quant','quant')]},
@@ -80,7 +94,8 @@ def complete(path):
                 qc.get('mapping_table', {}).get('sha256') != expected_table['sha256'] or
                 qc.get('expression', {}).get('sha256') != expression_entry['sha256']):
                 raise ValueError(f'build expression differs from inputs: {species}')
-            products[species].update(expression=expression_entry, expression_qc=record(qc_path))
+            products[species].update(expression=expression_entry, expression_qc=record(qc_path),
+                                     phenoradar_prep_version=qc.get('phenoradar_prep_version', 'unknown'))
         files = [*input_files, record(mapping), record(results / 'metadata/samples.tsv')]
         files.extend(relative_file(mapping.parent, e['table']) for e in tables['tables'].values())
         files.extend(manifest['auxiliary'].values())
@@ -94,7 +109,7 @@ def complete(path):
                 'metadata_history':manifest.get('metadata_history'),
                 'input':str(inputs), 'fields':manifest['fields'],
                 'translation':manifest['analysis']['translation'], 'lineage':manifest['analysis']['phylogeny']['lineage'],
-                'odb':{'version':'v12','node':manifest['analysis']['odb']['ncbi_tax_id']},
+                'odb':odb_record,
                 'mapping':record(mapping), 'products':products, 'files':files,
                 'excluded_runs':manifest.get('excluded', []), 'tpm':{'multimap':'error'}}
         completed = publish_pointer(path, publish_products(path, data))

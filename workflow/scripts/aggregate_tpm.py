@@ -24,6 +24,7 @@ def selected_sample(samples, run):
 
 
 def _aggregate(samples, run, mapping, output, qc):
+    from sample_processing import software_version
     sample = selected_sample(samples, run)
     values = {}
     with text_open(sample["abundance"]) as handle:
@@ -66,6 +67,7 @@ def _aggregate(samples, run, mapping, output, qc):
               for group, value in sorted(summed.items())]
     write_tsv(output, ["species", "run", "orthogroup", "tpm_sum", "tpm"], result)
     write_json(qc, {"created_at": now(), "species": sample["species"], "run": run, "multimap": "error",
+                    'phenoradar_prep_version': software_version(Path(__file__).resolve().parents[2]),
                     "targets": len(values), "protein_genes": protein_genes, "quantified_proteins": quantified_proteins,
                     "mapped_targets": len(mapping), "ambiguous_targets": len(ambiguous), "retained_targets": len(included),
                     "total_tpm": total, "mapped_tpm": matched_tpm, "mapped_tpm_fraction": matched_tpm / total,

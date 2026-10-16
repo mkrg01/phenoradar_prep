@@ -28,6 +28,8 @@ else
 fi
 "$command" SETUP
 [[ $("$command" CONFIG project) == "$project" ]]
+api_version=$("$command" CONFIG apiver)
+[[ "$api_version" == "$version" || "$api_version" == "$version".* ]]
 config="$project/orthologer_conf.sh"
 set_scalar() {
     grep -q "^${1}=" "$config"

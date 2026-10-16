@@ -9,12 +9,14 @@ from pathlib import Path
 
 from common import atomic_writer, file_record, now, write_json
 from odb_environment import command_path, odb_environment, software_records
+from odb_settings import validate as validate_odb
 
 
-def prepare(reference_dir, command="ODB-mapper_v12", prefix="", version="v12", node=3193):
+def prepare(reference_dir, command="ODB-mapper", prefix="", version="v12", node=3193):
     root = Path(reference_dir).resolve()
-    if version != "v12" or node < 1:
-        raise ValueError("this workflow supports ODB v12 with a positive node ID")
+    validate_odb({'version': version})
+    if type(node) is not int or node < 1:
+        raise ValueError("OrthoDB requires a positive node ID")
     if not re.fullmatch(r"[A-Za-z0-9_./+-]+", str(root)):
         raise ValueError(f"ODB path contains unsupported characters: {root}")
     root.mkdir(parents=True, exist_ok=True)
@@ -37,8 +39,11 @@ def prepare(reference_dir, command="ODB-mapper_v12", prefix="", version="v12", n
             raise ValueError("incomplete reference has different settings; use a new reference directory")
         write_json(setup, settings)
         env["ODBMAPPER_WORK"] = str(root / "odbmapper")
-        for args in [["SETUP"], ["DOWNLOAD", str(node)]]:
-            subprocess.run([command, *args], env=env, check=True)
+        subprocess.run([command, 'SETUP'], env=env, check=True)
+        api = subprocess.check_output([command, "CONFIG", "apiver"], env=env, text=True).strip()
+        if not re.fullmatch(re.escape(version) + r'(?:\.\d+)*', api):
+            raise ValueError(f'ODB-mapper selected {api!r}, requested {version}; install a mapper supporting this release')
+        subprocess.run([command, 'DOWNLOAD', str(node)], env=env, check=True)
         data = root / "odbmapper" / version / "data"
         files = sorted(p for p in data.rglob("*") if p.is_file())
         if sum(p.stat().st_size for p in files) < 1024**2:
@@ -46,7 +51,6 @@ def prepare(reference_dir, command="ODB-mapper_v12", prefix="", version="v12", n
         for name, args in [("dbinfo.txt", ["DBINFO"]), ("config.txt", ["CONFIG"])]:
             with atomic_writer(root / name) as handle:
                 subprocess.run([command, *args], env=env, stdout=handle, check=True)
-        api = subprocess.check_output([command, "CONFIG", "apiver"], env=env, text=True).strip()
         print(f"Recording SHA256 checksums for {len(files)} reference files", flush=True)
         inventory = [{"relative_path": str(p.relative_to(data)), **file_record(p)} for p in files]
         write_json(root / "files.json", inventory)
@@ -58,7 +62,7 @@ def prepare(reference_dir, command="ODB-mapper_v12", prefix="", version="v12", n
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference-dir", required=True)
-    parser.add_argument("--command", default="ODB-mapper_v12")
+    parser.add_argument("--command", default="ODB-mapper")
     parser.add_argument("--prefix", default="")
     parser.add_argument("--version", default="v12")
     parser.add_argument("--node", type=int, default=3193)

@@ -65,6 +65,9 @@ def print_plan(rows, directory=None):
     print(f'  Reuse{" candidates" if unverified else ""}: {counts["reuse"]}')
     print(f'  Process: {processing} (new: {counts["new"]}; partial reuse: {counts["partial"]}; rebuild: {counts["rebuild"]})')
     print(f'  Needs attention: {counts["blocked"]}')
+    mapping = Counter(row.get('mapping') for row in rows if row['action'] not in {'excluded', 'blocked'})
+    reuse_mapping = mapping['reuse'] + mapping['planned_reuse']
+    print(f'  OrthoDB mapping: {reuse_mapping} reuse; {sum(mapping.values()) - reuse_mapping} pending')
     if unverified:
         print('Product checksums are pending verification on Slurm.')
     if directory is not None:

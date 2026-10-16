@@ -13,6 +13,7 @@ translation_cache: resources/dataset_assets/.proteins
 translation:
   table: 1
 odb:
+  version: v12
   incremental: false
   cache_dir: resources/odb_cache
   chunk_size: 50  # Maximum samples per ODB mapping chunk.

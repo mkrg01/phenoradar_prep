@@ -16,9 +16,8 @@ To refresh, archive `resources/taxonomy/` and prepare a new build or analysis.
 
 ### Choosing an OrthoDB mapping clade
 
-Set `odb.ncbi_tax_id` in `build.yaml` to an OrthoDB v12 mapping level containing
-all build species. Narrower clades define finer OGs. This choice is independent
-of `busco.lineage`.
+Set `odb.ncbi_tax_id` to a mapping level containing all build species in the
+selected release. Narrower clades define finer OGs. BUSCO lineage is independent.
 
 | NCBI Taxonomy ID | Clade |
 | --- | --- |
@@ -28,13 +27,16 @@ of `busco.lineage`.
 | `38820` | Poales |
 | `71240` | Eudicots |
 
-Check the [OrthoDB tree](https://data.orthodb.org/v12/tree) for supported nodes.
-Changing the clade requires a new build and new mappings.
+Check the [OrthoDB v12 tree](https://data.orthodb.org/v12/tree), or the tree for
+your selected release. A clade change requires a new build and new mappings.
 
 ### Preparing and verifying the reference
 
-Build prepares `resources/orthodb/v12_<ncbi_tax_id>/` automatically. For advance
-setup, use a prepared build's config:
+Builds prepare references under `resources/orthodb/{version}_{ncbi_tax_id}/`.
+An existing reference is kept unchanged and reused for that release and clade.
+
+For advance setup and checksum verification, use a saved build's config and
+its reference path:
 
 ```bash
 sbatch --cpus-per-task=1 --mem=40G run_pipeline.sh --configfile results/leaf/pipeline.yaml -- references
@@ -42,9 +44,15 @@ python workflow/scripts/verify_odb_reference.py \
   --reference resources/orthodb/v12_3193/reference.json
 ```
 
-Mapping also needs network access. To refresh, archive the clade's snapshot and
-prepare a new build. Reuse only databases with compatible references; see
-[database reuse](datasets.md#reusing-completed-databases).
+Mapping requires network access and an ODB-mapper supporting the selected
+release; fallback to another release is rejected.
+
+New mapping jobs and retries share a pinned reference checksum. Reference
+checksums are recorded internally; missing historical records remain unknown.
+
+To change releases, edit `odb.version` and
+[create a new build](datasets.md#update-orthodb-for-all-samples). Matching results
+are reused; other samples are remapped automatically.
 
 ## KOfam and KEGG reference
 

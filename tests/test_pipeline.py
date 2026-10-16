@@ -214,7 +214,8 @@ def test_merge_rejects_queries_outside_chunk(tmp_path, query):
         root.mkdir(parents=True)
         annotated = root / f"{label}.og.annotations"
         annotated.write_text(f"#query\tODB_OG\n{value}\tOG1\n")
-        write_json(root / "provenance.json", {"results": [file_record(annotated)], "identity":{"reference":{"sha256":"0"*64}}})
+        write_json(root / "provenance.json", {"results": [file_record(annotated)],
+                   "identity":{"version":"v12", "node":3193, "reference":{"sha256":"0"*64}}})
     with pytest.raises(ValueError, match="does not belong"):
         collect_odb(samples, manifests / "chunks.json", chunks, proteins,
                   tmp_path / "mapping", tmp_path / "cache")

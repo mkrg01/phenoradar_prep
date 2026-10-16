@@ -1,4 +1,4 @@
-"""Reuse verified sample stages without requiring a completed database."""
+"""Reuse completed samples across software updates; resume partial work only unchanged."""
 import copy
 from pathlib import Path
 
@@ -29,6 +29,17 @@ def merge(selected, name, entry):
     if previous is None:
         selected[name] = entry
         return
+    old_complete = previous.get('kind') != 'stages' or all(previous['products'][key] for key in STAGES.values())
+    new_complete = entry.get('kind') != 'stages' or all(entry['products'][key] for key in STAGES.values())
+    old_processing = (previous.get('processing') if previous.get('kind') == 'stages'
+                      else previous['product'].get('processing'))
+    new_processing = (entry.get('processing') if entry.get('kind') == 'stages'
+                      else entry['product'].get('processing'))
+    same_producer = old_processing is not None and old_processing == new_processing
+    if old_complete != new_complete and not same_producer:
+        if new_complete:
+            selected[name] = entry
+        return
     old, new = fingerprints(previous), fingerprints(entry)
     if any(old[key] != new[key] for key in old.keys() & new.keys()):
         raise ValueError(f'conflicting reuse_from stages for {name}; choose a specific source or reuse_from: null')
@@ -36,13 +47,18 @@ def merge(selected, name, entry):
         if entry.get('kind') != 'stages':
             selected[name] = entry
         else:
+            # An older complete sample must replace a newer partial sample as
+            # a unit; never manufacture one sample from different releases.
+            if old_complete:
+                return
             for key in ('busco', 'quant'):
                 if previous['products'][key] is None:
                     previous['products'][key] = entry['products'][key]
 
 
 def select(paths, items, cfg, selected, errors, sources, verify_files=True, rebuilds=None):
-    from dataset import load
+    from dataset import load, check_conditions
+    from sample_processing import scientific_conditions, native_processing
     wanted = {item['species']: item for item in items}
     for path in paths:
         source = record(path)
@@ -57,7 +73,7 @@ def select(paths, items, cfg, selected, errors, sources, verify_files=True, rebu
             # conflicting matching products are reported rather than reused.
             if any(old['row'].get(k, '') != item['row'].get(k, '') for k in IDENTITY_FIELDS):
                 continue
-            if build['config'].get('conditions', {}).get('assembly') != cfg['conditions']['assembly']:
+            if scientific_conditions(build['config']) != scientific_conditions(cfg):
                 continue
             try:
                 products = resolve(build['config']['store'], old,
@@ -65,20 +81,22 @@ def select(paths, items, cfg, selected, errors, sources, verify_files=True, rebu
                                    verify_files=verify_files)
                 if products['reference'] is None:
                     continue
+                check_conditions(products, build['config'].get('conditions'))
+                complete = all(products[key] for key in STAGES.values())
+                if not complete and build['config'].get('conditions') != cfg['conditions']:
+                    continue
                 requested = item['row'].get('reference_id')
                 if requested and requested != products['reference']['reference_id']:
                     raise ValueError(f'reuse_from reference_id differs: {name}')
-                for stage, key in STAGES.items():
-                    product = products[key]
-                    if product and product.get('provenance', {}).get('condition') != cfg['conditions'][stage]:
-                        products[key] = None
-                if products['reference'] is None:
+                processing = native_processing(products, build)
+                if processing and processing.get('compatibility') != scientific_conditions(cfg):
                     continue
                 for product in products.values():
                     if product:
                         product.setdefault('provenance', {})['reused_from'] = source
                 merge(selected, name, {'kind': 'stages', 'products': products,
                                        'row': old['row'], 'source': source,
+                                       'processing': processing,
                                        'software_lock': build.get('software_lock')})
             except ProductIntegrityError as error:
                 if rebuilds is None or item['row'].get('reference_id'):
@@ -92,7 +110,7 @@ def select(paths, items, cfg, selected, errors, sources, verify_files=True, rebu
         verify(source)
 
 
-def stage(staging, target, name, chosen):
+def stage(staging, target, name, chosen, cfg):
     """Copy receipts and hardlink verified outputs into this build's own cache."""
     products = chosen['products']
     reference = products['reference']
@@ -113,6 +131,10 @@ def stage(staging, target, name, chosen):
             continue
         receipt = copy.deepcopy(product)
         receipt.setdefault('provenance', {}).setdefault('reused_from', chosen['source'])
+        if chosen.get('processing'):
+            receipt['provenance']['processing'] = copy.deepcopy(chosen['processing'])
+        receipt['provenance']['accepted_condition'] = cfg['conditions'][
+            next(stage for stage, field in STAGES.items() if field == key)]
         if key == 'reference':
             receipt['cds'] = saved(receipt['cds'], 'cds.fa.gz')
         elif key == 'busco':

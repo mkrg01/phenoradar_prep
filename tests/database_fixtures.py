@@ -11,7 +11,7 @@ from portable_build import publish_products
 from translate_cds import fasta_ids
 
 
-def database_from_stages(root, store, items, name='source'):
+def database_from_stages(root, store, items, name='source', reference_sha256=None, version='v12', node=3193):
     build = Path(root) / 'resources' / name
     build.mkdir(parents=True, exist_ok=True)
     products = {}
@@ -36,11 +36,14 @@ def database_from_stages(root, store, items, name='source'):
             'raw_inputs': quant.get('provenance', {}).get('raw_inputs', {}),
             'cds': ref['cds'], 'busco': busco['full'], 'abundance': quant['abundance'],
             'protein': record(protein), 'translation': record(translation)}
+        from sample_processing import native_processing
+        products[species]['processing'] = native_processing(stages)
     mapping = make_mapping(build / 'mapping/snapshot.json', genes, pairs)
     snapshot = load_tables(mapping)
-    entries = {s: dict(e, protein_sha256=products[s]['protein']['sha256'],
+    entries = {s: dict(e, protein_sha256=products[s]['protein']['sha256'], reference_sha256=reference_sha256,
                         table=relative_file(mapping.parent, e['table'])) for s,e in snapshot['tables'].items()}
-    mapping = write_tables(build / 'bound_mapping', entries)
+    mapping = write_tables(build / 'bound_mapping', entries,
+                           version=version, node=node, references=[reference_sha256] if reference_sha256 else [])
     # Materialize the stage products using the production publication layout.
     input_root = build / 'input'
     from dataset_assets import stage_file
@@ -71,9 +74,12 @@ def database_from_stages(root, store, items, name='source'):
         qc = expression.with_suffix('.qc.json')
         aggregate(samples, run, mapping, expression, qc)
         product.update(expression=record(expression), expression_qc=record(qc))
+        product['phenoradar_prep_version'] = json.loads(qc.read_text()).get('phenoradar_prep_version', 'unknown')
     data = {'schema_version': 5, 'kind': 'completed_build', 'build_id': name, 'created_at': 'fixture',
             'input': str(input_root), 'fields': list(rows[0]), 'translation': {'table': 1},
-            'lineage': 'embryophyta_odb12', 'odb': {'version': 'v12', 'node': 3193},
+            'lineage': 'embryophyta_odb12', 'odb': {'version': version, 'node': node},
             'mapping': record(mapping), 'products': products, 'files': files, 'excluded_runs': [],
             'tpm': {'multimap': 'error'}}
+    if reference_sha256:
+        data['odb']['reference_sha256'] = reference_sha256
     return publish_products(build, data).parent

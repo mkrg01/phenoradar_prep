@@ -7,11 +7,13 @@ from common import write_json, content_sha256
 from product_storage import stage_product
 from dataset_assets import (ProductIntegrityError, counts, product_file,
                             product_json, record, stage_file, stat_identity, verify, verify_many)
-from mapping_tables import load_tables, relative_file, write_tables
+from mapping_tables import load_tables, reference_for, relative_file, write_tables
 from portable_build import completion_path
 from verification_cache import active_cache
+from odb_settings import cache_namespace, matches as odb_matches
 
 PRODUCTS = ('cds', 'busco', 'abundance', 'protein', 'translation', 'expression', 'expression_qc')
+UPSTREAM = ('cds', 'busco', 'abundance', 'protein', 'translation')
 SAMPLE_FIELDS = ('scientific_name', 'taxid', 'species_id', 'analysis_sample_id', 'run',
                  'private_file', 'lib_layout', 'read1_path', 'read2_path')
 
@@ -46,12 +48,13 @@ def software_provenance(entry):
     path = verify(entry)
     before = stat_identity(path)
     cache = active_cache()
-    kind = 'build-software-v1'
+    kind = 'build-software-v2'
     indexed = cache.document(path, kind, before, entry['sha256']) if cache is not None else None
     if indexed is None:
         build = json.loads(path.read_text())
         gg = build.get('config', {}).get('genegalleon', {})
         indexed = {'pins': {k: gg.get(k) for k in ('image_uri', 'version', 'revision')},
+                   'config': build.get('config'),
                    'software_lock': build.get('software_lock')}
         if before != stat_identity(path):
             raise ValueError(f'file changed while reading build provenance: {path}')
@@ -92,8 +95,6 @@ def validate_conditions(item, product, database, cfg):
     name = item['species']
     if database['translation'] != cfg['translation'] or database['lineage'] != cfg['busco']['lineage']:
         raise ValueError(f'reuse_from genetic code or BUSCO lineage differs: {name}')
-    if database['odb'] != {'version': 'v12', 'node': cfg['odb']['ncbi_tax_id']}:
-        raise ValueError(f'reuse_from ODB version/node differs: {name}')
     for key in SAMPLE_FIELDS:
         old, new = product['row'].get(key, ''), item['row'].get(key, '')
         if old and new and old != new:
@@ -104,9 +105,16 @@ def validate_conditions(item, product, database, cfg):
     requested = item['row'].get('reference_id')
     if requested and requested != reference:
         raise ValueError(f'reuse_from reference_id differs: {name}')
-    for stage, condition in product.get('conditions', {}).items():
-        if condition and condition != cfg['conditions'].get(stage):
-            raise ValueError(f'{stage} settings differ from reuse_from product: {name}; use reuse_from: null for a fresh build')
+    from sample_processing import scientific_conditions
+    processing = product.get('processing') or {}
+    compatibility = processing.get('compatibility')
+    if compatibility is not None:
+        if compatibility != scientific_conditions(cfg):
+            raise ValueError(f'assembly settings differ from reuse_from product: {name}; use reuse_from: null for a fresh build')
+    else:
+        for stage, condition in product.get('conditions', {}).items():
+            if condition and condition != cfg['conditions'].get(stage):
+                raise ValueError(f'{stage} settings differ from reuse_from product: {name}; use reuse_from: null for a fresh build')
 
 
 def validate_product(item, product, database, tables, cfg, verify_files=True, mapping_root=None,
@@ -114,17 +122,20 @@ def validate_product(item, product, database, tables, cfg, verify_files=True, ma
     validate_conditions(item, product, database, cfg)
     name, reference = item['species'], product['cds']['sha256']
     if check_files:
-        for key in PRODUCTS:
+        for key in (PRODUCTS if tables is not None else UPSTREAM):
             product_file(product[key], verify_files)
     counts(product['counts'])
     translation = indexed_product_json(product['translation'], json_documents)
-    mapping = tables['tables'][name]
     if (translation['cds']['sha256'] != reference or
             translation['protein']['sha256'] != product['protein']['sha256'] or
             translation['translation_table'] != cfg['translation']['table'] or
-            mapping['protein_sha256'] != content_sha256(product['protein']) or
-            mapping['odb_species'] != item['odb_species'] or
             product['odb_species'] != item['odb_species']):
+        raise ValueError(f'reuse_from translation identity differs: {name}')
+    if tables is None:
+        return None, translation
+    mapping = tables['tables'][name]
+    if (mapping['protein_sha256'] != content_sha256(product['protein']) or
+            mapping['odb_species'] != item['odb_species']):
         raise ValueError(f'reuse_from translation/mapping identity differs: {name}')
     root = mapping_root if mapping_root is not None else Path(database['mapping']['path']).parent.resolve()
     table = relative_file(root, mapping['table'], resolved_root=root)
@@ -137,7 +148,19 @@ def validate_product(item, product, database, tables, cfg, verify_files=True, ma
             qc.get('mapping_table', {}).get('sha256') != table['sha256'] or
             qc.get('expression', {}).get('sha256') != product['expression']['sha256']):
         raise ValueError(f'reuse_from expression identity differs: {name}')
-    return dict(mapping, table=table), translation
+    return dict(mapping, table=table, reference_sha256=reference_for(tables, name)), translation
+
+
+def compatible_identity(first, second):
+    """Compare shared upstream products before preferring an up-to-date mapping."""
+    if any(first[key] != second[key] for key in ('counts', 'conditions')):
+        return False
+    if any(first['files'][key] != second['files'][key] for key in ('cds', 'busco', 'abundance', 'protein')):
+        return False
+    if first['mapping'] is not None and second['mapping'] is not None:
+        if first['mapping'] != second['mapping'] or first['files']['expression'] != second['files']['expression']:
+            return False
+    return True
 
 
 def select(paths, items, cfg, verify_files=True, rebuilds=None):
@@ -148,11 +171,23 @@ def select(paths, items, cfg, verify_files=True, rebuilds=None):
     wanted = {item['species']: item for item in items}
     selected, errors, sources = {}, {}, []
     stage_paths = [path for path in paths if Path(path).name == 'build.json']
+    database_sources = {path: record(path) for path in paths if path not in stage_paths}
+    databases = {path: load_complete(path, verify_files=False) for path in database_sources}
+    relevant = {path: data for path, data in databases.items() if wanted.keys() & data['products'].keys()}
+    snapshots = {path: load_tables(verify(data['mapping']), verify_files=False)
+                 for path, data in relevant.items() if odb_matches(data['odb'], cfg['odb'])}
+    if snapshots:
+        if any((table['version'], table['node']) != (cfg['odb'].get('version', 'v12'), cfg['odb']['ncbi_tax_id'])
+               for table in snapshots.values()):
+            raise ValueError('reuse_from mapping version/node differs from database manifest')
+        if any(data['odb'].get('reference_sha256') and snapshots[path].get('reference_sha256s') !=
+               [data['odb']['reference_sha256']] for path, data in relevant.items() if path in snapshots):
+            raise ValueError('reuse_from reference checksum differs from database manifest')
     for path in paths:
         if path in stage_paths:
             continue
-        source = record(path)
-        data = load_complete(path, verify_files=False)
+        source = database_sources[path]
+        data = databases[path]
         verify(source)
         sources.append(source)
         cache = active_cache()
@@ -162,26 +197,29 @@ def select(paths, items, cfg, verify_files=True, rebuilds=None):
         names = sorted(wanted.keys() & data['products'].keys())
         if not names:
             continue
-        software_lock = None
+        software_lock, source_config = None, None
         provenance = Path(data['bundle_root']) / 'provenance/build.json'
         inventory = {entry['path']: entry for entry in data['files']}
         if str(provenance) in inventory:
             build = software_provenance(inventory[str(provenance)])
+            source_config = build.get('config')
             if all(value == cfg['genegalleon'].get(k) for k, value in build['pins'].items()):
                 software_lock = build['software_lock']
-        tables = load_tables(verify(data['mapping']), verify_files=False)
+        tables = snapshots.get(path)
+        remap = tables is None
         mapping_root = Path(data['mapping']['path']).parent.resolve()
-        if (tables['version'], tables['node']) != ('v12', cfg['odb']['ncbi_tax_id']):
-            raise ValueError(f'reuse_from mapping version/node differs: {path}')
         candidates = []
         for name in names:
             if name in errors:
                 continue
             try:
-                product = data['products'][name]
+                from sample_processing import completed_processing
+                product = dict(data['products'][name])
+                product['processing'] = completed_processing(product, source_config)
                 validate_conditions(wanted[name], product, data, cfg)
-                mapping = tables['tables'][name]
-                mapping = dict(mapping, table=relative_file(mapping_root, mapping['table'], resolved_root=mapping_root))
+                mapping = tables['tables'][name] if tables is not None else None
+                if mapping is not None:
+                    mapping = dict(mapping, table=relative_file(mapping_root, mapping['table'], resolved_root=mapping_root))
                 candidates.append((name, product, mapping))
             except ProductIntegrityError as error:
                 if rebuilds is None or wanted[name]['row'].get('reference_id'):
@@ -195,7 +233,8 @@ def select(paths, items, cfg, verify_files=True, rebuilds=None):
         failures = {}
         if verify_files:
             entries = [(name, entry) for name, product, mapping in candidates
-                       for entry in [*(product[key] for key in PRODUCTS), mapping['table']]]
+                       for entry in [*(product[key] for key in (UPSTREAM if remap else PRODUCTS)),
+                                     *([mapping['table']] if mapping is not None else [])]]
             for (name, _), error in zip(entries, verify_many(entry for _, entry in entries)):
                 if error is not None:
                     failures.setdefault(name, error)
@@ -206,16 +245,20 @@ def select(paths, items, cfg, verify_files=True, rebuilds=None):
                 mapping, translation = validate_product(wanted[name], product, data, tables, cfg, False,
                                                         mapping_root=mapping_root, json_documents=json_documents,
                                                         check_files=False)
-                identity = {'files': {k: content_sha256(product[k]) for k in ('cds', 'busco', 'abundance', 'protein', 'expression')},
-                            'mapping': mapping['table']['sha256'], 'counts': product['counts'],
+                identity = {'files': {k: content_sha256(product[k]) for k in
+                                     (('cds', 'busco', 'abundance', 'protein') if remap else
+                                      ('cds', 'busco', 'abundance', 'protein', 'expression'))},
+                            'mapping': mapping['table']['sha256'] if mapping else None, 'counts': product['counts'],
                             'conditions': {stage: product.get('conditions', {}).get(stage) for stage in ('assembly', 'busco', 'quant')},
-                            'reference': sorted(tables.get('reference_sha256s', []))}
+                            'reference': [mapping['reference_sha256']] if mapping and mapping['reference_sha256'] else []}
                 previous = selected.get(name)
-                if previous and previous['identity'] != identity:
+                if previous and not compatible_identity(previous['identity'], identity):
                     raise ValueError(f'conflicting reuse_from databases for {name}: {previous["source"]["path"]} and {path}')
-                if not previous:
+                if (not previous or (mapping is not None and previous.get('reuse_mapping') is False)
+                        or (mapping is not None and not previous['identity']['reference'] and identity['reference'])):
                     selected[name] = {'product': product, 'mapping': mapping, 'translation': translation,
-                                      'identity': identity, 'source': source, 'software_lock': software_lock}
+                                      'identity': identity, 'source': source, 'software_lock': software_lock,
+                                      'reuse_mapping': not remap}
             except ProductIntegrityError as error:
                 if rebuilds is None or wanted[name]['row'].get('reference_id'):
                     errors[name] = str(error)
@@ -227,9 +270,6 @@ def select(paths, items, cfg, verify_files=True, rebuilds=None):
                 selected.pop(name, None)
         if cache and json_documents != (indexed or {}):
             cache.remember_document(path, json_index_kind, source['stat'], source['sha256'], json_documents)
-    references = {r for entry in selected.values() for r in entry['identity']['reference']}
-    if len(references) > 1:
-        raise ValueError('reuse_from databases use different ODB reference snapshots')
     from build_stage_reuse import select as select_stages
     select_stages(stage_paths, items, cfg, selected, errors, sources,
                   verify_files=verify_files, rebuilds=rebuilds)
@@ -259,7 +299,7 @@ def stage(staging, target, selected, cfg, progress=None):
         files[name] = []
         if chosen.get('kind') == 'stages':
             from build_stage_reuse import stage as stage_products
-            files[name] = stage_products(staging, target, name, chosen)
+            files[name] = stage_products(staging, target, name, chosen, cfg)
             if progress:
                 progress(index, len(selected))
             continue
@@ -273,6 +313,8 @@ def stage(staging, target, selected, cfg, progress=None):
         def provenance(stage):
             return {'source': 'database', 'database': chosen['source'],
                     'condition': product.get('conditions', {}).get(stage),
+                    'accepted_condition': cfg['conditions'][stage],
+                    'processing': copy.deepcopy(product.get('processing')),
                     'raw_inputs': product.get('raw_inputs', {})}
         write_json(base / prefix / 'reference.json', {'schema_version': 2, 'species': name,
                    'taxid': row['taxid'], 'species_id': row['species_id'], 'run': row['run'],
@@ -289,6 +331,13 @@ def stage(staging, target, selected, cfg, progress=None):
         write_json(base / protein_dir / 'receipt.json', {'schema_version': 1, 'cds_sha256': refid,
                    'translation_table': cfg['translation']['table'], 'seqkit': info['seqkit'],
                    'sequences': info['sequences'], 'protein': dict(protein, path='protein.fa.gz')})
+        if chosen.get('reuse_mapping') is False:
+            for relative in (prefix / 'reference.json', prefix / 'busco.json',
+                             prefix / 'quant' / (row['run'] + '.json'), protein_dir / 'receipt.json'):
+                files[name].append(dict(record(base / relative), path=str(final / relative)))
+            if progress:
+                progress(index, len(selected))
+            continue
         tables[name] = chosen['mapping']
         references.update(chosen['identity']['reference'])
         identity = cache_identity({'species': name, 'run': row['run']}, abundance, chosen['mapping']['table'])
@@ -297,7 +346,7 @@ def stage(staging, target, selected, cfg, progress=None):
         qc = copy.deepcopy(json.loads(verify(product['expression_qc']).read_text()))
         qc.update(abundance=abundance, expression=expression)
         qc['mapping_table'] = dict(chosen['mapping']['table'],
-            path=str(final / 'odb' / f'v12_{cfg["odb"]["ncbi_tax_id"]}' / 'reused/species' / (product['odb_species'] + '.tsv.gz')))
+            path=str(final / 'odb' / cache_namespace(cfg['odb']) / 'reused/species' / (product['odb_species'] + '.tsv.gz')))
         write_json(base / expression_dir / 'qc.json', qc)
         qc_entry = record(base / expression_dir / 'qc.json')
         write_json(base / expression_dir / 'receipt.json', {'identity': identity,
@@ -309,10 +358,10 @@ def stage(staging, target, selected, cfg, progress=None):
         if progress:
             progress(index, len(selected))
     if tables:
-        snapshot = write_tables(base / 'odb' / f'v12_{cfg["odb"]["ncbi_tax_id"]}' / 'reused', tables,
-                                node=cfg['odb']['ncbi_tax_id'], references=references)
+        snapshot = write_tables(base / 'odb' / cache_namespace(cfg['odb']) / 'reused', tables,
+                                version=cfg['odb'].get('version', 'v12'), node=cfg['odb']['ncbi_tax_id'], references=references)
         saved_tables = load_tables(snapshot, verify_files=False)
-        destination = final / 'odb' / f'v12_{cfg["odb"]["ncbi_tax_id"]}' / 'reused'
+        destination = final / 'odb' / cache_namespace(cfg['odb']) / 'reused'
         for name, table in saved_tables['tables'].items():
             files[name].append(relative_file(destination, table['table']))
     return files

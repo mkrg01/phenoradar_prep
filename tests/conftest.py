@@ -102,7 +102,8 @@ def fake_odb(tmp_path):
     command.write_text('''#!/usr/bin/env python3
 import json, os, sys, time
 from pathlib import Path
-root = Path(os.environ['ODBMAPPER_WORK']) / 'v12'
+version = os.environ.get('ODBAPI_URL_VERSION', 'v12')
+root = Path(os.environ['ODBMAPPER_WORK']) / version
 project = root / 'pipeline'
 action = sys.argv[1]
 if action == 'SETUP':
@@ -116,7 +117,7 @@ if action == 'SETUP':
 elif action == 'DOWNLOAD':
     (root / 'data/tiny.db').write_bytes(b'x' * 1024**2)
 elif action == 'CONFIG':
-    print(str(project) if len(sys.argv) > 2 and sys.argv[2] == 'project' else 'v12')
+    print(str(project) if len(sys.argv) > 2 and sys.argv[2] == 'project' else os.environ.get('FAKE_ODB_API_VERSION', version))
 elif action == 'MAP':
     label, manifest = sys.argv[2:4]
     if os.environ.get('FAKE_ODB_LOG'):

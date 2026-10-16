@@ -42,7 +42,8 @@ def settings(root, config, build=None):
     resolved = deep_merge(base, {k:v for k,v in cfg.items() if k not in {'build','inputs','slurm'}})
     resolved['translation'] = completed['translation']
     resolved['phylogeny']['lineage'] = completed['lineage']
-    resolved['odb'].update(ncbi_tax_id=completed['odb']['node'], incremental=False)
+    resolved['odb'].update(ncbi_tax_id=completed['odb']['node'], incremental=False,
+                           version=completed['odb']['version'])
     resolved['build_manifest'] = str(source)
     validate_keys(resolved); validate_analysis(resolved)
     threshold = resolved['selection']['busco_threshold']

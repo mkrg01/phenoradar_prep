@@ -207,8 +207,21 @@ def species_table(name, odb_name, protein, annotation, parts, cache_dir, version
         return dict(entry, table=relative_file(target, entry['table']))
 
 
+def reference_for(snapshot, name):
+    """Keep historical unknown references distinct from recorded checksums."""
+    entry = snapshot.get('tables', {}).get(name, {})
+    if 'reference_sha256' in entry:
+        return entry['reference_sha256']
+    references = set(snapshot.get('reference_sha256s', []))
+    if snapshot.get('reference_sha256'):
+        references.add(snapshot['reference_sha256'])
+    return next(iter(references)) if len(references) == 1 else None
+
+
 def write_tables(outdir, entries, version='v12', node=3193, qc=None, references=()):
     """Publish only selected species, by linking validated immutable tables."""
+    references = set(references)
+    fallback = next(iter(references)) if len(references) == 1 else None
     out = Path(outdir); out.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.tables-', dir=out) as tmp:
         staged = Path(tmp) / 'species'; staged.mkdir()
@@ -217,12 +230,14 @@ def write_tables(outdir, entries, version='v12', node=3193, qc=None, references=
             filename = entry['odb_species'] + '.tsv.gz'
             destination = staged / filename
             table = stage_file(entry['table'], destination)
-            saved[name] = dict(entry, table=dict(table, path=f'species/{filename}'))
+            saved[name] = dict(entry, table=dict(table, path=f'species/{filename}'),
+                               reference_sha256=entry.get('reference_sha256', fallback))
+        known = {entry['reference_sha256'] for entry in saved.values() if entry['reference_sha256']}
         if (out / 'species').exists(): shutil.rmtree(out / 'species')
         os.rename(staged, out / 'species')
         data = {'schema_version':2, 'kind':'odb_tables', 'version':version, 'node':node,
                 'proteins':[{'species':s,'odb_species':e['odb_species'],'sha256':e['protein_sha256']} for s,e in saved.items()],
-                'tables':saved, 'reference_sha256s':sorted(set(references)), 'qc':qc or {}}
+                'tables':saved, 'reference_sha256s':sorted(known), 'qc':qc or {}}
         write_json(out / 'snapshot.json', data)
     return out / 'snapshot.json'
 
@@ -253,7 +268,7 @@ def collect(samples, chunks, chunk_dir, protein_dir, outdir, cache_dir,
         members = [{'kind':'mapped', **c} for c in json.loads(Path(chunks).read_text())]
     if sorted(s for c in members for s in c['species']) != sorted(species):
         raise ValueError('chunk membership differs from selected species')
-    entries = {}; references = set(); excluded = 0
+    entries = {}; excluded = 0; mapped_references = set()
     for chunk in members:
         if chunk['kind'] == 'existing':
             root = Path(chunk['root']); snapshot, original = load_snapshot(root, version, node)
@@ -263,21 +278,24 @@ def collect(samples, chunks, chunk_dir, protein_dir, outdir, cache_dir,
             for name in chunk['species']:
                 if original[name]['odb_species'] != species[name] or original[name]['sha256'] != content_sha256(proteins[name]):
                     raise ValueError(f'protein differs from existing ODB input: {name}; remapping is required')
-            references.update(snapshot.get('reference_sha256s', []))
-            if snapshot.get('reference_sha256'): references.add(snapshot['reference_sha256'])
             if snapshot['schema_version'] == 2:
                 for name in chunk['species']:
                     entry = snapshot['tables'][name]
-                    entries[name] = dict(entry, table=relative_file(root, entry['table']))
+                    entries[name] = dict(entry, table=relative_file(root, entry['table']),
+                                         reference_sha256=reference_for(snapshot, name))
                 continue
             annotation = checked(dict(snapshot['annotations'], path=str(root/'annotations.tsv')), cache_dir)
+            reference = reference_for(snapshot, chunk['species'][0])
         else:
             root = Path(chunk_dir)/chunk['chunk']; provenance = json.loads((root/'provenance.json').read_text())
+            if (provenance['identity']['version'], provenance['identity']['node']) != (version, node):
+                raise ValueError('mapped chunk version/node differs from build')
             for result in provenance['results']: checked(dict(result,path=str(root/Path(result['path']).name)), cache_dir)
             annotation = next(r for r in provenance['results'] if r['path'].endswith('.og.annotations'))
             annotation = checked(dict(annotation,path=str(root/Path(annotation['path']).name)), cache_dir)
             original = {s:None for s in chunk['species']}
-            references.add(provenance['identity']['reference']['sha256'])
+            reference = provenance['identity']['reference']['sha256']
+            mapped_references.add(reference)
         parts = partition(annotation, original, cache_dir)
         partitions = json.loads((parts/'receipt.json').read_text())
         counts = partitions['counts']
@@ -286,10 +304,18 @@ def collect(samples, chunks, chunk_dir, protein_dir, outdir, cache_dir,
             pending = {pool.submit(species_table, name, species[name], proteins[name], annotation,
                                    parts, cache_dir, version, node, partitions['shards'].get(name)):name for name in chunk['species']}
             for index, future in enumerate(as_completed(pending), 1):
-                entries[pending[future]] = future.result()
+                entries[pending[future]] = dict(future.result(), reference_sha256=reference)
                 if index % 100 == 0 or index == len(pending):
                     print(f'Mapping tables: {index}/{len(pending)} species ready', flush=True)
     kinds = {c['kind'] for c in members}
+    references = {entry['reference_sha256'] for entry in entries.values() if entry['reference_sha256']}
+    if len(mapped_references) > 1:
+        raise ValueError('new mapping jobs use different OrthoDB references')
+    if source_plan and plan.get('reference_pin'):
+        from odb_settings import pin_reference
+        pinned = pin_reference(plan['reference_pin'], version, node, next(iter(mapped_references), None))
+        if mapped_references and mapped_references != {pinned['reference_sha256']}:
+            raise ValueError('mapping differs from the pinned OrthoDB build snapshot')
     qc = {'mode':'mixed' if len(kinds)>1 else 'existing' if kinds=={'existing'} else 'mapped',
           'reused_species':sum(len(c['species']) for c in members if c['kind']=='existing'),
           'mapped_species':sum(len(c['species']) for c in members if c['kind']=='mapped'),
