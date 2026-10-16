@@ -33,6 +33,8 @@ conda activate phenoradar_prep
 ./run_build.sh status --build results/{build_name}
 
 # After the build completes:
+./run_analysis.sh plan --build results/{build_name}
+# Review reports/analysis/plan/plan.tsv before submitting.
 ./run_analysis.sh submit --build results/{build_name} --name {analysis_name}
 ```
 

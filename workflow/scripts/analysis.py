@@ -258,6 +258,9 @@ def main():
     for name in ('plan','prepare'):
         p=sub.add_parser(name); p.add_argument('--root',default='.'); p.add_argument('--config',default='config/analysis.yaml'); p.add_argument('--build')
         if name=='prepare': p.add_argument('--name',required=True)
+        if name=='plan':
+            p.add_argument('--outdir',default='reports/analysis/plan',help='Directory for plan.tsv and excluded.tsv (default: reports/analysis/plan)')
+            p.add_argument('--json',action='store_true',help='Print the detailed selection as JSON instead of a summary')
     for name in ('status','cleanup','submit','run'):
         p=sub.add_parser(name); p.add_argument('--analysis',required=name != 'submit',help='Path to an already prepared downstream run')
         if name in {'submit','run'}: p.add_argument('--target',choices=TARGETS,default='all')
@@ -270,7 +273,13 @@ def main():
     args=parser.parse_args()
     if args.command in {'plan','prepare'}:
         root=Path(args.root).resolve(); config=absolute(root,args.config)
-        if args.command=='plan': print(json.dumps(settings(root,config,args.build)[-1],indent=2))
+        if args.command=='plan':
+            from analysis_reports import print_plan, write_plan
+            cfg, resolved, _, _, _, report = settings(root,config,args.build)
+            directory = absolute(root,args.outdir)
+            write_plan(report,directory)
+            if args.json: print(json.dumps(report,indent=2))
+            else: print_plan(report,resolved,absolute(root,args.build or cfg['build']),config,directory)
         else: print(prepare(root,args.name,config,args.build))
     elif args.command=='status': print(json.dumps(status(args.analysis),indent=2))
     elif args.command=='cleanup':

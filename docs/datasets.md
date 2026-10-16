@@ -33,8 +33,8 @@ scores for every sample; filtering belongs to the analysis.
 
 ## Plans and progress
 
-`plan` shows sample and mapping reuse and saves `reports/plan/plan.tsv`. It checks
-compatibility and checksums, reusing checks only for unchanged files.
+Build `plan` shows sample and mapping reuse and saves `reports/plan/plan.tsv`.
+It checks compatibility and checksums, reusing checks only for unchanged files.
 `status` shows progress and log paths for failed jobs;
 `status --verify` also checks product integrity.
 
@@ -58,6 +58,13 @@ Replace `{analysis_name}` with a name for your analysis.
 ./run_analysis.sh submit --build results/{build_name} --name {analysis_name}
 ./run_analysis.sh status --analysis results/{build_name}/downstream/{analysis_name}
 ```
+
+Analysis `plan` verifies database products and prints a summary. It saves
+`plan.tsv` (all samples) and `excluded.tsv` in `reports/analysis/plan/`.
+Use `--outdir DIR` to change the directory, relative to the repository root.
+Reports are overwritten on each run; `--json` prints detailed JSON instead of
+the summary while still saving TSVs. Selected counts precede tree-specific
+trait filtering and representative selection.
 
 Analyses inherit the database's BUSCO lineage, genetic code, and OrthoDB reference.
 The default target `all` runs enabled analyses and collects
