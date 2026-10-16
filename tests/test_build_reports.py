@@ -2,6 +2,7 @@
 import fcntl
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from build_reports import progress, read_context
 from common import file_record, read_tsv, write_json, write_tsv
 from database_reuse import PRODUCTS
 from test_database_reuse import configure
-from test_datasets import dataset_project, fake_genegalleon, imported
+from test_datasets import dataset_project, fake_genegalleon, imported, new_dataset
 from test_submit_cli import invoke, scheduler
 from test_portable_build import completed_project, execute
 
@@ -344,6 +345,81 @@ def test_status_identifies_scheduler_failure_without_completion(reuse_project, m
     assert report['verification']['state'] == 'failed'
     assert {row['state'] for row in report['samples']} == {'blocked'}
     assert 'OUT_OF_MEMORY' in report['samples'][0]['reason']
+    assert report['verification']['log'] == ''
+    assert all(row['log'] == '' for row in report['samples'])
+
+
+def test_status_reports_each_samples_latest_array_log_files(dataset_project, scheduler, monkeypatch, capsys):
+    build = new_dataset(dataset_project, ('Alpha new', 'Beta new', 'Gamma new'))
+    monkeypatch.setattr('phase_config.resolve_array_size', lambda: 2)
+    dataset.submit(build, until='quant')
+    items = dataset.load(build)['items']
+    pilot = dataset_project / 'retry.txt'
+    pilot.write_text(items[1]['species'] + '\n')
+    dataset.submit(build, until='quant', species=pilot)
+    # Only Beta was retried. Gamma retains task 1 of the second array batch.
+    expected = [('0001_sample_1001_1', '1001_1'),
+                ('0002_sample_1003_2', '1003_2'),
+                ('0001_sample_3_4_1002_1', '1002_1')]
+    for item, (_, identifier), stage in zip(items, expected, ('assembly', 'busco', 'quant')):
+        write_json(build / 'jobs/status' / f'{item["species"]}.sample.json',
+                   {'state': 'failed', 'stage': stage, 'error': 'native command failed',
+                    'slurm_id': identifier})
+    monkeypatch.setattr('genegalleon_run.scheduler_states', lambda jobs: {})
+    monkeypatch.setattr(subprocess, 'run', lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout=''))
+    capsys.readouterr()
+    output_dir = dataset_project / 'progress-report'
+    assert invoke(monkeypatch, dataset, 'status', '--build', build, '--outdir', output_dir) == 1
+    output = capsys.readouterr().out
+    exported = read_tsv(output_dir / 'failed.tsv')
+    assert len(exported) == 3
+    for row, (stem, identifier) in zip(exported, expected):
+        stderr = str(build / 'jobs/logs' / f'{stem}.err')
+        stdout = str(build / 'jobs/logs' / f'{stem}.out')
+        assert row['job_id'] == identifier
+        assert row['log'] == row['stderr'] == stderr
+        assert row['stdout'] == stdout
+        assert f'    Stderr: {stderr}\n    Stdout: {stdout}\n' in output
+        assert not Path(stderr).exists()  # Reporting never depends on log creation/content.
+    assert '    Logs: ' not in output
+    assert invoke(monkeypatch, dataset, 'status', '--build', build, '--json') == 1
+    report = json.loads(capsys.readouterr().out)
+    assert [row['stderr'] for row in report['samples']] == [row['stderr'] for row in exported]
+    assert [row['stdout'] for row in report['samples']] == [row['stdout'] for row in exported]
+
+
+@pytest.mark.parametrize('controller,stem', [('verification', '0001_verify_1001'),
+                                             ('database', '0001_mapping_1001_4294967294')])
+def test_status_reports_cancelled_controller_log_files(reuse_project, scheduler, monkeypatch, capsys,
+                                                     controller, stem):
+    root, _ = reuse_project
+    build = dataset.prepare(root, 'cancelled', root / 'config/build.yaml', defer=controller == 'verification')
+    dataset.submit(build, defer=controller == 'verification')
+    monkeypatch.setattr('genegalleon_run.scheduler_states', lambda jobs: {'1001': {'state': 'CANCELLED'}})
+    capsys.readouterr()
+    assert invoke(monkeypatch, dataset, 'status', '--build', build) == 1
+    output = capsys.readouterr().out
+    stderr = str(build / 'jobs/logs' / f'{stem}.err')
+    stdout = str(build / 'jobs/logs' / f'{stem}.out')
+    assert f'  {controller}: Slurm CANCELLED; completion was not recorded\n' in output
+    assert f'    Stderr: {stderr}\n    Stdout: {stdout}\n' in output
+    report = progress(build, read_context(build))
+    assert report[controller]['stderr'] == stderr
+    assert report[controller]['stdout'] == stdout
+    if controller == 'verification':
+        assert {row['state'] for row in report['samples']} == {'blocked'}
+        assert all(row['log'] == row['stderr'] == stderr for row in report['samples'])
+
+
+def test_status_explains_when_submission_log_paths_are_unavailable(reuse_project, monkeypatch, capsys):
+    from build_reports import print_progress
+    root, _ = reuse_project
+    build = dataset.prepare(root, 'no-submission', root / 'config/build.yaml', defer=True)
+    write_json(build / 'jobs/verification.json', {'state': 'failed', 'error': 'preparation failed locally'})
+    print_progress(progress(build, read_context(build)))
+    output = capsys.readouterr().out
+    assert 'Logs: unavailable (no recorded log file paths)' in output
+    assert str(build / 'jobs/logs') not in output
 
 
 def test_changed_shared_manifest_stops_dispatch(reuse_project, scheduler):

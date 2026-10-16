@@ -40,18 +40,17 @@ Monitor submitted work with `status`. The completed database is saved in
 ## Plans and progress
 
 `plan` checks reuse compatibility and product checksums. Cached checks apply
-only to unchanged files. Metadata updates, including new columns or values in
-previously empty columns, are detected automatically. Settings and exclusions
-are checked on every plan.
+only to unchanged files. Metadata, settings, and exclusions are checked each time.
 
-`status` shows recorded progress. Add `--verify` to check product integrity.
+`status` shows recorded progress and full `.err` and `.out` log paths for failed
+jobs. Add `--verify` to check product integrity.
 
-| Option | Command | Result |
+| Command | Option | Result |
 | --- | --- | --- |
-| `--outdir DIR` | `plan` | Write `plan.tsv` and `needs_attention.tsv` to `DIR` |
-| `--split` | `plan` | Also write `reuse.tsv`, `pending.tsv`, `conflicts.tsv`, and `excluded.tsv` |
-| `--outdir DIR` | `status` | Write `status.tsv` and `failed.tsv` to `DIR` |
-| `--json` | `status` | Print the detailed report as JSON |
+| `plan` | `--outdir DIR` | Save `plan.tsv` and `needs_attention.tsv` in `DIR` |
+| `plan` | `--split` | Also save `reuse.tsv`, `pending.tsv`, `conflicts.tsv`, and `excluded.tsv` |
+| `status` | `--outdir DIR` | Save `status.tsv` and `failed.tsv` in `DIR` |
+| `status` | `--json` | Print the detailed report as JSON |
 
 ## Run an analysis
 

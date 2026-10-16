@@ -9,7 +9,8 @@ from dataset_assets import digest
 
 STAGES = ('assembly', 'busco', 'quant')
 PLAN_FIELDS = ['species', 'run', 'action', *STAGES, 'mapping', 'verification', 'reason', 'reference_id']
-STATUS_FIELDS = ['species', 'run', 'state', 'action', 'verification', 'stage', 'reason', 'job_id', 'log']
+STATUS_FIELDS = ['species', 'run', 'state', 'action', 'verification', 'stage', 'reason', 'job_id', 'log',
+                 'stdout', 'stderr']
 
 
 def action(row):
@@ -116,6 +117,27 @@ def controller_state(data):
     return result
 
 
+def job_log_paths(path, submissions, identifier):
+    """Expand the saved sbatch output paths for this allocation or array task."""
+    identifier = str(identifier or '')
+    base, _, task = identifier.partition('_')
+    job = submissions.get(base, {})
+    options = dict(arg[2:].split('=', 1) for arg in job.get('command', [])
+                   if arg.startswith('--') and '=' in arg)
+    logs = {'stdout': '', 'stderr': ''}
+    for stream, option in (('stdout', 'output'), ('stderr', 'error')):
+        filename = options.get(option)
+        if filename:
+            # Non-array jobs expand Slurm's %a to NO_VAL (0xfffffffe).
+            filename = filename.replace('%A', base).replace('%a', task or '4294967294')
+            filename = filename.replace('%j', identifier)
+            target = Path(filename)
+            if not target.is_absolute():
+                target = Path(options.get('chdir', path)) / target
+            logs[stream] = str(target)
+    return dict(logs, log=logs['stderr'] or logs['stdout'])
+
+
 def progress(path, context):
     from sample_review import jobs
     path = Path(path).resolve()
@@ -125,12 +147,17 @@ def progress(path, context):
     evidence = jobs(path, build)
     verification_path = path / 'jobs/verification.json'
     verification = controller_state(json.loads(verification_path.read_text())) if verification_path.is_file() else {}
+    submissions = {}
     for receipt in sorted((path / 'jobs').glob('submission_*.json')):
         if receipt.name.endswith('.resources.json'):
             continue
         for job in json.loads(receipt.read_text()).get('jobs', []):
+            if job.get('job_id'):
+                submissions[str(job['job_id'])] = job
             if job['stage'] == 'verify' and job['state'] in {'submitting', 'unknown'}:
                 verification = {'state': 'unknown', 'error': f'Unresolved submission: {receipt}'}
+    if verification:
+        verification.update(job_log_paths(path, submissions, verification.get('job_id')))
     rows = []
     for planned in active:
         row = dict(planned)
@@ -167,21 +194,24 @@ def progress(path, context):
         if verification.get('state') == 'failed' and state in {'verifying', 'not_submitted'}:
             state = 'blocked'
         failure = primary.get('error') or (f'Slurm {scheduling}' if scheduling else '')
+        job_id = info.get('submitted_id') or primary.get('slurm_id') or primary.get('job_id') or ''
+        logs = (job_log_paths(path, submissions, verification.get('job_id')) if state == 'blocked' else
+                job_log_paths(path, submissions, job_id))
         row.update(state=state, stage=info.get('stopped_at') or '',
                    verification='verified' if state in {'complete', 'reused'} else row['verification'],
                    reason=(failure or verification.get('error', '')) if state in {'failed', 'blocked'} else '',
-                   job_id=info.get('submitted_id') or primary.get('slurm_id') or primary.get('job_id') or '',
-                   log=str(path / 'jobs/logs'))
+                   job_id=job_id, **logs)
         rows.append(row)
     for row in context['items']:
         if row['action'] == 'excluded':
-            rows.append(dict(row, state='excluded', stage='', job_id='', log=''))
+            rows.append(dict(row, state='excluded', stage='', job_id='', log='', stdout='', stderr=''))
     controller = path / 'jobs/database.json'
     database = controller_state(json.loads(controller.read_text())) if controller.is_file() else {}
     if (path / 'completed.json').is_file():
         database = dict(database, state='complete')
     elif not database:
         database = {'state': 'not_published'}
+    database.update(job_log_paths(path, submissions, database.get('job_id')))
     return {'build': str(path), 'name': context['name'], 'checked_at': now(),
             'coverage': 'recorded-progress', 'verification': verification,
             'database': database, 'samples': rows}
@@ -239,6 +269,14 @@ def verify_progress(path, report):
     return report
 
 
+def print_logs(data):
+    for stream in ('stderr', 'stdout'):
+        if data.get(stream):
+            print(f'    {stream.capitalize()}: {data[stream]}')
+    if not (data.get('stderr') or data.get('stdout')):
+        print('    Logs: unavailable (no recorded log file paths)')
+
+
 def print_progress(report):
     counts = Counter(row['state'] for row in report['samples'])
     included = len(report['samples']) - counts['excluded']
@@ -259,10 +297,11 @@ def print_progress(report):
     for label in ('verification', 'database'):
         if report[label].get('error'):
             print(f'  {label}: {report[label]["error"]}')
+            print_logs(report[label])
     for row in report['samples']:
         if row['state'] in {'failed', 'blocked'} or row['verification'] == 'failed':
             print(f'  {row["species"]}: {row["stage"] or "verification"}: {row["reason"]}')
-            print(f'    Logs: {row["log"]}')
+            print_logs(row)
 
 
 def write_progress(report, directory):
