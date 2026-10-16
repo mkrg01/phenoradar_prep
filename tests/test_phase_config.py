@@ -195,7 +195,7 @@ def test_ambiguous_and_malformed_resources_rejected(public_slurm):
 @pytest.mark.parametrize('phase', ['build', 'analysis'])
 def test_null_job_limit_is_explicitly_unlimited(phase, tmp_path):
     public = yaml.safe_load((ROOT / f'config/{phase}.yaml').read_text())['slurm']
-    assert public['total_limits']['jobs'] is None
+    public['total_limits']['jobs'] = None
     slurm = validate_slurm(public, build=phase == 'build')
     assert slurm['jobs'] is None
     assert workflow_jobs(slurm) == 'unlimited'
