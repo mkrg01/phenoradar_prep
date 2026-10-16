@@ -238,5 +238,7 @@ in advance:
 ./run_build.sh fetch-software
 ```
 
-Build settings pin the source revision and container. Downloads are cached under
-`resources/software/genegalleon/`; `repository` and `image` select local copies.
+`version` and `revision` pin the mounted workflow source; `image_uri` pins the
+runtime by OCI SHA256 digest. Image labels and file checksums are recorded in
+receipts. Downloads are cached under `resources/software/genegalleon/`;
+`repository` and `image` select local copies.

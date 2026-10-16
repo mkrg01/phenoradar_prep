@@ -11,13 +11,13 @@ translation:
 busco:
   lineage: embryophyta_odb12  # BUSCO lineage dataset for completeness and marker extraction.
 odb:
-  version: v12  # OrthoDB release; samples already processed with this release are reused.
+  version: v12  # Reuse mapping when both this release and ncbi_tax_id match.
   chunk_size: 50  # Maximum samples per ODB mapping chunk.
   ncbi_tax_id: 3193  # OrthoDB mapping clade: Embryophyta (land plants); NCBI Taxonomy ID.
 genegalleon:
-  version: 0.8.189  # Latest matching source/container on 2026-10-08; update explicitly.
-  revision: c3b8aad76751b3a04dc8453566a4a58184d6fd7b  # Pinned source commit.
-  image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:2bc90168b23435256f34a8b48a7b1a17bdf16769878ba08bf5937eb92cac2ce0  # Container pinned by OCI digest.
+  version: 0.8.276  # Latest source on 2026-10-16; update explicitly.
+  revision: 7f2fa68585deb9d470ea1a1146671d2d2d7b8c53  # Pinned source commit.
+  image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:0342363342b56ab56161acf91774bf2243ffd76c9bdfca1fa7fb3df36ba440a4  # Container pinned by OCI digest.
   settings:
     assembly_method: rnaSPAdes  # Transcriptome assembler passed to GeneGalleon.
 slurm:

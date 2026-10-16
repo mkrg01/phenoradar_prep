@@ -598,7 +598,7 @@ def container(root, cfg):
         raise ValueError('metadata preparation requires Apptainer or Singularity')
     if settings.get('image'):
         image = path_at(root, settings['image'])
-        labels = inspect_image(runtime, image, settings)
+        labels = inspect_image(runtime, image)
     else:
         image, receipt = fetch_image(settings)
         labels = receipt['labels']

@@ -156,14 +156,54 @@ def test_failed_oci_pull_is_not_published_and_can_be_retried(pins, runtime):
     assert image.exists() and len(calls) == 2
 
 
-def test_image_source_mismatch_is_rejected_before_and_after_caching(pins, runtime):
+@pytest.mark.parametrize("local_source", [False, True])
+def test_digest_pins_runtime_independently_of_source(
+        pins, source_download, runtime, monkeypatch, local_source):
+    from dataset_assets import cached_verification
+    from verification_cache import verification_cache
+
+    state, calls = runtime
+    state.update(version="1.2.2", revision="c" * 40)
+    if local_source:
+        source, _ = software.fetch_source(pins)
+        repository = Path(pins['cache_dir']).parent / 'local'
+        shutil.copytree(source, repository)
+        (repository / 'VERSION').write_text('9.9.9\n')
+        pins['repository'] = str(repository)
+    with verification_cache(Path(pins['cache_dir']).parent / 'checks.sqlite'):
+        expected = software.resolve(pins)
+        resolved, _, lock = expected
+        source_version = '9.9.9' if local_source else VERSION
+        assert (Path(resolved["repository"]) / "VERSION").read_text().strip() == source_version
+        if local_source:
+            assert lock["source"]["version"] == source_version
+        else:
+            assert lock["source"]["identity"]['version'] == VERSION
+            assert lock["source"]["identity"]["revision"] == REVISION
+        assert lock["container"]["identity"]["uri"] == pins["image_uri"]
+        assert lock["container"]["labels"]["org.opencontainers.image.version"] == "1.2.2"
+        assert lock["container"]["labels"]["org.opencontainers.image.revision"] == "c" * 40
+        monkeypatch.setattr(software, "download", lambda *_: pytest.fail("download on cache hit"))
+        monkeypatch.setattr(software.shutil, "which", lambda *_: pytest.fail("runtime lookup on cache hit"))
+        assert software.resolve(pins) == expected
+        with cached_verification():
+            assert software.resolve_cached(pins) == expected
+        assert len(calls) == 1
+
+
+def test_local_metadata_container_records_observed_labels(pins, runtime, tmp_path):
+    from metadata_catalog import container
+
     state, _ = runtime
-    state["revision"] = "c" * 40
-    with pytest.raises(ValueError, match="image/source mismatch"): software.fetch_image(pins)
-    state["revision"] = REVISION
-    software.fetch_image(pins)
-    other = dict(pins, revision="d" * 40)
-    with pytest.raises(ValueError, match="image/source mismatch"): software.fetch_image(other)
+    state.update(version="1.2.2", revision="c" * 40)
+    image = tmp_path / 'runtime.sif'
+    image.write_bytes(b'local SIF')
+    (tmp_path / 'build.yaml').write_text(json.dumps({'genegalleon': dict(pins, image=str(image))}))
+    _, selected, identity = container(tmp_path, {'build_config': 'build.yaml'})
+    assert selected == image
+    assert identity['image']['sha256'] == sha256(image)
+    assert identity['labels']['org.opencontainers.image.version'] == '1.2.2'
+    assert identity['labels']['org.opencontainers.image.revision'] == 'c' * 40
 
 
 def test_missing_image_uri_is_rejected_before_acquisition(pins, monkeypatch):

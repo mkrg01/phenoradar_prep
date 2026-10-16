@@ -158,12 +158,10 @@ def architecture():
         raise ValueError(f"unsupported GeneGalleon container architecture: {value}") from error
 
 
-def inspect_image(runtime, path, config):
+def inspect_image(runtime, path):
     data = json.loads(subprocess.check_output([runtime, "inspect", "--json", str(path)], text=True))
-    labels = data.get("data", {}).get("attributes", {}).get("labels", {})
     # OCI labels are retained by standard Apptainer pulls.
-    check_image_labels(labels, config)
-    return labels
+    return data.get("data", {}).get("attributes", {}).get("labels", {})
 
 
 def fetch_image(config):
@@ -177,7 +175,6 @@ def fetch_image(config):
     with locked(base / (key + ".lock")):
         if destination.exists():
             receipt = read_receipt(destination, identity)
-            check_image_labels(receipt["labels"], config)
             return destination / "genegalleon.sif", receipt
         runtime = shutil.which("apptainer") or shutil.which("singularity")
         if not runtime:
@@ -199,7 +196,7 @@ def fetch_image(config):
             shutil.rmtree(scratch)
             entry = record(image)
             if not entry["bytes"]: raise ValueError("downloaded GeneGalleon SIF is empty")
-            labels = inspect_image(runtime, image, config)
+            labels = inspect_image(runtime, image)
             receipt = {"schema_version": 1, "kind": "downloaded_image", "created_at": now(),
                        "identity": identity, "runtime": subprocess.check_output([runtime, "--version"], text=True).strip(),
                        "labels": labels, "files": relocate([entry], staging, destination)}
@@ -209,13 +206,6 @@ def fetch_image(config):
             return destination / "genegalleon.sif", receipt
         finally:
             if staging.exists(): shutil.rmtree(staging)
-
-
-def check_image_labels(labels, config):
-    for key, setting in (("org.opencontainers.image.revision", "revision"),
-                         ("org.opencontainers.image.version", "version")):
-        if labels.get(key) and config.get(setting) and labels[key] != config[setting]:
-            raise ValueError(f"GeneGalleon image/source mismatch: {key}={labels[key]}, expected {config[setting]}")
 
 
 def resolve(config):
@@ -237,8 +227,6 @@ def resolve(config):
         entry = record(image)
         container = {"kind": "local_image", "files": [entry]}
     else:
-        if source["kind"] == "local_source" and source.get("version") != cfg.get("version"):
-            raise ValueError("local GeneGalleon version differs from pinned image; provide its matching local image or update pins")
         image, container = fetch_image(cfg)
     cfg["repository"], cfg["image"] = str(repository), str(image)
     lock = {"schema_version": 1, "source": source, "container": container}
@@ -286,14 +274,11 @@ def resolve_cached(config):
                 return None
             container = {'kind': 'local_image', 'files': files}
         else:
-            if source['kind'] == 'local_source' and source.get('version') != cfg.get('version'):
-                return None
             identity = {'uri': cfg['image_uri'], 'architecture': architecture(), 'expected_sha256': None}
             destination = Path(cfg['cache_dir']) / 'images' / digest(identity)
             container = read_receipt(destination, identity, cached_only=True)
             if container is None:
                 return None
-            check_image_labels(container['labels'], cfg)
             image = destination / 'genegalleon.sif'
         cfg['repository'], cfg['image'] = str(repository), str(image)
         lock = {'schema_version': 1, 'source': source, 'container': container}

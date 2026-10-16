@@ -142,14 +142,18 @@ def test_release_changes_remap_and_same_release_reuses_results(dataset_project, 
 
 
 @pytest.mark.parametrize('reverse', [False, True])
-def test_mixed_release_sources_reuse_matching_samples_and_prefer_matching_duplicates(dataset_project, reverse):
+@pytest.mark.parametrize('old_reference,target_node', [
+    ({'version': 'v11'}, 3193), ({'node': 3193}, 33090),
+], ids=['release', 'clade'])
+def test_mixed_reference_sources_reuse_matching_samples_and_prefer_matching_duplicates(
+        dataset_project, reverse, old_reference, target_node):
     root = dataset_project
     imported(root)
     items = identities(root / 'input/metadata.tsv')[1]
     store = root / 'resources/dataset_assets'
-    old = database_from_stages(root, store, items, name='old_release', version='v11')
-    current = database_from_stages(root, store, items[:1], name='current_release')
-    config = configure(root, version='v12')
+    old = database_from_stages(root, store, items, name='old_reference', **old_reference)
+    current = database_from_stages(root, store, items[:1], name='current_reference', node=target_node)
+    config = configure(root, version='v12', ncbi_tax_id=target_node)
     cfg = yaml.safe_load(config.read_text())
     cfg['reuse_from'] = [str(path) for path in ([current, old] if reverse else [old, current])]
     config.write_text(yaml.safe_dump(cfg))
@@ -159,21 +163,26 @@ def test_mixed_release_sources_reuse_matching_samples_and_prefer_matching_duplic
     assert all(row['mapping'] == 'pending_inputs' for row in report[1:])
     build = dataset.prepare(root, 'mixed_release', config, defer=True)
     verify_and_stage(build, dataset.load(build))
-    cached = load_tables(build / 'work/cache/odb/v12_3193/reused/snapshot.json')
+    cached = load_tables(build / f'work/cache/odb/v12_{target_node}/reused/snapshot.json')
     assert set(cached['tables']) == {items[0]['species']}
+    assert cached['node'] == target_node
     assert len(list((build / 'work/cache/expression').glob('*/receipt.json'))) == 1
 
 
-def test_mixed_release_build_maps_only_outdated_samples(dataset_project, fake_odb, command_environment):
+@pytest.mark.parametrize('old_reference,target_node', [
+    ({'version': 'v11'}, 3193), ({'node': 3193}, 33090),
+], ids=['release', 'clade'])
+def test_mixed_reference_build_maps_only_mismatched_samples(
+        dataset_project, fake_odb, command_environment, old_reference, target_node):
     root = dataset_project
     if not shutil.which('snakemake') or not shutil.which('seqkit'):
         pytest.skip('Snakemake and seqkit required')
     imported(root)
     items = identities(root / 'input/metadata.tsv')[1]
     store = root / 'resources/dataset_assets'
-    current = database_from_stages(root, store, items[:1], name='current_release')
-    old = database_from_stages(root, store, items[1:], name='old_release', version='v11')
-    config = configure(root, version='v12', chunk_size=1)
+    current = database_from_stages(root, store, items[:1], name='current_reference', node=target_node)
+    old = database_from_stages(root, store, items[1:], name='old_reference', **old_reference)
+    config = configure(root, version='v12', ncbi_tax_id=target_node, chunk_size=1)
     cfg = yaml.safe_load(config.read_text())
     cfg['reuse_from'] = [str(current), str(old)]
     config.write_text(yaml.safe_dump(cfg))
@@ -194,13 +203,16 @@ def test_mixed_release_build_maps_only_outdated_samples(dataset_project, fake_od
     assert plan['mapped_species'] == sorted(item['species'] for item in items[1:])
     assert len(events.read_text().splitlines()) == len(items) - 1
     assert mapping['version'] == 'v12'
+    assert mapping['node'] == result['odb']['node'] == target_node
     assert {row['orthodb_release'] for row in read_tsv(build / 'database/sample_processing.tsv')} == {'v12'}
+    expected_clade = {3193: 'Embryophyta', 33090: 'Viridiplantae'}[target_node]
+    assert {row['orthodb_clade'] for row in read_tsv(build / 'database/sample_processing.tsv')} == {expected_clade}
     # Historical unknown checksums must not be inferred from other samples.
     assert reference_for(mapping, items[0]['species']) is None
     assert all(reference_for(mapping, item['species']) for item in items[1:])
     assert 'reference_sha256' not in result['odb']
     assert len(mapping['reference_sha256s']) == 1
-    # A subsequent build of the same release imports every completed mapping.
+    # The same release and clade import every completed mapping on a later build.
     cfg['reuse_from'] = str(build / 'database')
     config.write_text(yaml.safe_dump(cfg))
     assert all(row['mapping'] == 'reuse' for row in dataset.plan(root, config)[-1])
