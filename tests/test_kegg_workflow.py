@@ -282,6 +282,7 @@ def test_kegg_reuses_completed_database_without_mapping_or_translation(
     assert load_complete(build)["schema_version"] == 5
     cfg = yaml.safe_load((root / "config/analysis.yaml").read_text())
     cfg["inputs"]["species_trait"] = None
+    cfg["alignment"]["enabled"] = False
     cfg["phylogeny"]["trees"] = []
     cfg["phylogeny"]["contrast_pairs"]["enabled"] = False
     cfg["kegg"]["enabled"] = True

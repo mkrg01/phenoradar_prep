@@ -1,6 +1,8 @@
 # A completed snapshot is an immutable input, independent of code changes.
 # Failed downloads remain outside the snapshot and can be reused on retry.
-if not Path(KEGG_REFERENCE).exists():
+from bootstrap_kegg_reference import needs_bootstrap
+
+if needs_bootstrap(KEGG_REFERENCE):
     rule prepare_kegg_reference:
         input:
             code=f"{SCRIPTS}/bootstrap_kegg_reference.py",

@@ -1,6 +1,7 @@
 import io
 import gzip
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -322,9 +323,12 @@ def reference_downloads(kegg_inputs, monkeypatch):
     return payloads, urls, calls, fetch
 
 
-def test_bootstrap_downloads_once_and_reuses_portable_snapshot(tmp_path, reference_downloads):
+@pytest.mark.parametrize("precreated", [False, True])
+def test_bootstrap_downloads_once_and_reuses_portable_snapshot(tmp_path, reference_downloads, precreated):
     _, urls, calls, _ = reference_downloads
     root = tmp_path / "resources/kegg/snapshot_v1"
+    if precreated:
+        root.mkdir(parents=True)
     reference = bootstrap_module.bootstrap(root)
     assert calls == list(urls.values())
     assert verify(reference)["counts"]["profiles"] == 2
@@ -342,6 +346,64 @@ def test_bootstrap_downloads_once_and_reuses_portable_snapshot(tmp_path, referen
     moved = tmp_path / "relocated"
     root.rename(moved)
     verify(moved / "reference.json")
+
+
+@pytest.mark.parametrize("destination", ["nonempty", "file", "empty_symlink", "dangling_symlink"])
+def test_bootstrap_preserves_existing_invalid_destinations(tmp_path, reference_downloads, destination):
+    _, _, calls, _ = reference_downloads
+    root = tmp_path / "snapshot"
+    if destination == "nonempty":
+        root.mkdir()
+        (root / "keep.txt").write_text("untouched")
+    elif destination == "file":
+        root.write_text("untouched")
+    else:
+        target = tmp_path / "target"
+        if destination == "empty_symlink":
+            target.mkdir()
+        root.symlink_to(target)
+    with pytest.raises((FileNotFoundError, NotADirectoryError)):
+        bootstrap_module.bootstrap(root)
+    assert calls == []
+    if destination == "nonempty":
+        assert (root / "keep.txt").read_text() == "untouched"
+    elif destination == "file":
+        assert root.read_text() == "untouched"
+    else:
+        assert root.is_symlink() and root.readlink() == target
+        assert target.exists() is (destination == "empty_symlink")
+
+
+@pytest.mark.parametrize("precreated", [False, True])
+def test_snakemake_bootstraps_reference_from_cached_downloads(workflow_project, reference_downloads, precreated):
+    snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
+    if not snakemake:
+        pytest.skip("Snakemake is unavailable")
+    root = workflow_project / "resources/kegg/snapshot_v1"
+    # Seed tiny real archives with verified receipts; the child workflow runs offline.
+    for url, filename in bootstrap_module.DOWNLOADS.values():
+        bootstrap_module.download_cached(url, root.parent / "downloads" / filename)
+    if precreated:
+        root.mkdir()
+    cache = root.parent / "downloads"
+    before = {p: (sha256(p), p.stat().st_mtime_ns) for p in cache.iterdir()}
+    snakefile = Path(__file__).resolve().parents[1] / "workflow/Snakefile"
+    command = [snakemake, "--snakefile", str(snakefile), "--cores", "1",
+               "--resources", "mem_mb=8000", "--", "kegg_references"]
+    env = {**os.environ, "XDG_CACHE_HOME": str(workflow_project / ".cache")}
+    result = subprocess.run(command, cwd=workflow_project, env=env,
+                            capture_output=True, text=True, timeout=60)
+    logs = "\n".join(p.read_text() for p in (workflow_project / "logs").rglob("*.log"))
+    assert result.returncode == 0, result.stdout + result.stderr + logs
+    reference = root / "reference.json"
+    assert verify(reference)["counts"]["profiles"] == 2
+    assert all((sha256(p), p.stat().st_mtime_ns) == record for p, record in before.items())
+    frozen = {p: (sha256(p), p.stat().st_mtime_ns) for p in root.rglob("*") if p.is_file()}
+    result = subprocess.run(command, cwd=workflow_project, env=env,
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Nothing to be done" in result.stdout + result.stderr
+    assert all((sha256(p), p.stat().st_mtime_ns) == record for p, record in frozen.items())
 
 
 def test_bootstrap_resumes_completed_downloads_after_interruption(tmp_path, reference_downloads, monkeypatch):

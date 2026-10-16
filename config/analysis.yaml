@@ -4,13 +4,13 @@ inputs:
   species_trait: input/species_trait.tsv  # Species traits (TSV); null when traits are unused.
   species_list: null  # Species/sample IDs, one per line; a path enables filtering, null disables it.
   calibrations: null  # Calibration TSV required when phylogeny.dating.calibration_source is file.
-trait: carnivory  # Trait-table column; use C4 when a C4 column is provided.
+trait: C4  # Trait-table column; use C4 when a C4 column is provided.
 selection:
   busco_threshold: 0.5  # Minimum complete BUSCO fraction (single + duplicated); 0.5 = 50%.
 alignment:
-  enabled: false  # Include all-copy orthogroup alignments in the all target.
+  enabled: true  # Include all-copy orthogroup alignments in the all target.
 kegg:
-  enabled: false  # Include KO annotation and expression in the all target.
+  enabled: true  # Include KO annotation and expression in the all target.
   ambiguity: duplicate  # Multi-KO orthogroups: duplicate TPM to each KO, drop the OG, or error.
 phylogeny:
   trees:  # Any of all, phenotyped, representatives; [] disables tree inference.
@@ -40,9 +40,9 @@ exclude_species: []  # Species IDs (all samples) or exact sample IDs to omit bef
 slurm:
   partition: null  # null: cluster default; multiple: "epyc,rome,medium".
   total_limits:  # Per analysis; CPU/memory include the controller allocation.
-    jobs: null  # No workflow job-count cap; Slurm and finite CPU/memory budgets still apply.
-    cpus: null  # Total CPU request budget; null adds no workflow-wide limit.
-    mem_gb: null  # Total memory request budget in GB; null adds no workflow-wide limit.
+    jobs: 5  # No workflow job-count cap; Slurm and finite CPU/memory budgets still apply.
+    cpus: 64  # Total CPU request budget; null adds no workflow-wide limit.
+    mem_gb: 256  # Total memory request budget in GB; null adds no workflow-wide limit.
   per_job_resources:  # Per-job cpus, mem_gb (GB), and time (days-HH:MM:SS).
     controller:  # Runs Snakemake and manages its worker jobs.
       cpus: 1

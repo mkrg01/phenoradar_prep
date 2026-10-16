@@ -66,12 +66,19 @@ def extract_profiles(archive, destination):
             pass
 
 
+def needs_bootstrap(reference_dir):
+    """Only absent paths and empty, real directories can receive a new snapshot."""
+    root = Path(reference_dir)
+    return not root.is_symlink() and (
+        not root.exists() or (root.is_dir() and not any(root.iterdir())))
+
+
 def bootstrap(reference_dir):
     root = Path(reference_dir).absolute()
     root.parent.mkdir(parents=True, exist_ok=True)
     with (root.parent / f".{root.name}.bootstrap.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        if root.exists() or root.is_symlink():
+        if not needs_bootstrap(root):
             verify(root / "reference.json")
             print(f"Keeping existing reference snapshot: {root}", flush=True)
             return root / "reference.json"
@@ -83,6 +90,10 @@ def bootstrap(reference_dir):
             extract_profiles(cache / "profiles.tar.gz", staging / "profiles")
             with gzip.open(cache / "ko_list.gz", "rb") as source, (staging / "ko_list").open("wb") as output:
                 shutil.copyfileobj(source, output)
+            # Snakemake creates output parents before invoking this script.
+            # rmdir removes only an empty directory, preserving any existing data.
+            if root.exists():
+                root.rmdir()
             return prepare(staging / "profiles", staging / "ko_list", root,
                            cache / "ko_module_links.tsv", cache / "ko_pathway_links.tsv",
                            release="downloaded-" + records["profiles"]["retrieved_at"][:10],
