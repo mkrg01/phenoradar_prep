@@ -49,6 +49,14 @@ slurm:
       cpus: 1
       mem_gb: 8
       time: "64-00:00:00"
+    record_run:  # Record the resolved configuration and provenance.
+      cpus: 1
+      mem_gb: 8
+      time: "1-00:00:00"
+    prepare_phenoradar_metadata:  # Prepare PhenoRadar species metadata.
+      cpus: 1
+      mem_gb: 8
+      time: "1-00:00:00"
     import_build_protein:  # Import proteins and provenance from the completed database.
       cpus: 1
       mem_gb: 4
