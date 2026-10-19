@@ -113,6 +113,10 @@ after success or failure. Downloaded FASTQ/SRA files are removed after assembly
 and quantification finish. Original inputs, products, restart checkpoints, and
 logs are kept.
 
+[Shared BUSCO references](configuration.md#shared-busco-references) are kept for
+reuse and retries. Cleanup retains both shared references and older per-sample
+copies.
+
 After an interrupted job stops, inspect cleanup status and preview remaining
 temporary files:
 

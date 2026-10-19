@@ -10,6 +10,7 @@ translation:
   table: 1  # NCBI genetic code for CDS translation; 1 = standard.
 busco:
   lineage: embryophyta_odb12  # BUSCO lineage dataset for completeness and marker extraction.
+  cache_dir: resources/busco  # Shared, immutable lineage downloads; null uses GeneGalleon's per-sample cache.
 odb:
   version: v12  # Reuse mapping when both this release and ncbi_tax_id match.
   chunk_size: 50  # Maximum samples per ODB mapping chunk.

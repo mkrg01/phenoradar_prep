@@ -55,6 +55,7 @@ def apply_runtime(path, manifest):
     manifest['genegalleon'] = data['genegalleon']
     manifest['software_lock'] = data['software_lock']
     manifest['raw_inputs'] = data['raw_inputs']
+    manifest['busco_reference'] = data.get('busco_reference', manifest.get('busco_reference'))
     for item in manifest['items']:
         if item['species'] in data['references']:
             item['reference_id'] = data['references'][item['species']]
@@ -66,6 +67,7 @@ def save_runtime(path, manifest, references, raw_inputs, files, rebuilds):
             'prepared_sha256': json.loads((Path(path) / 'checksums.json').read_text())['build.json'],
             'genegalleon_config': manifest['config']['genegalleon'], 'genegalleon': manifest['genegalleon'],
             'software_lock': manifest['software_lock'], 'references': references,
+            'busco_reference': manifest.get('busco_reference'),
             'raw_inputs': raw_inputs, 'verified_files': files, 'rebuilds': rebuilds,
             'shared_files': [record(snapshot)] if snapshot.is_file() else []}
     data['sha256'] = digest(data)
@@ -220,6 +222,7 @@ def verify_and_stage(path, manifest, workers=4, software=None, cached_only=False
     else:
         rebuilds.update(failures(local_files))
     pending = False
+    needs_busco = False
     raw_inputs = copy.deepcopy(manifest['raw_inputs'])
     for item in manifest['items']:
         name = item['species']
@@ -254,6 +257,8 @@ def verify_and_stage(path, manifest, workers=4, software=None, cached_only=False
             reused = planned[name]['action'] == 'reuse' and not completed_here and name not in (previous or {}).get('rebuilds', {})
             write_json(receipt, {'state': 'reused' if reused else 'complete',
                                  'verification': 'verified', 'finished_at': now()})
+        if not products['busco']:
+            needs_busco = True
     if pending:
         if cached_only and software is None:
             from dataset_software import resolve_cached
@@ -265,6 +270,10 @@ def verify_and_stage(path, manifest, workers=4, software=None, cached_only=False
                 verify(entry)
         manifest['config']['genegalleon'], manifest['genegalleon'], manifest['software_lock'] = (
             software if software is not None else resolve_software(manifest['config']['genegalleon']))
+        if needs_busco:
+            from busco_reference import prepare as prepare_busco
+            manifest['busco_reference'] = prepare_busco(manifest['config']['busco'], manifest['config']['genegalleon'],
+                                                       expected=manifest.get('busco_reference'), cached_only=cached_only)
     if rebuilds and previous is not None:
         invalidate_mapping(path, manifest, rebuilds)
     save_runtime(path, manifest, references, raw_inputs, local_files, rebuilds)

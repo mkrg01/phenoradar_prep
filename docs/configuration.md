@@ -29,6 +29,7 @@ Use a new run for changed scientific conditions; use
 | `rebuild_samples` | Sample IDs or run accessions to restart from assembly in a new build; default `[]` |
 | `genegalleon` | [Pinned software](datasets.md#pinned-genegalleon-source-and-sif) and assembly/quantification settings |
 | `busco.lineage` | BUSCO dataset; default `embryophyta_odb12` |
+| `busco.cache_dir` | Shared reference directory; default `resources/busco`; `null` disables sharing |
 | `translation.table` | NCBI genetic code; default `1` |
 | `slurm` | [Job resources and total limits](running.md#resource-budgets) |
 
@@ -47,6 +48,19 @@ processed with that reference are reused; the others are mapped automatically.
 | `odb.chunk_size` | `50` | Maximum samples per mapping chunk |
 
 See [OrthoDB update examples](datasets.md#update-orthodb-for-all-samples).
+
+### Shared BUSCO references
+
+New builds download each lineage once to `resources/busco/<lineage>/` and
+share it read-only across samples. This requires Apptainer; for Docker or
+SingularityCE, set `busco.cache_dir: null` to use per-sample downloads.
+
+References are reused without automatic updates and checked for changes.
+Keep the cache while processing or resuming builds. To download a different
+snapshot, choose a new `busco.cache_dir` in a new build; use `rebuild_samples`
+to recompute completed samples.
+
+Existing per-sample copies are not moved or deleted.
 
 ## Analysis settings
 

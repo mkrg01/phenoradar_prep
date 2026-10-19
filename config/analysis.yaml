@@ -36,7 +36,8 @@ phylogeny:
     - genus
     outlierlevel: 0.5  # Required focal-group fraction in a candidate core clade; (0, 1].
     collapse_monophyletic: true  # Collapse monophyletic groups in figures only.
-exclude_species: []  # Species IDs (all samples) or exact sample IDs to omit before analysis.
+exclude_species:  # Species IDs (all samples) or exact sample IDs to omit before analysis.
+  - Paspalum_notatum_SRR13069628
 slurm:
   partition: null  # null: cluster default; multiple: "epyc,rome,medium".
   total_limits:  # Per analysis; CPU/memory include the controller allocation.
@@ -55,6 +56,10 @@ slurm:
     import_build_expression:  # Import saved per-sample OG expression.
       cpus: 1
       mem_gb: 4
+      time: "1-00:00:00"
+    kegg_verify_reference:  # Verify the KEGG snapshot with enough memory for the worker.
+      cpus: 1
+      mem_gb: 8
       time: "1-00:00:00"
     align_orthogroup:  # Align each all-copy orthogroup.
       cpus: 4

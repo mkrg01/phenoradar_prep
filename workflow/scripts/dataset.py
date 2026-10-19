@@ -69,8 +69,8 @@ def settings(root, config, analysis_config=None, name=None):
     cfg.setdefault("storage", {"keep_intermediates": False})
     analysis["storage"] = cfg["storage"]
     analysis["translation"] = cfg["translation"]
-    if set(cfg["busco"]) != {"lineage"} or not isinstance(cfg["busco"]["lineage"], str) or not cfg["busco"]["lineage"].strip():
-        raise ValueError("busco.lineage must be a nonempty string")
+    from busco_reference import settings as busco_settings
+    busco_settings(root, cfg['busco'])
     if set(cfg["odb"]) - {"ncbi_tax_id", "chunk_size", "version"}:
         raise ValueError("unknown build.odb settings")
     analysis["odb"].update(cfg["odb"], incremental=True)
@@ -358,8 +358,12 @@ def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_a
                          "samples": {s: entry['source'] for s, entry in selection['reusable'].items()}}
         write_json(staging / 'reuse.json', reuse_receipt)
         auxiliary['reuse.json'] = dict(record(staging / 'reuse.json'), path=str(target / 'reuse.json'))
+        busco_reference = None
         if needs_upstream and not defer:
             cfg["genegalleon"], gg_records, software_lock = resolve_software(cfg["genegalleon"])
+            if any(row['busco'] == 'pending' for row in report):
+                from busco_reference import prepare as prepare_busco
+                busco_reference = prepare_busco(cfg['busco'], cfg['genegalleon'])
         elif selection['reusable'] and all(entry.get('software_lock') for entry in selection['reusable'].values()):
             # Retain pinned-container evidence when every native stage is reused.
             # These are audit receipts; no upstream software needs to run again.
@@ -371,7 +375,8 @@ def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_a
                     "config": cfg, "analysis": analysis, "fields": fields, "items": items,
                     "metadata": dict(record(frozen), path=str(target / "metadata.tsv")),
                     "auxiliary": auxiliary, "excluded": selection["excluded"], "raw_inputs": raw_records, "implementation": implementation(root),
-                    "genegalleon": gg_records, "software_lock": software_lock}
+                    "genegalleon": gg_records, "software_lock": software_lock,
+                    "busco_reference": busco_reference}
         from sample_processing import software_version
         manifest['phenoradar_prep_version'] = software_version(root)
         manifest['deferred_verification'] = defer
@@ -571,6 +576,13 @@ def gg_environment(manifest, item, products, work, task_id):
                 "GG_COMMON_GENETIC_CODE": str(manifest["analysis"]["translation"]["table"]),
                 "GG_ARRAY_TASK_ID": str(task_id), "SLURM_ARRAY_TASK_ID": str(task_id),
                 "GG_OBSERVABILITY": "1", "GG_COMMON_TMP_ROOT": "workspace"})
+    if not products['busco'] and manifest['config']['busco'].get('cache_dir'):
+        from busco_reference import mount_environment, prepare as prepare_busco
+        reference = manifest.get('busco_reference')
+        if reference is None:
+            raise ValueError('shared BUSCO reference has not been prepared; submit the build preparation job first')
+        prepare_busco(manifest['config']['busco'], gg, expected=reference)
+        mount_environment(env, reference)
     # Imported checkpoints are verified by our registry. Disabled native producers
     # must not require their unavailable original isoforms/transcript outputs.
     for prefix in ('', 'SINGULARITYENV_', 'APPTAINERENV_'):
@@ -686,6 +698,8 @@ def register_native(path, manifest, item, products, eligible, env):
                       'software': manifest['genegalleon'], 'run': run,
                       'raw_inputs': manifest['raw_inputs'].get(species, {}),
                       'condition': manifest['config']['conditions'][stage]}
+        if stage == 'busco' and manifest.get('busco_reference'):
+            provenance['busco_reference'] = manifest['busco_reference']
         from sample_processing import generating_conditions
         provenance['processing'] = generating_conditions(manifest)
         published = work / 'products'
@@ -762,6 +776,9 @@ def worker(path, task_id):
                     write_json(receipt_path, dict(receipt, state='complete', finished_at=now(), native_exit_code=0))
                     return
             receipt.pop('native_exit_code', None)
+            if not products['busco'] and manifest.get('busco_reference'):
+                from busco_reference import verify_mount
+                verify_mount(manifest['busco_reference'], manifest['config']['genegalleon'], env)
             with locked(work / '.native.lock') as native_lock:
                 subprocess.run(['bash', str(repository / 'workflow/gg_transcriptome_generation_entrypoint.sh')],
                                cwd=repository, env=env, check=True, pass_fds=(native_lock.fileno(),))

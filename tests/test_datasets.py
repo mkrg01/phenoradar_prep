@@ -34,7 +34,14 @@ def dataset_project(tmp_path, tiny_inputs, monkeypatch):
     cfg = yaml.safe_load(build_config.read_text())
     cfg["reuse_from"] = None
     cfg["metadata"] = "input/metadata.tsv"
+    cfg['busco']['cache_dir'] = None  # Synthetic GeneGalleon tests need no external reference download.
     build_config.write_text(yaml.safe_dump(cfg))
+    analysis_config = root / 'config/analysis.yaml'
+    analysis_cfg = yaml.safe_load(analysis_config.read_text())
+    analysis_cfg['exclude_species'] = []  # Ignore exclusions in the user's active analysis config.
+    for branch in ('alignment', 'kegg'):
+        analysis_cfg[branch]['enabled'] = False  # Dedicated branch tests opt in with their own tools/references.
+    analysis_config.write_text(yaml.safe_dump(analysis_cfg))
     shutil.copytree(ROOT / "workflow", root / "workflow", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy2(ROOT / "run_pipeline.sh", root / "run_pipeline.sh")
     shutil.copytree(Path(tiny_inputs["metadata"]).parent, root / "input")
