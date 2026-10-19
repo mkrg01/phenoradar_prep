@@ -30,6 +30,7 @@ Use a new run for changed scientific conditions; use
 | `genegalleon` | [Pinned software](datasets.md#pinned-genegalleon-source-and-sif) and assembly/quantification settings |
 | `busco.lineage` | BUSCO dataset; default `embryophyta_odb12` |
 | `busco.cache_dir` | Shared reference directory; default `resources/busco`; `null` disables sharing |
+| `taxonomy.cache_dir` | Shared ETE/NCBI database; default `resources/taxonomy`; `null` disables sharing |
 | `translation.table` | NCBI genetic code; default `1` |
 | `slurm` | [Job resources and total limits](running.md#resource-budgets) |
 
@@ -52,15 +53,21 @@ See [OrthoDB update examples](datasets.md#update-orthodb-for-all-samples).
 ### Shared BUSCO references
 
 New builds download each lineage once to `resources/busco/<lineage>/` and
-share it read-only across samples. This requires Apptainer; for Docker or
-SingularityCE, set `busco.cache_dir: null` to use per-sample downloads.
+share it read-only across samples. Sharing requires Apptainer; for Docker or
+SingularityCE, set both `busco.cache_dir` and `taxonomy.cache_dir` to `null`.
 
 References are reused without automatic updates and checked for changes.
 Keep the cache while processing or resuming builds. To download a different
 snapshot, choose a new `busco.cache_dir` in a new build; use `rebuild_samples`
 to recompute completed samples.
 
-Existing per-sample copies are not moved or deleted.
+### Shared taxonomy database
+
+New builds prepare one ETE/NCBI database under `resources/taxonomy/ete/` and
+share it read-only across samples. This requires Apptainer; set
+`taxonomy.cache_dir: null` to use per-sample downloads. The snapshot is verified
+and reused without automatic updates. Keep it available while processing or
+resuming samples; choose a new cache directory for a different snapshot.
 
 ## Analysis settings
 
@@ -81,8 +88,8 @@ Set unused input paths to `null` and disable branches that require those inputs.
 
 Both build and analysis configs use `storage.keep_intermediates: false` by
 default, enabling [cleanup](outputs.md#storage-cleanup). GeneGalleon computation scratch
-is removed after successful and failed sample jobs; native restart checkpoints
-are preserved.
+is removed after successful and failed sample jobs; unfinished samples retain
+their restart data. Completed samples also retire [unneeded work](outputs.md#storage-cleanup).
 Set it to `true` before preparing a run to retain intermediates for debugging.
 
 ## Optional analyses and exports

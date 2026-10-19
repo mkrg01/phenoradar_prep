@@ -39,25 +39,25 @@ def runtime():
     # supplied by Apptainer is supported too; SingularityCE and Docker are not.
     if (os.environ.get('GG_CONTAINER_RUNTIME', 'auto') != 'auto'
             or os.environ.get('GG_CONTAINER_DOCKER_IMAGE') or os.environ.get('GG_WRAPPER_IMAGE')):
-        raise ValueError('shared BUSCO references require the Apptainer runtime; use busco.cache_dir: null to disable')
+        raise ValueError('shared references require the Apptainer runtime; set busco.cache_dir and taxonomy.cache_dir to null to disable')
     command = shutil.which('singularity') or shutil.which('apptainer')
     if not command:
-        raise ValueError('shared BUSCO references require Apptainer')
+        raise ValueError('shared references require Apptainer')
     version = subprocess.check_output([command, '--version'], text=True).strip()
     help_text = subprocess.check_output([command, 'exec', '--help'], text=True)
     if 'apptainer' not in version.lower() or '--mount' not in help_text:
-        raise ValueError('shared BUSCO references require Apptainer with APPTAINER_MOUNT support; '
-                         'use busco.cache_dir: null to disable')
+        raise ValueError('shared references require Apptainer with APPTAINER_MOUNT support; '
+                         'set busco.cache_dir and taxonomy.cache_dir to null to disable')
     return command
 
 
-def tree_files(directory):
+def tree_files(directory, label='BUSCO'):
     if Path(directory).is_symlink():
-        raise ProductIntegrityError(f'BUSCO reference must not be a symlink: {directory}')
+        raise ProductIntegrityError(f'{label} reference must not be a symlink: {directory}')
     files = []
     for path in sorted(Path(directory).rglob('*')):
         if path.is_symlink():
-            raise ProductIntegrityError(f'BUSCO reference must not contain symlinks: {path}')
+            raise ProductIntegrityError(f'{label} reference must not contain symlinks: {path}')
         if path.is_file():
             files.append(path)
     return files
@@ -146,7 +146,7 @@ def prepare(config, software, *, expected=None, cached_only=False):
                 shutil.rmtree(staging)
 
 
-def mount_environment(env, reference):
+def mount_environment(env, reference, destination=DESTINATION, label='BUSCO'):
     """Append a CSV mount without losing unrelated mounts or allowing a shadow."""
     runtime()
     rows = []
@@ -156,14 +156,14 @@ def mount_environment(env, reference):
                 continue
             fields = next(csv.reader([line], strict=True))
             options = dict(field.split('=', 1) for field in fields if '=' in field)
-            destination = next((options[key] for key in ('dst', 'destination', 'dest', 'target') if key in options), None)
-            destination = os.path.normpath(destination) if destination else None
-            if destination and (destination == DESTINATION or DESTINATION.startswith(destination.rstrip('/') + '/')
-                                or destination.startswith(DESTINATION + '/')):
-                raise ValueError(f'existing {variable} mount overlaps the shared BUSCO reference')
+            mounted = next((options[key] for key in ('dst', 'destination', 'dest', 'target') if key in options), None)
+            mounted = os.path.normpath(mounted) if mounted else None
+            if mounted and (mounted == destination or destination.startswith(mounted.rstrip('/') + '/')
+                            or mounted.startswith(destination + '/')):
+                raise ValueError(f'existing {variable} mount overlaps the shared {label} reference')
             if fields not in rows:
                 rows.append(fields)
-    rows.append(['type=bind', 'src=' + reference['dataset'], 'dst=' + DESTINATION, 'ro'])
+    rows.append(['type=bind', 'src=' + reference['dataset'], 'dst=' + destination, 'ro'])
     text = io.StringIO()
     csv.writer(text, lineterminator='\n').writerows(rows)
     env['APPTAINER_MOUNT'] = text.getvalue().rstrip('\n')

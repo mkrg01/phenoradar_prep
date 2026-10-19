@@ -56,6 +56,7 @@ def apply_runtime(path, manifest):
     manifest['software_lock'] = data['software_lock']
     manifest['raw_inputs'] = data['raw_inputs']
     manifest['busco_reference'] = data.get('busco_reference', manifest.get('busco_reference'))
+    manifest['taxonomy_reference'] = data.get('taxonomy_reference', manifest.get('taxonomy_reference'))
     for item in manifest['items']:
         if item['species'] in data['references']:
             item['reference_id'] = data['references'][item['species']]
@@ -68,6 +69,7 @@ def save_runtime(path, manifest, references, raw_inputs, files, rebuilds):
             'genegalleon_config': manifest['config']['genegalleon'], 'genegalleon': manifest['genegalleon'],
             'software_lock': manifest['software_lock'], 'references': references,
             'busco_reference': manifest.get('busco_reference'),
+            'taxonomy_reference': manifest.get('taxonomy_reference'),
             'raw_inputs': raw_inputs, 'verified_files': files, 'rebuilds': rebuilds,
             'shared_files': [record(snapshot)] if snapshot.is_file() else []}
     data['sha256'] = digest(data)
@@ -270,6 +272,9 @@ def verify_and_stage(path, manifest, workers=4, software=None, cached_only=False
                 verify(entry)
         manifest['config']['genegalleon'], manifest['genegalleon'], manifest['software_lock'] = (
             software if software is not None else resolve_software(manifest['config']['genegalleon']))
+        from taxonomy_reference import prepare as prepare_taxonomy
+        manifest['taxonomy_reference'] = prepare_taxonomy(manifest['config'].get('taxonomy', {}), manifest['config']['genegalleon'],
+                                                         expected=manifest.get('taxonomy_reference'), cached_only=cached_only)
         if needs_busco:
             from busco_reference import prepare as prepare_busco
             manifest['busco_reference'] = prepare_busco(manifest['config']['busco'], manifest['config']['genegalleon'],

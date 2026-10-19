@@ -11,6 +11,8 @@ translation:
 busco:
   lineage: embryophyta_odb12  # BUSCO lineage dataset for completeness and marker extraction.
   cache_dir: resources/busco  # Shared, immutable lineage downloads; null uses GeneGalleon's per-sample cache.
+taxonomy:
+  cache_dir: resources/taxonomy  # Shared ETE/NCBI database; null uses per-sample downloads.
 odb:
   version: v12  # Reuse mapping when both this release and ncbi_tax_id match.
   chunk_size: 50  # Maximum samples per ODB mapping chunk.
@@ -45,4 +47,4 @@ slurm:
       mem_gb: 8
       time: "64-00:00:00"
 storage:
-  keep_intermediates: false  # Remove successful/failed computation scratch; true retains it for debugging.
+  keep_intermediates: false  # Remove scratch and completed sample work; true retains it for debugging.

@@ -24,7 +24,7 @@ def owned_path(root, relative):
     return path
 
 
-def cleanup(root, relatives, receipt, *, errors=()):
+def cleanup(root, relatives, receipt, *, errors=(), details=None):
     """Called under the job lock, only after durable results have been verified.
 
     Cleanup errors leave the computation successful and can be retried. Never
@@ -48,6 +48,7 @@ def cleanup(root, relatives, receipt, *, errors=()):
     if report['errors']:
         report['state'] = 'pending'
         warnings.warn(f'Intermediate cleanup incomplete; see {receipt}', RuntimeWarning)
+    report.update(details or {})
     try:
         write_json(receipt, report)
     except OSError as error:

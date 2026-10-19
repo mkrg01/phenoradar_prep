@@ -73,7 +73,10 @@ def entry_state(entry, keep):
         if entry['kind'] == 'genegalleon':
             if not incomplete:
                 from genegalleon_run import runtime_directory
+                from genegalleon_cleanup import POLICY_VERSION
                 runtime = runtime_directory(entry['work_dir'])
+                if sample and result.get('completed_sample_cleanup') != POLICY_VERSION:
+                    return 'available'
                 if result.get('state') == 'complete' and (runtime.exists() or runtime.is_symlink()):
                     return 'available'
                 return result.get('state', 'unknown')

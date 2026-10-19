@@ -108,14 +108,15 @@ Keep `run.json`, branch provenance, reference snapshots, and the release's
 ## Storage cleanup
 
 With the default `storage.keep_intermediates: false`, ODB and KofamScan remove
-temporary work after publishing results. GeneGalleon removes computation scratch
-after success or failure. Downloaded FASTQ/SRA files are removed after assembly
-and quantification finish. Original inputs, products, restart checkpoints, and
-logs are kept.
+temporary work after publishing results. GeneGalleon removes scratch after any
+attempt. Once all sample products are registered, cleanup also retires per-sample
+BUSCO/taxonomy downloads and unused assembly/quantification outputs.
 
-[Shared BUSCO references](configuration.md#shared-busco-references) are kept for
-reuse and retries. Cleanup retains both shared references and older per-sample
-copies.
+Private staged reads are removed only when the original is available and matches.
+Original inputs, registered products, logs, and failed samples' restart data are
+kept. Shared [BUSCO](configuration.md#shared-busco-references) and
+[taxonomy](configuration.md#shared-taxonomy-database) references remain available
+for reuse and retries.
 
 After an interrupted job stops, inspect cleanup status and preview remaining
 temporary files:

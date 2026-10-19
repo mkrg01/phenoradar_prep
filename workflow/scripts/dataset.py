@@ -51,7 +51,7 @@ def settings(root, config, analysis_config=None, name=None):
     cfg = read_yaml(config)
     if analysis_config is not None:
         raise ValueError("build does not accept analysis overrides; use run_analysis.sh")
-    unknown = set(cfg) - {"name", "name_mode", "metadata", "metadata_provenance", "reuse_from", "rebuild_samples", "translation", "busco", "odb", "genegalleon", "slurm", "excluded_accessions", "storage"}
+    unknown = set(cfg) - {"name", "name_mode", "metadata", "metadata_provenance", "reuse_from", "rebuild_samples", "translation", "busco", "taxonomy", "odb", "genegalleon", "slurm", "excluded_accessions", "storage"}
     if unknown: raise ValueError(f"unknown build settings: {sorted(unknown)}; use config/build.yaml for build settings")
     cfg['name_mode'] = naming_mode(cfg)
     rebuild = cfg.setdefault('rebuild_samples', [])
@@ -71,6 +71,8 @@ def settings(root, config, analysis_config=None, name=None):
     analysis["translation"] = cfg["translation"]
     from busco_reference import settings as busco_settings
     busco_settings(root, cfg['busco'])
+    from taxonomy_reference import settings as taxonomy_settings
+    taxonomy_settings(root, cfg.setdefault('taxonomy', {}))
     if set(cfg["odb"]) - {"ncbi_tax_id", "chunk_size", "version"}:
         raise ValueError("unknown build.odb settings")
     analysis["odb"].update(cfg["odb"], incremental=True)
@@ -358,9 +360,11 @@ def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_a
                          "samples": {s: entry['source'] for s, entry in selection['reusable'].items()}}
         write_json(staging / 'reuse.json', reuse_receipt)
         auxiliary['reuse.json'] = dict(record(staging / 'reuse.json'), path=str(target / 'reuse.json'))
-        busco_reference = None
+        busco_reference = taxonomy_reference = None
         if needs_upstream and not defer:
             cfg["genegalleon"], gg_records, software_lock = resolve_software(cfg["genegalleon"])
+            from taxonomy_reference import prepare as prepare_taxonomy
+            taxonomy_reference = prepare_taxonomy(cfg['taxonomy'], cfg['genegalleon'])
             if any(row['busco'] == 'pending' for row in report):
                 from busco_reference import prepare as prepare_busco
                 busco_reference = prepare_busco(cfg['busco'], cfg['genegalleon'])
@@ -376,7 +380,7 @@ def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_a
                     "metadata": dict(record(frozen), path=str(target / "metadata.tsv")),
                     "auxiliary": auxiliary, "excluded": selection["excluded"], "raw_inputs": raw_records, "implementation": implementation(root),
                     "genegalleon": gg_records, "software_lock": software_lock,
-                    "busco_reference": busco_reference}
+                    "busco_reference": busco_reference, "taxonomy_reference": taxonomy_reference}
         from sample_processing import software_version
         manifest['phenoradar_prep_version'] = software_version(root)
         manifest['deferred_verification'] = defer
@@ -583,6 +587,13 @@ def gg_environment(manifest, item, products, work, task_id):
             raise ValueError('shared BUSCO reference has not been prepared; submit the build preparation job first')
         prepare_busco(manifest['config']['busco'], gg, expected=reference)
         mount_environment(env, reference)
+    if manifest['config'].get('taxonomy', {}).get('cache_dir'):
+        from taxonomy_reference import mount_environment, prepare as prepare_taxonomy
+        reference = manifest.get('taxonomy_reference')
+        if reference is None:
+            raise ValueError('shared taxonomy reference has not been prepared; submit the build preparation job first')
+        prepare_taxonomy(manifest['config']['taxonomy'], gg, expected=reference)
+        mount_environment(env, reference)
     # Imported checkpoints are verified by our registry. Disabled native producers
     # must not require their unavailable original isoforms/transcript outputs.
     for prefix in ('', 'SINGULARITYENV_', 'APPTAINERENV_'):
@@ -613,10 +624,11 @@ def gg_environment(manifest, item, products, work, task_id):
 
 
 def cleanup_genegalleon(path, manifest, item, stage, products, *, apply=True, discard_reads=False):
-    """Retire only owned scratch; products and native BUSCO receipts stay valid."""
+    """Retire scratch and completed sample work, preserving registered products."""
     if not discard_reads and manifest['config'].get('storage', {}).get('keep_intermediates', False):
         return
     from cleanup_work import cleanup, owned_path
+    from genegalleon_cleanup import POLICY_VERSION, completed_targets
     from genegalleon_run import runtime_directory
     path = Path(path)
     work = workspace(path, manifest, item)
@@ -625,6 +637,7 @@ def cleanup_genegalleon(path, manifest, item, stage, products, *, apply=True, di
     from contextlib import ExitStack
     with ExitStack() as guards:
         targets = []
+        completed, retained = False, []
         # The upstream stages share tmp/. Never clear another failed stage's work
         # just because a previously completed stage was requested again.
         errors = []
@@ -667,6 +680,12 @@ def cleanup_genegalleon(path, manifest, item, stage, products, *, apply=True, di
                             candidate = re.sub(r'\.(?:part|partial|tmp)$', '', name) if discard_reads else name
                             if candidate.endswith(('.fastq', '.fastq.gz', '.fq', '.fq.gz', '.sra')):
                                 targets.append((Path(root) / name).relative_to(path))
+            if stage == 'sample' and not discard_reads:
+                finished = completed_targets(path, work, manifest, item, products, apply=apply)
+                if finished is not None:
+                    completed = True
+                    extra, retained = finished
+                    targets.extend(extra)
         except (OSError, ValueError) as error:
             targets = []
             errors.append({'path': str(relative), 'error': str(error)})
@@ -674,9 +693,12 @@ def cleanup_genegalleon(path, manifest, item, stage, products, *, apply=True, di
             from cleanup_work import scratch_usage
             sizes = [scratch_usage(owned_path(path, target)) for target in targets]
             return {'targets': [str(t) for t in targets], 'errors': errors,
+                    'retained': retained,
                     **{key: sum(size[key] for size in sizes)
                        for key in ('files', 'allocated_bytes', 'reclaimable_bytes')}}
-        return cleanup(path, targets, path / 'jobs/cleanup' / f"{item['species']}.{stage}.json", errors=errors)
+        receipt = path / 'jobs/cleanup' / f"{item['species']}.{stage}.json"
+        details = {'completed_sample_cleanup': POLICY_VERSION, 'retained': retained} if completed else None
+        return cleanup(path, targets, receipt, errors=errors, details=details)
 
 
 def register_native(path, manifest, item, products, eligible, env):
@@ -700,6 +722,8 @@ def register_native(path, manifest, item, products, eligible, env):
                       'condition': manifest['config']['conditions'][stage]}
         if stage == 'busco' and manifest.get('busco_reference'):
             provenance['busco_reference'] = manifest['busco_reference']
+        if manifest.get('taxonomy_reference'):
+            provenance['taxonomy_reference'] = manifest['taxonomy_reference']
         from sample_processing import generating_conditions
         provenance['processing'] = generating_conditions(manifest)
         published = work / 'products'
@@ -779,6 +803,9 @@ def worker(path, task_id):
             if not products['busco'] and manifest.get('busco_reference'):
                 from busco_reference import verify_mount
                 verify_mount(manifest['busco_reference'], manifest['config']['genegalleon'], env)
+            if manifest.get('taxonomy_reference'):
+                from taxonomy_reference import verify_mount
+                verify_mount(manifest['taxonomy_reference'], manifest['config']['genegalleon'], env, work)
             with locked(work / '.native.lock') as native_lock:
                 subprocess.run(['bash', str(repository / 'workflow/gg_transcriptome_generation_entrypoint.sh')],
                                cwd=repository, env=env, check=True, pass_fds=(native_lock.fileno(),))
