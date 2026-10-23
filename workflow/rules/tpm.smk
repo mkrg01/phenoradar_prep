@@ -87,7 +87,7 @@ rule merge_tpm:
     params: runs=f"{TPM}/runs", out=TPM
     log: f"{LOG}/{ORTHOGROUP_EXPRESSION}/merge.log"
     conda: "../envs/analysis.yaml"
-    resources: mem_mb=8000
+    resources: mem_mb=32000
     shell:
         "{PYTHON:q} {input.code:q} --samples {input.samples:q} --run-dir {params.runs:q} "
         "--outdir {params.out:q} > {log:q} 2>&1"

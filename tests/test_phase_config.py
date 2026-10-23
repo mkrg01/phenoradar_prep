@@ -10,6 +10,15 @@ from phase_config import array_concurrency, execution_settings, merge_slurm, res
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_analysis_profile_requests_32gb_for_tpm_merge(tmp_path):
+    slurm = yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['slurm']
+    settings = execution_settings(slurm, None, build=False)
+    profile = write_profile(tmp_path / 'profile', settings)
+    actual = yaml.safe_load((profile / 'config.yaml').read_text())
+    assert actual['set-resources']['merge_tpm'] == {'mem_mb': 32000, 'runtime': 1440}
+    assert actual['set-threads']['merge_tpm'] == 1
+
+
 @pytest.mark.parametrize('duration,minutes', [
     ('1-00:00:00', 1440), ('3-00:00:00', 4320), ('14-00:00:00', 20160),
     ('02:00:00', 120), ('25:00:00', 1500), ('90', 90), ('90:30', 91),

@@ -109,6 +109,11 @@ OG expression aggregation processes up to 50 runs per Slurm job. Set
 `per_job_resources.aggregate_tpm` for each batch (default: one CPU and 2 GB).
 Logs are named `orthogroups/expression/batch_*.log`; retries reuse completed runs.
 
+`merge_tpm` combines the run tables in one job and reads each table once. It
+retains compact expression columns and writes wide tables one run at a time.
+The default request is one CPU and 32 GB; use `per_job_resources.merge_tpm` to
+override it.
+
 Resource overrides take precedence over rule defaults. Enable optional
 branches in the analysis settings.
 

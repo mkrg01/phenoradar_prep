@@ -65,6 +65,10 @@ slurm:
       cpus: 1
       mem_gb: 4
       time: "1-00:00:00"
+    merge_tpm:  # Merge expression tables using compact per-run buffers.
+      cpus: 1
+      mem_gb: 32
+      time: "1-00:00:00"
     kegg_verify_reference:  # Verify the KEGG snapshot with enough memory for the worker.
       cpus: 1
       mem_gb: 8
