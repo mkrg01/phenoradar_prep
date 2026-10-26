@@ -21,12 +21,21 @@ Analysis tools run inside the workflow container. Use a published release and
 prepare the image matching [VERSION](../VERSION):
 
 ```bash
-./run_pipeline.sh --prepare-container --cores 1 --resources mem_gb=4
+./run_pipeline.sh --prepare-container --cores 1 --resources mem_gb=16
 ```
 
 Prepare the image before the first mapping or analysis job, after changing
 releases, or when the image cache has been cleared. GeneGalleon uses
 [separate software](datasets.md#pinned-genegalleon-source-and-sif).
+
+The first OCI-to-SIF conversion needs more memory than running an existing
+image. Allocate at least 20 GB in Slurm to leave room for the launcher's 4 GB
+overhead reservation. Compression uses at most the requested CPUs and one
+quarter of the memory budget (capped at 4 GiB); temporary files stay on the
+image-cache filesystem. Failed pulls cannot publish a partial image.
+Job-specific limits require an unprivileged runtime installation; a setuid
+installation must already have sufficiently strict administrator
+`mksquashfs procs` and `mksquashfs mem` limits. System settings are never edited.
 
 Continue with [building a database and running analyses](datasets.md).
 
@@ -39,9 +48,9 @@ receipt in `.snakemake/slurm_submissions/`; reconcile that receipt before retryi
 New downstream analyses create a compact, verified `build_inputs/` index.
 Workers read only the selected product receipts rather than the full database.
 
-## Upgrading an unfinished v0.4.14 or v0.4.15 analysis
+## Upgrading an unfinished v0.4.14, v0.4.15 or v0.4.16 analysis
 
-With a clean v0.4.16 checkout, audit compatible reuse before applying it.
+With a clean v0.4.17 checkout, audit compatible reuse before applying it.
 For an existing analysis, explicitly opt in to the new 50% OG occupancy condition:
 
 ```bash

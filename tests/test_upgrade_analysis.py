@@ -20,7 +20,9 @@ def test_occupancy_migration_requires_explicit_condition_change(saved, requested
 
 
 @pytest.mark.parametrize('requested', [None, 0.5])
-def test_upgrade_backs_up_and_refreezes_only_declared_condition(tmp_path, monkeypatch, requested):
+@pytest.mark.parametrize('previous_version', ['0.4.14', '0.4.15', '0.4.16'])
+def test_upgrade_backs_up_and_refreezes_only_declared_condition(tmp_path, monkeypatch, requested,
+                                                               previous_version):
     import upgrade_analysis as module
     from dataset import implementation
     from dataset_assets import verify
@@ -37,11 +39,17 @@ def test_upgrade_backs_up_and_refreezes_only_declared_condition(tmp_path, monkey
                         'commit', '-qm', 'snapshot'], cwd=root, check=True)
         return subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
     monkeypatch.setattr(module, 'PREDECESSOR', commit())
+    snapshots = {'0.4.14': implementation(root)}
     (root / 'VERSION').write_text('0.4.15\n')
     monkeypatch.setattr(module, 'BATCHED', commit())
-    old_code = implementation(root)
+    snapshots['0.4.15'] = implementation(root)
     (root / 'VERSION').write_text('0.4.16\n')
     (root / 'workflow/scripts/alignment_selection.py').write_text('occupancy selection\n')
+    monkeypatch.setattr(module, 'OCCUPANCY', commit())
+    snapshots['0.4.16'] = implementation(root)
+    old_code = snapshots[previous_version]
+    (root / 'VERSION').write_text('0.4.17\n')
+    (root / 'workflow/scripts/container_pull.py').write_text('bounded compression\n')
     commit()
     path = root / 'results/test'; (path / 'jobs').mkdir(parents=True)
     config = {'alignment': {'enabled': True}, 'unchanged': {'value': 17}}

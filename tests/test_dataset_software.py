@@ -54,9 +54,11 @@ def source_download(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def runtime(monkeypatch):
+def runtime(monkeypatch, tmp_path):
     calls = []
     state = {"fail": False, "version": VERSION, "revision": REVISION}
+    config = tmp_path / 'runtime.conf'
+    config.write_text('mksquashfs procs = 0\n')
     monkeypatch.setattr(software.shutil, "which", lambda name: "/fake/apptainer" if name == "apptainer" else None)
     monkeypatch.setattr(software, "architecture", lambda: "amd64")
     def run(command, **kwargs):
@@ -68,6 +70,8 @@ def runtime(monkeypatch):
         if state["fail"]: raise subprocess.CalledProcessError(1, command)
         return subprocess.CompletedProcess(command, 0)
     def output(command, **kwargs):
+        if command[1:] == ['buildcfg']:
+            return f'APPTAINER_CONF_FILE={config}\nAPPTAINER_SUID_INSTALL=0\n'
         if command[1] == "inspect":
             return json.dumps({"data": {"attributes": {"labels": {
                 "org.opencontainers.image.version": state["version"],

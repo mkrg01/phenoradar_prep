@@ -23,29 +23,34 @@ from verification_cache import verification_cache
 
 PREDECESSOR = 'dddd331b5a2770bbe7709370cf3695834cc261eb'
 BATCHED = 'e7a0e1343f909666df140ea26c8d9f50fcdcaa0e'
+OCCUPANCY = '2729d40481974a1ffa1db73e9d6982d3f279d342'
 CHANGED = {'VERSION', 'run_pipeline.sh', 'workflow/rules/alignments.smk',
            'workflow/rules/build_inputs.smk', 'workflow/rules/tpm.smk',
            'workflow/scripts/analysis.py', 'workflow/scripts/build_products.py',
            'workflow/scripts/dataset.py', 'workflow/scripts/phase_config.py',
            'workflow/scripts/configuration.py', 'workflow/pipeline_defaults.yaml',
-           'workflow/scripts/filter_species.py', 'workflow/scripts/upgrade_analysis.py'}
+           'workflow/scripts/filter_species.py', 'workflow/scripts/upgrade_analysis.py',
+           'workflow/container.smk', 'workflow/scripts/dataset_software.py'}
 ADDED = {'workflow/scripts/alignment_batches.py', 'workflow/scripts/analysis_build_index.py',
          'workflow/scripts/slurm_submit.py', 'workflow/scripts/upgrade_analysis.py', 'workflow/slurm/sbatch',
-         'workflow/scripts/alignment_selection.py'}
+         'workflow/scripts/alignment_selection.py', 'workflow/scripts/container_pull.py'}
 BATCHED_CHANGES = {'VERSION', 'workflow/rules/alignments.smk', 'workflow/scripts/configuration.py',
                    'workflow/pipeline_defaults.yaml', 'workflow/scripts/filter_species.py',
-                   'workflow/scripts/upgrade_analysis.py'}
+                   'workflow/scripts/upgrade_analysis.py', 'workflow/container.smk',
+                   'workflow/scripts/dataset_software.py'}
+CONTAINER_CHANGES = {'VERSION', 'workflow/container.smk', 'workflow/scripts/dataset_software.py',
+                     'workflow/scripts/upgrade_analysis.py'}
 
 
 def audit_source(root, saved, current):
     previous = {str(Path(x['path']).relative_to(root)): x['sha256'] for x in saved}
-    candidates = [revision for revision in (PREDECESSOR, BATCHED)
+    candidates = [revision for revision in (PREDECESSOR, BATCHED, OCCUPANCY)
                   if hashlib.sha256(subprocess.check_output(
                       ['git', 'show', f'{revision}:VERSION'], cwd=root)).hexdigest() == previous.get('VERSION')]
     if len(candidates) != 1:
-        raise ValueError('frozen code must match audited v0.4.14 or v0.4.15')
+        raise ValueError('frozen code must match audited v0.4.14, v0.4.15 or v0.4.16')
     revision = candidates[0]
-    allowed = CHANGED if revision == PREDECESSOR else BATCHED_CHANGES
+    allowed = {PREDECESSOR: CHANGED, BATCHED: BATCHED_CHANGES, OCCUPANCY: CONTAINER_CHANGES}[revision]
     for relative, checksum in previous.items():
         old = subprocess.check_output(['git', 'show', f'{revision}:{relative}'], cwd=root)
         if hashlib.sha256(old).hexdigest() != checksum:
@@ -118,8 +123,8 @@ def upgrade(path, apply=False, min_sample_fraction=None):
     root = Path(manifest['root'])
     if (path / 'completed.json').exists():
         raise ValueError('completed analyses are immutable')
-    if (root / 'VERSION').read_text().strip() != '0.4.16':
-        raise ValueError('this audited upgrade requires v0.4.16')
+    if (root / 'VERSION').read_text().strip() != '0.4.17':
+        raise ValueError('this audited upgrade requires v0.4.17')
     subprocess.run(['git', 'diff', '--quiet', 'HEAD'], cwd=root, check=True)
     new = implementation(root)
     before_fraction, after_fraction = occupancy_condition(manifest, min_sample_fraction)

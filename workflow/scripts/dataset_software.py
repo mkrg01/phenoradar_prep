@@ -13,6 +13,7 @@ import urllib.request
 from pathlib import Path
 
 from common import now, sha256, write_json
+from container_pull import pull_image
 from dataset_assets import digest, locked, record, stat_identity, verification_cached, verify
 from verification_cache import active_cache
 
@@ -192,7 +193,7 @@ def fetch_image(config):
                 env[prefix + "_CACHEDIR"] = str(runtime_cache)
                 env[prefix + "_TMPDIR"] = str(scratch)
             env["TMPDIR"] = str(scratch)
-            subprocess.run([runtime, "pull", "--arch", identity["architecture"], str(image), uri], env=env, check=True)
+            pull_image(runtime, uri, image, architecture=identity['architecture'], env=env)
             shutil.rmtree(scratch)
             entry = record(image)
             if not entry["bytes"]: raise ValueError("downloaded GeneGalleon SIF is empty")

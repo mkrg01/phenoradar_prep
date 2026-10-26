@@ -286,7 +286,9 @@ def test_real_workflow_container_setup(batch_workspace, mode, deployment):
 
 
 @pytest.mark.parametrize("mode", ["batch", "direct"])
-def test_container_bootstrap_pulls_before_conda_probe_and_reuses_cache(batch_workspace, tmp_path, mode):
+@pytest.mark.parametrize('custom_prefix', [False, True])
+def test_container_bootstrap_pulls_before_conda_probe_and_reuses_cache(batch_workspace, tmp_path, mode,
+                                                                    custom_prefix):
     checkout, script, env = batch_workspace
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     if not snakemake:
@@ -296,8 +298,8 @@ def test_container_bootstrap_pulls_before_conda_probe_and_reuses_cache(batch_wor
     checkout.rename(renamed)
     checkout = renamed
     shutil.copyfile(ROOT / "workflow/container.smk", checkout / "workflow/container.smk")
-    (checkout / "workflow/scripts").mkdir()
-    shutil.copyfile(ROOT / "workflow/scripts/versioning.py", checkout / "workflow/scripts/versioning.py")
+    shutil.copytree(ROOT / 'workflow/scripts', checkout / 'workflow/scripts',
+                    ignore=shutil.ignore_patterns('__pycache__'))
     shutil.copyfile(ROOT / "VERSION", checkout / "VERSION")
     fake_bin = tmp_path / "bootstrap_bin"
     fake_bin.mkdir()
@@ -310,20 +312,32 @@ args = sys.argv[1:]
 if args == ["--version"]:
     print("apptainer version 1.4.2")
     raise SystemExit(0)
+if args == ['buildcfg']:
+    print(f'APPTAINER_CONF_FILE={Path(__file__).with_name("runtime.conf")}\nAPPTAINER_SUID_INSTALL=0')
+    raise SystemExit(0)
+if args[0] == 'inspect':
+    assert Path(args[-1]).is_file()
+    print('{"data":{"attributes":{}}}')
+    raise SystemExit(0)
 if args[0] == "pull":
-    image = Path(args[args.index("--name") + 1])
+    image = Path(args[-2])
+    limits = Path(os.environ['APPTAINER_CONFIG_FILE']).read_text()
+    assert 'mksquashfs procs = 1' in limits
+    assert 'mksquashfs mem = ' in limits
     image.write_text("synthetic image")
     event = {"action": "pull", "image": str(image.resolve()), "url": args[-1]}
 else:
     assert "exec" in args, args
     image = next(Path(arg) for arg in args if arg.endswith(".simg"))
     assert image.is_file(), "container was probed before it was pulled"
-    assert "conda info --json" in args[-1], args
+    assert args[-3:] == ['conda', 'info', '--json'], args
     event = {"action": "probe", "image": str(image.resolve())}
 with Path(os.environ["PHENORADAR_TEST_EVENTS"]).open("a") as handle:
     handle.write(json.dumps(event) + "\n")
 ''')
     command.chmod(0o755)
+    (fake_bin / 'apptainer').symlink_to(command)
+    (fake_bin / 'runtime.conf').write_text('mksquashfs procs = 0\n')
     forbidden = fake_bin / "conda"
     forbidden.write_text(f"#!{sys.executable}\nraise SystemExit('host Conda must not run')\n")
     forbidden.chmod(0o755)
@@ -333,13 +347,18 @@ with Path(os.environ["PHENORADAR_TEST_EVENTS"]).open("a") as handle:
     if mode == "direct":
         env = {k: v for k, v in env.items() if not k.startswith("SLURM_")}
         script = checkout / "run_pipeline.sh"
-    args = [str(script), "--prepare-container", "--cores", "1", "--resources", "mem_gb=4"]
+    args = [str(script), "--prepare-container", "--cores", "1", "--resources", "mem_gb=16"]
+    expected_cache = tmp_path / 'custom-images' if custom_prefix else checkout / '.snakemake/singularity'
+    if custom_prefix:
+        args += ['--apptainer-prefix', str(expected_cache)]
     for _ in range(2):
         result = subprocess.run(args, cwd=checkout, env=env, text=True, capture_output=True, timeout=60)
         assert result.returncode == 0, result.stdout + result.stderr
     records = [json.loads(line) for line in events.read_text().splitlines()]
     assert [r["action"] for r in records] == ["pull", "probe", "probe"]
-    assert len({r["image"] for r in records}) == 1
+    assert len({r['image'] for r in records if r['action'] == 'probe'}) == 1
+    assert not Path(records[0]['image']).exists()  # Only the complete image was published.
+    assert all(Path(r['image']).parent == expected_cache for r in records if r['action'] == 'probe')
     assert records[0]["url"].endswith(":v" + (ROOT / "VERSION").read_text().strip())
     assert not (checkout / "input").exists()
     assert not (checkout / "results").exists()
