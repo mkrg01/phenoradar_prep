@@ -231,6 +231,8 @@ def write_profile(destination, slurm):
                'slurm-no-account':True,
                'slurm-status-command':'squeue', 'slurm-init-seconds-before-status-checks':10,
                'seconds-between-status-checks':10}
+    profile['max-jobs-per-timespan'] = '1/2s'
+    profile['scheduler'] = 'greedy'
     profile['set-resources'] = {rule:_snakemake_resources(values) for rule,values in slurm.get('rules', {}).items()}
     profile['set-threads'] = {rule:values['cpus'] for rule,values in slurm.get('rules', {}).items() if 'cpus' in values}
     profile['set-resources'] = {rule: values for rule, values in profile['set-resources'].items() if values}

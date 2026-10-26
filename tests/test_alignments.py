@@ -275,8 +275,8 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
            "FAMSA_EVENTS": str(events), "FAMSA_FAIL_ONCE": str(fail_once), "FAKE_ODB_LOG": str(odb_events)}
     base = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(configfile),
             "--cores", "2", "--resources", "mem_mb=16000",
-            "--set-threads", "odb_map=1", "align_orthogroup=1",
-            "--set-resources", "odb_map:mem_mb=3000", "align_orthogroup:mem_mb=2000",
+            "--set-threads", "odb_map=1", "align_orthogroup_batch=1",
+            "--set-resources", "odb_map:mem_mb=3000", "align_orthogroup_batch:mem_mb=2000",
             "collect_orthogroup_proteins:mem_mb=2000", "finish_alignments:mem_mb=2000"]
 
     def execute(options=(), targets=("alignments",), fail=False):

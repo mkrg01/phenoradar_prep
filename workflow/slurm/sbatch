@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -euo pipefail
+exec "${PHENORADAR_SUBMIT_PYTHON:-python3}" "$(dirname -- "${BASH_SOURCE[0]}")/../scripts/slurm_submit.py" "$@"

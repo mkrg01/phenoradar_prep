@@ -1,24 +1,22 @@
 if config.get("build_manifest"):
-    BUILD_RUNS = {p['row']['run']: p for p in COMPLETED_BUILD['products'].values()}
-
     rule import_build_expression:
         input:
             completion=config['build_manifest'],
             samples=f"{META}/samples.tsv",
-            expression=lambda wc: BUILD_RUNS[wc.run]['expression']['path'],
-            qc=lambda wc: BUILD_RUNS[wc.run]['expression_qc']['path'],
-            code=f"{SCRIPTS}/build_products.py",
+            expression=lambda wc: BUILD_INPUTS.product(wc.run, 'run')['expression']['path'],
+            qc=lambda wc: BUILD_INPUTS.product(wc.run, 'run')['expression_qc']['path'],
+            code=ancient(f"{SCRIPTS}/build_products.py"),
             helpers=[f"{SCRIPTS}/portable_build.py", f"{SCRIPTS}/dataset_assets.py", f"{SCRIPTS}/product_storage.py"]
         output:
             tpm=f"{TPM}/runs/{{run}}.tsv.gz",
             qc=f"{TPM}/runs/{{run}}.qc.json"
         conda: "../envs/analysis.yaml"
-        # Each import loads the complete database manifest, including sample metadata.
+        params: index=BUILD_INDEX, implementation=BUILD_IMPORT_SIGNATURE
         resources: mem_mb=4000
         shell:
             "{PYTHON:q} {input.code:q} expression --completion {input.completion:q} "
             "--samples {input.samples:q} --run {wildcards.run:q} --output {output.tpm:q} "
-            "--qc {output.qc:q}"
+            "--qc {output.qc:q} --index {params.index:q}"
 else:
     from sample_table import expression_batches
 

@@ -11,8 +11,16 @@ Align each mapped OG with FAMSA, retaining all gene copies without trimming.
 ```
 
 To include alignments in `all`, set `alignment.enabled: true` before preparing
-the analysis. Each OG job defaults to 4 CPUs/8 GB; see
+the analysis. Weighted batches contain up to 500 OGs; inputs of 16 MB or more
+run individually. Each batch defaults to 12 CPUs/32 GB, running up to three
+FAMSA processes with four threads each; see
 [resource overrides](running.md#resource-budgets).
+
+OG alignments and provenance retain their original paths. A retried batch
+verifies and reuses completed OGs; missing or changed members invalidate only
+their batch receipt. `batches/*.json` records membership and reuse counts.
+Batch scheduling uses input FASTA size as a cost estimate; exceptionally large
+groups can still need a resource override.
 
 ## Inputs and outputs
 

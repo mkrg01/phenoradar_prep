@@ -73,9 +73,9 @@ slurm:
       cpus: 1
       mem_gb: 8
       time: "1-00:00:00"
-    align_orthogroup:  # Align each all-copy orthogroup.
-      cpus: 4
-      mem_gb: 8
+    align_orthogroup_batch:  # Align weighted OG batches, internally parallel.
+      cpus: 12
+      mem_gb: 32
       time: "1-00:00:00"
     annotate_kofam:  # Annotate batches of median-length OG representatives.
       cpus: 4

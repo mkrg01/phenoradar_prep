@@ -260,6 +260,7 @@ def implementation(root):
              Path(root, "workflow/Snakefile"), Path(root, "run_pipeline.sh"),
              *Path(root, "workflow").rglob("*.yaml"), *Path(root, "workflow").rglob("*.sh")]
     if Path(root, "VERSION").exists(): paths.append(Path(root, "VERSION"))
+    if Path(root, 'workflow/slurm/sbatch').exists(): paths.append(Path(root, 'workflow/slurm/sbatch'))
     return [record(p) for p in sorted(paths)]
 
 

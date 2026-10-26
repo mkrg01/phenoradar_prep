@@ -62,7 +62,10 @@ def run_workflow(project, overrides, *, dry_run=False):
     # Dry-run the actual remote profile as well as running its resource accounting
     # through Snakemake's local scheduler, without submitting to a real cluster.
     if dry_run: command += ['--dry-run']
-    else: command += ['--executor', 'local', '--cores', '8']
+    else:
+        # Isolate allocation accounting from the remote submission rate limit:
+        # these synthetic jobs finish before the next permitted Slurm submission.
+        command += ['--executor', 'local', '--cores', '8', '--max-jobs-per-timespan', '100/1s']
     return subprocess.run(command + ['--', 'all'], cwd=path, text=True, capture_output=True, timeout=90)
 
 

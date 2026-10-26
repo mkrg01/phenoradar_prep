@@ -56,6 +56,13 @@ else
 fi
 cd "$root"
 
+if [[ "$executor" == slurm ]]; then
+    export PHENORADAR_REAL_SBATCH=${PHENORADAR_REAL_SBATCH:-$(command -v sbatch)}
+    export PHENORADAR_SUBMIT_PYTHON=${PHENORADAR_SUBMIT_PYTHON:-$(command -v python3)}
+    export PHENORADAR_SUBMIT_STATE="$root/.snakemake/slurm_submissions"
+    export PATH="$root/workflow/slurm:$PATH"
+fi
+
 snakemake_bin=${SNAKEMAKE_BIN:-snakemake}
 command -v "$snakemake_bin" >/dev/null 2>&1 ||
     die "Snakemake is unavailable: $snakemake_bin. Install Snakemake and add it to PATH, or set SNAKEMAKE_BIN; see README.md requirements."

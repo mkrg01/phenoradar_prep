@@ -117,9 +117,10 @@ def complete(path):
         return completed
 
 
-def import_protein(completion, species, protein, provenance):
-    data = load_complete(completion, verify_files=False)
-    selected = [p for p in data['products'].values() if p['odb_species'] == species]
+def import_protein(completion, species, protein, provenance, index=None):
+    from analysis_build_index import BuildInputs
+    source = BuildInputs(completion, index or Path(completion).parent / '.no-index')
+    selected = [source.product(species, 'odb_species')]
     if len(selected) != 1: raise ValueError(f'protein absent from completed build: {species}')
     entry = stage_product(selected[0]['protein'], protein)
     info = json.loads(verify(selected[0]['translation']).read_text())
@@ -127,8 +128,9 @@ def import_protein(completion, species, protein, provenance):
     write_json(provenance, info)
 
 
-def subset_mapping(completion, samples, outdir):
-    data = load_complete(completion, verify_files=False)
+def subset_mapping(completion, samples, outdir, index=None):
+    from analysis_build_index import BuildInputs
+    data = BuildInputs(completion, index or Path(completion).parent / '.no-index').data
     rows = read_tsv(samples); names = {r['species'] for r in rows}
     if not names or names - data['products'].keys(): raise ValueError('analysis species absent from completed build')
     for row in rows:
@@ -139,8 +141,9 @@ def subset_mapping(completion, samples, outdir):
     return subset(verify(data['mapping']), names, outdir)
 
 
-def import_expression(completion, samples, run, output, qc):
-    data = load_complete(completion, verify_files=False)
+def import_expression(completion, samples, run, output, qc, index=None):
+    from analysis_build_index import BuildInputs
+    data = BuildInputs(completion, index or Path(completion).parent / '.no-index').data
     if data.get('tpm', {}).get('multimap') != 'error':
         raise ValueError('database TPM policy must be error')
     rows = [row for row in read_tsv(samples) if row['run'] == run]
@@ -160,8 +163,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['protein','mapping','expression'])
     parser.add_argument('--completion', required=True)
+    parser.add_argument('--index')
     for name in ('species','protein','provenance','samples','outdir','run','output','qc'): parser.add_argument('--' + name)
     args = parser.parse_args()
-    if args.action == 'protein': import_protein(args.completion,args.species,args.protein,args.provenance)
-    elif args.action == 'mapping': subset_mapping(args.completion,args.samples,args.outdir)
-    else: import_expression(args.completion,args.samples,args.run,args.output,args.qc)
+    if args.action == 'protein': import_protein(args.completion,args.species,args.protein,args.provenance,args.index)
+    elif args.action == 'mapping': subset_mapping(args.completion,args.samples,args.outdir,args.index)
+    else: import_expression(args.completion,args.samples,args.run,args.output,args.qc,args.index)

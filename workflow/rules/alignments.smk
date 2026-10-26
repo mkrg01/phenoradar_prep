@@ -1,15 +1,14 @@
-def alignment_files(wc, suffix, root):
-    inputs = checkpoints.collect_orthogroup_proteins.get().output.fasta
-    with open(Path(inputs) / "provenance.json") as handle:
-        groups = json.load(handle)["orthogroups"]
-    return [f"{root}/{og}.{suffix}" for og in groups]
+from alignment_batches import batch_targets
 
 
 def alignment_targets(wc):
-    # Request each OG directly: Snakemake otherwise considers a deleted MSA an
-    # unnecessary intermediate when the final provenance still exists.
-    return (ALIGNMENT_FINAL + alignment_files(wc, "faa", ALIGNMENTS)
-            + alignment_files(wc, "json", f"{LOG}/{ORTHOGROUP_ALIGNMENTS}"))
+    plan = checkpoints.plan_alignment_batches.get().output.plan
+    return ALIGNMENT_FINAL + batch_targets(plan, ALIGNMENTS, f'{LOG}/{ORTHOGROUP_ALIGNMENTS}')
+
+
+def alignment_batch_file(wc):
+    plan = checkpoints.plan_alignment_batches.get().output.plan
+    return str(Path(plan) / f'{wc.batch}.json')
 
 
 checkpoint collect_orthogroup_proteins:
@@ -30,35 +29,44 @@ checkpoint collect_orthogroup_proteins:
         "--protein-dir {params.proteins:q} --outdir {output.fasta:q} > {log:q} 2>&1"
 
 
-rule align_orthogroup:
-    wildcard_constraints: og="[A-Za-z0-9][A-Za-z0-9_.-]*"
+checkpoint plan_alignment_batches:
     input:
         proteins=lambda wc: checkpoints.collect_orthogroup_proteins.get().output.fasta,
-        code=f"{SCRIPTS}/align_orthogroups.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/busco_phylogeny.py"]
-    output:
-        alignment=f"{ALIGNMENTS}/{{og}}.faa",
-        provenance=f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/{{og}}.json"
-    params: fasta=lambda wc: f"{ALIGNMENT_INPUTS}/{wc.og}.faa"
-    threads: 4
-    resources: mem_mb=8000
-    conda: "../envs/alignment.yaml"
-    log: f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/{{og}}.log"
-    benchmark: f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/benchmarks/{{og}}.tsv"
+        code=f'{SCRIPTS}/alignment_batches.py'
+    output: plan=directory(f'{WORK}/{ORTHOGROUP_ALIGNMENTS}/batches')
+    resources: mem_mb=4000
+    conda: '../envs/alignment.yaml'
     shell:
-        "{PYTHON:q} {input.code:q} align --fasta {params.fasta:q} --output {output.alignment:q} "
-        "--provenance {output.provenance:q} --threads {threads} > {log:q} 2>&1"
+        '{PYTHON:q} {input.code:q} plan --inputs {input.proteins:q} --outdir {output.plan:q}'
+
+
+rule align_orthogroup_batch:
+    wildcard_constraints: batch='batch_[0-9]+'
+    input:
+        batch=alignment_batch_file,
+        code=f'{SCRIPTS}/alignment_batches.py',
+        aligner=f'{SCRIPTS}/align_orthogroups.py'
+    output: receipt=f'{ALIGNMENTS}/batches/{{batch}}.json'
+    params: inputs=ALIGNMENT_INPUTS, outdir=ALIGNMENTS, reports=f'{LOG}/{ORTHOGROUP_ALIGNMENTS}'
+    threads: 12
+    resources: mem_mb=32000
+    conda: '../envs/alignment.yaml'
+    log: f'{LOG}/{ORTHOGROUP_ALIGNMENTS}/batches/{{batch}}.log'
+    benchmark: f'{LOG}/{ORTHOGROUP_ALIGNMENTS}/batches/benchmarks/{{batch}}.tsv'
+    shell:
+        '{PYTHON:q} {input.code:q} batch --batch {input.batch:q} --inputs {params.inputs:q} '
+        '--outdir {params.outdir:q} --reports {params.reports:q} --receipt {output.receipt:q} '
+        '--cpus {threads} > {log:q} 2>&1'
 
 
 rule finish_alignments:
     input:
         proteins=lambda wc: checkpoints.collect_orthogroup_proteins.get().output.fasta,
-        alignments=lambda wc: alignment_files(wc, "faa", ALIGNMENTS),
-        reports=lambda wc: alignment_files(wc, "json", f"{LOG}/{ORTHOGROUP_ALIGNMENTS}"),
+        batches=lambda wc: batch_targets(checkpoints.plan_alignment_batches.get().output.plan,
+                                        ALIGNMENTS, f'{LOG}/{ORTHOGROUP_ALIGNMENTS}'),
         code=f"{SCRIPTS}/align_orthogroups.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/busco_phylogeny.py"]
-    output:
-        provenance=f"{ALIGNMENTS}/provenance.json"
+    output: provenance=f"{ALIGNMENTS}/provenance.json"
     params: outdir=ALIGNMENTS, reports=f"{LOG}/{ORTHOGROUP_ALIGNMENTS}"
     resources: mem_mb=8000
     conda: "../envs/alignment.yaml"

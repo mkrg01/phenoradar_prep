@@ -117,6 +117,9 @@ def prepare(root, name, config, build=None):
         resolved['work_root'] = str(collection / 'work/downstream' / name)
         resolved['log_root'] = str(collection / 'logs/downstream' / name)
         resolved['input_root'] = str(target / 'input')
+        from analysis_build_index import create_index
+        create_index(source, staging / 'build_inputs', completed,
+                     {r['species'] for r in report if r['selected']})
         (staging / 'pipeline.yaml').write_text(yaml.safe_dump(resolved, sort_keys=False))
         (staging / 'analysis.yaml').write_text(yaml.safe_dump(cfg, sort_keys=False))
         records = [dict(record(p), path=str(target / p.relative_to(staging))) for p in sorted(staging.rglob('*')) if p.is_file()]
@@ -158,6 +161,10 @@ def run(path, target='all', execution=None, local=False, cores=1, mem_mb=8000):
     path = Path(path).resolve()
     manifest = load(path, check_code=True)
     root = Path(manifest['root'])
+    if not (path / 'build_inputs/index.json').exists():
+        from analysis_build_index import create_index
+        create_index(manifest['build']['path'], path / 'build_inputs',
+                     species={r['species'] for r in manifest['selection'] if r['selected']})
     validate_analysis(manifest['pipeline'], [target])
     slurm = load_execution(execution) if execution else manifest['config']['slurm']
     slurm = validate_slurm(slurm, build=False)
@@ -166,12 +173,16 @@ def run(path, target='all', execution=None, local=False, cores=1, mem_mb=8000):
     if local: command += ['--cores',str(cores),'--resources',f'mem_mb={mem_mb}']
     else: command += ['--slurm','--profile',str(profile),'--jobs',str(workflow_jobs(slurm))]
     command += ['--configfile',str(path/'pipeline.yaml')]
+    pipeline_env = {**os.environ, 'PHENORADAR_ANALYSIS_PATH': str(path)}
+    if manifest.get('compatible_launcher'):
+        pipeline_env['SNAKEMAKE_BIN'] = str(verify(manifest['compatible_launcher']))
     with locked(path/'.run.lock'):
-        subprocess.run([*command,'--',target], cwd=root, check=True)
+        subprocess.run([*command,'--',target], cwd=root, check=True,
+                       env=pipeline_env)
         if target == 'all':
             subprocess.run([str(root/'run_pipeline.sh'),'--cores','1','--resources','mem_mb=4000',
                             '--configfile',str(path/'pipeline.yaml'),'--','phenoradar_inputs'], cwd=root, check=True,
-                           env={k:v for k,v in os.environ.items() if not k.startswith('SLURM_')})
+                           env={k:v for k,v in pipeline_env.items() if not k.startswith('SLURM_')})
             output = root / run_layout(manifest['pipeline'])[0]
             generated = [output / name for name in ('run.json', 'metadata', 'proteins', 'orthogroups',
                                                    'kegg', 'phylogeny', 'filtered', 'phenoradar_inputs')]
@@ -199,6 +210,9 @@ def submit(path, target='all', dry_run=False, resources=None):
                 import pwd
                 queued = subprocess.check_output(['squeue','--noheader','--user',pwd.getpwuid(os.getuid()).pw_name,'--format=%i'],text=True).splitlines()
                 if any(j.strip().split('_',1)[0] in ids for j in queued): raise ValueError('analysis still has queued/running jobs')
+                from slurm_submit import check_analysis_submissions
+                check_analysis_submissions(Path(manifest['root']) / '.snakemake/slurm_submissions',
+                                           path, {j.strip() for j in queued})
         number = 1 + max([int(p.name.split('_')[1].split('.')[0]) for p in jobs.glob('submission_*.resources.json')] + [0])
         execution = jobs/f'submission_{number:04d}.resources.json'
         write_json(execution, {'slurm':slurm,'sha256':digest(slurm)})
@@ -218,8 +232,11 @@ def submit(path, target='all', dry_run=False, resources=None):
         result = {'created_at':now(),'target':target,'command':cmd,'resources':record(execution),'state':'submitting','job_id':None}
         write_json(receipt,result)
         try: identifier = subprocess.check_output(cmd,text=True).strip().split(';')[0]
-        except (OSError,subprocess.CalledProcessError):
-            result['state']='rejected'; write_json(receipt,result); raise
+        except (OSError,subprocess.CalledProcessError) as error:
+            # A failed RPC can still have reached Slurm. Preserve ambiguity;
+            # subsequent submissions must reconcile the receipt first.
+            result['state'] = 'unknown' if isinstance(error, subprocess.CalledProcessError) else 'rejected'
+            write_json(receipt,result); raise
         if not identifier.isdigit():
             result['state']='unknown'; write_json(receipt,result); raise ValueError('unrecognized sbatch result; inspect queue before retrying')
         result.update(state='submitted',job_id=identifier); write_json(receipt,result)
@@ -299,6 +316,9 @@ def main():
 
 
 if __name__=='__main__':
-    try: main()
+    try:
+        from verification_cache import verification_cache
+        with verification_cache(Path(__file__).resolve().parents[2] / '.cache/verification.sqlite'):
+            main()
     except (ValueError,OSError,subprocess.CalledProcessError) as error:
         print(f'analysis: {error}',file=sys.stderr); sys.exit(1)
