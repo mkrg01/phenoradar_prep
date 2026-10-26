@@ -1,6 +1,7 @@
 import json
 import copy
 import subprocess
+from types import SimpleNamespace
 
 import yaml
 
@@ -20,7 +21,7 @@ def test_occupancy_migration_requires_explicit_condition_change(saved, requested
 
 
 @pytest.mark.parametrize('requested', [None, 0.5])
-@pytest.mark.parametrize('previous_version', ['0.4.14', '0.4.15', '0.4.16', '0.4.17'])
+@pytest.mark.parametrize('previous_version', ['0.4.14', '0.4.15', '0.4.16', '0.4.17', '0.4.18'])
 def test_upgrade_backs_up_and_refreezes_only_declared_condition(tmp_path, monkeypatch, requested,
                                                                previous_version):
     import upgrade_analysis as module
@@ -51,16 +52,19 @@ def test_upgrade_backs_up_and_refreezes_only_declared_condition(tmp_path, monkey
     (root / 'workflow/scripts/container_pull.py').write_text('bounded compression\n')
     monkeypatch.setattr(module, 'CONTAINER', commit())
     snapshots['0.4.17'] = implementation(root)
-    old_code = snapshots[previous_version]
     (root / 'VERSION').write_text('0.4.18\n')
+    monkeypatch.setattr(module, 'COMPRESSED_IMPORTS', commit())
+    snapshots['0.4.18'] = implementation(root)
+    old_code = snapshots[previous_version]
+    (root / 'VERSION').write_text('0.4.19\n')
     commit()
     path = root / 'results/test'; (path / 'jobs').mkdir(parents=True)
     config = {'alignment': {'enabled': True}, 'unchanged': {'value': 17}}
     for filename in ('analysis.yaml', 'pipeline.yaml'):
         (path / filename).write_text(yaml.safe_dump(config))
     previous_config = (path / 'pipeline.yaml').read_bytes()
-    output = path / 'tpm.tsv'; output.write_text('saved TPM\n')
-    old_output = record(output)
+    tpm_output = path / 'tpm.tsv'; tpm_output.write_text('saved TPM\n')
+    old_output = record(tpm_output)
     source = root / 'database.json'; source.write_text('{}')
     manifest = {'root': str(root), 'pipeline': copy.deepcopy(config), 'config': copy.deepcopy(config),
                 'build': record(source), 'implementation': old_code, 'selection': [],
@@ -69,7 +73,24 @@ def test_upgrade_backs_up_and_refreezes_only_declared_condition(tmp_path, monkey
     write_json(path / 'checksums.json', {'analysis.json': record(path / 'analysis.json')['sha256']})
     monkeypatch.setattr(module, 'load', lambda p: json.loads((p / 'analysis.json').read_text()))
     monkeypatch.setattr(module, 'load_complete', lambda p: {})
-    monkeypatch.setattr(module, 'verified_imports', lambda *args: [])
+    # Exercise real Snakemake metadata with both historical absolute protein
+    # outputs and relative expression outputs. Empty reuse lists hide API errors.
+    from snakemake.io import IOFile
+    from snakemake.persistence import Persistence
+    dag = SimpleNamespace(workflow=SimpleNamespace(
+        dag_settings=SimpleNamespace(max_checksum_file_size=0)))
+    persistence = Persistence(nolock=True, path=root / '.snakemake', dag=dag)
+    reusable = [('import_build_protein', str(path / 'protein.fa.gz')),
+                ('import_build_expression', 'results/test/expression.tsv.gz')]
+    unrelated = str(path / 'other.tsv')
+    records = {output: {'rule': rule, 'params': ['old import signature']}
+               for rule, output in reusable}
+    records[unrelated] = {'rule': 'merge_tpm', 'params': ['preserve this']}
+    for output, metadata in records.items():
+        persistence._record(persistence._metadata_path, metadata, IOFile(output))
+        persistence._record(persistence._incomplete_path, {'external_jobid': 'old'}, IOFile(output))
+    reuse = reusable + [('import_build_protein', unrelated)]
+    monkeypatch.setattr(module, 'verified_imports', lambda *args: reuse)
     def index(completion, destination, completed, species):
         write_json(destination / 'index.json', {'source': str(completion)})
     monkeypatch.setattr(module, 'create_index', index)
@@ -79,10 +100,22 @@ def test_upgrade_backs_up_and_refreezes_only_declared_condition(tmp_path, monkey
     monkeypatch.setenv('SLURM_JOB_ID', '123')  # The allocated audit itself is allowed.
     preview = module.upgrade(path, min_sample_fraction=requested)
     assert preview['state'] == 'ready'
+    assert preview['verified_import_outputs'] == len(reuse)
+    for output, metadata in records.items():
+        assert persistence.metadata(IOFile(output)) == metadata
     assert not list((path / 'jobs').glob('code_migration_*'))
     assert (path / 'pipeline.yaml').read_bytes() == previous_config
     result = module.upgrade(path, apply=True, min_sample_fraction=requested)
     assert result['state'] == 'upgraded'
+    assert result['reset_import_metadata'] == len(reusable)
+    backed_up = json.loads((path / 'jobs/code_migration_0003/import_metadata.json').read_text())
+    assert backed_up == [{'output': output, 'metadata': records[output]} for _, output in reusable]
+    checked = Persistence(nolock=True, path=root / '.snakemake', dag=dag)
+    for _, output in reusable:
+        assert checked.metadata(IOFile(output)) == {}
+        assert not checked._exists_record(checked._incomplete_path, IOFile(output))
+    assert checked.metadata(IOFile(unrelated)) == records[unrelated]
+    assert checked._exists_record(checked._incomplete_path, IOFile(unrelated))
     expected = 0 if requested is None else requested
     current = json.loads((path / 'analysis.json').read_text())
     for section, filename in [('pipeline', 'pipeline.yaml'), ('config', 'analysis.yaml')]:
@@ -94,7 +127,7 @@ def test_upgrade_backs_up_and_refreezes_only_declared_condition(tmp_path, monkey
     assert json.loads((path / 'checksums.json').read_text())['analysis.json'] == record(path / 'analysis.json')['sha256']
     assert (path / 'jobs/code_migration_0003/pipeline.yaml').read_bytes() == previous_config
     assert current['code_migrations'][-1]['analysis_conditions'] == {'before': 0, 'after': expected}
-    assert record(output) == old_output
+    assert record(tpm_output) == old_output
     assert module.upgrade(path, min_sample_fraction=requested)['state'] == 'already_upgraded'
 
 

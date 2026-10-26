@@ -26,6 +26,7 @@ PREDECESSOR = 'dddd331b5a2770bbe7709370cf3695834cc261eb'
 BATCHED = 'e7a0e1343f909666df140ea26c8d9f50fcdcaa0e'
 OCCUPANCY = '2729d40481974a1ffa1db73e9d6982d3f279d342'
 CONTAINER = '35c93ecbe3e43e48c4cac142fff39174847056fd'
+COMPRESSED_IMPORTS = '641fcfd0cc1bb7a44ff2fa25a087ea3f714e43ee'
 CHANGED = {'VERSION', 'run_pipeline.sh', 'workflow/rules/alignments.smk',
            'workflow/rules/build_inputs.smk', 'workflow/rules/tpm.smk',
            'workflow/scripts/analysis.py', 'workflow/scripts/build_products.py',
@@ -46,14 +47,15 @@ CONTAINER_CHANGES = {'VERSION', 'workflow/container.smk', 'workflow/scripts/data
 
 def audit_source(root, saved, current):
     previous = {str(Path(x['path']).relative_to(root)): x['sha256'] for x in saved}
-    candidates = [revision for revision in (PREDECESSOR, BATCHED, OCCUPANCY, CONTAINER)
+    candidates = [revision for revision in (PREDECESSOR, BATCHED, OCCUPANCY, CONTAINER, COMPRESSED_IMPORTS)
                   if hashlib.sha256(subprocess.check_output(
                       ['git', 'show', f'{revision}:VERSION'], cwd=root)).hexdigest() == previous.get('VERSION')]
     if len(candidates) != 1:
-        raise ValueError('frozen code must match audited v0.4.14 through v0.4.17')
+        raise ValueError('frozen code must match audited v0.4.14 through v0.4.18')
     revision = candidates[0]
     allowed = {PREDECESSOR: CHANGED, BATCHED: BATCHED_CHANGES, OCCUPANCY: CONTAINER_CHANGES,
-               CONTAINER: {'VERSION', 'workflow/scripts/upgrade_analysis.py'}}[revision]
+               CONTAINER: {'VERSION', 'workflow/scripts/upgrade_analysis.py'},
+               COMPRESSED_IMPORTS: {'VERSION', 'workflow/scripts/upgrade_analysis.py'}}[revision]
     for relative, checksum in previous.items():
         old = subprocess.check_output(['git', 'show', f'{revision}:{relative}'], cwd=root)
         if hashlib.sha256(old).hexdigest() != checksum:
@@ -150,8 +152,8 @@ def upgrade(path, apply=False, min_sample_fraction=None):
     root = Path(manifest['root'])
     if (path / 'completed.json').exists():
         raise ValueError('completed analyses are immutable')
-    if (root / 'VERSION').read_text().strip() != '0.4.18':
-        raise ValueError('this audited upgrade requires v0.4.18')
+    if (root / 'VERSION').read_text().strip() != '0.4.19':
+        raise ValueError('this audited upgrade requires v0.4.19')
     subprocess.run(['git', 'diff', '--quiet', 'HEAD'], cwd=root, check=True)
     new = implementation(root)
     before_fraction, after_fraction = occupancy_condition(manifest, min_sample_fraction)
@@ -168,6 +170,7 @@ def upgrade(path, apply=False, min_sample_fraction=None):
     if not apply:
         return result
     from snakemake.persistence import Persistence
+    from snakemake.io import IOFile
     binary = Path(sys.executable).with_name('snakemake')
     if not binary.is_file():
         raise ValueError('run the upgrade with the Snakemake host environment Python')
@@ -188,16 +191,16 @@ def upgrade(path, apply=False, min_sample_fraction=None):
         metadata_dag = SimpleNamespace(workflow=SimpleNamespace(
             dag_settings=SimpleNamespace(max_checksum_file_size=0)))
         persistence = Persistence(nolock=True, path=root / '.snakemake', dag=metadata_dag)
+        metadata = []
+        for rule, output in reuse:
+            saved = persistence.metadata(IOFile(output))
+            if saved and saved.get('rule') == rule:
+                metadata.append({'output': output, 'metadata': saved})
         backup = path / f'jobs/code_migration_{max(numbers, default=2) + 1:04d}'
         backup.mkdir(exist_ok=False)
         for name in ('analysis.json', 'checksums.json', 'run.json', 'pipeline.yaml', 'analysis.yaml'):
             if (path / name).exists():
                 shutil.copy2(path / name, backup / name)
-        metadata = []
-        for rule, output in reuse:
-            saved = persistence.metadata(output)
-            if saved and saved.get('rule') == rule:
-                metadata.append({'output': output, 'metadata': saved})
         write_json(backup / 'import_metadata.json', metadata)
         if not (path / 'build_inputs/index.json').exists():
             create_index(manifest['build']['path'], path / 'build_inputs', completed,
@@ -207,8 +210,11 @@ def upgrade(path, apply=False, min_sample_fraction=None):
                             ' --rerun-triggers mtime input params code "$@"\n')
         launcher.chmod(0o755)
         for item in metadata:
-            persistence.cleanup_metadata(item['output'])
-            persistence.cleanup_metadata(item['output'])
+            # cleanup_metadata short-circuits after removing an incomplete
+            # record; the second call also clears the corresponding metadata.
+            output = IOFile(item['output'])
+            persistence.cleanup_metadata(output)
+            persistence.cleanup_metadata(output)
         manifest['implementation'] = new
         manifest['compatible_launcher'] = record(launcher)
         for section in ('config', 'pipeline'):

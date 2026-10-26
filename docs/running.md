@@ -48,9 +48,9 @@ receipt in `.snakemake/slurm_submissions/`; reconcile that receipt before retryi
 New downstream analyses create a compact, verified `build_inputs/` index.
 Workers read only the selected product receipts rather than the full database.
 
-## Upgrading an unfinished v0.4.14 through v0.4.17 analysis
+## Upgrading an unfinished v0.4.14 through v0.4.18 analysis
 
-With a clean v0.4.18 checkout, audit compatible reuse before applying it.
+With a clean v0.4.19 checkout, audit compatible reuse before applying it.
 For an existing analysis, explicitly opt in to the new 50% OG occupancy condition:
 
 ```bash
