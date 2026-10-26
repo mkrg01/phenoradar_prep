@@ -15,15 +15,17 @@ import yaml
 from analysis import load
 from analysis_build_index import create_index
 from build_products import load_complete
-from common import now, read_tsv, write_json
+from common import content_sha256, now, read_tsv, write_json
 from dataset import implementation
-from dataset_assets import locked, record, verify
+from dataset_assets import locked, record, stat_identity, verify
 from mapping_tables import load_tables, relative_file
-from verification_cache import verification_cache
+from product_storage import decoded_sha256
+from verification_cache import active_cache, verification_cache
 
 PREDECESSOR = 'dddd331b5a2770bbe7709370cf3695834cc261eb'
 BATCHED = 'e7a0e1343f909666df140ea26c8d9f50fcdcaa0e'
 OCCUPANCY = '2729d40481974a1ffa1db73e9d6982d3f279d342'
+CONTAINER = '35c93ecbe3e43e48c4cac142fff39174847056fd'
 CHANGED = {'VERSION', 'run_pipeline.sh', 'workflow/rules/alignments.smk',
            'workflow/rules/build_inputs.smk', 'workflow/rules/tpm.smk',
            'workflow/scripts/analysis.py', 'workflow/scripts/build_products.py',
@@ -44,13 +46,14 @@ CONTAINER_CHANGES = {'VERSION', 'workflow/container.smk', 'workflow/scripts/data
 
 def audit_source(root, saved, current):
     previous = {str(Path(x['path']).relative_to(root)): x['sha256'] for x in saved}
-    candidates = [revision for revision in (PREDECESSOR, BATCHED, OCCUPANCY)
+    candidates = [revision for revision in (PREDECESSOR, BATCHED, OCCUPANCY, CONTAINER)
                   if hashlib.sha256(subprocess.check_output(
                       ['git', 'show', f'{revision}:VERSION'], cwd=root)).hexdigest() == previous.get('VERSION')]
     if len(candidates) != 1:
-        raise ValueError('frozen code must match audited v0.4.14, v0.4.15 or v0.4.16')
+        raise ValueError('frozen code must match audited v0.4.14 through v0.4.17')
     revision = candidates[0]
-    allowed = {PREDECESSOR: CHANGED, BATCHED: BATCHED_CHANGES, OCCUPANCY: CONTAINER_CHANGES}[revision]
+    allowed = {PREDECESSOR: CHANGED, BATCHED: BATCHED_CHANGES, OCCUPANCY: CONTAINER_CHANGES,
+               CONTAINER: {'VERSION', 'workflow/scripts/upgrade_analysis.py'}}[revision]
     for relative, checksum in previous.items():
         old = subprocess.check_output(['git', 'show', f'{revision}:{relative}'], cwd=root)
         if hashlib.sha256(old).hexdigest() != checksum:
@@ -75,6 +78,30 @@ def occupancy_condition(manifest, requested):
     return before, after
 
 
+def verified_import_product(source, target, saved):
+    """Check exact copies by stored bytes and converted imports by decoded bytes."""
+    if (Path(source['path']).suffix == '.gz') == (target.suffix == '.gz'):
+        verify(dict(source, path=str(target)))
+        return source
+    # Importers deliberately gzip historical plain products. Bind the saved
+    # receipt to the actual file before trusting its decoded-content identity.
+    before = stat_identity(target)
+    verify(dict(saved, path=str(target)))
+    cache = active_cache()
+    indexed = cache.document(target, 'import-decoded-v1', before, saved['sha256']) if cache else None
+    observed = indexed['sha256'] if indexed else decoded_sha256(target)
+    if before != stat_identity(target):
+        raise ValueError(f'import changed while verifying content: {target}')
+    expected = content_sha256(source)
+    if str(source['path']).endswith('.gz') and 'content_sha256' not in source:
+        expected = decoded_sha256(verify(source))
+    if observed != expected or ('content_sha256' in saved and saved['content_sha256'] != observed):
+        raise ValueError(f'cannot reuse changed imported content: {target}')
+    if cache is not None and indexed is None:
+        cache.remember_document(target, 'import-decoded-v1', before, saved['sha256'], {'sha256': observed})
+    return dict(saved, bytes=before[2])
+
+
 def verified_imports(path, manifest, completed):
     """Validate source-equivalent imports before resetting only their scheduler metadata."""
     root = Path(manifest['root'])
@@ -89,12 +116,12 @@ def verified_imports(path, manifest, completed):
         ]:
             if not first.exists() or not second.exists():
                 continue
-            verify(dict(product[report_key], path=str(first)))
             original = json.loads(verify(product[source_key]).read_text())
             saved = json.loads(second.read_text())
+            imported = verified_import_product(product[report_key], first, saved[report_key])
             if ({k: v for k, v in original.items() if k != report_key} !=
                     {k: v for k, v in saved.items() if k != report_key} or
-                    any(saved[report_key][k] != product[report_key][k] for k in ('bytes', 'sha256'))):
+                    any(saved[report_key][k] != imported[k] for k in ('bytes', 'sha256'))):
                 raise ValueError(f'cannot reuse changed imported provenance: {second}')
             for output in (first, second):
                 # Protein outputs were absolute; expression outputs were relative.
@@ -123,8 +150,8 @@ def upgrade(path, apply=False, min_sample_fraction=None):
     root = Path(manifest['root'])
     if (path / 'completed.json').exists():
         raise ValueError('completed analyses are immutable')
-    if (root / 'VERSION').read_text().strip() != '0.4.17':
-        raise ValueError('this audited upgrade requires v0.4.17')
+    if (root / 'VERSION').read_text().strip() != '0.4.18':
+        raise ValueError('this audited upgrade requires v0.4.18')
     subprocess.run(['git', 'diff', '--quiet', 'HEAD'], cwd=root, check=True)
     new = implementation(root)
     before_fraction, after_fraction = occupancy_condition(manifest, min_sample_fraction)

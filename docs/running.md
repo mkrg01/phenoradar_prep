@@ -48,9 +48,9 @@ receipt in `.snakemake/slurm_submissions/`; reconcile that receipt before retryi
 New downstream analyses create a compact, verified `build_inputs/` index.
 Workers read only the selected product receipts rather than the full database.
 
-## Upgrading an unfinished v0.4.14, v0.4.15 or v0.4.16 analysis
+## Upgrading an unfinished v0.4.14 through v0.4.17 analysis
 
-With a clean v0.4.17 checkout, audit compatible reuse before applying it.
+With a clean v0.4.18 checkout, audit compatible reuse before applying it.
 For an existing analysis, explicitly opt in to the new 50% OG occupancy condition:
 
 ```bash
@@ -60,7 +60,8 @@ python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/c
 
 Run this verification with an allocated controller-sized CPU/memory budget.
 It requires an idle repository, checks the pinned predecessor and unchanged
-scientific code/environments, verifies imported artifacts, and backs up the old
+scientific code/environments, verifies imported artifacts (including decoded
+content when legacy plain products were compressed), and backs up the old
 records under the next `jobs/code_migration_*/` directory. Omitting
 `--min-sample-fraction` preserves the saved condition; legacy analyses retain all
 OGs with an explicit `0`. Condition changes update the frozen settings and are

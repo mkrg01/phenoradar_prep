@@ -20,7 +20,7 @@ def test_occupancy_migration_requires_explicit_condition_change(saved, requested
 
 
 @pytest.mark.parametrize('requested', [None, 0.5])
-@pytest.mark.parametrize('previous_version', ['0.4.14', '0.4.15', '0.4.16'])
+@pytest.mark.parametrize('previous_version', ['0.4.14', '0.4.15', '0.4.16', '0.4.17'])
 def test_upgrade_backs_up_and_refreezes_only_declared_condition(tmp_path, monkeypatch, requested,
                                                                previous_version):
     import upgrade_analysis as module
@@ -47,9 +47,12 @@ def test_upgrade_backs_up_and_refreezes_only_declared_condition(tmp_path, monkey
     (root / 'workflow/scripts/alignment_selection.py').write_text('occupancy selection\n')
     monkeypatch.setattr(module, 'OCCUPANCY', commit())
     snapshots['0.4.16'] = implementation(root)
-    old_code = snapshots[previous_version]
     (root / 'VERSION').write_text('0.4.17\n')
     (root / 'workflow/scripts/container_pull.py').write_text('bounded compression\n')
+    monkeypatch.setattr(module, 'CONTAINER', commit())
+    snapshots['0.4.17'] = implementation(root)
+    old_code = snapshots[previous_version]
+    (root / 'VERSION').write_text('0.4.18\n')
     commit()
     path = root / 'results/test'; (path / 'jobs').mkdir(parents=True)
     config = {'alignment': {'enabled': True}, 'unchanged': {'value': 17}}
@@ -119,3 +122,64 @@ def test_upgrade_only_reuses_source_equivalent_imports(tmp_path):
     write_json(paths[1], data)
     with pytest.raises(ValueError, match='changed imported provenance'):
         verified_imports(out, manifest, completed)
+
+
+@pytest.mark.parametrize('kind', ['protein', 'expression'])
+@pytest.mark.parametrize('compressed_source', [False, True])
+def test_upgrade_reuses_real_imports_with_legacy_compression(tmp_path, monkeypatch, kind, compressed_source):
+    import build_products
+    from analysis_build_index import BuildInputs
+    from product_storage import product_record
+    source = tmp_path / ('source.gz' if compressed_source else 'source')
+    content = b'>Plant_R1_g1\nMAST\n' if kind == 'protein' else b'gene\ttpm\nPlant_R1_g1\t2\n'
+    if compressed_source:
+        import gzip
+        source.write_bytes(gzip.compress(content, mtime=0))
+    else:
+        source.write_bytes(content)
+    provenance = tmp_path / 'source.json'
+    metadata = {'translation_table': 1} if kind == 'protein' else {'run': 'R1', 'species': 'Plant_R1'}
+    write_json(provenance, dict(metadata, **{kind: product_record(source)}))
+    product = {'odb_species': 'Plant_R1', 'row': {'run': 'R1'}, kind: product_record(source),
+               'translation' if kind == 'protein' else 'expression_qc': record(provenance)}
+    completed = {'products': {'Plant_R1': product}, 'tpm': {'multimap': 'error'}}
+    monkeypatch.setattr(BuildInputs, 'data', property(lambda self: completed))
+    out = tmp_path / 'analysis'
+    target = out / ('proteins/Plant_R1_protein.fa.gz' if kind == 'protein' else
+                    'orthogroups/expression/runs/R1.tsv.gz')
+    report = target.with_name('Plant_R1_protein.json' if kind == 'protein' else 'R1.qc.json')
+    if kind == 'protein':
+        build_products.import_protein('unused', 'Plant_R1', target, report)
+    else:
+        monkeypatch.setattr(build_products, 'read_tsv', lambda _: [{'species': 'Plant_R1', 'run': 'R1',
+                                                                 'abundance': str(source)}])
+        product['abundance'] = product[kind]
+        build_products.import_expression('unused', 'unused', 'R1', target, report)
+    manifest = {'root': str(tmp_path), 'pipeline': {'output_root': 'analysis'}}
+    before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in (target, report)}
+    assert len(verified_imports(out, manifest, completed)) == 2
+    assert {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in (target, report)} == before
+    # A self-consistent replacement receipt must not disguise altered sequences/TPM.
+    import gzip
+    target.write_bytes(gzip.compress(content + b'changed\n', mtime=0))
+    data = json.loads(report.read_text()); data[kind] = product_record(target)
+    write_json(report, data)
+    with pytest.raises(ValueError, match='changed imported content|registered file changed'):
+        verified_imports(out, manifest, completed)
+
+
+def test_converted_import_verification_cache_tracks_file_identity(tmp_path, monkeypatch):
+    import gzip
+    import upgrade_analysis as module
+    from product_storage import product_record
+    from verification_cache import verification_cache
+    source = tmp_path / 'source.fa'; source.write_bytes(b'>a\nMAST\n')
+    target = tmp_path / 'target.fa.gz'; target.write_bytes(gzip.compress(source.read_bytes(), mtime=0))
+    saved = product_record(target)
+    with verification_cache(tmp_path / 'verification.sqlite'):
+        module.verified_import_product(record(source), target, saved)
+        monkeypatch.setattr(module, 'decoded_sha256', lambda _: pytest.fail('unchanged content was re-read'))
+        module.verified_import_product(record(source), target, saved)
+        target.write_bytes(gzip.compress(b'>a\nWRONG\n', mtime=0))
+        with pytest.raises(ValueError, match='registered file changed'):
+            module.verified_import_product(record(source), target, saved)
