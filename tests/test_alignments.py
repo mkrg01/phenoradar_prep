@@ -304,6 +304,24 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     times = {p.name: p.stat().st_mtime_ns for p in out.glob("*.faa")}
     assert "Nothing to be done" in execute()
 
+    # Tightening occupancy only changes selection; shared completed OGs and the
+    # all-OG collection are reused. Returning to 50% reuses the retained OG too.
+    raw_collection = tmp_path / 'work/test/orthogroups/alignments/inputs/provenance.json'
+    measured = tmp_path / 'work/test/orthogroups/alignments/occupancy/occupancy.tsv'
+    source_times = [p.stat().st_mtime_ns for p in (raw_collection, measured)]
+    for fraction, expected in [(1, {'OG1', 'OG2'}), (0.5, {'OG1', 'OG2', 'OG3'})]:
+        config['alignment']['min_sample_fraction'] = fraction
+        configfile.write_text(yaml.safe_dump(config))
+        execute()
+        inventory = json.loads((out / 'provenance.json').read_text())
+        assert {r['orthogroup'] for r in inventory['alignments']} == expected
+        assert all((out / name).stat().st_mtime_ns == t for name, t in times.items())
+        assert [p.stat().st_mtime_ns for p in (raw_collection, measured)] == source_times
+    (out / 'occupancy.tsv').unlink()
+    execute()
+    assert (out / 'occupancy.tsv').is_file()
+    assert all((out / name).stat().st_mtime_ns == t for name, t in times.items())
+
     # Missing output + interrupted rerun: only the affected OG is recomputed.
     (out / "OG2.faa").unlink()
     fail_once.touch()

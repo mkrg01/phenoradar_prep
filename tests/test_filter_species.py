@@ -222,6 +222,37 @@ def test_alignment_without_completion_record_is_incomplete(snapshot, tmp_path):
     assert not (tmp_path / "filtered/orthogroups/alignments").exists()
 
 
+def test_sample_occupancy_subset_preserves_selected_og_membership_checks(snapshot, tmp_path):
+    source, traits = snapshot
+    path = source / 'orthogroups/alignments/provenance.json'
+    report = json.loads(path.read_text())
+    report['alignments'] = [r for r in report['alignments'] if r['orthogroup'] == 'OGshared']
+    report['selection'] = {'min_sample_fraction': 0.5, 'total_samples': 5,
+                           'minimum_samples': 3, 'selected_orthogroups': 1}
+    write_json(path, report)
+    out = tmp_path / 'filtered'
+    export(source, ['Plant_A'], out, traits)
+    saved = json.loads((out / 'orthogroups/alignments/filter_qc.json').read_text())
+    assert [r['orthogroup'] for r in saved['alignments']] == ['OGshared']
+    assert saved['source_selection'] == report['selection']
+    low = source / 'orthogroups/alignments/OGempty.faa'
+    report['alignments'].append(dict(orthogroup='OGempty', alignment=file_record(low)))
+    report['selection']['selected_orthogroups'] = 2
+    write_json(path, report)
+    with pytest.raises(ValueError, match='below the occupancy threshold'):
+        export(source, [], tmp_path / 'below_threshold', traits)
+    report['alignments'].pop()
+    report['selection']['selected_orthogroups'] = 1
+    # A missing gene within the selected OG is still an integrity failure.
+    fasta = source / 'orthogroups/alignments/OGshared.faa'
+    records = list(fasta_records(fasta))[1:]
+    fasta.write_text(''.join(f'>{gene}\n{sequence}\n' for gene, sequence in records))
+    report['alignments'][0]['alignment'] = file_record(fasta)
+    write_json(path, report)
+    with pytest.raises(ValueError, match='membership differs'):
+        export(source, [], tmp_path / 'damaged', traits)
+
+
 @pytest.mark.parametrize("damage", ["format", "unknown_species", "duplicate", "empty", "unequal_lengths", "missing_gene", "missing_og", "duplicate_og"])
 def test_alignment_id_and_membership_checks_use_fasta(snapshot, tmp_path, damage):
     source, traits = snapshot

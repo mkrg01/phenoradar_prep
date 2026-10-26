@@ -6,7 +6,7 @@ KEYS = {
     "selection": "busco_threshold species_list",
     "translation": "table",
     "odb": "ncbi_tax_id incremental cache_dir chunk_size version",
-    "alignment": "enabled",
+    "alignment": "enabled min_sample_fraction",
     "kegg": "enabled ambiguity",
     "phylogeny": "trees lineage "
         "outgroup max_markers min_protein_length max_unknown_fraction "
@@ -40,6 +40,8 @@ def validate_keys(config):
             raise ValueError(f"{key} must be null or a directory")
     if type(config.get("storage", {}).get("keep_intermediates", False)) is not bool:
         raise ValueError("storage.keep_intermediates must be true or false")
+    from alignment_selection import validate_fraction
+    validate_fraction(config.get('alignment', {}).get('min_sample_fraction', 0.5))
     odb = config.get("odb", {})
     from odb_settings import validate as validate_odb
     validate_odb(odb)

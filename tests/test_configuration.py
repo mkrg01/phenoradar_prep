@@ -34,6 +34,18 @@ def test_odb_ncbi_tax_id_accepts_integer_taxonomy_ids(value):
     validate_keys({"odb": {"ncbi_tax_id": value}})
 
 
+@pytest.mark.parametrize('value', [0, 0.5, 1, 0.07])
+def test_alignment_occupancy_accepts_fractions(value):
+    validate_keys({'alignment': {'min_sample_fraction': value}})
+
+
+@pytest.mark.parametrize('value', [None, True, False, -0.1, 1.01, 50, '50%', '0.5',
+                                 float('nan'), float('inf'), [], {}])
+def test_alignment_occupancy_rejects_invalid_fractions(value):
+    with pytest.raises(ValueError, match='alignment.min_sample_fraction'):
+        validate_keys({'alignment': {'min_sample_fraction': value}})
+
+
 @pytest.mark.parametrize("value", [None, True, False, 0, -1, 3193.0, "3193"])
 def test_odb_ncbi_tax_id_rejects_invalid_values(value):
     with pytest.raises(ValueError, match="odb.ncbi_tax_id must be a positive integer"):

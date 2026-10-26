@@ -99,7 +99,7 @@ representative trees and contrast pairs; review these choices for your dataset.
 
 | Setting | Guide |
 | --- | --- |
-| `alignment.enabled` | [All-copy OG alignments](alignments.md) |
+| `alignment.enabled`, `alignment.min_sample_fraction` | [All-copy OG alignments](alignments.md); default sample occupancy 0.5 |
 | `kegg.enabled`, `kegg.ambiguity` | [KO annotation and expression](kegg.md) |
 | `phylogeny.trees`, marker and outgroup settings | [BUSCO trees](phylogeny.md) |
 | `phylogeny.dating` | [Calibrations and dating](dating.md) |

@@ -325,7 +325,7 @@ class Export:
             unique = relative.endswith("_wide.tsv") or relative.endswith("mapping_qc.tsv")
             self.subset_table(relative, ["species", "run"], self.run_row, unique_runs=unique, complete_runs=True)
 
-    def verify_gene_owners(self, db, table_name, gene_column):
+    def verify_gene_owners(self, db, table_name, gene_column, orthogroups=None):
         if self.inventory['sections']['odb']['status'] != 'ready': return
         snapshot = self.input(self.source / ORTHOGROUP_MAPPING / 'snapshot.json')
         db.execute(f'CREATE INDEX owners_species ON {table_name}(species)')
@@ -335,7 +335,8 @@ class Export:
             genes, _ = read_species(snapshot, species)
             if table_name == 'members':
                 actual = set(db.execute('SELECT gene,og FROM members WHERE species=?', (species,)))
-                expected = {(gene,og) for gene,ogs in genes.items() for og in ogs}
+                expected = {(gene,og) for gene,ogs in genes.items() for og in ogs
+                            if orthogroups is None or og in orthogroups}
                 if actual != expected:
                     raise ValueError('alignment gene/OG membership differs from completed ODB mappings')
             else:
@@ -384,9 +385,21 @@ class Export:
                     output.unlink()
                     empty.append(og)
                 records.append(dict(orthogroup=og, before=len(seen), after=after, columns=width))
-            self.verify_gene_owners(db, "members", "gene")
+            selection = report.get('selection')
+            if selection is not None:
+                if selection['selected_orthogroups'] != len(declared):
+                    raise ValueError('alignment selection differs from the completed inventory')
+                from alignment_selection import minimum_samples
+                if (selection['total_samples'] != len(self.species) or
+                        selection['minimum_samples'] != minimum_samples(
+                            selection['min_sample_fraction'], len(self.species))):
+                    raise ValueError('alignment selection differs from the source samples')
+                if any(count < selection['minimum_samples'] for _, count in db.execute(
+                        'SELECT og,COUNT(DISTINCT species) FROM members GROUP BY og')):
+                    raise ValueError('completed OG alignment is below the occupancy threshold')
+            self.verify_gene_owners(db, "members", "gene", set(declared) if selection is not None else None)
             write_json(destination / "filter_qc.json", {"realigned": False, "columns_changed": False,
-                       "empty_orthogroups": empty, "alignments": records})
+                       "source_selection": selection, "empty_orthogroups": empty, "alignments": records})
             self.counts["alignment_sequences"] = dict(before=sum(r["before"] for r in records), after=sum(r["after"] for r in records))
         (self.stage / ".alignment_members.sqlite").unlink()
 

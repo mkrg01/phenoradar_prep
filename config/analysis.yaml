@@ -9,6 +9,7 @@ selection:
   busco_threshold: 0.5  # Minimum complete BUSCO fraction (single + duplicated); 0.5 = 50%.
 alignment:
   enabled: true  # Include all-copy orthogroup alignments in the all target.
+  min_sample_fraction: 0.5  # Align OGs present in at least this fraction of selected samples; 0 keeps all.
 kegg:
   enabled: true  # Include KO annotation and expression in the all target.
   ambiguity: duplicate  # Multi-KO orthogroups: duplicate TPM to each KO, drop the OG, or error.

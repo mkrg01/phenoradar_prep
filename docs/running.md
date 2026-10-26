@@ -39,20 +39,24 @@ receipt in `.snakemake/slurm_submissions/`; reconcile that receipt before retryi
 New downstream analyses create a compact, verified `build_inputs/` index.
 Workers read only the selected product receipts rather than the full database.
 
-## Upgrading an unfinished v0.4.14 analysis
+## Upgrading an unfinished v0.4.14 or v0.4.15 analysis
 
-With a clean v0.4.15 checkout, audit compatible reuse before applying it:
+With a clean v0.4.16 checkout, audit compatible reuse before applying it.
+For an existing analysis, explicitly opt in to the new 50% OG occupancy condition:
 
 ```bash
-python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/carnivory
-python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/carnivory --apply
+python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/carnivory --min-sample-fraction 0.5
+python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/carnivory --min-sample-fraction 0.5 --apply
 ```
 
 Run this verification with an allocated controller-sized CPU/memory budget.
 It requires an idle repository, checks the pinned predecessor and unchanged
 scientific code/environments, verifies imported artifacts, and backs up the old
-records under `jobs/code_migration_0003/`. Only verified import-job metadata is
-reset. A pinned compatibility launcher retains input/mtime/parameter/code rerun
+records under the next `jobs/code_migration_*/` directory. Omitting
+`--min-sample-fraction` preserves the saved condition; legacy analyses retain all
+OGs with an explicit `0`. Condition changes update the frozen settings and are
+recorded with before/after values. Only verified import-job metadata is reset.
+A pinned compatibility launcher retains input/mtime/parameter/code rerun
 checks while allowing the verified unchanged tool environments to be reused.
 Use the normal submission command afterward; retain four FAMSA threads
 per OG to reuse existing alignments. New batch resource overrides use

@@ -1,4 +1,4 @@
-"""Audit and upgrade an unfinished v0.4.14 analysis to the batched workflow."""
+"""Audit reusable outputs and explicitly migrate unfinished analysis conditions."""
 import argparse
 import hashlib
 import json
@@ -7,6 +7,10 @@ import shutil
 import subprocess
 import shlex
 import sys
+import re
+from types import SimpleNamespace
+
+import yaml
 
 from analysis import load
 from analysis_build_index import create_index
@@ -18,12 +22,52 @@ from mapping_tables import load_tables, relative_file
 from verification_cache import verification_cache
 
 PREDECESSOR = 'dddd331b5a2770bbe7709370cf3695834cc261eb'
+BATCHED = 'e7a0e1343f909666df140ea26c8d9f50fcdcaa0e'
 CHANGED = {'VERSION', 'run_pipeline.sh', 'workflow/rules/alignments.smk',
            'workflow/rules/build_inputs.smk', 'workflow/rules/tpm.smk',
            'workflow/scripts/analysis.py', 'workflow/scripts/build_products.py',
-           'workflow/scripts/dataset.py', 'workflow/scripts/phase_config.py'}
+           'workflow/scripts/dataset.py', 'workflow/scripts/phase_config.py',
+           'workflow/scripts/configuration.py', 'workflow/pipeline_defaults.yaml',
+           'workflow/scripts/filter_species.py', 'workflow/scripts/upgrade_analysis.py'}
 ADDED = {'workflow/scripts/alignment_batches.py', 'workflow/scripts/analysis_build_index.py',
-         'workflow/scripts/slurm_submit.py', 'workflow/scripts/upgrade_analysis.py', 'workflow/slurm/sbatch'}
+         'workflow/scripts/slurm_submit.py', 'workflow/scripts/upgrade_analysis.py', 'workflow/slurm/sbatch',
+         'workflow/scripts/alignment_selection.py'}
+BATCHED_CHANGES = {'VERSION', 'workflow/rules/alignments.smk', 'workflow/scripts/configuration.py',
+                   'workflow/pipeline_defaults.yaml', 'workflow/scripts/filter_species.py',
+                   'workflow/scripts/upgrade_analysis.py'}
+
+
+def audit_source(root, saved, current):
+    previous = {str(Path(x['path']).relative_to(root)): x['sha256'] for x in saved}
+    candidates = [revision for revision in (PREDECESSOR, BATCHED)
+                  if hashlib.sha256(subprocess.check_output(
+                      ['git', 'show', f'{revision}:VERSION'], cwd=root)).hexdigest() == previous.get('VERSION')]
+    if len(candidates) != 1:
+        raise ValueError('frozen code must match audited v0.4.14 or v0.4.15')
+    revision = candidates[0]
+    allowed = CHANGED if revision == PREDECESSOR else BATCHED_CHANGES
+    for relative, checksum in previous.items():
+        old = subprocess.check_output(['git', 'show', f'{revision}:{relative}'], cwd=root)
+        if hashlib.sha256(old).hexdigest() != checksum:
+            raise ValueError(f'frozen code differs from audited predecessor: {relative}')
+    for entry in current:
+        relative = str(Path(entry['path']).relative_to(root))
+        if relative not in previous:
+            if relative not in ADDED:
+                raise ValueError(f'unaudited new source: {relative}')
+        elif previous[relative] != entry['sha256'] and relative not in allowed:
+            raise ValueError(f'unaudited source change: {relative}')
+    if set(previous) - {str(Path(x['path']).relative_to(root)) for x in current}:
+        raise ValueError('audited upgrade cannot remove source files')
+    return revision
+
+
+def occupancy_condition(manifest, requested):
+    """Omitting the new option preserves the legacy all-OG condition explicitly."""
+    from alignment_selection import validate_fraction
+    before = manifest['pipeline']['alignment'].get('min_sample_fraction', 0)
+    after = before if requested is None else validate_fraction(requested)
+    return before, after
 
 
 def verified_imports(path, manifest, completed):
@@ -68,65 +112,64 @@ def verified_imports(path, manifest, completed):
     return reusable
 
 
-def upgrade(path, apply=False):
+def upgrade(path, apply=False, min_sample_fraction=None):
     path = Path(path).resolve()
     manifest = load(path)
     root = Path(manifest['root'])
     if (path / 'completed.json').exists():
         raise ValueError('completed analyses are immutable')
-    if (root / 'VERSION').read_text().strip() != '0.4.15':
-        raise ValueError('this audited upgrade requires v0.4.15')
+    if (root / 'VERSION').read_text().strip() != '0.4.16':
+        raise ValueError('this audited upgrade requires v0.4.16')
     subprocess.run(['git', 'diff', '--quiet', 'HEAD'], cwd=root, check=True)
     new = implementation(root)
-    if {x['path']: x['sha256'] for x in new} == {x['path']: x['sha256'] for x in manifest['implementation']}:
+    before_fraction, after_fraction = occupancy_condition(manifest, min_sample_fraction)
+    same_code = {x['path']: x['sha256'] for x in new} == {
+        x['path']: x['sha256'] for x in manifest['implementation']}
+    if same_code and before_fraction == after_fraction:
         return {'state': 'already_upgraded'}
-    previous = {}
-    for entry in manifest['implementation']:
-        relative = str(Path(entry['path']).relative_to(root))
-        old = subprocess.check_output(['git', 'show', f'{PREDECESSOR}:{relative}'], cwd=root)
-        if hashlib.sha256(old).hexdigest() != entry['sha256']:
-            raise ValueError(f'frozen code does not match audited v0.4.14: {relative}')
-        previous[relative] = entry['sha256']
-    for entry in new:
-        relative = str(Path(entry['path']).relative_to(root))
-        if relative not in previous:
-            if relative not in ADDED:
-                raise ValueError(f'unaudited new source: {relative}')
-        elif previous[relative] != entry['sha256'] and relative not in CHANGED:
-            raise ValueError(f'unaudited source change: {relative}')
-    if set(previous) - {str(Path(x['path']).relative_to(root)) for x in new}:
-        raise ValueError('audited upgrade cannot remove source files')
+    revision = (subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+                if same_code else audit_source(root, manifest['implementation'], new))
     completed = load_complete(manifest['build']['path'])
     reuse = verified_imports(path, manifest, completed)
-    result = {'state': 'ready', 'verified_import_outputs': len(reuse), 'from_commit': PREDECESSOR}
+    result = {'state': 'ready', 'verified_import_outputs': len(reuse), 'from_commit': revision,
+              'alignment.min_sample_fraction': {'before': before_fraction, 'after': after_fraction}}
     if not apply:
         return result
     from snakemake.persistence import Persistence
+    binary = Path(sys.executable).with_name('snakemake')
+    if not binary.is_file():
+        raise ValueError('run the upgrade with the Snakemake host environment Python')
     before = record(path / 'analysis.json')['sha256']
     with locked(path / '.run.lock'), locked(path / 'jobs/.submit.lock'):
         if record(path / 'analysis.json')['sha256'] != before:
             raise ValueError('analysis changed during upgrade verification')
         queue = subprocess.check_output(['squeue', '-h', '-u', str(__import__('os').getuid()),
                                          '-o', '%i|%Z'], text=True)
-        if any(line.strip().endswith('|' + str(root)) for line in queue.splitlines()):
+        current_job = __import__('os').environ.get('SLURM_JOB_ID')
+        if any(line.strip().endswith('|' + str(root)) and line.split('|')[0] != current_job
+               for line in queue.splitlines()):
             raise ValueError('repository still has queued/running jobs; inspect them before upgrading')
-        backup = path / 'jobs/code_migration_0003'
+        numbers = [int(p.name.rsplit('_', 1)[1]) for p in (path / 'jobs').glob('code_migration_*')
+                   if re.fullmatch(r'code_migration_[0-9]+', p.name)]
+        # Snakemake 9.8 requires the checksum setting even for metadata-only
+        # operations. No workflow/DAG evaluation or input hashing is needed here.
+        metadata_dag = SimpleNamespace(workflow=SimpleNamespace(
+            dag_settings=SimpleNamespace(max_checksum_file_size=0)))
+        persistence = Persistence(nolock=True, path=root / '.snakemake', dag=metadata_dag)
+        backup = path / f'jobs/code_migration_{max(numbers, default=2) + 1:04d}'
         backup.mkdir(exist_ok=False)
-        for name in ('analysis.json', 'checksums.json', 'run.json'):
+        for name in ('analysis.json', 'checksums.json', 'run.json', 'pipeline.yaml', 'analysis.yaml'):
             if (path / name).exists():
                 shutil.copy2(path / name, backup / name)
-        persistence = Persistence(nolock=True, path=root / '.snakemake')
         metadata = []
         for rule, output in reuse:
             saved = persistence.metadata(output)
             if saved and saved.get('rule') == rule:
                 metadata.append({'output': output, 'metadata': saved})
         write_json(backup / 'import_metadata.json', metadata)
-        create_index(manifest['build']['path'], path / 'build_inputs', completed,
-                     {r['species'] for r in manifest['selection'] if r['selected']})
-        binary = Path(sys.executable).with_name('snakemake')
-        if not binary.is_file():
-            raise ValueError('run the upgrade with the Snakemake host environment Python')
+        if not (path / 'build_inputs/index.json').exists():
+            create_index(manifest['build']['path'], path / 'build_inputs', completed,
+                         {r['species'] for r in manifest['selection'] if r['selected']})
         launcher = backup / 'snakemake'
         launcher.write_text('#!/usr/bin/env bash\nset -euo pipefail\nexec ' + shlex.quote(str(binary)) +
                             ' --rerun-triggers mtime input params code "$@"\n')
@@ -136,11 +179,21 @@ def upgrade(path, apply=False):
             persistence.cleanup_metadata(item['output'])
         manifest['implementation'] = new
         manifest['compatible_launcher'] = record(launcher)
-        manifest['files'].extend(record(p) for p in sorted((path / 'build_inputs').rglob('*.json')))
-        event = {'created_at': now(), 'from_commit': PREDECESSOR,
+        for section in ('config', 'pipeline'):
+            manifest[section]['alignment']['min_sample_fraction'] = after_fraction
+        (path / 'pipeline.yaml').write_text(yaml.safe_dump(manifest['pipeline'], sort_keys=False))
+        (path / 'analysis.yaml').write_text(yaml.safe_dump(manifest['config'], sort_keys=False))
+        files = {entry['path']: entry for entry in manifest['files']}
+        for p in [path / 'pipeline.yaml', path / 'analysis.yaml', *sorted((path / 'build_inputs').rglob('*.json'))]:
+            entry = record(p)
+            files[entry['path']] = entry
+        manifest['files'] = list(files.values())
+        event = {'created_at': now(), 'from_commit': revision,
                  'to_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip(),
                  'backup': str(backup), 'verified_import_outputs': len(reuse),
-                 'reason': 'Batch scheduling and indexed imports; scientific algorithms and environments unchanged.'}
+                 'analysis_conditions': result['alignment.min_sample_fraction'],
+                 'reason': 'Explicit OG sample-occupancy selection; retained OG alignment algorithms, '
+                           'tool environments and other analysis conditions unchanged.'}
         manifest.setdefault('code_migrations', []).append(event)
         write_json(path / 'analysis.json', manifest)
         write_json(path / 'checksums.json', {'analysis.json': record(path / 'analysis.json')['sha256']})
@@ -152,7 +205,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--analysis', required=True)
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--min-sample-fraction', type=float,
+                        help='explicitly change OG sample occupancy; omitted preserves the saved condition')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     with verification_cache(root / '.cache/verification.sqlite'):
-        print(json.dumps(upgrade(args.analysis, args.apply), indent=2))
+        print(json.dumps(upgrade(args.analysis, args.apply, args.min_sample_fraction), indent=2))

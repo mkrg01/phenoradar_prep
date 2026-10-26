@@ -75,6 +75,7 @@ def test_restricted_batch_worker_does_not_open_database(workflow_project, tmp_pa
     inputs.mkdir(parents=True)
     (inputs / 'OG1.faa').write_text('>Plant_g1\nMAA\n')
     write_json(inputs / 'provenance.json', {'orthogroups': ['OG1']})
+    (inputs.parent / 'selected').symlink_to(inputs, target_is_directory=True)
     plan(inputs, inputs.parent / 'batches')
     database = tmp_path / 'unreadable-database.json'
     database.write_text('not database JSON; unrelated workers must never parse this')

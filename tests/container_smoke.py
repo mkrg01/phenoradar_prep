@@ -101,7 +101,8 @@ def phylogeny(work):
 def check_environment(name):
     manifest = json.loads(MANIFEST.read_text())
     assert Path(sys.prefix) == Path(manifest["environments"][name]), sys.prefix
-    imports = {"analysis": ["pandas", "ete4", "matplotlib"], "dating": ["Bio", "ete4"],
+    imports = {"alignment": ["alignment_selection"],
+               "analysis": ["pandas", "ete4", "matplotlib"], "dating": ["Bio", "ete4"],
                "monophy": ["ete4"], "phylogeny": ["Bio", "ete4", "numpy", "cdskit"],
                "timetree": ["Bio", "nwkit"]}
     commands = {"alignment": ["famsa"], "kofam": ["exec_annotation", "hmmsearch"],

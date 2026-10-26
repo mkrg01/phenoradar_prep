@@ -2,7 +2,8 @@
 
 [Documentation](index.md)
 
-Align each mapped OG with FAMSA, retaining all gene copies without trimming.
+Align mapped OGs meeting a sample-occupancy threshold with FAMSA, retaining all
+gene copies within selected OGs without trimming.
 
 ## Running
 
@@ -10,8 +11,24 @@ Align each mapped OG with FAMSA, retaining all gene copies without trimming.
 ./run_analysis.sh submit --analysis results/leaf/downstream/carnivory --target alignments
 ```
 
-To include alignments in `all`, set `alignment.enabled: true` before preparing
-the analysis. Weighted batches contain up to 500 OGs; inputs of 16 MB or more
+Set these conditions before preparing an analysis:
+
+```yaml
+alignment:
+  enabled: true
+  min_sample_fraction: 0.5
+```
+
+The default `0.5` selects OGs represented in at least 50% of the selected sample
+IDs in `metadata/samples.tsv`, after sample exclusions and BUSCO selection.
+The required count is rounded up: 5,582 samples require at least 2,791.
+Each sample counts once even with multiple gene copies; distinct sample IDs from
+the same biological species count separately. All copies of a retained OG are
+aligned. Allowed values are 0–1; `0` retains all observed OGs and `1` requires
+every selected sample. An empty qualifying set produces an empty inventory.
+This condition affects OG alignments, not TPM aggregation or BUSCO-marker trees.
+
+Weighted batches contain up to 500 selected OGs; inputs of 16 MB or more
 run individually. Each batch defaults to 12 CPUs/32 GB, running up to three
 FAMSA processes with four threads each; see
 [resource overrides](running.md#resource-budgets).
@@ -32,7 +49,11 @@ aggregation rejects such assignments.
 Results are in `results/<build>/downstream/<analysis>/orthogroups/alignments/`:
 
 - `{og}.faa`: untrimmed alignment with original gene IDs.
+- `occupancy.tsv`: counts, fractions and selection decisions for all candidate OGs.
 - `provenance.json`: completed alignment inventory and provenance.
+
+Read the completed inventory to identify active OGs. Existing alignments below
+the threshold remain available for reuse but are not published to PhenoRadar.
 
 Remove the final `_g{number}` to recover the sample ID, then join
 `metadata/samples.tsv` for biological species. Alignment columns identify sites;

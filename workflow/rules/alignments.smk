@@ -1,9 +1,13 @@
 from alignment_batches import batch_targets
 
+SELECTED_ALIGNMENT_INPUTS = f'{WORK}/{ORTHOGROUP_ALIGNMENTS}/selected'
+ALIGNMENT_OCCUPANCY = f'{WORK}/{ORTHOGROUP_ALIGNMENTS}/occupancy'
+
 
 def alignment_targets(wc):
     plan = checkpoints.plan_alignment_batches.get().output.plan
-    return ALIGNMENT_FINAL + batch_targets(plan, ALIGNMENTS, f'{LOG}/{ORTHOGROUP_ALIGNMENTS}')
+    return (ALIGNMENT_FINAL + [f'{ALIGNMENTS}/occupancy.tsv']
+            + batch_targets(plan, ALIGNMENTS, f'{LOG}/{ORTHOGROUP_ALIGNMENTS}'))
 
 
 def alignment_batch_file(wc):
@@ -29,25 +33,52 @@ checkpoint collect_orthogroup_proteins:
         "--protein-dir {params.proteins:q} --outdir {output.fasta:q} > {log:q} 2>&1"
 
 
+rule measure_alignment_occupancy:
+    input:
+        proteins=lambda wc: checkpoints.collect_orthogroup_proteins.get().output.fasta,
+        samples=f'{META}/samples.tsv', mapping=f'{MAPPING}/snapshot.json',
+        tables=f'{MAPPING}/species', code=f'{SCRIPTS}/alignment_selection.py'
+    output:
+        counts=f'{ALIGNMENT_OCCUPANCY}/occupancy.tsv',
+        provenance=f'{ALIGNMENT_OCCUPANCY}/provenance.json'
+    params: outdir=ALIGNMENT_OCCUPANCY
+    resources: mem_mb=4000
+    conda: '../envs/alignment.yaml'
+    log: f'{LOG}/{ORTHOGROUP_ALIGNMENTS}/occupancy.log'
+    shell:
+        '{PYTHON:q} {input.code:q} measure --inputs {input.proteins:q} --samples {input.samples:q} '
+        '--mapping {input.mapping:q} --outdir {params.outdir:q} > {log:q} 2>&1'
+
+
 checkpoint plan_alignment_batches:
     input:
         proteins=lambda wc: checkpoints.collect_orthogroup_proteins.get().output.fasta,
-        code=f'{SCRIPTS}/alignment_batches.py'
-    output: plan=directory(f'{WORK}/{ORTHOGROUP_ALIGNMENTS}/batches')
+        counts=rules.measure_alignment_occupancy.output.counts,
+        occupancy=rules.measure_alignment_occupancy.output.provenance,
+        code=f'{SCRIPTS}/alignment_batches.py', selection_code=f'{SCRIPTS}/alignment_selection.py'
+    output:
+        fasta=directory(SELECTED_ALIGNMENT_INPUTS),
+        plan=directory(f'{WORK}/{ORTHOGROUP_ALIGNMENTS}/batches')
+    params: occupancy=ALIGNMENT_OCCUPANCY, fraction=config['alignment']['min_sample_fraction']
     resources: mem_mb=4000
     conda: '../envs/alignment.yaml'
+    log: f'{LOG}/{ORTHOGROUP_ALIGNMENTS}/selection.log'
     shell:
-        '{PYTHON:q} {input.code:q} plan --inputs {input.proteins:q} --outdir {output.plan:q}'
+        '({PYTHON:q} {input.selection_code:q} select --inputs {input.proteins:q} '
+        '--occupancy {params.occupancy:q} --outdir {output.fasta:q} '
+        '--min-sample-fraction {params.fraction} && '
+        '{PYTHON:q} {input.code:q} plan --inputs {output.fasta:q} --outdir {output.plan:q}) > {log:q} 2>&1'
 
 
 rule align_orthogroup_batch:
     wildcard_constraints: batch='batch_[0-9]+'
     input:
         batch=alignment_batch_file,
+        selection_manifest=f'{SELECTED_ALIGNMENT_INPUTS}/provenance.json',
         code=f'{SCRIPTS}/alignment_batches.py',
         aligner=f'{SCRIPTS}/align_orthogroups.py'
     output: receipt=f'{ALIGNMENTS}/batches/{{batch}}.json'
-    params: inputs=ALIGNMENT_INPUTS, outdir=ALIGNMENTS, reports=f'{LOG}/{ORTHOGROUP_ALIGNMENTS}'
+    params: inputs=SELECTED_ALIGNMENT_INPUTS, outdir=ALIGNMENTS, reports=f'{LOG}/{ORTHOGROUP_ALIGNMENTS}'
     threads: 12
     resources: mem_mb=32000
     conda: '../envs/alignment.yaml'
@@ -61,12 +92,14 @@ rule align_orthogroup_batch:
 
 rule finish_alignments:
     input:
-        proteins=lambda wc: checkpoints.collect_orthogroup_proteins.get().output.fasta,
+        proteins=lambda wc: checkpoints.plan_alignment_batches.get().output.fasta,
         batches=lambda wc: batch_targets(checkpoints.plan_alignment_batches.get().output.plan,
                                         ALIGNMENTS, f'{LOG}/{ORTHOGROUP_ALIGNMENTS}'),
-        code=f"{SCRIPTS}/align_orthogroups.py",
+        code=f"{SCRIPTS}/alignment_selection.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/busco_phylogeny.py"]
-    output: provenance=f"{ALIGNMENTS}/provenance.json"
+    output:
+        provenance=f"{ALIGNMENTS}/provenance.json",
+        occupancy=f"{ALIGNMENTS}/occupancy.tsv"
     params: outdir=ALIGNMENTS, reports=f"{LOG}/{ORTHOGROUP_ALIGNMENTS}"
     resources: mem_mb=8000
     conda: "../envs/alignment.yaml"

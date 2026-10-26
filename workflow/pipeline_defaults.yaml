@@ -20,6 +20,7 @@ odb:
   ncbi_tax_id: 3193  # NCBI Taxonomy ID of the OrthoDB mapping clade; Embryophyta.
 alignment:
   enabled: false
+  min_sample_fraction: 0.5  # Fraction of selected sample IDs represented in each OG; 0 keeps all OGs.
 kegg:
   enabled: false
   ambiguity: duplicate
