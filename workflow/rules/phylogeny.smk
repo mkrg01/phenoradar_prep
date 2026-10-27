@@ -144,7 +144,9 @@ rule collect_busco_markers:
         "--species-dir {params.species_dir:q} --outdir {output.fasta:q} > {log:q} 2>&1"
 
 
+# Keep each marker chain in one cluster allocation; completed stages remain reusable.
 rule align_busco_marker:
+    group: "busco_marker"
     wildcard_constraints: marker="[A-Za-z0-9][A-Za-z0-9_.-]*"
     input:
         markers=rules.collect_busco_markers.output.fasta,
@@ -170,6 +172,7 @@ rule align_busco_marker:
 
 
 rule trim_busco_marker:
+    group: "busco_marker"
     wildcard_constraints: marker="[A-Za-z0-9][A-Za-z0-9_.-]*"
     input:
         alignment=f"{PHYLO_RUN}/alignments/raw/{{marker}}.faa",
@@ -196,6 +199,7 @@ rule trim_busco_marker:
 
 
 rule infer_busco_gene_tree:
+    group: "busco_marker"
     input:
         alignment=f"{PHYLO_RUN}/alignments/{{marker}}.faa",
         alignment_qc=f"{PHYLO_RUN}/alignments/{{marker}}.json",

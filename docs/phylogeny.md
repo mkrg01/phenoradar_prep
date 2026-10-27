@@ -126,8 +126,15 @@ gene-tree error, paralogy, and model assumptions affect the estimates.
 
 ## Resources
 
-Marker alignment and gene-tree jobs default to 4 CPUs/8 GB; species-tree inference
-uses 32 CPUs/64 GB. See [resource overrides](running.md#resource-budgets).
+On Slurm, each marker's alignment, trimming, and gene-tree inference share one
+`busco_marker` group job. Different markers and tree sets remain separate jobs.
+Stages already complete before submission are reused on resume. Local execution
+keeps the normal scheduler.
+
+The group requests the largest CPU/memory requirement among its pending stages
+(default: 4 CPUs/8 GB) and sums their time limits. Per-rule resource overrides
+still apply. Species-tree inference remains separate at 32 CPUs/64 GB.
+See [resource overrides](running.md#resource-budgets).
 Logs are under `results/<build>/logs/downstream/<analysis>/phylogeny/`.
 
 ## Methods
