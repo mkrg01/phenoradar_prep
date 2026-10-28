@@ -10,6 +10,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+READ_ONLY_COMMAND = (len(sys.argv) > 1 and
+                    ((sys.argv[1] == 'status' and '--verify' not in sys.argv) or
+                     (sys.argv[1] == 'submit' and '--dry-run' in sys.argv)))
+if __name__ == '__main__' and READ_ONLY_COMMAND:
+    sys.dont_write_bytecode = True
+
 import yaml
 from build_products import load_complete
 from portable_build import completion_path, input_entries
@@ -145,16 +151,18 @@ def load(path, check_code=False):
     return manifest
 
 
-def status(path):
-    manifest = load(path)
-    done = Path(path) / 'completed.json'
-    if done.exists():
-        for entry in json.loads(done.read_text())['files']: verify(entry)
-    from storage_management import storage_report
-    return {'storage': storage_report(path, manifest, 'analysis'),
-            'name':manifest['name'], 'build':manifest['build']['path'], 'state':'complete' if done.exists() else 'prepared',
-            'selection':manifest['selection'],
-            'submissions':[json.loads(p.read_text()) for p in sorted((Path(path)/'jobs').glob('submission_*.json')) if not p.name.endswith('.resources.json')]}
+def status(path, verify_outputs=False):
+    from analysis_status import status as observe
+    report = observe(path)
+    if verify_outputs:
+        manifest = load(path)
+        done = Path(path) / 'completed.json'
+        if done.exists():
+            for entry in json.loads(done.read_text())['files']: verify(entry)
+        from storage_management import storage_report
+        report['storage'] = storage_report(path, manifest, 'analysis')
+        report['verification'] = {'performed': True, 'scope': 'frozen inputs and recorded completed outputs'}
+    return report
 
 
 def run(path, target='all', execution=None, local=False, cores=1, mem_mb=8000):
@@ -177,50 +185,96 @@ def run(path, target='all', execution=None, local=False, cores=1, mem_mb=8000):
     if manifest.get('compatible_launcher'):
         pipeline_env['SNAKEMAKE_BIN'] = str(verify(manifest['compatible_launcher']))
     with locked(path/'.run.lock'):
-        subprocess.run([*command,'--',target], cwd=root, check=True,
-                       env=pipeline_env)
-        if target == 'all':
-            subprocess.run([str(root/'run_pipeline.sh'),'--cores','1','--resources','mem_mb=4000',
-                            '--configfile',str(path/'pipeline.yaml'),'--','phenoradar_inputs'], cwd=root, check=True,
-                           env={k:v for k,v in pipeline_env.items() if not k.startswith('SLURM_')})
-            output = root / run_layout(manifest['pipeline'])[0]
-            generated = [output / name for name in ('run.json', 'metadata', 'proteins', 'orthogroups',
-                                                   'kegg', 'phylogeny', 'filtered', 'phenoradar_inputs')]
-            files = [p for part in generated for p in ([part] if part.is_file() else sorted(part.rglob('*'))) if p.is_file()]
-            write_json(path/'completed.json', {'created_at':now(), 'build':manifest['build'],
-                       'files':[record(p) for p in files]})
+        from analysis_runtime import RunState
+        state = RunState(path, target, execution)
+        pipeline_env.update(PHENORADAR_RUN_TOKEN=state.token, PHENORADAR_RUN_STATE=str(state.path))
+        try:
+            state.phase('computing')
+            subprocess.run([*command,'--',target], cwd=root, check=True, env=pipeline_env)
+            if target == 'all':
+                state.phase('exporting')
+                subprocess.run([str(root/'run_pipeline.sh'),'--cores','1','--resources','mem_mb=4000',
+                                '--configfile',str(path/'pipeline.yaml'),'--','phenoradar_inputs'], cwd=root, check=True,
+                               env={k:v for k,v in pipeline_env.items() if not k.startswith('SLURM_')})
+                state.phase('recording_completion')
+                output = root / run_layout(manifest['pipeline'])[0]
+                generated = [output / name for name in ('run.json', 'metadata', 'proteins', 'orthogroups',
+                                                       'kegg', 'phylogeny', 'filtered', 'phenoradar_inputs')]
+                files = [p for part in generated for p in ([part] if part.is_file() else sorted(part.rglob('*'))) if p.is_file()]
+                write_json(path/'completed.json', {'created_at':now(), 'build':manifest['build'],
+                           'run_token':state.token, 'controller_id':state.data['controller_id'],
+                           'files':[record(p) for p in files]})
+                state.phase('complete')
+            else:
+                state.phase('target_complete')
+        except BaseException as error:
+            state.phase('interrupted' if isinstance(error, KeyboardInterrupt) else 'failed',
+                        last_error=str(error)[-1600:])
+            raise
 
 
-def submit(path, target='all', dry_run=False, resources=None):
-    path = Path(path).resolve()
+def submission_guard(path, manifest):
+    from analysis_status import submissions
+    ids = []
+    for receipt, old in submissions(path):
+        if old['state'] in {'submitting','unknown'}:
+            raise ValueError(f'unresolved submission in {receipt}; inspect Slurm before retrying')
+        if old.get('job_id'): ids.append(str(old['job_id']))
+    # Also look for workers of an exited controller, using the existing scoped
+    # submission records. Unrelated jobs never block this analysis.
+    worker_records = Path(manifest['root']) / '.snakemake/slurm_submissions'
+    if ids or worker_records.exists():
+        import pwd
+        queued = subprocess.check_output(['squeue','--noheader','--user',pwd.getpwuid(os.getuid()).pw_name,'--format=%i'],
+                                         text=True, timeout=12).splitlines()
+        if any(j.strip().split('_',1)[0] in ids for j in queued):
+            raise ValueError('analysis still has queued/running jobs')
+        from slurm_submit import check_analysis_submissions
+        check_analysis_submissions(worker_records, path, {j.strip() for j in queued})
+
+
+def preflight(path, target, resources):
     manifest = load(path, check_code=True)
     validate_analysis(manifest['pipeline'], [target])
     slurm = execution_settings(manifest['config']['slurm'], resources, build=False)
     worker_budgets(slurm)
-    jobs = path/'jobs'; jobs.mkdir(exist_ok=True); (jobs/'logs').mkdir(exist_ok=True)
-    with locked(jobs/'.submit.lock'):
-        previous = [p for p in jobs.glob('submission_*.json') if not p.name.endswith('.resources.json')]
-        if not dry_run:
-            ids = []
-            for p in previous:
-                old = json.loads(p.read_text())
-                if old['state'] in {'submitting','unknown'}: raise ValueError(f'unresolved submission in {p}; inspect Slurm before retrying')
-                if old.get('job_id'): ids.append(old['job_id'])
-            if ids:
-                import pwd
-                queued = subprocess.check_output(['squeue','--noheader','--user',pwd.getpwuid(os.getuid()).pw_name,'--format=%i'],text=True).splitlines()
-                if any(j.strip().split('_',1)[0] in ids for j in queued): raise ValueError('analysis still has queued/running jobs')
-                from slurm_submit import check_analysis_submissions
-                check_analysis_submissions(Path(manifest['root']) / '.snakemake/slurm_submissions',
-                                           path, {j.strip() for j in queued})
+    submission_guard(path, manifest)
+    from analysis_inspection import inspect_workflow
+    pending = inspect_workflow(manifest, slurm, target)
+    return manifest, slurm, pending
+
+
+def print_pending(pending, target):
+    qualifier = 'currently known ' if pending['partial'] else ''
+    print(f"Pending: {pending['workflow_steps']} {qualifier}workflow steps; "
+          f"{pending['worker_jobs']} Slurm worker jobs (controller excluded)")
+    for rule, count in sorted(pending['pending'].items()):
+        print(f'  {rule}: {count}')
+    print('Reusable workflow steps: ' + str(sum(pending['reused'].values())))
+    if pending['reasons']:
+        print('Reasons: ' + ', '.join(f'{key}={count}' for key, count in sorted(pending['reasons'].items())))
+    for item in [item for item in pending['examples'] if set(item['reasons']) - {'missing_output', 'updated_input'}][:3]:
+        print(f"  Rerun: {item['rule']} ({', '.join(item['reasons'])}): " + ', '.join(item['outputs']))
+    if pending['partial']:
+        print('Counts are partial until these checkpoints finish: ' + ', '.join(pending['pending_checkpoints']))
+    if target == 'all':
+        print('After workflow steps: export PhenoRadar inputs and record whole-analysis completion.')
+
+
+def submit(path, target='all', dry_run=False, resources=None):
+    from contextlib import nullcontext
+    path = Path(path).resolve()
+    # Preview never creates locks, profiles, scripts, receipts, or cache files.
+    # The real submission holds the lock across the same checks and sbatch.
+    jobs = path/'jobs'
+    with nullcontext() if dry_run else locked(jobs/'.submit.lock'):
+        manifest, slurm, pending = preflight(path, target, resources)
+        print_pending(pending, target)
         number = 1 + max([int(p.name.split('_')[1].split('.')[0]) for p in jobs.glob('submission_*.resources.json')] + [0])
         execution = jobs/f'submission_{number:04d}.resources.json'
-        write_json(execution, {'slurm':slurm,'sha256':digest(slurm)})
         script = jobs/f'{number:04d}_analysis.sh'
         invocation = [sys.executable,str(Path(manifest['root'])/'workflow/scripts/analysis.py'),'run','--analysis',str(path),
                       '--target',target,'--execution',str(execution)]
-        script.write_text('#!/usr/bin/env bash\nset -euo pipefail\nexec ' + shlex.join(invocation) + '\n')
-        script.chmod(0o755)
         job = slurm['stages']['controller']
         cmd = ['sbatch','--parsable','--nodes=1','--ntasks=1',f"--cpus-per-task={job['cpus']}",f"--mem={job['mem_gb'] * 1000}M",f"--time={job['time']}",
                '--chdir='+manifest['root'],'--job-name='+manifest['name'],f'--output={jobs}/logs/{number:04d}_%j.out',f'--error={jobs}/logs/{number:04d}_%j.err']
@@ -228,8 +282,14 @@ def submit(path, target='all', dry_run=False, resources=None):
         cmd.append(str(script))
         if dry_run:
             print(shlex.join(cmd)); return cmd
+        submission_guard(path, manifest)  # Catch jobs appearing during DAG inspection.
+        (jobs/'logs').mkdir(parents=True, exist_ok=True)
+        write_json(execution, {'slurm':slurm,'sha256':digest(slurm)})
+        script.write_text('#!/usr/bin/env bash\nset -euo pipefail\nexec ' + shlex.join(invocation) + '\n')
+        script.chmod(0o755)
         receipt = jobs/f'submission_{number:04d}.json'
-        result = {'created_at':now(),'target':target,'command':cmd,'resources':record(execution),'state':'submitting','job_id':None}
+        result = {'created_at':now(),'target':target,'command':cmd,'resources':record(execution),
+                  'plan':pending, 'state':'submitting','job_id':None}
         write_json(receipt,result)
         try: identifier = subprocess.check_output(cmd,text=True).strip().split(';')[0]
         except (OSError,subprocess.CalledProcessError) as error:
@@ -255,7 +315,8 @@ def submit_named(root, name, config=None, build=None, target='all', dry_run=Fals
     source = inside(root, completion_path(inside(root, absolute(root, build))))
     completed = load_complete(source, verify_files=False)
     path = downstream_parent(root, source, completed) / name
-    with locked(path.parent / f'.{name}.prepare.lock'):
+    from contextlib import nullcontext
+    with nullcontext() if dry_run else locked(path.parent / f'.{name}.prepare.lock'):
         if path.exists():
             if not (path / 'analysis.json').is_file():
                 raise ValueError(f'existing path is not a prepared downstream run: {path}; choose a new name')
@@ -264,6 +325,16 @@ def submit_named(root, name, config=None, build=None, target='all', dry_run=Fals
                 raise ValueError('saved downstream run uses a different database; choose a new name')
             print(f'Using saved downstream conditions: {path}. Source edits require a new name.', flush=True)
         else:
+            if dry_run:
+                cfg, resolved, _, _, _, report = settings(root, config, source)
+                validate_analysis(resolved, [target])
+                slurm = execution_settings(cfg['slurm'], absolute(root, resources) if resources else None, build=False)
+                worker_budgets(slurm)
+                print(f'New downstream preview: {path}')
+                print(f"Samples: {sum(row['selected'] for row in report)} selected; target: {target}")
+                print('Pending job counts: not yet available; inputs have not been prepared.')
+                print('submit will save these conditions, inspect the workflow, then submit. No files were created.')
+                return []
             path = prepare(root, name, config, source)
             print(f'Prepared downstream conditions: {path}', flush=True)
     return submit(path, target, dry_run, absolute(root, resources) if resources else None)
@@ -282,6 +353,9 @@ def main():
         p=sub.add_parser(name); p.add_argument('--analysis',required=name != 'submit',help='Path to an already prepared downstream run')
         if name in {'submit','run'}: p.add_argument('--target',choices=TARGETS,default='all')
         if name=='cleanup': p.add_argument('--apply',action='store_true',help='Delete verified successful scratch; default is preview')
+        if name=='status':
+            p.add_argument('--verify',action='store_true',help='Also verify frozen inputs and recorded output checksums (can be expensive)')
+            p.add_argument('--json',action='store_true',help='Print JSON (also the default when stdout is redirected)')
         if name=='submit':
             p.add_argument('--root',default='.'); p.add_argument('--config'); p.add_argument('--build')
             p.add_argument('--name',help='Downstream condition name'); p.add_argument('--dry-run',action='store_true'); p.add_argument('--resources')
@@ -298,7 +372,12 @@ def main():
             if args.json: print(json.dumps(report,indent=2))
             else: print_plan(report,resolved,absolute(root,args.build or cfg['build']),config,directory)
         else: print(prepare(root,args.name,config,args.build))
-    elif args.command=='status': print(json.dumps(status(args.analysis),indent=2))
+    elif args.command=='status':
+        report = status(args.analysis, args.verify)
+        if args.json or not sys.stdout.isatty(): print(json.dumps(report,indent=2))
+        else:
+            from analysis_status import print_status
+            print_status(report)
     elif args.command=='cleanup':
         from storage_management import run_storage
         report = run_storage(args.analysis, 'analysis', inspect=True, apply=args.apply)
@@ -317,8 +396,11 @@ def main():
 
 if __name__=='__main__':
     try:
-        from verification_cache import verification_cache
-        with verification_cache(Path(__file__).resolve().parents[2] / '.cache/verification.sqlite'):
+        if READ_ONLY_COMMAND:
             main()
-    except (ValueError,OSError,subprocess.CalledProcessError) as error:
+        else:
+            from verification_cache import verification_cache
+            with verification_cache(Path(__file__).resolve().parents[2] / '.cache/verification.sqlite'):
+                main()
+    except (ValueError,OSError,subprocess.SubprocessError) as error:
         print(f'analysis: {error}',file=sys.stderr); sys.exit(1)

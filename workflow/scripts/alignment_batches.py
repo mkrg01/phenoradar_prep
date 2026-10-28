@@ -1,5 +1,7 @@
 """Weighted OG batches with bounded parallelism and per-OG recovery."""
 import argparse
+from contextlib import contextmanager
+from contextvars import ContextVar
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import heapq
 import json
@@ -9,6 +11,19 @@ import shutil
 from align_orthogroups import align, SAFE_OG
 from common import file_record, write_json
 from dataset_assets import digest, record, stat_identity
+
+_INSPECTION = ContextVar('alignment_batch_inspection', default=None)
+
+
+@contextmanager
+def inspect_batches():
+    """Collect invalid receipts for a read-only planner instead of deleting them."""
+    invalid = set()
+    token = _INSPECTION.set(invalid)
+    try:
+        yield invalid
+    finally:
+        _INSPECTION.reset(token)
 
 
 def plan(inputs, outdir, batch_size=500, heavy_bytes=16000000):
@@ -72,7 +87,10 @@ def batch_targets(plan_dir, outdir, reports):
                             for entry, filename in zip(files, expected)):
                         raise ValueError('batch member changed')
             except (OSError, ValueError, KeyError, TypeError):
-                path.unlink()
+                if _INSPECTION.get() is None:
+                    path.unlink()
+                else:
+                    _INSPECTION.get().add(str(path))
         targets.append(str(path))
     return targets
 

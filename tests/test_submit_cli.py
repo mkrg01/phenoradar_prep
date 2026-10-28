@@ -103,6 +103,8 @@ def test_analysis_submit_prepares_and_retries_saved_conditions(completed_project
     scheduler['running'] = True
     with pytest.raises(ValueError, match='queued/running'):
         invoke(monkeypatch, analysis, *command)
+    with pytest.raises(ValueError, match='queued/running'):
+        invoke(monkeypatch, analysis, *command, '--dry-run')
     assert len(scheduler['commands']) == 1
     cfg_path.unlink(); scheduler['running'] = False
     invoke(monkeypatch, analysis, 'submit', '--analysis', run)
@@ -110,17 +112,31 @@ def test_analysis_submit_prepares_and_retries_saved_conditions(completed_project
     assert (run / 'analysis.json').read_bytes() == before
 
 
-def test_analysis_submit_dry_run_prepares_without_sbatch(completed_project, scheduler, monkeypatch):
+def test_analysis_submit_dry_run_leaves_new_analysis_unprepared(completed_project, scheduler, monkeypatch, capsys):
     root, build, _, _ = completed_project
     cfg = root / 'dry.yaml'
     cfg.write_text('inputs:\n  species_trait: null\nphylogeny:\n  trees: []\n  contrast_pairs:\n    enabled: false\n')
     invoke(monkeypatch, analysis, 'submit', '--root', root, '--config', cfg,
            '--build', build, '--name', 'dry', '--dry-run')
     run = build / 'downstream/dry'
-    assert (run / 'analysis.json').is_file()
-    assert (run / 'jobs/0001_analysis.sh').is_file()
+    assert not run.exists()
     assert scheduler['commands'] == []
-    assert not (run / 'jobs/submission_0001.json').exists()
+    assert 'not yet available' in capsys.readouterr().out
+
+
+def test_analysis_repeated_dry_run_preserves_all_files_and_first_submission_number(completed_project, scheduler):
+    from test_analysis_inspection import snapshot
+    root, build, _, _ = completed_project
+    config = root / 'minimal.yaml'
+    config.write_text('inputs:\n  species_trait: null\nphylogeny:\n  trees: []\n  contrast_pairs:\n    enabled: false\n')
+    run = analysis.prepare(root, 'preview', config, build)
+    before = snapshot(root)
+    first = analysis.submit(run, dry_run=True)
+    assert analysis.submit(run, dry_run=True) == first
+    assert snapshot(root) == before
+    assert not scheduler['commands']
+    analysis.submit(run)
+    assert (run / 'jobs/submission_0001.json').is_file()
 
 
 @pytest.mark.parametrize('module,args', [

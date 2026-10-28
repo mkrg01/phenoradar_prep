@@ -204,18 +204,23 @@ def test_downstream_completion_records_outputs_without_its_own_receipt(completed
     def run_pipeline(command, **kwargs):
         if command[-1] == 'all':
             write_json(downstream / 'run.json', {'completed': True})
+            write_json(downstream / 'metadata/selection.json', {})
+            write_tsv(downstream / 'metadata/samples.tsv', ['species'], [])
         else:
             assert command[-1] == 'phenoradar_inputs'
             write_tsv(downstream / 'phenoradar_inputs/tpm.tsv', ['species', 'orthogroup', 'tpm'],
                       [{'species':'Alpha_plant_A1', 'orthogroup':'OG1', 'tpm':1000000}])
+            write_tsv(downstream / 'phenoradar_inputs/species_metadata.tsv', ['species'], [])
     monkeypatch.setattr(analysis.subprocess, 'run', run_pipeline)
     analysis.run(downstream, local=True)
     assert analysis.status(downstream)['state'] == 'complete'
     receipt = json.loads((downstream / 'completed.json').read_text())
     paths = {Path(entry['path']).relative_to(downstream).as_posix() for entry in receipt['files']}
-    assert paths == {'run.json', 'phenoradar_inputs/tpm.tsv'}
+    assert paths == {'run.json', 'metadata/samples.tsv', 'metadata/selection.json',
+                     'phenoradar_inputs/tpm.tsv', 'phenoradar_inputs/species_metadata.tsv'}
     analysis.run(downstream, local=True)
     assert analysis.status(downstream)['state'] == 'complete'
     (downstream / 'phenoradar_inputs/tpm.tsv').write_text('changed\n')
+    assert not analysis.status(downstream)['verification']['performed']
     with pytest.raises(ValueError, match='registered file changed'):
-        analysis.status(downstream)
+        analysis.status(downstream, verify_outputs=True)

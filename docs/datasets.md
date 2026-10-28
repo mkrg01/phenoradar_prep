@@ -66,6 +66,27 @@ Reports are overwritten on each run; `--json` prints detailed JSON instead of
 the summary while still saving TSVs. Selected counts precede tree-specific
 trait filtering and representative selection.
 
+Use the existing commands for these three tasks:
+
+| Command | Purpose |
+| --- | --- |
+| `status --analysis PATH` | Lightweight execution state, phase progress, Slurm waiting reason, and log paths |
+| `status --analysis PATH --verify` | Also verify frozen inputs and recorded completed outputs; this can read large files |
+| `submit --analysis PATH --dry-run` | Check resources and duplicate jobs, then preview pending/reusable work and rerun reasons |
+
+Normal `status` does not checksum artifacts or scan scratch storage. It reports
+unknown when Slurm observations are unavailable; a disappeared job or 100% of
+workflow steps alone does not prove whole-analysis completion. Export and the
+completion record must finish too. Terminal output is a summary; redirected
+output remains JSON, and `--json` requests JSON explicitly.
+
+Analysis dry-run creates no saved run, submission files, or workflow metadata.
+For a new name it previews sample selection; exact job counts become available
+after `prepare`. For a saved run it uses the same checks as actual submission
+and distinguishes workflow steps from grouped Slurm worker jobs. Counts beyond
+unfinished checkpoints remain partial. Real submission checks again and uses
+the saved conditions; no separate resume command is needed.
+
 Analyses inherit the database's BUSCO lineage, genetic code, and OrthoDB reference.
 The default target `all` runs enabled analyses and collects
 [PhenoRadar inputs](phenoradar_inputs.md). Several analyses can share one database;
@@ -83,7 +104,8 @@ changed software or scientific settings. Use
 | Default naming | New builds append a UTC timestamp; resume using the printed path |
 | `--name NAME` | Use an exact name |
 | `name_mode: fixed` | Repeated `submit` resumes the configured build |
-| `--dry-run` | Save the run and preview jobs without submitting |
+| Build `--dry-run` | Save the build and preview jobs without submitting |
+| Analysis `--dry-run` | Preview without saving or changing the analysis |
 
 ## Failure and recovery behavior
 
