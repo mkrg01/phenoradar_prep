@@ -53,7 +53,9 @@ For KO expression, replace `tpm_path` with
 `results/leaf/downstream/carnivory/kegg/ko_tpm_sum.tsv`, set `feature_col: ko`,
 `value_col: tpm_sum`, and `orthogroup_annotation_path: null`.
 
-The extra `run` column can remain: PhenoRadar selects the configured columns.
+Expression tables omit the redundant `run` column; the sample-to-run mapping
+remains in `metadata/samples.tsv`. Older tables with `run` are also accepted by
+PhenoRadar, which selects the configured columns.
 `species` is a computational sample ID, not a biological-species grouping. Give
 each independently assembled run a distinct sample ID; samples are never
 averaged. Use `metadata/samples.tsv` to identify biological species.

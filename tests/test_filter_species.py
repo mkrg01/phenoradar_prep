@@ -116,6 +116,36 @@ def test_filtered_metadata_and_alignments_feed_phenoradar(snapshot, tmp_path):
     assert state(source) == before
 
 
+def test_native_expression_subset_preserves_columns_values_and_manifest_lookup(snapshot, tmp_path):
+    from analysis_validation import validate
+    source, traits = snapshot
+    metadata = source / "metadata/metadata_high_busco.tsv"
+    rows = [{**row, "family": "Plantaceae"} for row in read_tsv(metadata)]
+    write_tsv(metadata, list(rows[0]), rows)
+    # The legacy fixture has two runs sharing Plant_A. Native expression
+    # requires a distinct computational sample key for each independent run.
+    for path in source.rglob("*.tsv"):
+        rows = read_tsv(path)
+        if rows and "run" in rows[0]:
+            fields = list(rows[0])
+            rows = [row for row in rows if row["run"] != "R5"]
+            if path.name in {"tpm.tsv", "tpm_sum.tsv", "tpm_wide.tsv", "tpm_sum_wide.tsv",
+                             "ko_tpm_sum.tsv", "ko_tpm_sum_wide.tsv"}:
+                fields.remove("run")
+            write_tsv(path, fields, [{key: row[key] for key in fields} for row in rows])
+    before = state(source)
+    out = source / "filtered"
+    export(source, ["Plant_A"], out, traits)
+    for relative in ["orthogroups/expression/tpm.tsv", "orthogroups/expression/tpm_sum.tsv",
+                     "orthogroups/expression/tpm_wide.tsv", "orthogroups/expression/tpm_sum_wide.tsv",
+                     "kegg/ko_tpm_sum.tsv", "kegg/ko_tpm_sum_wide.tsv"]:
+        rows = read_tsv(out / relative)
+        assert "run" not in rows[0]
+        assert rows == [row for row in read_tsv(source / relative) if row["species"] != "Plant_A"]
+    assert validate(source, exclusions=["Plant_A"])["samples"] == 4
+    assert {name: value for name, value in state(source).items() if not name.startswith("filtered/")} == before
+
+
 @pytest.mark.parametrize("value", [None, "Plant_A", {"species": "Plant_A"}, [1], ["Plant A"], ["../Plant_A"], ["Plant_A", "Plant_A"]])
 def test_exclusions_require_exact_list(value):
     with pytest.raises(ValueError):

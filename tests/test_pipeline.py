@@ -236,8 +236,12 @@ def test_aggregation_ambiguity_and_run_preservation(tiny_inputs, tmp_path):
     assert [float(r["tpm"]) for r in rows] == [400000, 600000]
     report = json.loads((runs / "A1.qc.json").read_text())
     assert report["mapped_tpm_fraction"] == 0.5
+    with pytest.raises(ValueError, match="multiple runs per sample key"):
+        merge_tpm(meta / "samples.tsv", runs, tmp_path / "final")
+    selected = read_tsv(meta / "samples.tsv")
+    write_tsv(meta / "samples.tsv", list(selected[0]), [row for row in selected if row["run"] != "A2"])
     merge_tpm(meta / "samples.tsv", runs, tmp_path / "final")
-    assert [r["run"] for r in read_tsv(tmp_path / "final/tpm_wide.tsv")] == ["A1", "A2", "B1"]
+    assert [r["species"] for r in read_tsv(tmp_path / "final/tpm_wide.tsv")] == ["Alpha_plant", "Beta_sp-X"]
     edit_mapping(database, pairs=lambda rows: rows + [('Alpha_plant_g1','OG3')])
     with pytest.raises(ValueError, match="multiple OGs"):
         aggregate(meta / "samples.tsv", "A1", database, runs / "x.tsv", runs / "x.json")
@@ -392,6 +396,10 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     if not snakemake or not seqkit:
         pytest.skip("set SNAKEMAKE_BIN and SEQKIT_BIN to run the workflow integration test")
     import yaml
+    # Legacy standalone sample keys must identify one run each. Independent
+    # assemblies of the same species are covered by test_sample_identity.py.
+    metadata = read_tsv(tiny_inputs["metadata"])
+    write_tsv(tiny_inputs["metadata"], list(metadata[0]), [row for row in metadata if row["run"] != "A2"])
     taxonomy = seed_taxonomy(tiny_inputs["taxonomy_db"])
     taxonomy_before = file_record(taxonomy), taxonomy.stat().st_mtime_ns
     config = {"run_name": "test"}
@@ -449,14 +457,14 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     out = tmp_path / "results/test"
     batches = list((out / 'orthogroups/expression/batches').glob('batch_*/receipt.json'))
     assert len(batches) == 1
-    assert set(json.loads(batches[0].read_text())['runs']) == {'A1', 'A2', 'B1'}
+    assert set(json.loads(batches[0].read_text())['runs']) == {'A1', 'B1'}
     run = json.loads((out / "run.json").read_text())
     assert run["container_image"] is None
     assert "container_image" not in run["config"]
     assert len(read_tsv(out / "metadata/species_metadata.tsv")) == 2
     manifest_dir = "incremental_plan" if reuse else "manifests"
     assert (out / "orthogroups/mapping" / manifest_dir / "chunks.json").is_file()
-    assert len(read_tsv(out / "orthogroups/expression/tpm_wide.tsv")) == 3
+    assert len(read_tsv(out / "orthogroups/expression/tpm_wide.tsv")) == 2
     events = tmp_path / "events.txt"
     assert (len(events.read_text().splitlines()) if events.exists() else 0) == (0 if reuse else 1)
     assert json.loads((out / "orthogroups/mapping/snapshot.json").read_text())["qc"]["duplicate_pairs_removed"] == 4
@@ -485,7 +493,7 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     config["selection"] = {"species_list": True}
     configfile.write_text(yaml.safe_dump(config))
     execute()
-    assert [r["run"] for r in read_tsv(out / "orthogroups/expression/tpm_wide.tsv")] == ["B1"]
+    assert [r["species"] for r in read_tsv(out / "orthogroups/expression/tpm_wide.tsv")] == ["Beta_sp-X"]
     assert json.loads((out / "metadata/selection.json").read_text())["requested_species"] == ["Beta_sp-X", "Gamma_plant"]
     assert (len(events.read_text().splitlines()) if events.exists() else 0) == (0 if reuse else 2)
     if reuse:

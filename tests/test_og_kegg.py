@@ -151,13 +151,16 @@ def test_og_labels_keep_real_donors_and_all_statuses(og_annotations):
 @pytest.mark.parametrize("policy", ["duplicate", "drop"])
 def test_aggregates_original_og_tpm_preserving_zero_and_missing(og_inputs, og_annotations, og_expression, policy):
     aggregate(og_inputs["samples"], og_annotations, og_expression, og_annotations, ambiguity=policy)
-    values = {(r["run"], r["ko"]): float(r["tpm_sum"]) for r in read_tsv(og_annotations / "ko_tpm_sum.tsv")}
-    assert values["RA", "K00001"] == 5  # never the normalized value 999999
-    assert values["RC", "K00001"] == 0
+    rows = read_tsv(og_annotations / "ko_tpm_sum.tsv")
+    assert list(rows[0]) == ["species", "ko", "tpm_sum"]
+    assert all("run" not in row for row in read_tsv(og_annotations / "ko_tpm_sum_wide.tsv"))
+    values = {(r["species"], r["ko"]): float(r["tpm_sum"]) for r in rows}
+    assert values["A", "K00001"] == 5  # never the normalized value 999999
+    assert values["C", "K00001"] == 0
     if policy == "duplicate":
-        assert values["RA", "K00002"] == 0
-        assert values["RB", "K00002"] == values["RB", "K00003"] == 11
-        assert ("RD", "K00002") not in values
+        assert values["A", "K00002"] == 0
+        assert values["B", "K00002"] == values["B", "K00003"] == 11
+        assert ("D", "K00002") not in values
         support = {(r["run"], r["ko"]): r for r in read_tsv(og_annotations / "ko_support.tsv")}
         assert support["RD", "K00002"]["tpm_sum"] == ""
         assert support["RA", "K00002"]["quantified_orthogroups"] == "1"
@@ -173,6 +176,14 @@ def test_aggregates_original_og_tpm_preserving_zero_and_missing(og_inputs, og_an
 def test_error_policy_rejects_multi_ko_og_even_with_zero_tpm(og_inputs, og_annotations, og_expression):
     with pytest.raises(ValueError, match="multiple accepted KOs"):
         aggregate(og_inputs["samples"], og_annotations, og_expression, og_annotations, ambiguity="error")
+
+
+def test_og_expression_requires_unique_sample_keys(og_inputs, og_annotations, og_expression):
+    rows = read_tsv(og_inputs["samples"])
+    rows.append({**rows[0], "run": "second_private_run"})
+    write_tsv(og_inputs["samples"], list(rows[0]), rows)
+    with pytest.raises(ValueError, match="multiple runs per sample key"):
+        aggregate(og_inputs["samples"], og_annotations, og_expression, og_annotations)
 
 
 def test_all_zero_run_is_valid(og_inputs, og_annotations, og_expression):

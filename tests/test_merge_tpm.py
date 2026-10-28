@@ -31,14 +31,14 @@ def save_run(directory, species, run, entries, compressed=False):
 
 def test_exact_tables_single_input_pass_and_independent_runs(tmp_path, monkeypatch):
     samples = tmp_path / "samples.tsv"
-    manifest = [{"species": "Beta", "run": "B1"}, {"species": "Alpha", "run": "A2"},
-                {"species": "Alpha", "run": "A1"}]
+    manifest = [{"species": "Beta", "run": "B1"}, {"species": "Alpha_A2", "run": "A2"},
+                {"species": "Alpha_A1", "run": "A1"}]
     write_tsv(samples, ["species", "run"], manifest)
     runs = tmp_path / "runs"
     odd_group = 'OG4\t"雪\n'
     data = [
-        ("Alpha", "A1", [("OG2", "1.2300", "0.0010"), ("OG1", "1e-12", "02.500")], True),
-        ("Alpha", "A2", [("OG3", "0", "-0.0")], True),
+        ("Alpha_A1", "A1", [("OG2", "1.2300", "0.0010"), ("OG1", "1e-12", "02.500")], True),
+        ("Alpha_A2", "A2", [("OG3", "0", "-0.0")], True),
         ("Beta", "B1", [("OG1", "-0", "9.999999999999999"), (odd_group, "2.0", "3e+10")], False),
     ]
     all_rows, reports, paths = [], [], []
@@ -65,17 +65,17 @@ def test_exact_tables_single_input_pass_and_independent_runs(tmp_path, monkeypat
     ordered = sorted(manifest, key=lambda row: (row["species"], row["run"]))
     groups = ["OG1", "OG2", "OG3", odd_group]
     for value in ["tpm", "tpm_sum"]:
-        fields = ["species", "run", "orthogroup", value]
+        fields = ["species", "orthogroup", value]
         write_tsv(expected / f"{value}.tsv", fields,
                   [{key: row[key] for key in fields} for row in all_rows])
         wide = []
         for sample in ordered:
-            row = dict(sample)
+            row = {"species": sample["species"]}
             row.update(dict.fromkeys(groups, 0))
             row.update({entry["orthogroup"]: entry[value] for entry in all_rows
                         if entry["run"] == sample["run"]})
             wide.append(row)
-        write_tsv(expected / f"{value}_wide.tsv", ["species", "run", *groups], wide)
+        write_tsv(expected / f"{value}_wide.tsv", ["species", *groups], wide)
     write_tsv(expected / "mapping_qc.tsv", QC_FIELDS, reports)
     for name in OUTPUTS:
         assert (actual / name).read_bytes() == (expected / name).read_bytes(), name
@@ -84,10 +84,10 @@ def test_exact_tables_single_input_pass_and_independent_runs(tmp_path, monkeypat
 @pytest.mark.parametrize("problem", ["empty", "species", "run", "duplicate", "qc"])
 def test_bad_later_run_preserves_previous_outputs(tmp_path, problem):
     samples = tmp_path / "samples.tsv"
-    write_tsv(samples, ["species", "run"], [{"species": "Alpha", "run": "A1"},
+    write_tsv(samples, ["species", "run"], [{"species": "Alpha_A1", "run": "A1"},
                                            {"species": "Beta", "run": "B1"}])
     runs = tmp_path / "runs"
-    save_run(runs, "Alpha", "A1", [("OG1", "1.0", "2.0")])
+    save_run(runs, "Alpha_A1", "A1", [("OG1", "1.0", "2.0")])
     _, _, path = save_run(runs, "Beta", "B1", [("OG1", "3.0", "4.0")])
     rows = read_tsv(path)
     if problem == "empty":
@@ -133,5 +133,19 @@ def test_empty_selection_writes_headers(tmp_path):
     write_tsv(samples, ["species", "run"], [])
     out = tmp_path / "out"
     merge_tpm.merge(samples, tmp_path / "runs", out)
-    assert (out / "tpm_wide.tsv").read_text() == "species\trun\n"
+    assert (out / "tpm_wide.tsv").read_text() == "species\n"
     assert all(read_tsv(out / name) == [] for name in OUTPUTS)
+
+
+@pytest.mark.parametrize("manifest", [
+    [{"species": "Alpha", "run": "A1"}, {"species": "Alpha", "run": "A2"}],
+    [{"species": "Alpha", "run": "A1"}, {"species": "Beta", "run": "A1"}],
+])
+def test_ambiguous_sample_identity_is_rejected_before_replacing_outputs(tmp_path, manifest):
+    samples, out = tmp_path / "samples.tsv", tmp_path / "out"
+    write_tsv(samples, ["species", "run"], manifest)
+    out.mkdir()
+    (out / "tpm.tsv").write_text("previous\n")
+    with pytest.raises(ValueError, match="multiple runs|duplicate run"):
+        merge_tpm.merge(samples, tmp_path / "unused", out)
+    assert (out / "tpm.tsv").read_text() == "previous\n"

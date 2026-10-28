@@ -75,7 +75,7 @@ rule merge_tpm:
         tables=lambda wc: run_outputs(wc, "tsv"),
         reports=lambda wc: run_outputs(wc, "qc.json"),
         code=f"{SCRIPTS}/merge_tpm.py",
-        common=f"{SCRIPTS}/common.py"
+        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
     output:
         normalized=f"{TPM}/tpm.tsv",
         normalized_wide=f"{TPM}/tpm_wide.tsv",

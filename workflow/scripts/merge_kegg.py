@@ -13,10 +13,12 @@ from aggregate_ko_tpm import (AMBIGUITY_POLICIES, GENE_FIELDS, HIT_FIELDS, KO_FI
                               abundance_values, load_annotation, number, selected_samples,
                               summed, table, verify_file)
 from common import atomic_writer, write_tsv
+from sample_identity import sample_run_map
 
 
 def merge(samples, annotation_dir, run_dir, outdir):
     manifest = selected_samples(samples)
+    sample_run_map(manifest)
     species = {row["species"]: row["odb_species"] for row in manifest}
     output = Path(outdir)
     output.mkdir(parents=True, exist_ok=True)
@@ -131,10 +133,10 @@ def merge(samples, annotation_dir, run_dir, outdir):
             write_tsv(output / "ko_support.tsv", KO_FIELDS,
                       (dict(zip(KO_FIELDS, row)) for row in database.execute(
                           "SELECT * FROM support ORDER BY species, run, ko")))
-            fields = ["species", "run", "ko", "tpm_sum"]
+            fields = ["species", "ko", "tpm_sum"]
             write_tsv(output / "ko_tpm_sum.tsv", fields,
                       (dict(zip(fields, row)) for row in database.execute(
-                          "SELECT species, run, ko, tpm_sum FROM support WHERE quantified_genes > 0 "
+                          "SELECT species, ko, tpm_sum FROM support WHERE quantified_genes > 0 "
                           "ORDER BY species, run, ko")))
             kos = sorted(all_kos)
 
@@ -142,11 +144,11 @@ def merge(samples, annotation_dir, run_dir, outdir):
                 for sample in manifest:
                     run = sample["run"]
                     observed = dict(database.execute("SELECT ko, tpm_sum FROM support WHERE run = ?", (run,)))
-                    row = {"species": sample["species"], "run": run}
+                    row = {"species": sample["species"]}
                     row.update({ko: observed.get(ko, "") for ko in kos})
                     yield row
 
-            write_tsv(output / "ko_tpm_sum_wide.tsv", ["species", "run", *kos], wide_rows())
+            write_tsv(output / "ko_tpm_sum_wide.tsv", ["species", *kos], wide_rows())
     write_tsv(output / "mapping_qc.tsv", QC_FIELDS,
               ({key: row[key] for key in QC_FIELDS} for row in reports))
 

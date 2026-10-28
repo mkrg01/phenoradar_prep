@@ -8,10 +8,12 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from common import atomic_writer, existing_product, read_tsv
+from sample_identity import sample_run_map
 
 
 def merge(samples, run_dir, outdir):
     manifest = sorted(read_tsv(samples), key=lambda row: (row["species"], row["run"]))
+    sample_run_map(manifest)
     fields = ["species", "run", "targets", "protein_genes", "quantified_proteins", "mapped_targets",
               "ambiguous_targets", "retained_targets", "orthogroups", "total_tpm", "mapped_tpm",
               "mapped_tpm_fraction", "retained_tpm", "retained_tpm_fraction", "multimap"]
@@ -24,7 +26,7 @@ def merge(samples, run_dir, outdir):
             for name in names
         }
         for value in values:
-            writers[value].writerow(["species", "run", "orthogroup", value])
+            writers[value].writerow(["species", "orthogroup", value])
         writers["mapping_qc"].writerow(fields)
 
         groups, per_run = set(), []
@@ -42,7 +44,7 @@ def merge(samples, run_dir, outdir):
             with io.StringIO(newline="") as packed:
                 packer = csv.writer(packed, delimiter="\t", lineterminator="\n")
                 for row in rows:
-                    prefix = (row["species"], row["run"], row["orthogroup"])
+                    prefix = (row["species"], row["orthogroup"])
                     for value in values:
                         writers[value].writerow((*prefix, row[value]))
                     packer.writerow([row["orthogroup"], row["tpm"], row["tpm_sum"]])
@@ -53,7 +55,7 @@ def merge(samples, run_dir, outdir):
 
         groups = sorted(groups)
         for value in values:
-            writers[f"{value}_wide"].writerow(["species", "run", *groups])
+            writers[f"{value}_wide"].writerow(["species", *groups])
         for index, sample in enumerate(manifest):
             packed = per_run[index]
             per_run[index] = None
@@ -62,7 +64,7 @@ def merge(samples, run_dir, outdir):
             del packed
             for column, value in enumerate(values):
                 writers[f"{value}_wide"].writerow(
-                    [sample["species"], sample["run"],
+                    [sample["species"],
                      *(by_group.get(group, (0, 0))[column] for group in groups)])
             del by_group
 

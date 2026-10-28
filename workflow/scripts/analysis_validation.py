@@ -1,5 +1,4 @@
 """Read-only integrity checks for native analysis outputs and filtered subsets."""
-from collections import Counter
 import csv
 import gzip
 import json
@@ -9,6 +8,7 @@ from pathlib import Path
 from common import existing_product, read_tsv, sha256, species_from_gene_id
 from filter_species import fasta_records, manifest, safe_name, table, validate_exclusions
 from phenoradar_metadata import read_base, with_pairs
+from sample_identity import expression_run, sample_run_map
 from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
                     PHYLOGENY_BRANCHES, REPRESENTATIVES)
 
@@ -207,17 +207,13 @@ def discover(source, exclusions=()):
 
 def validate_expression(path, runs, feature, value):
     """Validate run-level values without choosing or combining biological replicates."""
-    repeated = sorted(name for name, count in Counter(runs.values()).items() if count > 1)
-    if repeated:
-        raise ValueError("multiple runs per sample key; assign a distinct sample ID to each run: " + ", ".join(repeated[:10]))
-    reader = table(path, ["species", "run", feature, value])
+    samples = sample_run_map(dict(species=sample, run=run) for run, sample in runs.items())
+    reader = table(path, ["species", feature, value])
     next(reader)
     seen, features, current_features = set(), set(), set()
     current = None
     for row in reader:
-        run = row["run"]
-        if runs.get(run) != row["species"]:
-            raise ValueError(f"expression run/species differs from samples: {path}: {row['species']}/{run}")
+        run = expression_run(row, samples)
         if run != current:
             if run in seen:
                 raise ValueError(f"duplicate/discontiguous run block in expression: {path}: {run}")

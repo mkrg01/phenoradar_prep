@@ -13,6 +13,7 @@ import tempfile
 
 from common import existing_product, RANDOM_SEED, file_record, now, species_from_gene_id, write_json, write_tsv
 from mapping_tables import load_tables, read_species, relative_file, subset
+from sample_identity import expression_run, sample_run_map
 from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
                     PHYLOGENY_BRANCHES, REPRESENTATIVES)
 
@@ -215,6 +216,7 @@ class Export:
         if not self.keep:
             raise ValueError("exclude_species would remove every selected species")
         self.keep_runs = {r for r, s in self.runs.items() if s in self.keep}
+        self.expression_runs = None
         self.inventory, self.records, self.stats, self.counts = inventory, {}, {}, {}
         self.allowed_inputs = set(inventory["files"])
         self.ignored = [f"{PHENOTYPED_PHYLOGENY} inference outputs (contrast pairs are recomputed)",
@@ -238,10 +240,17 @@ class Export:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(self.input(source), destination)
 
+    def row_run(self, row):
+        if "run" in row:
+            if row["run"] not in self.runs or self.runs[row["run"]] != row["species"]:
+                raise ValueError("table run/species differs from sample manifest: " + row["run"])
+            return row["run"]
+        if self.expression_runs is None:
+            self.expression_runs = sample_run_map(self.rows)
+        return expression_run(row, self.expression_runs)
+
     def run_row(self, row):
-        if row["run"] not in self.runs or self.runs[row["run"]] != row["species"]:
-            raise ValueError("table run/species differs from sample manifest: " + row["run"])
-        return row["run"] in self.keep_runs
+        return self.row_run(row) in self.keep_runs
 
     def subset_table(self, relative, required, predicate, unique_runs=False, complete_runs=False):
         path = self.input(self.source / relative)
@@ -256,10 +265,11 @@ class Export:
             writer.writeheader()
             for row in reader:
                 before += 1
-                if "run" in row:
-                    if unique_runs and row["run"] in seen:
+                if "run" in row or unique_runs or complete_runs:
+                    run = row["run"] if "run" in row else self.row_run(row)
+                    if unique_runs and run in seen:
                         raise ValueError(f"duplicate run in {relative}")
-                    seen.add(row["run"])
+                    seen.add(run)
                 if predicate(row):
                     writer.writerow(row)
                     after += 1
@@ -331,7 +341,8 @@ class Export:
     def tpm(self):
         for relative in BUNDLES["tpm"]:
             unique = relative.endswith("_wide.tsv") or relative.endswith("mapping_qc.tsv")
-            self.subset_table(relative, ["species", "run"], self.run_row, unique_runs=unique, complete_runs=True)
+            required = ["species", "run"] if relative.endswith("mapping_qc.tsv") else ["species"]
+            self.subset_table(relative, required, self.run_row, unique_runs=unique, complete_runs=True)
 
     def verify_gene_owners(self, db, table_name, gene_column, orthogroups=None):
         if self.inventory['sections']['odb']['status'] != 'ready': return
@@ -423,7 +434,8 @@ class Export:
                 self.copy(self.source / relative, self.stage / relative)
             for relative in KEGG_OG_BUNDLE[3:]:
                 unique = relative.endswith("_wide.tsv") or relative.endswith("mapping_qc.tsv")
-                self.subset_table(relative, ["species", "run"], self.run_row,
+                required = ["species", "run"] if relative.endswith(("mapping_qc.tsv", "ko_support.tsv")) else ["species"]
+                self.subset_table(relative, required, self.run_row,
                                   unique_runs=unique, complete_runs=unique)
             for relative in ["ko_modules.tsv", "ko_pathways.tsv", "reference_qc.json",
                              "representatives/representatives.tsv", "representatives/provenance.json"]:
@@ -459,7 +471,8 @@ class Export:
             self.subset_table("kegg/gene_kos.tsv", ["species", "gene_id", "ko"], hit_row)
             for relative in BUNDLES["kegg"][2:]:
                 unique = relative.endswith("_wide.tsv") or relative.endswith("mapping_qc.tsv")
-                self.subset_table(relative, ["species", "run"], self.run_row, unique_runs=unique, complete_runs=unique)
+                required = ["species", "run"] if relative.endswith(("mapping_qc.tsv", "ko_support.tsv")) else ["species"]
+                self.subset_table(relative, required, self.run_row, unique_runs=unique, complete_runs=unique)
             # These maps describe KO features, not species. Preserve source feature
             # axes, including zeros and missing values, across the table subset.
             for name in ["ko_modules.tsv", "ko_pathways.tsv", "reference_qc.json"]:

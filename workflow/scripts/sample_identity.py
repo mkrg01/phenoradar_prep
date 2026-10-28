@@ -32,6 +32,31 @@ def annotate(row):
     return row
 
 
+def sample_run_map(rows):
+    """Resolve runs from explicit metadata, requiring one run per sample key."""
+    samples, runs = {}, set()
+    for row in rows:
+        sample, run = row["species"], row["run"]
+        if not sample or not run or run in runs:
+            raise ValueError("empty sample/run or duplicate run in sample manifest")
+        if sample in samples:
+            raise ValueError("multiple runs per sample key; assign a distinct sample ID to each run: " + sample)
+        samples[sample] = run
+        runs.add(run)
+    return samples
+
+
+def expression_run(row, samples):
+    """Resolve native rows and cross-check optional legacy run columns."""
+    sample = row["species"]
+    if sample not in samples:
+        raise ValueError("expression sample is absent from sample manifest: " + sample)
+    run = samples[sample]
+    if "run" in row and row["run"] != run:
+        raise ValueError("expression run/species differs from sample manifest: " + sample)
+    return run
+
+
 def traits_for_samples(rows, annotations):
     return {r["species"]: annotations[species_id(r)] for r in rows
             if species_id(r) in annotations}

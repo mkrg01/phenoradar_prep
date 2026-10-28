@@ -106,7 +106,7 @@ rule assign_og_kos:
         verified=f"{KEGG}/reference_qc.json",
         code=f"{SCRIPTS}/og_kegg.py",
         helpers=[f"{SCRIPTS}/{name}.py" for name in [
-            "select_kegg_representatives", "aggregate_ko_tpm", "common"]]
+            "select_kegg_representatives", "aggregate_ko_tpm", "common", "sample_identity"]]
     output:
         hits=f"{KEGG}/og_kos.tsv",
         groups=f"{KEGG}/orthogroups.tsv",

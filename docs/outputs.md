@@ -138,9 +138,11 @@ preparing the run.
 
 ## TPM interpretation
 
-Long tables contain `species` (sample ID), `run`, `orthogroup`, and `tpm_sum` or
-`tpm`. Wide tables have one row per run and one column per OG; missing combinations
-are zero.
+Long tables contain `species` (sample ID), `orthogroup`, and `tpm_sum` or `tpm`.
+Wide tables have one row per sample and one column per OG; missing combinations
+are zero. Run IDs are recorded once in `metadata/samples.tsv`, and remain in
+QC tables and internal per-run products. Each computational sample ID must
+identify exactly one run.
 
 - **`tpm_sum`** sums original gene TPM within each OG, excluding unmapped genes.
 - **`tpm`** rescales retained OG values to one million per run. It describes
@@ -151,6 +153,8 @@ stops aggregation. Duplicate targets, negative/nonfinite TPM, and no positive
 retained TPM also cause errors.
 
 [PhenoRadar](phenoradar_inputs.md) reads the selected columns directly from the
-native tables; the `run` column remains available. Samples are never averaged.
+native tables. Samples are never averaged. Older tables with an explicit `run`
+column remain readable; verification checks it against the sample manifest.
+Post hoc subsets preserve the source table's columns.
 [KO expression](kegg.md#outputs) uses
 original TPM sums and distinguishes unquantified features from measured zeros.

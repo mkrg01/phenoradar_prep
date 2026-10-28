@@ -51,7 +51,7 @@ Under `results/<build>/downstream/<analysis>/kegg/`:
 
 | Output | Contents |
 | --- | --- |
-| `ko_tpm_sum.tsv`, `ko_tpm_sum_wide.tsv` | Long/wide expression; long columns: `species`, `run`, `ko`, `tpm_sum` |
+| `ko_tpm_sum.tsv`, `ko_tpm_sum_wide.tsv` | Long/wide expression; long columns: `species`, `ko`, `tpm_sum` |
 | `ko_support.tsv` | Observed contributing OG counts and TPM per KO/run |
 | `mapping_qc.tsv` | Per-run counts and original, ODB-mapped, and KO-retained TPM |
 | `orthogroups.tsv` | OG annotation status and representative metadata |

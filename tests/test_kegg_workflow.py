@@ -126,6 +126,9 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
             pytest.fail(result.stdout + "\n" + logs)
         return result.stdout
 
+    # Legacy standalone inputs must choose one run per computational sample.
+    metadata = read_tsv(tiny_inputs["metadata"])
+    write_tsv(tiny_inputs["metadata"], list(metadata[0]), [r for r in metadata if r["run"] != "A2"])
     execute()
     out = tmp_path / "results/test/kegg"
     assert len(odb_events.read_text().splitlines()) == 1  # Representatives require ODB groups.
@@ -134,8 +137,8 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     assert len(benchmarks) == 1
     assert all(float(read_tsv(path)[0]["s"]) >= 0 for path in benchmarks)
     rows = read_tsv(out / "ko_tpm_sum.tsv")
-    assert {(r["run"], r["ko"]): float(r["tpm_sum"]) for r in rows} == {
-        (run, ko): value for run, unique, multi in [("A1", 20, 30), ("A2", 80, 10), ("B1", 20, 30)]
+    assert {(r["species"], r["ko"]): float(r["tpm_sum"]) for r in rows} == {
+        (run, ko): value for run, unique, multi in [("Alpha_plant", 20, 30), ("Beta_sp-X", 20, 30)]
         for ko, value in [("K00001", unique), ("K00002", multi), ("K00003", multi)]}
     assert len(read_tsv(out / "orthogroups.tsv")) == 2
     representatives = read_tsv(out / "representatives/representatives.tsv")
@@ -147,7 +150,7 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     assert float(qc["A1"]["retained_tpm_fraction"]) == 0.5
     assert float(qc["A1"]["retained_tpm"]) == 50
     assert float(qc["A1"]["ko_tpm_sum"]) == 80
-    assert len(read_tsv(out / "ko_support.tsv")) == 9
+    assert len(read_tsv(out / "ko_support.tsv")) == 6
     assert read_tsv(out / "ko_modules.tsv")[0] == {"ko": "K00001", "module": "M00001"}
     assert "Nothing to be done" in execute(["--dry-run"])
 
@@ -161,7 +164,7 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     execute()
     assert len(events.read_text().splitlines()) == 1
     assert float(next(r for r in read_tsv(out / "ko_tpm_sum.tsv")
-                      if r["run"] == "A1" and r["ko"] == "K00001")["tpm_sum"]) == 40
+                      if r["species"] == "Alpha_plant" and r["ko"] == "K00001")["tpm_sum"]) == 40
 
     # Aggregation policy changes reuse the representative annotations.
     annotation_times = {p: p.stat().st_mtime_ns for p in (out / "annotation").glob("*/provenance.json")}
@@ -181,14 +184,14 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     config["selection"] = {"species_list": True}
     configfile.write_text(yaml.safe_dump(config))
     execute()
-    assert [r["run"] for r in read_tsv(out / "ko_tpm_sum.tsv")] == ["B1"] * 3
+    assert [r["species"] for r in read_tsv(out / "ko_tpm_sum.tsv")] == ["Beta_sp-X"] * 3
     assert {r["representative_species"] for r in read_tsv(out / "orthogroups.tsv")} == {"Beta_sp-X"}
     assert len(events.read_text().splitlines()) == 1
 
     config["kegg"]["enabled"] = True
     configfile.write_text(yaml.safe_dump(config))
     execute(targets=())
-    assert [r["run"] for r in read_tsv(out.parent / "orthogroups/expression/tpm.tsv")] == ["B1", "B1"]
+    assert [r["species"] for r in read_tsv(out.parent / "orthogroups/expression/tpm.tsv")] == ["Beta_sp-X", "Beta_sp-X"]
     assert len(odb_events.read_text().splitlines()) == 2  # Legacy mapping reran for the smaller sample set.
     assert "Nothing to be done" in execute(["--dry-run"], targets=())
 
@@ -296,10 +299,10 @@ def test_kegg_reuses_completed_database_without_mapping_or_translation(
     assert len(events.read_text().splitlines()) == 1
     assert (run / "orthogroups/expression/runs/A1.tsv.gz").samefile(
         build / "database/expression/runs/A1.tsv.gz")
-    values = {(r["run"], r["ko"]): float(r["tpm_sum"])
+    values = {(r["species"], r["ko"]): float(r["tpm_sum"])
               for r in read_tsv(run / "kegg/ko_tpm_sum.tsv")}
-    assert values["A1", "K00001"] == 20
-    assert values["B1", "K00002"] == values["B1", "K00003"] == 30
+    assert values["Alpha_plant_A1", "K00001"] == 20
+    assert values["Beta_sp-X_B1", "K00002"] == values["Beta_sp-X_B1", "K00003"] == 30
     from analysis_validation import validate
     validate(run)
     assert not (run / "phenoradar_inputs").exists()

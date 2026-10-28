@@ -13,6 +13,7 @@ from aggregate_ko_tpm import (AMBIGUITY_POLICIES, HIT_FIELDS, load_annotation, n
                               selected_samples, summed, table, verify_file)
 from common import existing_product, atomic_writer, file_record, now, write_json, write_tsv
 from select_kegg_representatives import FIELDS as REPRESENTATIVE_FIELDS
+from sample_identity import sample_run_map
 
 ANNOTATION_LABEL = "orthogroup_representatives"
 OG_FIELDS = REPRESENTATIVE_FIELDS + ["assignment_status", "accepted_ko_count", "selected_ko"]
@@ -144,6 +145,7 @@ def aggregate(samples, annotation_dir, og_run_dir, outdir, ambiguity="duplicate"
     if ambiguity not in AMBIGUITY_POLICIES:
         raise ValueError("unsupported KO ambiguity policy")
     manifest = selected_samples(samples)
+    sample_run_map(manifest)
     groups, assignments, annotation = load_og_annotations(annotation_dir)
     eligible = {og: kos for og, kos in assignments.items()
                 if kos and (ambiguity == "duplicate" or len(kos) == 1)}
@@ -156,9 +158,9 @@ def aggregate(samples, annotation_dir, og_run_dir, outdir, ambiguity="duplicate"
             result = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", lineterminator="\n")
             result.writeheader()
             return result
-        long = writer("ko_tpm_sum.tsv", ["species", "run", "ko", "tpm_sum"])
+        long = writer("ko_tpm_sum.tsv", ["species", "ko", "tpm_sum"])
         support = writer("ko_support.tsv", KO_FIELDS)
-        wide = writer("ko_tpm_sum_wide.tsv", ["species", "run", *all_kos])
+        wide = writer("ko_tpm_sum_wide.tsv", ["species", *all_kos])
         for sample in manifest:
             species, run = sample["species"], sample["run"]
             path = existing_product(Path(og_run_dir) / f"{run}.tsv")
@@ -194,8 +196,8 @@ def aggregate(samples, annotation_dir, og_run_dir, outdir, ambiguity="duplicate"
                 support.writerow(dict(species=species, run=run, ko=ko, tpm_sum=value,
                                       quantified_orthogroups=len(contributions[ko])))
                 if ko in summed_kos:
-                    long.writerow(dict(species=species, run=run, ko=ko, tpm_sum=value))
-            wide.writerow({"species": species, "run": run, **{ko: summed_kos.get(ko, "") for ko in all_kos}})
+                    long.writerow(dict(species=species, ko=ko, tpm_sum=value))
+            wide.writerow({"species": species, **{ko: summed_kos.get(ko, "") for ko in all_kos}})
             retained_tpm = summed(values[og] for og in retained)
             statuses = Counter(groups[og]["assignment_status"] for og in values)
             reports.append(dict(zip(QC_FIELDS, [

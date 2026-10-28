@@ -39,16 +39,18 @@ def provenance(root, species):
 @pytest.fixture
 def ko_inputs(tmp_path):
     annotation = tmp_path / "annotations"
-    alpha = {f"Alpha_plant_g{i}": hits for i, hits in enumerate([
+    alpha = {f"Alpha_plant_A1_g{i}": hits for i, hits in enumerate([
         [("K00001", "accepted"), ("K00009", "below_threshold")], [("K00001", "accepted")],
         [("K00002", "accepted"), ("K00003", "accepted")], [("K00004", "below_threshold")],
         [("K00005", "threshold_missing")], [], [("K00006", "accepted")], [("K00007", "accepted")],
     ], 1)}
-    annotate(annotation / "Alpha_plant", "Alpha_plant", alpha)
+    annotate(annotation / "Alpha_plant_A1", "Alpha_plant_A1", alpha)
+    annotate(annotation / "Alpha_plant_A2", "Alpha_plant_A2",
+             {gene.replace("_A1_", "_A2_"): hits for gene, hits in alpha.items()})
     annotate(annotation / "Beta_sp_X", "Beta_sp-X", {"Beta_sp-X_g1": [("K00002", "accepted")], "Beta_sp-X_g2": []})
     samples = tmp_path / "samples.tsv"
     manifest = []
-    for name, directory, run in [("Alpha_plant", "Alpha_plant", "A1"), ("Alpha_plant", "Alpha_plant", "A2"),
+    for name, directory, run in [("Alpha_plant_A1", "Alpha_plant_A1", "A1"), ("Alpha_plant_A2", "Alpha_plant_A2", "A2"),
                                  ("Beta_sp-X", "Beta_sp_X", "B1")]:
         abundance = tmp_path / f"{run}.abundance.tsv"
         values = {1: 20, 2: 30, 3: 10, 4: 10, 5: 10, 6: 10, 8: 0, 9: 10}
@@ -119,30 +121,40 @@ def test_merge_runs_missing_evidence_and_selection(ko_inputs):
     aggregate_runs(ko_inputs)
     merge(**ko_inputs)
     wide = read_tsv(ko_inputs["outdir"] / "ko_tpm_sum_wide.tsv")
-    assert [row["run"] for row in wide] == ["A1", "A2", "B1"]
+    assert all("run" not in row for row in wide)
+    assert [row["species"] for row in wide] == ["Alpha_plant_A1", "Alpha_plant_A2", "Beta_sp-X"]
     assert float(wide[0]["K00001"]) == 50
     assert float(wide[1]["K00001"]) == 20
     assert wide[0]["K00002"] == wide[0]["K00003"] == "10.0"
     assert wide[0]["K00006"] == wide[2]["K00001"] == ""
     assert wide[0]["K00007"] == "0.0"
     numeric = read_tsv(ko_inputs["outdir"] / "ko_tpm_sum.tsv")
+    assert list(numeric[0]) == ["species", "ko", "tpm_sum"]
     assert len(numeric) == 9
     assert all(row["tpm_sum"] != "" for row in numeric)
     assert len(read_tsv(ko_inputs["outdir"] / "ko_support.tsv")) == 11
     qc = read_tsv(ko_inputs["outdir"] / "mapping_qc.tsv")[0]
     assert float(qc["retained_tpm"]) == 60
     assert float(qc["ko_tpm_sum"]) == 70
-    assert len(read_tsv(ko_inputs["outdir"] / "genes.tsv")) == 10  # species annotation not duplicated per run
-    assert any(row["assignment_status"] == "accepted" and row["gene_id"] == "Alpha_plant_g3"
+    assert len(read_tsv(ko_inputs["outdir"] / "genes.tsv")) == 18  # distinct assembled samples retain their own gene IDs
+    assert any(row["assignment_status"] == "accepted" and row["gene_id"] == "Alpha_plant_A1_g3"
                for row in read_tsv(ko_inputs["outdir"] / "gene_kos.tsv"))
     manifest = read_tsv(ko_inputs["samples"])
     write_tsv(ko_inputs["samples"], list(manifest[0]), [manifest[-1]])
     # Stale, even corrupted unselected products are ignored.
     (ko_inputs["run_dir"] / "A1.tsv").write_text("broken")
-    (ko_inputs["annotation_dir"] / "Alpha_plant/genes.tsv").write_text("broken")
+    (ko_inputs["annotation_dir"] / "Alpha_plant_A1/genes.tsv").write_text("broken")
     merge(**ko_inputs)
-    assert [row["run"] for row in read_tsv(ko_inputs["outdir"] / "ko_tpm_sum_wide.tsv")] == ["B1"]
+    assert [row["species"] for row in read_tsv(ko_inputs["outdir"] / "ko_tpm_sum_wide.tsv")] == ["Beta_sp-X"]
     assert {row["species"] for row in read_tsv(ko_inputs["outdir"] / "genes.tsv")} == {"Beta_sp-X"}
+
+
+def test_gene_ko_expression_requires_unique_sample_keys(ko_inputs):
+    rows = read_tsv(ko_inputs["samples"])
+    rows[1].update(species=rows[0]["species"], odb_species=rows[0]["odb_species"])
+    write_tsv(ko_inputs["samples"], list(rows[0]), rows)
+    with pytest.raises(ValueError, match="multiple runs per sample key"):
+        merge(**ko_inputs)
 
 
 @pytest.mark.parametrize("ambiguity", ["duplicate", "drop", "error"])
@@ -181,13 +193,13 @@ def test_multi_ko_only_no_retained_or_all_zero_runs(ko_inputs, kind, ambiguity):
         assert report["retained_tpm"] == report["ko_tpm_sum"] == 0
         assert report["no_retained_kos"]
         assert read_tsv(ko_inputs["outdir"] / "ko_tpm_sum.tsv") == []
-        assert read_tsv(ko_inputs["outdir"] / "ko_tpm_sum_wide.tsv") == [{"species": "Beta_sp-X", "run": "B1"}]
+        assert read_tsv(ko_inputs["outdir"] / "ko_tpm_sum_wide.tsv") == [{"species": "Beta_sp-X"}]
 
 
 def test_unobserved_multi_ko_has_missing_support_under_default_policy(ko_inputs):
     sample = read_tsv(ko_inputs["samples"])[0]
     values = read_tsv(sample["abundance"])
-    write_tsv(sample["abundance"], list(values[0]), [r for r in values if r["target_id"] != "Alpha_plant_g3"])
+    write_tsv(sample["abundance"], list(values[0]), [r for r in values if r["target_id"] != "Alpha_plant_A1_g3"])
     aggregate_runs(ko_inputs)
     merge(**ko_inputs)
     support = {r["ko"]: r for r in read_tsv(ko_inputs["run_dir"] / "A1.tsv")}
@@ -199,7 +211,7 @@ def test_unobserved_multi_ko_has_missing_support_under_default_policy(ko_inputs)
 
 def test_ambiguity_error_does_not_split(ko_inputs):
     with pytest.raises(ValueError, match="multiple accepted KOs"):
-        aggregate(ko_inputs["samples"], "A1", ko_inputs["annotation_dir"] / "Alpha_plant",
+        aggregate(ko_inputs["samples"], "A1", ko_inputs["annotation_dir"] / "Alpha_plant_A1",
                   ko_inputs["run_dir"] / "A1.tsv", ko_inputs["run_dir"] / "A1.qc.json", ambiguity="error")
     with pytest.raises(ValueError, match="splitting is unsupported"):
         aggregate(ko_inputs["samples"], "A1", "unused", "unused", "unused", ambiguity="split")
@@ -215,7 +227,7 @@ def test_invalid_abundance_numbers_rejected(ko_inputs, value):
         aggregate_runs(ko_inputs)
 
 
-@pytest.mark.parametrize("value", ["", "bad id", "../bad", "Alpha_plant_g2"])
+@pytest.mark.parametrize("value", ["", "bad id", "../bad", "Alpha_plant_A1_g2"])
 def test_invalid_and_duplicate_target_ids_rejected(ko_inputs, value):
     sample = read_tsv(ko_inputs["samples"])[0]
     values = read_tsv(sample["abundance"])
@@ -247,7 +259,7 @@ def test_provenance_and_manifest_mismatches_rejected(ko_inputs, change):
         path = Path(read_tsv(ko_inputs["samples"])[0]["abundance"])
         path.write_text(path.read_text().replace("20", "21"))
     elif change == "annotation":
-        path = ko_inputs["annotation_dir"] / "Alpha_plant/genes.tsv"
+        path = ko_inputs["annotation_dir"] / "Alpha_plant_A1/genes.tsv"
         path.write_text(path.read_text().replace("K00001", "K00008"))
     elif change == "run_table":
         path = ko_inputs["run_dir"] / "A1.tsv"
@@ -292,7 +304,7 @@ def test_merge_rejects_dividing_multi_ko_tpm_even_with_matching_checksum(ko_inpu
 
 
 def test_global_gene_ids_must_be_unique(ko_inputs):
-    annotate(ko_inputs["annotation_dir"] / "Beta_sp_X", "Beta_sp-X", {"Alpha_plant_g1": [("K00001", "accepted")]})
+    annotate(ko_inputs["annotation_dir"] / "Beta_sp_X", "Beta_sp-X", {"Alpha_plant_A1_g1": [("K00001", "accepted")]})
     aggregate_runs(ko_inputs)
     with pytest.raises(ValueError, match="not globally unique"):
         merge(**ko_inputs)
@@ -300,7 +312,7 @@ def test_global_gene_ids_must_be_unique(ko_inputs):
 
 @pytest.mark.parametrize("change", ["bad_ko", "duplicate_hit", "summary_count", "nan_score"])
 def test_invalid_annotation_contract_rejected(ko_inputs, change):
-    root = ko_inputs["annotation_dir"] / "Alpha_plant"
+    root = ko_inputs["annotation_dir"] / "Alpha_plant_A1"
     if change == "summary_count":
         rows = read_tsv(root / "genes.tsv")
         rows[0]["accepted_ko_count"] = 2
@@ -314,16 +326,16 @@ def test_invalid_annotation_contract_rejected(ko_inputs, change):
         else:
             rows[0]["score"] = "nan"
         write_tsv(root / "gene_kos.tsv", HIT_FIELDS, rows)
-    provenance(root, "Alpha_plant")
+    provenance(root, "Alpha_plant_A1")
     with pytest.raises(ValueError):
         aggregate_runs(ko_inputs)
 
 
 def test_rounded_kofam_accepted_marker_is_authoritative(ko_inputs):
-    root = ko_inputs["annotation_dir"] / "Alpha_plant"
+    root = ko_inputs["annotation_dir"] / "Alpha_plant_A1"
     rows = read_tsv(root / "gene_kos.tsv")
     rows[0].update(score="10.0", threshold="10.04")
     write_tsv(root / "gene_kos.tsv", HIT_FIELDS, rows)
-    provenance(root, "Alpha_plant")
+    provenance(root, "Alpha_plant_A1")
     aggregate_runs(ko_inputs)
     assert float(read_tsv(ko_inputs["run_dir"] / "A1.tsv")[0]["tpm_sum"]) == 50

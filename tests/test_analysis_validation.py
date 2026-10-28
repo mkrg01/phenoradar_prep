@@ -109,6 +109,42 @@ def test_metadata_must_cover_selected_species_without_duplicates(snapshot, tmp_p
         validate(snapshot)
 
 
+@pytest.mark.parametrize("layout", ["native", "mixed", "legacy"])
+def test_expression_layouts_validate_without_modifying_inputs(snapshot, layout):
+    for index, branch in enumerate(["orthogroups/expression/tpm.tsv", "kegg/ko_tpm_sum.tsv"]):
+        path = snapshot / branch
+        rows = read_tsv(path)
+        if layout == "native" or (layout == "mixed" and index == 0):
+            fields = [key for key in rows[0] if key != "run"]
+            write_tsv(path, fields, [{key: row[key] for key in fields} for row in rows])
+    before = state(snapshot)
+    assert validate(snapshot)["samples"] == len(SPECIES)
+    assert state(snapshot) == before
+
+
+@pytest.mark.parametrize("problem", ["unknown_sample", "missing_sample", "duplicate", "discontiguous", "ambiguous_manifest"])
+def test_native_expression_resolves_explicit_metadata_without_parsing_ids(snapshot, problem):
+    from analysis_validation import validate_expression
+    path = snapshot / "orthogroups/expression/tpm.tsv"
+    fields = ["species", "orthogroup", "tpm"]
+    rows = [{key: row[key] for key in fields} for row in read_tsv(path)]
+    runs = {f"private_run_with_underscores_{i}": name for i, name in enumerate(SPECIES)}
+    if problem == "unknown_sample":
+        rows[0]["species"] = "Unknown_R0"
+    elif problem == "missing_sample":
+        rows.pop()
+    elif problem in {"duplicate", "discontiguous"}:
+        extra = dict(rows[0])
+        if problem == "discontiguous":
+            extra["orthogroup"] = "OG2"
+        rows.append(extra)
+    else:
+        runs["extra_run"] = SPECIES[0]
+    write_tsv(path, fields, rows)
+    with pytest.raises(ValueError):
+        validate_expression(path, runs, "orthogroup", "tpm")
+
+
 def completed_tree(snapshot, newick, branch="all"):
     tree = snapshot / f"phylogeny/{branch}/species_tree.nwk"
     tree.parent.mkdir(parents=True, exist_ok=True)
