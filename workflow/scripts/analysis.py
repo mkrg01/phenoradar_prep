@@ -28,8 +28,8 @@ from dataset_assets import SAFE, digest, link_file, locked, record, verify
 from phase_config import deep_merge, execution_settings, merge_slurm, read_yaml, validate_slurm, worker_budgets, workflow_jobs, write_profile
 
 TARGETS = ('all','alignments','kegg','phylogeny','phylogeny_prepare','taxonomy_check',
-           'contrast_pairs','phylogeny_calibrations','timetree','phenoradar_inputs')
-ANALYSIS_KEYS = {'build','inputs','trait','selection','alignment','kegg','phylogeny','exclude_species','slurm','storage'}
+           'contrast_pairs','phylogeny_calibrations','timetree')
+ANALYSIS_KEYS = {'build','inputs','trait','trait_encoding','selection','alignment','kegg','phylogeny','exclude_species','slurm','storage'}
 
 
 def settings(root, config, build=None):
@@ -159,10 +159,21 @@ def status(path, verify_outputs=False):
         done = Path(path) / 'completed.json'
         if done.exists():
             for entry in json.loads(done.read_text())['files']: verify(entry)
+            validate_outputs(Path(path), manifest)
         from storage_management import storage_report
         report['storage'] = storage_report(path, manifest, 'analysis')
-        report['verification'] = {'performed': True, 'scope': 'frozen inputs and recorded completed outputs'}
+        report['verification'] = {'performed': True, 'scope': 'frozen inputs, recorded outputs and native output consistency'}
     return report
+
+
+def validate_outputs(path, manifest):
+    from analysis_status import required_outputs
+    from analysis_validation import validate
+    pipeline = manifest['pipeline']
+    missing = [name for name in required_outputs(pipeline) if not (path / name).is_file()]
+    if missing:
+        raise ValueError('required analysis outputs are missing: ' + ', '.join(missing))
+    return validate(path, exclusions=pipeline.get('exclude_species', []), trait=pipeline.get('trait', 'C4'))
 
 
 def run(path, target='all', execution=None, local=False, cores=1, mem_mb=8000):
@@ -192,16 +203,15 @@ def run(path, target='all', execution=None, local=False, cores=1, mem_mb=8000):
             state.phase('computing')
             subprocess.run([*command,'--',target], cwd=root, check=True, env=pipeline_env)
             if target == 'all':
-                state.phase('exporting')
-                subprocess.run([str(root/'run_pipeline.sh'),'--cores','1','--resources','mem_mb=4000',
-                                '--configfile',str(path/'pipeline.yaml'),'--','phenoradar_inputs'], cwd=root, check=True,
-                               env={k:v for k,v in pipeline_env.items() if not k.startswith('SLURM_')})
-                state.phase('recording_completion')
+                state.phase('validating')
                 output = root / run_layout(manifest['pipeline'])[0]
+                validate_outputs(output, manifest)
+                state.phase('recording_completion')
                 generated = [output / name for name in ('run.json', 'metadata', 'proteins', 'orthogroups',
-                                                       'kegg', 'phylogeny', 'filtered', 'phenoradar_inputs')]
+                                                       'kegg', 'phylogeny', 'filtered')]
                 files = [p for part in generated for p in ([part] if part.is_file() else sorted(part.rglob('*'))) if p.is_file()]
-                write_json(path/'completed.json', {'created_at':now(), 'build':manifest['build'],
+                write_json(path/'completed.json', {'schema_version':2, 'output_layout':'native',
+                           'created_at':now(), 'build':manifest['build'],
                            'run_token':state.token, 'controller_id':state.data['controller_id'],
                            'files':[record(p) for p in files]})
                 state.phase('complete')
@@ -354,7 +364,7 @@ def main():
         if name in {'submit','run'}: p.add_argument('--target',choices=TARGETS,default='all')
         if name=='cleanup': p.add_argument('--apply',action='store_true',help='Delete verified successful scratch; default is preview')
         if name=='status':
-            p.add_argument('--verify',action='store_true',help='Also verify frozen inputs and recorded output checksums (can be expensive)')
+            p.add_argument('--verify',action='store_true',help='Also verify frozen inputs, recorded output checksums and native output consistency (can be expensive)')
             p.add_argument('--json',action='store_true',help='Print JSON (also the default when stdout is redirected)')
         if name=='submit':
             p.add_argument('--root',default='.'); p.add_argument('--config'); p.add_argument('--build')

@@ -81,7 +81,6 @@ from layout import (
 from make_manifests import chunk_plan
 from taxonomy_check import validate_settings as validate_taxonomy_check_settings
 from filter_species import validate_exclusions, discover as discover_filter_inputs
-from phenoradar_inputs import discover as discover_phenoradar_inputs
 try:
     TAXONOMY_CHECK = validate_taxonomy_check_settings(PHY["taxonomy_check"])
     EXCLUDE_SPECIES = validate_exclusions(config["exclude_species"])
@@ -131,7 +130,7 @@ CONTRAST = f"{REPRESENTATIVES}/contrast"
 ROOTING = f"{OUT}/{ROOTING_REL}"
 CONTRAST_OUTPUTS = [
     "contrast_pairs.tsv", "species_metadata.tsv", "summary.json", "summary_tree.nwk",
-    "summary_tree.pdf", "summary_tree.svg", "contrastive.nwk"]
+    "summary_tree.pdf", "summary_tree.svg", "summary_tree_id.pdf", "summary_tree_id.svg", "contrastive.nwk"]
 
 def phylogeny_targets(names):
     # Selecting targets must not change any inference job's parameters.
@@ -373,7 +372,6 @@ include: "rules/phylogeny.smk"
 include: "rules/contrast.smk"
 include: "rules/taxonomy_check.smk"
 include: "rules/filter_species.smk"
-include: "rules/phenoradar.smk"
 
 # Account for actual rule requests, including rules discovered by checkpoints.
 from resource_limits import apply_workflow_limits

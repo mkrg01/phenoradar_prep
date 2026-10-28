@@ -94,20 +94,21 @@ def test_completed_controller_needs_current_record_and_outputs(saved):
     assert status(saved, run=observed)['state'] == 'incomplete'
     complete(saved)
     assert status(saved, run=observed)['state'] == 'complete'
-    (saved / 'phenoradar_inputs/tpm.tsv').unlink()
+    (saved / 'orthogroups/expression/tpm.tsv').unlink()
     report = status(saved, run=observed)
     assert report['state'] == 'incomplete'
-    assert 'phenoradar_inputs/tpm.tsv' in report['completion']['missing']
+    assert 'orthogroups/expression/tpm.tsv' in report['completion']['missing']
 
 
-def test_runtime_phase_100_percent_does_not_mean_whole_completion(saved, monkeypatch):
+@pytest.mark.parametrize('phase', ['validating', 'exporting'])
+def test_runtime_phase_100_percent_does_not_mean_whole_completion(saved, monkeypatch, phase):
     receipt(saved)
     monkeypatch.setenv('SLURM_JOB_ID', '123')
     state = RunState(saved, 'all', saved / 'jobs/submission_0003.resources.json')
-    state.phase('exporting', progress={'done': 824, 'total': 824})
+    state.phase(phase, progress={'done': 824, 'total': 824})
     report = status(saved, run=queue(saved.parent.parent, 'RUNNING'))
     assert report['state'] == 'finalizing'
-    assert report['phase'] == 'exporting'
+    assert report['phase'] == phase
     assert not report['completion']['current']
     state.phase('failed', last_error='export failed')
     assert status(saved, run=queue(saved.parent.parent))['state'] == 'failed'
@@ -154,6 +155,7 @@ def test_explicit_verification_checks_recorded_outputs(saved, monkeypatch):
     from dataset_assets import record
     write_json(saved / 'completed.json', {'created_at': '2026-10-27T00:00:00Z', 'files': [record(artifact)]})
     monkeypatch.setattr(analysis, 'load', lambda path: json.loads((saved / 'analysis.json').read_text()))
+    monkeypatch.setattr(analysis, 'validate_outputs', lambda *args: None)
     monkeypatch.setattr('storage_management.storage_report', lambda *args: {'state': 'retained'})
     assert analysis.status(saved, verify_outputs=True)['verification']['performed']
     artifact.write_text('corrupt')
@@ -172,6 +174,26 @@ def test_status_cli_json_is_read_only_even_without_snakemake(saved):
     assert not (saved / 'jobs').exists()
     assert not (cli / '.cache').exists()
     assert not list(cli.rglob('*.pyc'))
+
+
+def test_legacy_completion_record_and_bundle_are_preserved(saved, monkeypatch):
+    complete(saved)
+    legacy = saved / 'phenoradar_inputs/tpm.tsv'
+    legacy.parent.mkdir()
+    legacy.write_text('legacy export\n')
+    from dataset_assets import record
+    certificate = {'created_at': '2026-10-27T00:00:00Z', 'files': [record(legacy)]}
+    write_json(saved / 'completed.json', certificate)
+    before = (saved / 'completed.json').read_bytes()
+    monkeypatch.setattr(analysis, 'load', lambda path: json.loads((saved / 'analysis.json').read_text()))
+    monkeypatch.setattr(analysis, 'validate_outputs', lambda *args: None)
+    monkeypatch.setattr('storage_management.storage_report', lambda *args: {'state': 'retained'})
+    assert analysis.status(saved, verify_outputs=True)['verification']['performed']
+    assert (saved / 'completed.json').read_bytes() == before
+    assert legacy.read_text() == 'legacy export\n'
+    legacy.write_text('changed\n')
+    with pytest.raises(ValueError, match='changed'):
+        analysis.status(saved, verify_outputs=True)
 
 
 def test_progress_final_write_and_worker_guard(saved, monkeypatch):

@@ -79,21 +79,23 @@ Coverage counts distinct biological species, so extra samples do not inflate it.
 
 | Setting under `phylogeny` | Default | Meaning |
 | --- | --- | --- |
-| `max_markers` | `500` | Positive integer cap, or `null` for no limit; select by species coverage, then BUSCO ID |
+| `max_markers` | `null` | All eligible markers; a positive integer caps by species coverage, then BUSCO ID |
 | `min_taxa` | `4` | Minimum species per marker before and after QC; at least four |
 | `min_protein_length` | `100` | Minimum known amino acids per extracted/trimmed sequence |
 | `max_unknown_fraction` | `0.05` | Maximum unknown fraction in prepared proteins |
 | `trimal_mode` | `gappyout` | `gappyout` or `automated1` |
 
-To use every eligible marker without a count limit, set:
+New analyses use every eligible marker by default. To limit computation, set a
+positive cap, for example:
 
 ```yaml
 phylogeny:
-  max_markers: null
+  max_markers: 500
 ```
 
-`min_taxa` and sequence/alignment QC still apply. Omitting `max_markers` keeps
-the default cap of 500; `0` and negative values are invalid.
+`min_taxa` and sequence/alignment QC still apply with no cap. Prepared analyses
+retain their recorded settings; this default does not expand an existing
+500-marker analysis. `0` and negative values are invalid.
 
 cdskit pads, masks, and translates CDS using the build's genetic code. Stops and
 unresolved codons become X. Review `species/*.json`: padding may affect reading
@@ -102,6 +104,19 @@ frames, and QC cannot verify ORFs or exclude paralogy.
 FAMSA aligns proteins; trimAl selects columns with X treated as gaps. Retained
 loci must pass sequence-length/species-coverage checks and contain a variable
 amino-acid site. Markers lost during QC are not replaced.
+
+## Alignment reuse
+
+Tree inference reuses the raw and trimmed BUSCO alignments saved under
+`phylogeny/<set>/alignments/`; use these files directly for downstream work.
+BUSCO alignments are also available when `alignment.enabled: false`; that
+setting controls the separate OG output.
+
+Enabling [OG alignments](alignments.md) adds a separate calculation: OGs use
+OrthoDB assignments and retain all gene copies across selected samples, whereas
+BUSCO alignments use single-copy hits and prepared CDS from the chosen tree's
+samples. Subsetting an OG alignment does not reproduce aligning the BUSCO inputs,
+so OG alignments are not substituted for BUSCO alignments.
 
 ## Inference and outputs
 

@@ -71,8 +71,8 @@ transcripts, `odb_mapped_tpm` counts mapped OGs, and `retained_tpm` counts OGs
 retained by KO assignment and the ambiguity policy. Contribution totals across
 KOs can count an OG more than once.
 
-Use the [collector](phenoradar_inputs.md#data-checks-and-downstream-use) to pass KO
-features to PhenoRadar. A [post hoc subset](species_filter.md) keeps the original
+Pass the [native KO table](phenoradar_inputs.md#expression-settings) directly
+to PhenoRadar. A [post hoc subset](species_filter.md) keeps the original
 OG labels and donor metadata. A new analysis selects new representatives from
 its chosen samples.
 

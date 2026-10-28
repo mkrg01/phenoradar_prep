@@ -41,8 +41,8 @@ follow the [sample identifier conventions](inputs.md#identifiers).
 | `expression/runs/{run}.tsv.gz`, `{run}.qc.json` | Saved OG expression and QC |
 
 New databases and build caches gzip protein FASTA and expression tables,
-preserving all values and source columns. Combined analysis tables and
-PhenoRadar exports remain plain TSV.
+preserving all values and source columns. Combined analysis tables remain plain
+TSV and can be read directly by PhenoRadar.
 
 Existing uncompressed databases remain readable and reusable; no conversion is
 needed. New builds compress imported products and leave the source database
@@ -89,7 +89,6 @@ results/<build>/downstream/<analysis>/
     alignments/              # Optional all-copy alignments
   kegg/                      # Optional KO annotation and expression
   phylogeny/                 # Trees, dating, pairs, and taxonomy reports
-  phenoradar_inputs/         # Collected inputs for PhenoRadar
 ```
 
 Start with these checks:
@@ -151,6 +150,7 @@ Duplicate gene/OG pairs count once. A quantified gene assigned to multiple OGs
 stops aggregation. Duplicate targets, negative/nonfinite TPM, and no positive
 retained TPM also cause errors.
 
-[PhenoRadar export](phenoradar_inputs.md) removes the `run` column and preserves
-TPM values; it never averages samples. [KO expression](kegg.md#outputs) uses
+[PhenoRadar](phenoradar_inputs.md) reads the selected columns directly from the
+native tables; the `run` column remains available. Samples are never averaged.
+[KO expression](kegg.md#outputs) uses
 original TPM sums and distinguishes unquantified features from measured zeros.

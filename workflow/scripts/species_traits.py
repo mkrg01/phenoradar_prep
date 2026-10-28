@@ -22,8 +22,6 @@ def read_species_traits(path, column="C4"):
                 raise ValueError(f"duplicate species after normalization in trait table: {name}")
             value = row[column].strip()
             value = "" if value in {"", "NA", "NaN", "nan"} else value
-            if column == "C4" and value not in {"", "0", "1"}:
-                raise ValueError(f"C4 must be 0, 1 or missing: {name}={value}")
             result[name] = value
     if not result:
         raise ValueError("empty species trait table")

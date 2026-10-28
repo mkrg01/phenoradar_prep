@@ -96,7 +96,7 @@ def state(folder):
 
 
 def test_filtered_metadata_and_alignments_feed_phenoradar(snapshot, tmp_path):
-    from phenoradar_inputs import export as collect_inputs
+    from analysis_validation import validate
     source, traits = snapshot
     path = source / "metadata/metadata_high_busco.tsv"
     rows = [{**row, "family": "Plantaceae"} for row in read_tsv(path)]
@@ -106,14 +106,14 @@ def test_filtered_metadata_and_alignments_feed_phenoradar(snapshot, tmp_path):
     metadata = read_tsv(filtered / "metadata/species_metadata.tsv")
     assert {r["species"] for r in metadata} == set(SPECIES[1:])
     assert all(r["family"] == "Plantaceae" and r["contrast_pair_id"] == "" for r in metadata)
-    out = tmp_path / "phenoradar_inputs"
-    collect_inputs(source, out, exclusions=["Plant_A"])
-    assert (out / "orthogroups/expression/tpm.tsv").resolve() == filtered / "orthogroups/expression/tpm.tsv"
-    assert {row["species"] for row in read_tsv(out / "tpm.tsv")} == set(SPECIES[1:])
-    assert list(read_tsv(out / "tpm.tsv")[0]) == ["species", "orthogroup", "tpm"]
-    assert (out / "alignments/OGshared.faa").is_symlink()
-    assert not (out / "alignments/OGempty.faa").exists()
-    assert (out / "phylogeny/all/species_tree.pruned.nwk").is_symlink()
+    before = state(source)
+    report = validate(source, exclusions=["Plant_A"])
+    assert report["source"] == str(filtered)
+    assert {row["species"] for row in read_tsv(filtered / "orthogroups/expression/tpm.tsv")} == set(SPECIES[1:])
+    assert (filtered / "orthogroups/alignments/OGshared.faa").is_file()
+    assert not (filtered / "orthogroups/alignments/OGempty.faa").exists()
+    assert (filtered / "phylogeny/all/species_tree.pruned.nwk").is_file()
+    assert state(source) == before
 
 
 @pytest.mark.parametrize("value", [None, "Plant_A", {"species": "Plant_A"}, [1], ["Plant A"], ["../Plant_A"], ["Plant_A", "Plant_A"]])

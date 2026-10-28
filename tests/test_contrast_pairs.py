@@ -33,8 +33,7 @@ def test_traits_normalize_names_and_reject_collisions(tmp_path):
     with pytest.raises(ValueError, match="duplicate"):
         read_species_traits(path)
     path.write_text("species\tC4\nPlant alpha\t2\n")
-    with pytest.raises(ValueError, match="C4 must"):
-        read_species_traits(path)
+    assert read_species_traits(path) == {"Plant_alpha": "2"}  # Encoding is validated before analysis.
 
 
 def test_ncbi_guide_uses_only_frozen_sqlite(tmp_path, tiny_inputs, monkeypatch):
@@ -130,6 +129,7 @@ def test_two_skims_compose_all_species_membership_and_plot(tmp_path):
     tree.write_text("(O:1,(((A:1,C:1)0.95:1,B:1)0.98:1,(D:1,E:1)0.97:1)1:1);\n")
     out = tmp_path / "out"
     summarize(tree, tmp_path / "selection", source / "outgroup.txt", out)
+    assert json.loads((out / "summary.json").read_text())["state_order"] == ["0", "1"]
     pairs = read_tsv(out / "contrast_pairs.tsv")
     assert len(pairs) == 2
     meta = {r["species"]: r for r in read_tsv(out / "species_metadata.tsv")}
@@ -144,7 +144,8 @@ def test_two_skims_compose_all_species_membership_and_plot(tmp_path):
     assert meta["O"]["is_representative"] == "1"
     plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out)
     assert (out / "summary_tree.pdf").read_bytes().startswith(b"%PDF")
-    assert "Pair" in (out / "summary_tree.svg").read_text()
+    assert "pair = " not in (out / "summary_tree.svg").read_text()
+    assert "pair = " in (out / "summary_tree_id.svg").read_text()
 
 
 def test_polytomy_is_not_arbitrarily_split_into_pairs(tmp_path):

@@ -64,7 +64,7 @@ def dating_calibrations(wc):
 checkpoint select_phenotyped_species:
     input:
         samples=f"{META}/samples.tsv",
-        traits=INPUTS["species_trait"],
+        traits=rules.normalize_traits.output.traits,
         code=f"{SCRIPTS}/species_traits.py",
         common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
     output:

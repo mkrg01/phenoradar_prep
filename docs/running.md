@@ -85,7 +85,7 @@ settings and never rebuild upstream sample products.
 
 | Target | Work requested |
 | --- | --- |
-| `all` (default) | Merge OG expression/QC, run enabled branches, collect PhenoRadar inputs |
+| `all` (default) | Merge OG expression/QC, run enabled branches, and validate native outputs |
 | `alignments` | [All-copy OG alignments](alignments.md) |
 | `kegg` | [KO annotation and expression](kegg.md) |
 | `phylogeny_prepare` | BUSCO input audit, outgroup, and marker plan |
@@ -94,7 +94,6 @@ settings and never rebuild upstream sample products.
 | `timetree` | [LSD2 dating](dating.md) |
 | `taxonomy_check` | [MonoPhy review](taxonomy_check.md) |
 | `contrast_pairs` | [Trait pairs](contrast_pairs.md) on selected trees |
-| `phenoradar_inputs` | [Collect completed results](phenoradar_inputs.md), without starting analyses |
 
 Dating, taxonomy checks, and contrast pairs require their enabled flag even
 when targeted explicitly. `alignments` and `kegg` work without enabling their

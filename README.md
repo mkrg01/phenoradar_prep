@@ -44,8 +44,7 @@ Build names include UTC timestamps by default. Retry with the
 [saved run path](docs/datasets.md#failure-and-recovery-behavior) via `--build`
 or `--analysis`.
 
-Reusable products are in `results/{build_name}/database/`. Analysis results,
-including `phenoradar_inputs/`, are in
+Reusable products are in `results/{build_name}/database/`. Analysis results are in
 `results/{build_name}/downstream/{analysis_name}/`.
 
 For curated datasets and metadata updates, see the [dataset catalog](datasets/README.md)

@@ -5,6 +5,7 @@ inputs:
   species_list: null  # Species/sample IDs, one per line; a path enables filtering, null disables it.
   calibrations: null  # Calibration TSV required when phylogeny.dating.calibration_source is file.
 trait: C4  # Trait-table column; use C4 when a C4 column is provided.
+trait_encoding: null  # For text states, e.g. {absent: 0, present: 1}; numeric 0/1 needs none.
 selection:
   busco_threshold: 0.5  # Minimum complete BUSCO fraction (single + duplicated); 0.5 = 50%.
 alignment:
@@ -17,7 +18,7 @@ phylogeny:
   trees:  # Any of all, phenotyped, representatives; [] disables tree inference.
   - representatives
   outgroup: auto  # Infer a basal group from taxonomy, or supply species/sample ID(s).
-  max_markers: 500  # Maximum BUSCO markers, ranked by species coverage; null: no limit.
+  max_markers: null  # All eligible BUSCO markers; a positive integer caps by species coverage.
   min_protein_length: 100  # Minimum known amino acids per extracted/trimmed sequence.
   max_unknown_fraction: 0.05  # Maximum unknown amino-acid fraction in prepared proteins.
   min_taxa: 4  # Minimum distinct biological species per marker; must be at least 4.

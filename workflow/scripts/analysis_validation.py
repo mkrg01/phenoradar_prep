@@ -1,15 +1,12 @@
-#!/usr/bin/env python3
-"""Collect completed outputs for present and future PhenoRadar analyses."""
-import argparse
+"""Read-only integrity checks for native analysis outputs and filtered subsets."""
+from collections import Counter
 import csv
 import gzip
 import json
 import math
 from pathlib import Path
-import tempfile
 
 from common import existing_product, read_tsv, sha256, species_from_gene_id
-from export_species_tpm import export as export_species_tpm
 from filter_species import fasta_records, manifest, safe_name, table, validate_exclusions
 from phenoradar_metadata import read_base, with_pairs
 from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
@@ -29,7 +26,7 @@ def discover(source, exclusions=()):
         source = original / "filtered"
         marker = source / "manifest.json"
         if not marker.is_file():
-            raise ValueError("run filter_species with the current exclude_species before phenoradar_inputs")
+            raise ValueError("run filter_species with the current exclude_species before verification")
         filtered = json.loads(marker.read_text())
         retained = set(original_species) - set(exclusions)
         retained_runs = {r["run"] for r in original_samples if r["species"] in retained}
@@ -45,19 +42,19 @@ def discover(source, exclusions=()):
             raise ValueError(f"missing required workflow output: {path}")
         files.add(path)
 
-    sections, links, hashes, trees, contrasts = {}, {}, {}, {}, []
+    sections, artifacts, hashes, trees, contrasts = {}, {}, {}, {}, []
 
-    def publish(relative, destination=None):
+    def include(relative):
         path = source / relative
         if path.is_file():
             files.add(path)
-            links[destination or relative] = path
+            artifacts[relative] = path
 
     def folder(relative, recursive=False):
         root = source / relative
         for path in sorted(root.rglob("*") if recursive else root.glob("*")):
             if path.is_file() and not any(p.startswith(".") for p in path.relative_to(root).parts):
-                publish(str(path.relative_to(source)))
+                include(str(path.relative_to(source)))
 
     def branch(name, required):
         present = [p for p in required if (source / p).is_file()]
@@ -67,11 +64,9 @@ def discover(source, exclusions=()):
         return status == "ready"
 
     folder("metadata")
-    publish("run.json")
-    publish("metadata/species_metadata.tsv", "species_metadata.tsv")
+    include("run.json")
     if branch("orthogroups", [f"{ORTHOGROUP_EXPRESSION}/tpm.tsv", f"{ORTHOGROUP_EXPRESSION}/mapping_qc.tsv"]):
         folder(ORTHOGROUP_EXPRESSION)
-        publish(f"{ORTHOGROUP_EXPRESSION}/tpm.tsv", "tpm.tsv")
     if branch("mapping", [f"{ORTHOGROUP_MAPPING}/{name}" for name in
                           ["snapshot.json"]]):
         folder(ORTHOGROUP_MAPPING, recursive=True)
@@ -82,20 +77,20 @@ def discover(source, exclusions=()):
                      "orthogroups.tsv", "og_kos.tsv",
                      "annotation_provenance.json", "provenance.json", "source_provenance.json",
                      "filter_qc.json"]:
-            publish("kegg/" + name)
+            include("kegg/" + name)
         if og_kegg:
             from og_kegg import load_og_annotations
             load_og_annotations(source / "kegg")
             for name in ["representatives.tsv", "provenance.json"]:
-                publish("kegg/representatives/" + name)
+                include("kegg/representatives/" + name)
         else:
             for name in ["genes.tsv", "gene_kos.tsv"]:
-                publish("kegg/" + name)
+                include("kegg/" + name)
     for group in ["module", "pathway"]:
         relative = f"kegg/ko_{group}s.tsv"
         if branch(f"kegg_{group}s", [relative, "kegg/reference_qc.json"]):
-            publish(relative)
-            publish("kegg/reference_qc.json")
+            include(relative)
+            include("kegg/reference_qc.json")
             record = json.loads((source / "kegg/reference_qc.json").read_text())
             maps = {Path(r["path"]).name: r["sha256"] for r in record.get("results", [])}
             if Path(relative).name not in maps:
@@ -117,13 +112,12 @@ def discover(source, exclusions=()):
             path = source / relative
             if not path.is_file():
                 raise ValueError("completed alignment is missing: " + str(path))
-            publish(relative)
-            publish(relative, f"alignments/{og}.faa")
+            include(relative)
             if not filtered:
                 hashes[str(path)] = record["alignment"]["sha256"]
         for path in (source / ORTHOGROUP_ALIGNMENTS).glob("*"):
             if path.suffix != ".faa":
-                publish(str(path.relative_to(source)))
+                include(str(path.relative_to(source)))
     elif any((source / ORTHOGROUP_ALIGNMENTS).glob("*.faa")):
         sections["alignments"] = "incomplete"
 
@@ -133,8 +127,8 @@ def discover(source, exclusions=()):
         protein = str(existing_product(source / f"proteins/{name}_protein.fa").relative_to(source))
         report = f"proteins/{name}_protein.json"
         if branch(f"proteins/{name}", [protein] if filtered else [protein, report]):
-            publish(protein)
-            publish(report)
+            include(protein)
+            include(report)
             if not filtered:
                 hashes[str(source / protein)] = json.loads((source / report).read_text())["protein"]["sha256"]
         relative = f"kegg/species/{name}"
@@ -154,9 +148,9 @@ def discover(source, exclusions=()):
             for name, marker in [("species_tree.nwk", "species_tree.json"),
                                  ("gene_trees.nwk", "gene_trees.json")]:
                 if branch(f"{relative}/{name}", [f"{relative}/{name}", f"{relative}/{marker}"]):
-                    publish(f"{relative}/{name}")
-                    publish(f"{relative}/{marker}")
-                    publish(f"{relative}/species_coverage.tsv")
+                    include(f"{relative}/{name}")
+                    include(f"{relative}/{marker}")
+                    include(f"{relative}/species_coverage.tsv")
                     if name == "species_tree.nwk":
                         trees[str(source / relative / name)] = relative != PHYLOGENY_BRANCHES["all"]
                     else:
@@ -165,7 +159,7 @@ def discover(source, exclusions=()):
                             og = safe_name(locus["marker"])
                             for directory in ["markers", "alignments", "alignments/raw", "gene_trees"]:
                                 for suffix in [".faa", ".nwk", ".json", ".columns.tsv"]:
-                                    publish(f"{relative}/{directory}/{og}{suffix}")
+                                    include(f"{relative}/{directory}/{og}{suffix}")
             for directory, marker in [("selection", "selection.json"), ("plan", "provenance.json"),
                                       ("rooting", "outgroup.json"), ("timetree", "provenance.json"),
                                       ("dating", "provenance.json"), ("taxonomy_check", "summary.json")]:
@@ -191,13 +185,13 @@ def discover(source, exclusions=()):
                         stem = f"{relative}/{directory}/{safe_name(row[field])}"
                         if all((source / (stem + ext)).is_file() for ext in [suffix, ".json"]):
                             for ext in [suffix, ".json", ".columns.tsv"]:
-                                publish(stem + ext)
+                                include(stem + ext)
                 if (source / relative / "markers/.snakemake_timestamp").is_file():
                     files.add(source / relative / "markers/.snakemake_timestamp")
                     plan_path = source / relative / "plan/markers.tsv"
                     if plan_path.is_file():
                         for row in read_tsv(plan_path):
-                            publish(f"{relative}/markers/{safe_name(row['marker'])}.faa")
+                            include(f"{relative}/markers/{safe_name(row['marker'])}.faa")
         contrast = f"{relative}/contrast"
         if branch(contrast, [f"{contrast}/species_metadata.tsv", f"{contrast}/summary.json"]):
             folder(contrast)
@@ -205,14 +199,17 @@ def discover(source, exclusions=()):
 
     for directory in ["", "orthogroups", ORTHOGROUP_MAPPING]:
         for suffix in [".tsv", ".tsv.gz"]:
-            publish(str(Path(directory) / ("orthogroup_annotations" + suffix)))
-    return dict(source=str(source), files=sorted(str(p) for p in files), links=links,
+            include(str(Path(directory) / ("orthogroup_annotations" + suffix)))
+    return dict(source=str(source), files=sorted(str(p) for p in files), artifacts=artifacts,
                 sections=sections, filtered=filtered, contrasts=contrasts, hashes=hashes, trees=trees,
                 original_runs={r["run"]: r["species"] for r in original_samples if r["species"] not in exclusions})
 
 
 def validate_expression(path, runs, feature, value):
     """Validate run-level values without choosing or combining biological replicates."""
+    repeated = sorted(name for name, count in Counter(runs.values()).items() if count > 1)
+    if repeated:
+        raise ValueError("multiple runs per sample key; assign a distinct sample ID to each run: " + ", ".join(repeated[:10]))
     reader = table(path, ["species", "run", feature, value])
     next(reader)
     seen, features, current_features = set(), set(), set()
@@ -308,44 +305,14 @@ def validate_annotations(path, orthogroups):
                 matched.add(row[0])
     if orthogroups and not matched:
         raise ValueError("OG annotations do not match expression IDs; check the OrthoDB reference version")
-    print(f"OG descriptions: {len(matched)}/{len(orthogroups)} expressed OGs", flush=True)
 
 
-def check_destination(out):
-    if out.is_symlink():
-        raise ValueError("phenoradar_inputs output directory must not be a symlink")
-    allowed = {"species_metadata.tsv", "tpm.tsv", "orthogroup_annotations.tsv",
-               "orthogroup_annotations.tsv.gz", "run.json", ".snakemake_timestamp"}
-    directories = {"metadata", "proteins", "orthogroups", "phylogeny", "alignments", "kegg"}
-    if out.exists():
-        for path in out.iterdir():
-            if path.name in allowed and (path.is_symlink() or
-                    (path.name in {"species_metadata.tsv", "tpm.tsv", ".snakemake_timestamp"} and path.is_file())):
-                continue
-            if path.name in directories and path.is_dir() and not path.is_symlink():
-                for child in path.rglob("*"):
-                    if child.is_symlink() and not child.is_dir():
-                        continue
-                    if child.is_dir() and not child.is_symlink():
-                        continue
-                    raise ValueError("unrecognized file in output directory: " + str(child))
-                continue
-            raise ValueError("refusing to replace unrecognized output contents: " + str(path))
-
-
-def export(source, outdir=None, exclusions=(), trait="C4"):
-    out = Path(outdir) if outdir else Path(source) / "phenoradar_inputs"
-    check_destination(out)
-    out = out.resolve()
+def validate(source, exclusions=(), trait="C4"):
+    """Verify existing outputs in place; never create files or launch producers."""
     inventory = discover(source, exclusions)
     source = Path(inventory["source"])
     paths = [Path(p) for p in inventory["files"]]
-    if out == source or any(out == p.resolve() or out in p.resolve().parents for p in paths):
-        raise ValueError("phenoradar_inputs output overlaps its source files")
     stats = {p: (p.stat().st_size, p.stat().st_mtime_ns, p.stat().st_ino) for p in paths}
-    print("PhenoRadar source: " + str(source), flush=True)
-    for name, status in inventory["sections"].items():
-        print(f"{name}: {status}", flush=True)
     expected_hashes = dict(inventory["hashes"])
     filtered = inventory["filtered"]
     if filtered:
@@ -372,17 +339,16 @@ def export(source, outdir=None, exclusions=(), trait="C4"):
         raise ValueError("PhenoRadar metadata species differ from samples")
     for pairs in inventory["contrasts"]:
         with_pairs(metadata, pairs, trait)
-    links, orthogroups = inventory["links"], set()
-    for dest, feature, value, qc in [("tpm.tsv", "orthogroup", "tpm", f"{ORTHOGROUP_EXPRESSION}/mapping_qc.tsv"),
+    artifacts, orthogroups = inventory["artifacts"], set()
+    for dest, feature, value, qc in [(f"{ORTHOGROUP_EXPRESSION}/tpm.tsv", "orthogroup", "tpm", f"{ORTHOGROUP_EXPRESSION}/mapping_qc.tsv"),
                                     ("kegg/ko_tpm_sum.tsv", "ko", "tpm_sum", "kegg/mapping_qc.tsv")]:
-        if dest in links:
-            print("Checking expression: " + str(links[dest]), flush=True)
-            features = validate_expression(links[dest], runs, feature, value)
+        if dest in artifacts:
+            features = validate_expression(artifacts[dest], runs, feature, value)
             validate_qc(source / qc, runs)
             if feature == "orthogroup":
                 orthogroups = features
-    for dest, path in links.items():
-        if dest.startswith("alignments/"):
+    for dest, path in artifacts.items():
+        if dest.startswith(f"{ORTHOGROUP_ALIGNMENTS}/") and path.suffix == ".faa":
             validate_alignment(path, species)
         elif dest in {"kegg/ko_modules.tsv", "kegg/ko_pathways.tsv"}:
             validate_groups(path, "module" if "modules" in dest else "pathway")
@@ -390,42 +356,9 @@ def export(source, outdir=None, exclusions=(), trait="C4"):
             validate_tree(path, species, subset=inventory["trees"][str(path)])
         elif path.name.startswith("orthogroup_annotations."):
             validate_annotations(path, orthogroups)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".phenoradar-inputs-", dir=out.parent) as tmp:
-        stage = Path(tmp) / "inputs"
-        stage.mkdir()
-        for dest, path in links.items():
-            target = stage / dest
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if dest == "tpm.tsv":
-                export_species_tpm(source / "metadata/samples.tsv", path, target)
-                print(f"{dest}: species/orthogroup/tpm exported from {path}", flush=True)
-            else:
-                target.symlink_to(path.resolve())
-                print(f"{dest} -> {path}", flush=True)
-        for path, expected in stats.items():
-            stat = path.stat()
-            if (stat.st_size, stat.st_mtime_ns, stat.st_ino) != expected:
-                raise ValueError("source changed during input preparation: " + str(path))
-        backup = Path(tmp) / "previous"
-        if out.exists():
-            out.rename(backup)
-        try:
-            stage.rename(out)
-        except BaseException:
-            if backup.exists():
-                backup.rename(out)
-            raise
-    print(f"PhenoRadar inputs: {out} ({len(species)} species)", flush=True)
-    return dict(output=str(out), species=len(species), sections=inventory["sections"])
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", required=True)
-    parser.add_argument("--outdir")
-    parser.add_argument("--exclude-species", default="[]", help="JSON exact species IDs")
-    parser.add_argument("--trait", default="C4")
-    args = vars(parser.parse_args())
-    args["exclusions"] = json.loads(args.pop("exclude_species"))
-    export(**args)
+    for path, expected in stats.items():
+        stat = path.stat()
+        if (stat.st_size, stat.st_mtime_ns, stat.st_ino) != expected:
+            raise ValueError("source changed during verification: " + str(path))
+    return dict(source=str(source), samples=len(samples), sections=inventory["sections"],
+                files=inventory["files"])

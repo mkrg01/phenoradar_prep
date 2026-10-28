@@ -25,11 +25,9 @@ biological species IDs; list every sample to exclude.
 ```bash
 ./run_pipeline.sh --cores 1 --resources mem_gb=8 \
   --configfile results/leaf/downstream/carnivory/pipeline.yaml config/export_exclusions.yaml -- filter_species
-./run_pipeline.sh --cores 1 --resources mem_gb=4 \
-  --configfile results/leaf/downstream/carnivory/pipeline.yaml config/export_exclusions.yaml -- phenoradar_inputs
 ```
 
-Use the same override for both commands. The export goes to `filtered/` under
+Use the files directly from `filtered/` under
 the source analysis, which stays unchanged. No producer jobs are started;
 `manifest.json` lists exported and incomplete sections. Rerunning refreshes from
 the original results. To recreate deleted exports, add `--forcerun filter_species`

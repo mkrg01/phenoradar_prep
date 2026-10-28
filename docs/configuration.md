@@ -75,6 +75,7 @@ resuming samples; choose a new cache directory for a different snapshot.
 | --- | --- |
 | `build` | Completed build or copied database; `--build` overrides it |
 | `inputs.species_trait`, `trait` | Trait table and column; set the path to `null` when unused |
+| `trait_encoding` | Explicit text-state mapping to integers `0` and `1`; `null` for existing `0`/`1` input |
 | `inputs.species_list` | Restrict to listed species/sample IDs; `null` disables filtering |
 | `exclude_species` | Omit biological species IDs (all their samples) or exact sample IDs |
 | `selection.busco_threshold` | Minimum complete BUSCO fraction per sample; default `0.5` |
@@ -106,7 +107,8 @@ representative trees and contrast pairs; review these choices for your dataset.
 | `phylogeny.contrast_pairs` | [Trait pairs](contrast_pairs.md) |
 | `phylogeny.taxonomy_check` | [Taxonomic review](taxonomy_check.md) |
 
-`all` runs enabled branches and collects [PhenoRadar inputs](phenoradar_inputs.md).
+`all` runs enabled branches and validates their outputs.
+[Use native outputs directly in PhenoRadar](phenoradar_inputs.md).
 See [targets](running.md#targets) to run branches separately.
 
 ## Choosing species trees

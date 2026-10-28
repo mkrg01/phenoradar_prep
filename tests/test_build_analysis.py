@@ -142,14 +142,14 @@ def test_complete_build_multiple_analyses_and_species_updates(dataset_project,fa
         config.write_text(yaml.safe_dump(cfg))
         run = analysis.prepare(root,name,config,build)
         execute(run,'all')
-        execute(run,'phenoradar_inputs')
+        analysis.validate_outputs(run, analysis.load(run))
         assert run == build/'downstream'/name
         output = run
         assert 'tpm' not in analysis.load(run)['pipeline']
         assert load_complete(build)['tpm'] == {'multimap': 'error'}
         assert (output/'orthogroups/expression/runs/A1.tsv.gz').samefile(build/'database/expression/runs/A1.tsv.gz')
         assert {r['species'] for r in read_tsv(output/'orthogroups/expression/tpm.tsv')} == expected
-        assert {r['species'] for r in read_tsv(output/'phenoradar_inputs/tpm.tsv')} == expected
+        assert not (output/'phenoradar_inputs').exists()
         # Expression-only downstream runs do not even stage proteins or mappings.
         assert not (output/'orthogroups/mapping').exists()
         assert not (output/'proteins').exists()
@@ -185,8 +185,8 @@ def test_complete_build_multiple_analyses_and_species_updates(dataset_project,fa
         assert [r['run'] for r in load_complete(updated)['excluded_runs']] == [r['run'] for r in blocked]
         if name == 'removed':
             subset = analysis.prepare(root,'without_excluded',config,updated)
-            execute(subset,'all'); execute(subset,'phenoradar_inputs')
-            assert {r['species'] for r in read_tsv(subset/'phenoradar_inputs/tpm.tsv')} == {'Alpha_plant_A1'}
+            execute(subset,'all'); analysis.validate_outputs(subset, analysis.load(subset))
+            assert {r['species'] for r in read_tsv(subset/'orthogroups/expression/tpm.tsv')} == {'Alpha_plant_A1'}
             assert not events.exists()
         assert (updated/'database/expression/runs/A1.tsv.gz').samefile(build/'database/expression/runs/A1.tsv.gz')
         assert analysis.prepare(root,'loose',config,updated) == updated/'downstream/loose'

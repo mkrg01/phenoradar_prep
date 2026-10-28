@@ -109,6 +109,38 @@ def test_plan_selects_highest_coverage_with_id_ties_independent_of_orders(tmp_pa
     assert selected[0] == selected[1]
 
 
+@pytest.mark.parametrize("config_path", ["workflow/pipeline_defaults.yaml", "config/analysis.yaml"])
+def test_default_marker_plan_keeps_more_than_500_eligible_markers(tmp_path, config_path):
+    species = [f"plant_{i}" for i in range(4)]
+    markers = [f"{i}at1" for i in range(502)]
+    cds = tmp_path / "cds.fa"
+    cds.write_text(">placeholder\n" + "ATG" * 100 + "\n")
+    tables = tmp_path / "busco"
+    tables.mkdir()
+    for index, name in enumerate(species):
+        table(tables / f"{name}.busco.full.tsv",
+              [f"{marker}\tComplete\t{name}_g{marker}\t100\t100"
+               if index < 3 or marker != markers[-1] else f"{marker}\tMissing"
+               for marker in markers])
+    samples = tmp_path / "samples.tsv"
+    write_tsv(samples, ["species", "cds"],
+              [{"species": name, "cds": str(cds)} for name in species])
+    cfg = settings()
+    cfg.update(yaml.safe_load((ROOT / config_path).read_text())["phylogeny"])
+    cfg.update(busco_full_dir=str(tables), outgroup=species[0])
+    output = tmp_path / "plan"
+    plan(samples, output, cfg)
+    selected = read_tsv(output / "markers.tsv")
+    assert len(selected) == 501
+    assert markers[-1] not in {row["marker"] for row in selected}
+    provenance = json.loads((output / "provenance.json").read_text())
+    assert provenance["eligible_markers"] == 501
+    assert provenance["settings"]["max_markers"] is None
+
+    plan(samples, tmp_path / "capped", dict(cfg, max_markers=500))
+    assert read_tsv(tmp_path / "capped/markers.tsv") == selected[:500]
+
+
 def test_extract_original_cds_audits_padding_masking_and_missing_ids(tmp_path):
     full, cds, markers = tmp_path / "busco.tsv", tmp_path / "cds.fa.gz", tmp_path / "markers.tsv"
     table(full, ["1at1\tComplete\tg1:3-11\t100\t3", "2at1\tComplete\tg2:0-11\t100\t3"])

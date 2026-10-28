@@ -94,7 +94,25 @@ species IDs, and every sample of that species inherits its trait. Duplicate
 normalized names are errors. Blanks, `NA`, `NaN`, `nan`, and absent rows are
 unknown; extra rows do not add species.
 
-Use `0`, `1`, or blank for PhenoRadar traits. Phenotyped trees accept a single
-observed state; representative selection requires two. On all/phenotyped trees,
+Numeric `0`/`1` values need no encoding setting. For text states, explicitly
+identify the reference (`0`) and focal (`1`) states before preparing the analysis:
+
+```yaml
+trait: carnivory
+trait_encoding:
+  absent: 0
+  present: 1
+```
+
+The workflow normalizes selected species once to `metadata/species_trait.tsv`
+and records the mapping and source checksums in `metadata/trait_encoding.json`.
+All analysis branches and PhenoRadar metadata use the same `0`/`1` values;
+contrast legends retain the original text labels. Unknown values stay missing,
+and unmapped selected states stop before inference. Text labels are never
+assigned codes by sorting. The original input table is unchanged.
+Quote YAML labels such as `"yes"`/`"no"` to keep them as strings.
+
+Only binary traits are supported. Phenotyped trees accept a single observed
+state; representative selection requires two. On all/phenotyped trees,
 fewer than two states produces zero contrast pairs. If traits are unused, set
 `inputs.species_trait: null` and disable trait-dependent branches.

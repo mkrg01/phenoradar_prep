@@ -94,6 +94,10 @@ def manifest(path):
 def discover(source, traits=None):
     """List external snapshot inputs; never request missing inference jobs."""
     source = Path(source).resolve()
+    normalized = source / "metadata/species_trait.tsv"
+    encoding = source / "metadata/trait_encoding.json"
+    if normalized.is_file() and encoding.is_file():
+        traits = normalized
     previous = source / "manifest.json"
     if previous.is_file() and json.loads(previous.read_text()).get("report_type") == "species_filter":
         raise ValueError("use the original analysis as source, not a previous filtered export")
@@ -122,6 +126,7 @@ def discover(source, traits=None):
             sections["alignments"]["status"] = "incomplete"
             files.update(unfinished)
     for relative in ["run.json", "metadata/metadata_all.tsv", "metadata/metadata_high_busco.tsv", "metadata/selection.json",
+                     "metadata/trait_encoding.json",
                      "kegg/ko_modules.tsv", "kegg/ko_pathways.tsv", "kegg/reference_qc.json",
                      "kegg/provenance.json", "kegg/representatives/representatives.tsv",
                      "kegg/representatives/provenance.json"]:
@@ -268,6 +273,9 @@ class Export:
         retained = [r for r in self.rows if r["species"] in self.keep]
         retained_taxa = {species_id(r) for r in retained}
         write_tsv(self.stage / "metadata/samples.tsv", self.fields, retained)
+        encoding = self.source / "metadata/trait_encoding.json"
+        if encoding.is_file():
+            self.copy(encoding, self.stage / "metadata/trait_encoding.json")
         write_tsv(self.stage / "excluded_samples.tsv", ["species", "run", "scientific_name", "taxid"],
                   [{k: r[k] for k in ["species", "run", "scientific_name", "taxid"]}
                    for r in self.rows if r["species"] in self.excluded])
@@ -468,12 +476,14 @@ def export_contrast(job, branch, trait, seed):
     if {r["species"] for r in list(table(samples))[1:]} - job.species:
         raise ValueError("contrast species manifest contains species outside the source dataset")
     out = job.stage / branch / "contrast"
+    encoding = job.source / "metadata/trait_encoding.json"
     report = from_tree(job.input(job.source / branch / "species_tree.nwk"),
                        job.input(job.source / branch / "species_tree.json"), samples,
                        job.input(job.source / "metadata/metadata_high_busco.tsv"),
                        job.input(job.inventory["sections"]["traits"]["path"]),
-                       out, trait=trait, seed=seed, exclude_species=sorted(job.excluded))
-    plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out)
+                       out, trait=trait, seed=seed, exclude_species=sorted(job.excluded),
+                       trait_encoding=job.input(encoding) if encoding.is_file() else None)
+    plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out, samples=samples)
     job.counts[f"{branch}_contrast"] = {k: report[k] for k in
                                        ["source_species", "retained_species", "observed_species", "contrast_pairs"]}
 
@@ -535,7 +545,7 @@ def export(source, exclusions, outdir=None, traits=None, contrast_trait="C4", se
                    "code": [file_record(Path(__file__).with_name(name)) for name in
                             ["filter_species.py", "filter_species_phylogeny.py", "contrast_pairs.py",
                              "plot_contrast_tree.py", "species_traits.py", "sample_identity.py", "phylogeny_root.py",
-                             "phenoradar_metadata.py", "layout.py", "common.py"]],
+                             "phenoradar_metadata.py", "trait_encoding.py", "layout.py", "common.py"]],
                    "policies": {"sequence_inference_recomputed": False,
                                 "contrast_pairs": "recomputed from completed molecular trees after exclusions; NCBI representative analysis untouched",
                                 "expression_values": "original strings preserved",

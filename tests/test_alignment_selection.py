@@ -102,7 +102,7 @@ def test_selection_rejects_changed_sources(occupancy_inputs):
 
 
 def test_selection_exports_omit_preserved_below_threshold_results(occupancy_inputs, tmp_path):
-    from phenoradar_inputs import discover
+    from analysis_validation import discover
     raw, occupancy, selected = occupancy_inputs
     select(raw, occupancy, selected, 1)
     source = tmp_path / 'source'

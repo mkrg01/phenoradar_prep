@@ -84,8 +84,8 @@ def test_bundle_relocation_and_analysis(completed_project):
         run = analysis.prepare(second,'copied',second/'config/analysis.yaml',moved)
         assert run == second/'results/copied/downstream/copied'
         execute(second,run,'all',env)
-        execute(second,run,'phenoradar_inputs',env)
-        assert {r['species'] for r in read_tsv(run/'phenoradar_inputs/tpm.tsv')} == {'Alpha_plant_A1','Beta_sp-X_B1'}
+        analysis.validate_outputs(run, analysis.load(run))
+        assert {r['species'] for r in read_tsv(run/'orthogroups/expression/tpm.tsv')} == {'Alpha_plant_A1','Beta_sp-X_B1'}
         assert not (run/'orthogroups/expression/runs/A1.qc.json').samefile(moved/'expression/runs/A1.qc.json')
         assert not events.exists()
     finally:
@@ -202,25 +202,32 @@ def test_downstream_completion_records_outputs_without_its_own_receipt(completed
     config.write_text('inputs:\n  species_trait: null\nphylogeny:\n  trees: []\n  contrast_pairs:\n    enabled: false\n')
     downstream = analysis.prepare(root, 'finished', config, build)
     def run_pipeline(command, **kwargs):
-        if command[-1] == 'all':
-            write_json(downstream / 'run.json', {'completed': True})
-            write_json(downstream / 'metadata/selection.json', {})
-            write_tsv(downstream / 'metadata/samples.tsv', ['species'], [])
-        else:
-            assert command[-1] == 'phenoradar_inputs'
-            write_tsv(downstream / 'phenoradar_inputs/tpm.tsv', ['species', 'orthogroup', 'tpm'],
-                      [{'species':'Alpha_plant_A1', 'orthogroup':'OG1', 'tpm':1000000}])
-            write_tsv(downstream / 'phenoradar_inputs/species_metadata.tsv', ['species'], [])
+        assert command[-1] == 'all'
+        write_json(downstream / 'run.json', {'completed': True})
+        write_json(downstream / 'metadata/selection.json', {})
+        write_tsv(downstream / 'metadata/samples.tsv', ['species', 'run', 'odb_species', 'scientific_name', 'taxid'],
+                  [dict(species='Alpha_plant_A1', run='A1', odb_species='Alpha_plant_A1', scientific_name='Alpha plant', taxid=42)])
+        write_tsv(downstream / 'metadata/species_metadata.tsv', ['species', 'C4', 'contrast_pair_id', 'family'],
+                  [dict(species='Alpha_plant_A1', C4='', contrast_pair_id='', family='Plantaceae')])
+        write_tsv(downstream / 'orthogroups/expression/tpm.tsv', ['species', 'run', 'orthogroup', 'tpm'],
+                  [dict(species='Alpha_plant_A1', run='A1', orthogroup='OG1', tpm=1000000)])
+        write_tsv(downstream / 'orthogroups/expression/mapping_qc.tsv', ['species', 'run'],
+                  [dict(species='Alpha_plant_A1', run='A1')])
+    legacy = downstream / 'phenoradar_inputs/keep.txt'
+    legacy.parent.mkdir()
+    legacy.write_text('Existing input bundle\n')
     monkeypatch.setattr(analysis.subprocess, 'run', run_pipeline)
     analysis.run(downstream, local=True)
+    assert legacy.read_text() == 'Existing input bundle\n'
     assert analysis.status(downstream)['state'] == 'complete'
     receipt = json.loads((downstream / 'completed.json').read_text())
     paths = {Path(entry['path']).relative_to(downstream).as_posix() for entry in receipt['files']}
     assert paths == {'run.json', 'metadata/samples.tsv', 'metadata/selection.json',
-                     'phenoradar_inputs/tpm.tsv', 'phenoradar_inputs/species_metadata.tsv'}
+                     'orthogroups/expression/tpm.tsv', 'orthogroups/expression/mapping_qc.tsv',
+                     'metadata/species_metadata.tsv'}
     analysis.run(downstream, local=True)
     assert analysis.status(downstream)['state'] == 'complete'
-    (downstream / 'phenoradar_inputs/tpm.tsv').write_text('changed\n')
+    (downstream / 'orthogroups/expression/tpm.tsv').write_text('changed\n')
     assert not analysis.status(downstream)['verification']['performed']
     with pytest.raises(ValueError, match='registered file changed'):
         analysis.status(downstream, verify_outputs=True)

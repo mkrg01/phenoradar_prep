@@ -6,6 +6,7 @@ work_root: null
 log_root: null
 expression_cache: null
 trait: carnivory
+trait_encoding: null  # Text states require an explicit mapping to 0 and 1; numeric 0/1 needs none.
 selection:
   species_list: false
   busco_threshold: 0.5
@@ -29,7 +30,7 @@ phylogeny:
   - representatives
   lineage: embryophyta_odb12
   outgroup: auto
-  max_markers: 500  # null: no marker-count limit.
+  max_markers: null  # All eligible BUSCO markers; a positive integer caps by species coverage.
   min_protein_length: 100
   max_unknown_fraction: 0.05
   min_taxa: 4

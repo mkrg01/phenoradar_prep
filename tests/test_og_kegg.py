@@ -192,7 +192,7 @@ def test_expression_corruption_is_rejected(og_inputs, og_annotations, og_express
 def test_species_filter_preserves_shared_og_annotation_when_donor_is_removed(
         og_inputs, og_annotations, og_expression, tmp_path):
     from filter_species import export
-    from phenoradar_inputs import export as collect
+    from analysis_validation import validate
     aggregate(og_inputs["samples"], og_annotations, og_expression, og_annotations)
     source = og_annotations.parent
     out = source / "filtered"
@@ -202,19 +202,14 @@ def test_species_filter_preserves_shared_og_annotation_when_donor_is_removed(
     # The removed sample remains the recorded donor; no annotation is recomputed.
     assert read_tsv(out / "kegg/orthogroups.tsv")[0]["representative_species"] == "C"
     assert json.loads((out / "kegg/filter_qc.json").read_text())["representatives_reselected"] is False
-    # A collector includes OG evidence and ignores stale direct-gene output.
+    # Validation uses OG evidence and ignores stale direct-gene output.
     (source / "kegg/genes.tsv").write_text("stale\n")
     (source / "kegg/gene_kos.tsv").write_text("stale\n")
-    destination = tmp_path / "inputs"
-    collect(source, destination)
-    assert (destination / "kegg/og_kos.tsv").is_file()
-    assert (destination / "kegg/annotation_provenance.json").is_file()
-    assert (destination / "kegg/representatives/representatives.tsv").is_file()
-    assert not (destination / "kegg/genes.tsv").exists()
-    assert not (destination / "kegg/gene_kos.tsv").exists()
-
-    filtered_inputs = tmp_path / "filtered_inputs"
-    collect(source, filtered_inputs, exclusions=["C"])
-    assert {r["species"] for r in read_tsv(filtered_inputs / "kegg/ko_tpm_sum.tsv")} == {"A", "B", "D"}
-    assert read_tsv(filtered_inputs / "kegg/orthogroups.tsv")[0]["representative_species"] == "C"
-    assert (filtered_inputs / "kegg/source_provenance.json").is_file()
+    report = validate(source)
+    assert str(source / "kegg/og_kos.tsv") in report["files"]
+    assert str(source / "kegg/genes.tsv") not in report["files"]
+    report = validate(source, exclusions=["C"])
+    assert report["source"] == str(out)
+    assert {r["species"] for r in read_tsv(out / "kegg/ko_tpm_sum.tsv")} == {"A", "B", "D"}
+    assert read_tsv(out / "kegg/orthogroups.tsv")[0]["representative_species"] == "C"
+    assert (out / "kegg/source_provenance.json").is_file()

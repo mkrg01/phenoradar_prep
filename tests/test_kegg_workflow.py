@@ -300,7 +300,8 @@ def test_kegg_reuses_completed_database_without_mapping_or_translation(
               for r in read_tsv(run / "kegg/ko_tpm_sum.tsv")}
     assert values["A1", "K00001"] == 20
     assert values["B1", "K00002"] == values["B1", "K00003"] == 30
-    execute(run, "phenoradar_inputs")
-    assert (run / "phenoradar_inputs/kegg/og_kos.tsv").is_file()
+    from analysis_validation import validate
+    validate(run)
+    assert not (run / "phenoradar_inputs").exists()
     assert "Nothing to be done" in execute(run, "all", dry=True)
     assert receipt.read_bytes() == before

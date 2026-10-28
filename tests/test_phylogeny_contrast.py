@@ -103,17 +103,19 @@ def test_exclusion_reforms_pairs_and_does_not_just_remove_rows(molecular_snapsho
     assert frozenset(["D", "E"]) in pair_members(out)
 
 
-@pytest.mark.parametrize("keep", [{"A", "A2", "C", "E", "O", "U"}, {"A", "O"}, {"O", "U"}, set()])
+@pytest.mark.parametrize("keep", [{"A", "A2", "C", "E", "O", "U"}, {"A", "O"}, {"B", "D", "O"}, {"O", "U"}, set()])
 def test_degenerate_subsets_clear_pairs_and_render(molecular_snapshot, tmp_path, keep):
     source, traits = molecular_snapshot
     out = tmp_path / "pairs"
     from_tree(**inputs(source, traits), outdir=out)
     report = from_tree(**inputs(source, traits), outdir=out, exclude_species=sorted(set(SPECIES) - keep))
     assert report["contrast_pairs"] == 0 and pair_members(out) == set()
+    assert report["state_order"] == ["0", "1"]
     meta = read_tsv(out / "species_metadata.tsv")
     assert {r["species"] for r in meta} == keep
     assert all(r["contrast_pair_id"] == "" for r in meta)
-    plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out)
+    plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out,
+         samples=source / "metadata/samples.tsv")
     assert (out / "summary_tree.pdf").read_bytes().startswith(b"%PDF")
     assert (out / "summary_tree.svg").is_file()
 
@@ -126,6 +128,63 @@ def test_phenotyped_scope_and_different_pair_trait(molecular_snapshot, tmp_path)
     assert set(meta) == set(KNOWN) - {"A"}
     assert meta["B"]["group"] == meta["B"]["contrast_pair_id"] == ""
     assert report["excluded_species"] == ["A"] and report["outgroup_in_observed_tree"] is False
+
+
+def test_text_states_keep_source_order_after_exclusion(molecular_snapshot, tmp_path):
+    source, traits = molecular_snapshot
+    rows = read_tsv(traits)
+    for row in rows:
+        row["habit"] = {"0": "herbaceous", "1": "woody", "": ""}[row["C4"]]
+    write_tsv(traits, list(rows[0]), rows)
+    out = tmp_path / "pairs"
+    report = from_tree(**inputs(source, traits), outdir=out, trait="habit",
+                       exclude_species=["A", "A2", "C", "E"])
+    assert report["states"] == ["woody"]
+    assert report["state_order"] == ["herbaceous", "woody"]
+    assert report["contrast_pairs"] == 0
+    plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out)
+    assert "woody" in (out / "summary_tree.svg").read_text()
+
+
+def test_encoded_traits_round_trip_through_contrast_subset_and_validation(molecular_snapshot):
+    from analysis_validation import validate
+    from phenoradar_metadata import prepare
+    from trait_encoding import normalize, read_labels
+    source, traits = molecular_snapshot
+    rows = read_tsv(traits)
+    for row in rows:
+        row["carnivory"] = {"0": "absent", "1": "present", "": ""}[row["C4"]]
+    write_tsv(traits, list(rows[0]), rows)
+    metadata = source / "metadata/metadata_high_busco.tsv"
+    rows = read_tsv(metadata)
+    for row in rows:
+        row["family"] = "Testaceae"
+    write_tsv(metadata, list(rows[0]), rows)
+    normalized, encoding = source / "metadata/species_trait.tsv", source / "metadata/trait_encoding.json"
+    normalize(source / "metadata/samples.tsv", normalized, encoding, "carnivory", traits,
+              {"absent": 0, "present": 1})
+    prepare(source / "metadata/samples.tsv", metadata, normalized,
+            source / "metadata/species_metadata.tsv", trait="carnivory")
+    out = source / "phylogeny/all/contrast"
+    report = from_tree(**inputs(source, normalized), outdir=out, trait="carnivory", trait_encoding=encoding)
+    assert report["trait_labels"] == {"0": "absent", "1": "present"}
+    plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out)
+    assert "present" in (out / "summary_tree.svg").read_text()
+    validate(source, trait="carnivory")
+    for stem in ["summary_tree", "summary_tree_id"]:
+        assert (source / f"phylogeny/all/contrast/{stem}.pdf").is_file()
+    assert {row["carnivory"] for row in read_tsv(source / "metadata/species_metadata.tsv")} == {"", "0", "1"}
+    before = state(source)
+    export(source, ["E"], traits=traits, contrast_trait="carnivory")
+    after = state(source)
+    assert {name: after[name] for name in before} == before
+    validate(source, exclusions=["E"], trait="carnivory")
+    published = source / "filtered"
+    assert read_labels(published / "metadata/trait_encoding.json", "carnivory") == {"0": "absent", "1": "present"}
+    subset = json.loads((source / "filtered/phylogeny/all/contrast/summary.json").read_text())
+    assert subset["trait_labels"] == report["trait_labels"]
+    assert "run = R1, replicate_A" in (source / "filtered/phylogeny/all/contrast/summary_tree_id.svg").read_text()
+    assert (published / "phylogeny/all/contrast/summary_tree_id.pdf").is_file()
 
 
 @pytest.mark.parametrize("damage", ["duplicate_tip", "missing_tip", "wrong_root", "wrong_qc", "missing_score", "conflicting_score"])
@@ -214,3 +273,40 @@ def test_full_snakefile_exclusions_never_request_inference(molecular_snapshot, w
     assert "Nothing to be done" in run(["A"])
     assert {p: v for p, v in state(target).items() if not p.startswith("filtered/")} == before
     assert not list(target.rglob("gene_trees.nwk"))
+
+
+def test_missing_id_figure_runs_only_plot_rule_on_frozen_inputs(molecular_snapshot, workflow_project, command_environment):
+    snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
+    if not snakemake:
+        pytest.skip("Snakemake required")
+    source, traits = molecular_snapshot
+    source_pairs = source / "phylogeny/all/contrast"
+    from_tree(**inputs(source, traits), outdir=source_pairs)
+    target = workflow_project / "results/test"
+    target.parent.mkdir()
+    shutil.copytree(source, target)
+    before = state(target)
+    cfg = workflow_project / "override.yaml"
+    cfg.write_text(yaml.safe_dump({"run_name": "test", "phylogeny": {
+        "trees": ["all"], "contrast_pairs": {"enabled": True}}}))
+    environment = command_environment({"python": sys.executable})
+    argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(cfg),
+            "--cores", "1", "--allowed-rules", "contrast_pairs", "plot_contrast_tree", "--", "contrast_pairs"]
+
+    def run():
+        process = subprocess.run(argv, cwd=workflow_project, env=environment, text=True,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        assert process.returncode == 0, process.stdout
+        return process.stdout
+
+    run()
+    out = target / "phylogeny/all/contrast"
+    for stem in ["summary_tree", "summary_tree_id"]:
+        for ext in ["pdf", "svg"]:
+            assert (out / f"{stem}.{ext}").is_file()
+    assert "run = R1, replicate_A" in (out / "summary_tree_id.svg").read_text()
+    assert "Nothing to be done" in run()
+    (out / "summary_tree_id.pdf").unlink()
+    assert "plot_contrast_tree" in run()
+    assert (out / "summary_tree_id.pdf").is_file()
+    assert {path: state(target)[path] for path in before} == before

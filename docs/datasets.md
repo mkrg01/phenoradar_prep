@@ -88,8 +88,9 @@ unfinished checkpoints remain partial. Real submission checks again and uses
 the saved conditions; no separate resume command is needed.
 
 Analyses inherit the database's BUSCO lineage, genetic code, and OrthoDB reference.
-The default target `all` runs enabled analyses and collects
-[PhenoRadar inputs](phenoradar_inputs.md). Several analyses can share one database;
+The default target `all` runs enabled analyses and validates native outputs.
+[Use those outputs directly in PhenoRadar](phenoradar_inputs.md).
+Several analyses can share one database;
 use an [analysis target](running.md#targets) to run a single branch.
 
 ## Saved settings and previews

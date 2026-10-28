@@ -1,7 +1,7 @@
 """Accepted configuration keys, including optional tool-specific overrides."""
 KEYS = {
     "": "run_name selection translation odb alignment kegg phylogeny storage "
-        "trait exclude_species input_root build_manifest translation_cache expression_cache output_root work_root log_root",
+        "trait trait_encoding exclude_species input_root build_manifest translation_cache expression_cache output_root work_root log_root",
     "storage": "keep_intermediates",
     "selection": "busco_threshold species_list",
     "translation": "table",
@@ -60,6 +60,8 @@ def validate_keys(config):
         if trait in {"species", "role", "group", "representative", "is_representative",
                      "n_species_in_group", "n_samples_in_group", "species_id", "contrast_pair_id"}:
             raise ValueError("trait conflicts with a reserved output column")
+    from trait_encoding import validate_mapping
+    validate_mapping(config.get("trait_encoding"))
     phylogeny = config.get("phylogeny", {})
     max_markers = phylogeny.get("max_markers")
     if max_markers is not None and (type(max_markers) is not int or max_markers <= 0):

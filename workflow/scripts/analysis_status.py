@@ -103,6 +103,7 @@ def legacy_progress(path, receipt):
         if found:
             result['progress'] = dict(zip(('done', 'total'), map(int, found[-1].groups())), unit='workflow_steps')
         result['recent_worker_ids'].extend(re.findall(r'has been submitted with SLURM jobid (\d+)', tail)[-64:])
+        # Retain observations of old launchers without requiring their bundle.
         if 'Rule: phenoradar_inputs' in tail or 'rule phenoradar_inputs:' in tail:
             result['phase'] = 'exporting'
     return result
@@ -111,18 +112,17 @@ def legacy_progress(path, receipt):
 def required_outputs(pipeline):
     """Bounded presence checks for final branch markers, not per-OG validation."""
     required = ['run.json', 'metadata/samples.tsv', 'metadata/selection.json',
-                'phenoradar_inputs/species_metadata.tsv', 'phenoradar_inputs/tpm.tsv']
+                'metadata/species_metadata.tsv', 'orthogroups/expression/tpm.tsv',
+                'orthogroups/expression/mapping_qc.tsv']
     if pipeline.get('alignment', {}).get('enabled'):
-        required += ['orthogroups/alignments/provenance.json',
-                     'phenoradar_inputs/orthogroups/alignments/provenance.json']
+        required += ['orthogroups/alignments/provenance.json']
     if pipeline.get('kegg', {}).get('enabled'):
         required += ['kegg/provenance.json', 'kegg/annotation_provenance.json',
-                     'phenoradar_inputs/kegg/ko_tpm_sum.tsv']
+                     'kegg/ko_tpm_sum.tsv']
     phy = pipeline.get('phylogeny', {})
     for branch in phy.get('trees', []):
         prefix = f'phylogeny/{branch}'
-        required += [f'{prefix}/species_tree.nwk', f'{prefix}/species_tree.json',
-                     f'phenoradar_inputs/{prefix}/species_tree.nwk']
+        required += [f'{prefix}/species_tree.nwk', f'{prefix}/species_tree.json']
         for option, marker in [('dating', 'dating/provenance.json'),
                                ('taxonomy_check', 'taxonomy_check/summary.json'),
                                ('contrast_pairs', 'contrast/summary.json')]:
@@ -167,10 +167,10 @@ def status(path, manifest=None, run=None):
     elif queue_state == 'PENDING':
         state, action = 'pending', 'Wait for the reported Slurm scheduling reason to clear.'
     elif queue_state in ACTIVE:
-        state = 'finalizing' if phase in {'exporting', 'recording_completion', 'complete'} else 'running'
+        state = 'finalizing' if phase in {'validating', 'exporting', 'recording_completion', 'complete'} else 'running'
         action = 'Wait for the current phase to finish.'
     elif complete and (queue_state == 'COMPLETED' or runtime.get('phase') == 'complete'):
-        state, action = 'complete', 'PhenoRadar inputs are ready.'
+        state, action = 'complete', 'Analysis outputs are ready in their native directories.'
     elif runtime.get('phase') in {'failed', 'interrupted'}:
         state, action = 'failed', 'Review the recorded error before submitting again.'
     elif current and missing:

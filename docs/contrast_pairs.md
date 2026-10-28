@@ -59,8 +59,26 @@ Under `results/<build>/downstream/<analysis>/phylogeny/<tree>/contrast/`:
 | `species_metadata.tsv` | Traits, groups, representatives, and nullable pair IDs |
 | `summary_tree.nwk`, `.all.tsv`, `.sampled.tsv` | Grouped molecular tree and membership |
 | `contrastive.nwk`, `.all.tsv`, `.sampled.tsv` | Raw selection, including unresolved candidates |
-| `summary_tree.pdf`, `.svg` | Trait-colored tree with group/pair IDs |
+| `summary_tree.pdf`, `.svg` | Publication view: scientific names, group species counts, and red pair clades |
+| `summary_tree_id.pdf`, `.svg` | Same tree with run, group, and pair IDs in tip labels |
 | `summary.json` | Counts, settings, and provenance |
+
+The legend shows the configured trait name and source state labels. With
+[explicit text encoding](inputs.md#traits), the label mapped to `0` is gray
+and the label mapped to `1` is green; numeric inputs display `0`/`1`, including
+for `C4`. `summary.json` records `trait_labels` and `state_order`, preserving the
+labels and colors in post hoc subsets. Older summaries without labels use their
+state values. The plot reserves a separate legend area and expands its width
+for long names.
+
+Tip labels show the representative's scientific name in italics, followed by
+upright `(n = ...)`, where `n` counts biological species in its group. Red branches
+mark the two-tip clade of each selected pair; unpaired branches remain black.
+The ID view adds run IDs from `metadata/samples.tsv`, plus group and pair IDs
+(`-` means unpaired). It retains sample IDs when explicit run information is
+unavailable. Only scientific names are italicized. Both views use the same
+topology, branch lengths, trait colors, and pair assignments; drawing requires
+no inference or pair reselection. Both views remain in the contrast output directory.
 
 Pairs describe sampled trait contrasts, not independent evolutionary origins.
 NCBI group membership is not molecularly tested for every species, and selection

@@ -131,7 +131,7 @@ def test_ncbi_guide_expands_duplicate_taxids(tmp_path,tiny_inputs,monkeypatch):
 
 def test_phenotyped_selection_and_tpm_keep_replicates_separate(tmp_path):
     from species_traits import select_phenotyped
-    from export_species_tpm import export
+    from analysis_validation import validate_expression
     rows = [dict(species=f"Plant_{name}_R{i}", species_id=f"Plant_{name}", run=f"R{i}")
             for i, name in enumerate("AABCD")]
     samples, traits = tmp_path / "samples.tsv", tmp_path / "traits.tsv"
@@ -142,14 +142,14 @@ def test_phenotyped_selection_and_tpm_keep_replicates_separate(tmp_path):
     report = json.loads((tmp_path / "selected/selection.json").read_text())
     assert report["inference_species"] == 4 and report["inference_samples"] == 5
     assert len(read_tsv(tmp_path / "selected/samples.tsv")) == 5
-    tpm, output = tmp_path / "tpm.tsv", tmp_path / "export.tsv"
+    tpm = tmp_path / "tpm.tsv"
     values = ["0.0000012300", "9e+05", "10", "20", "0"]
     write_tsv(tpm, ["species", "run", "orthogroup", "tpm"],
               [dict(species=r["species"], run=r["run"], orthogroup="OG1", tpm=v)
                for r, v in zip(rows, values)])
-    export(samples, tpm, output)
-    assert [r["tpm"] for r in read_tsv(output)] == values
-    assert len({r["species"] for r in read_tsv(output)}) == 5
+    validate_expression(tpm, {r["run"]: r["species"] for r in rows}, "orthogroup", "tpm")
+    assert [r["tpm"] for r in read_tsv(tpm)] == values
+    assert len({r["species"] for r in read_tsv(tpm)}) == 5
 
 
 def test_real_phylogeny_retains_independent_samples(tmp_path, command_environment, workflow_project, seed_taxonomy):
