@@ -29,7 +29,8 @@ biological species IDs; list every sample to exclude.
 
 Use the files directly from `filtered/` under
 the source analysis, which stays unchanged. No producer jobs are started;
-`manifest.json` lists exported and incomplete sections. Rerunning refreshes from
+`manifest.json` lists exported and incomplete sections, source/output checksums,
+and export-script checksums, including metadata generation. Rerunning refreshes from
 the original results. To recreate deleted exports, add `--forcerun filter_species`
 before `--`.
 

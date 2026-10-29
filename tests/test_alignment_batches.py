@@ -1,4 +1,5 @@
 import json
+import errno
 from pathlib import Path
 import sys
 import shutil
@@ -9,7 +10,7 @@ import yaml
 import pytest
 
 from align_orthogroups import align, finish
-from alignment_batches import plan, run_batch, batch_targets
+from alignment_batches import plan, run_batch, batch_targets, move_alignment
 from common import write_json
 
 
@@ -89,3 +90,33 @@ def test_restricted_batch_worker_does_not_open_database(workflow_project, tmp_pa
                             cwd=workflow_project, text=True, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'align_orthogroup_batch' in result.stdout
+
+
+@pytest.mark.parametrize('fail_copy', [False, True])
+def test_cross_filesystem_move_is_atomic_and_keeps_source_on_copy_failure(tmp_path, monkeypatch, fail_copy):
+    source, destination = tmp_path / 'source.faa', tmp_path / 'cache/OG.faa'
+    source.write_bytes(b'>Plant_g1\nMAA\n')
+    before = source.stat()
+    destination.parent.mkdir()
+    destination.write_bytes(b'previous cached alignment')
+    replace = Path.replace
+    def cross_filesystem(path, target):
+        if path == source:
+            raise OSError(errno.EXDEV, 'different filesystems')
+        return replace(path, target)
+    monkeypatch.setattr(Path, 'replace', cross_filesystem)
+    if fail_copy:
+        def broken_copy(src, dest):
+            Path(dest).write_bytes(b'partial')
+            raise OSError(errno.EIO, 'copy failed')
+        monkeypatch.setattr('alignment_batches.shutil.copy2', broken_copy)
+        with pytest.raises(OSError):
+            move_alignment(source, destination)
+        assert source.read_bytes() == b'>Plant_g1\nMAA\n'
+        assert destination.read_bytes() == b'previous cached alignment'
+    else:
+        move_alignment(source, destination)
+        assert not source.exists()
+        assert destination.read_bytes() == b'>Plant_g1\nMAA\n'
+        assert destination.stat().st_mtime_ns == before.st_mtime_ns
+    assert list(destination.parent.iterdir()) == [destination]

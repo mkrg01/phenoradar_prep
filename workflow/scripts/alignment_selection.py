@@ -8,7 +8,7 @@ from pathlib import Path
 import shutil
 import tempfile
 
-from alignment_batches import validate_groups
+from alignment_batches import cache_directory, copy_report, move_alignment, validate_groups
 from common import atomic_writer, file_record, now, read_tsv, write_json, write_tsv
 from mapping_tables import load_tables, read_species
 
@@ -121,9 +121,10 @@ def select(inputs, occupancy, outdir, min_sample_fraction=0.5):
     return settings
 
 
-def finish(inputs, outdir, reports):
-    """Complete the selected inventory, retaining excluded OGs for later reuse."""
+def finish(inputs, outdir, reports, cache=None):
+    """Publish selected OGs only, moving other alignments to a reusable work cache."""
     inputs, outdir, reports = Path(inputs), Path(outdir), Path(reports)
+    cache = cache_directory(cache if cache is not None else inputs.parent / 'cache', inputs, outdir, reports)
     selected = json.loads((inputs / 'provenance.json').read_text())
     for key in ('source_collection', 'samples', 'mapping'):
         check_record(selected[key]['path'], selected[key])
@@ -144,13 +145,26 @@ def finish(inputs, outdir, reports):
     rows = read_tsv(occupancy)
     if {r['orthogroup'] for r in rows if r['selected'] == '1'} != set(groups):
         raise ValueError('selected alignment inventory differs from occupancy')
-    # Preserve results below the threshold. Only OGs absent from the current raw
-    # collection are obsolete (e.g. after changing the selected sample set).
+    # Verify every selected alignment before moving any former output. Keep its
+    # report with the cached file so later reuse checks input, output and aligner.
+    expected_names = {f'{og}.faa' for og in groups}
     candidates = {r['orthogroup'] + '.faa' for r in rows}
     outdir.mkdir(parents=True, exist_ok=True)
     for path in outdir.glob('*.faa'):
         if path.name not in candidates:
+            path.unlink()  # Preserve the existing policy for obsolete OGs.
+        elif path.name not in expected_names:
+            report = reports / f'{path.stem}.json'
+            cached_report = cache / report.name
+            if report.is_file():
+                copy_report(report, cached_report)
+            else:
+                cached_report.unlink(missing_ok=True)
+            move_alignment(path, cache / path.name)
+    for path in cache.glob('*.faa'):
+        if path.name not in candidates:
             path.unlink()
+            path.with_suffix('.json').unlink(missing_ok=True)
     with occupancy.open() as source, atomic_writer(outdir / 'occupancy.tsv') as target:
         shutil.copyfileobj(source, target)
     write_json(outdir / 'provenance.json', {
@@ -171,5 +185,7 @@ if __name__ == '__main__':
             command.add_argument('--' + flag, required=True)
         if action == 'select':
             command.add_argument('--min-sample-fraction', type=float, default=0.5)
+        if action == 'finish':
+            command.add_argument('--cache')
     args = vars(parser.parse_args())
     globals()[args.pop('action')](**args)

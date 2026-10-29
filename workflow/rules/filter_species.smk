@@ -1,3 +1,6 @@
+from filter_species import EXPORT_CODE
+
+
 def filter_snapshot():
     # Absolute input paths intentionally describe an already completed snapshot.
     # They do not request producers under results/<run_name>/, so this explicit
@@ -9,12 +12,7 @@ rule filter_species:
     input:
         snapshot=lambda wc: filter_snapshot()["files"],
         code=f"{SCRIPTS}/filter_species.py",
-        phylogeny_code=f"{SCRIPTS}/filter_species_phylogeny.py",
-        contrast_code=[f"{SCRIPTS}/{name}.py" for name in
-                       ["contrast_pairs", "plot_contrast_tree", "species_traits", "trait_encoding", "sample_identity", "phylogeny_root", "phenoradar_metadata"]],
-        common=[f"{SCRIPTS}/{name}.py" for name in ["common", "layout", "consumer_metadata", "phenoradar_metadata"]],
-        kegg_code=[f"{SCRIPTS}/{name}.py" for name in
-                   ["og_kegg", "select_kegg_representatives", "aggregate_ko_tpm"]]
+        helpers=[f"{SCRIPTS}/{name}" for name in EXPORT_CODE if name != "filter_species.py"]
     output: bundle=directory(f"{OUT}/filtered")
     params:
         source=str(Path(OUT).resolve()),

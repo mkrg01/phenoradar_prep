@@ -3,13 +3,16 @@ import argparse
 from contextlib import contextmanager
 from contextvars import ContextVar
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import errno
 import heapq
 import json
+import os
 from pathlib import Path
 import shutil
+import tempfile
 
 from align_orthogroups import align, SAFE_OG
-from common import file_record, write_json
+from common import atomic_writer, file_record, write_json
 from dataset_assets import digest, record, stat_identity
 
 _INSPECTION = ContextVar('alignment_batch_inspection', default=None)
@@ -110,13 +113,44 @@ def reusable(fasta, output, report, threads, executable):
         return False
 
 
+def move_alignment(source, destination):
+    """Move without duplicating storage; publish cross-filesystem copies atomically."""
+    source, destination = Path(source), Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        source.replace(destination)
+    except OSError as error:
+        if error.errno != errno.EXDEV:
+            raise
+        fd, name = tempfile.mkstemp(prefix=f'.{destination.name}.', dir=destination.parent)
+        os.close(fd)
+        try:
+            shutil.copy2(source, name)
+            os.replace(name, destination)
+            source.unlink()
+        finally:
+            Path(name).unlink(missing_ok=True)
+
+
+def copy_report(source, destination):
+    with Path(source).open('rb') as original, atomic_writer(destination, 'wb') as target:
+        shutil.copyfileobj(original, target)
+
+
+def cache_directory(cache, inputs, outdir, reports):
+    path = Path(cache)
+    if any(path.resolve().is_relative_to(Path(folder).resolve()) for folder in (inputs, outdir, reports)):
+        raise ValueError('alignment cache must be outside inputs, final alignments and reports')
+    return path
+
+
 def validate_groups(groups):
     if (not isinstance(groups, list) or any(not isinstance(og, str) or not SAFE_OG.fullmatch(og) for og in groups)
             or len(set(groups)) != len(groups)):
         raise ValueError('batch OG IDs must be unique, safe filename components')
 
 
-def run_batch(batch, inputs, outdir, reports, receipt, cpus=12, threads_per_og=4, command='famsa'):
+def run_batch(batch, inputs, outdir, reports, receipt, cpus=12, threads_per_og=4, command='famsa', cache=None):
     if any(type(value) is not int or value < 1 for value in (cpus, threads_per_og)):
         raise ValueError('CPU counts must be positive')
     payload = json.loads(Path(batch).read_text())
@@ -124,6 +158,7 @@ def run_batch(batch, inputs, outdir, reports, receipt, cpus=12, threads_per_og=4
         raise ValueError('alignment batch plan changed')
     validate_groups(payload['orthogroups'])
     inputs, outdir, reports = Path(inputs), Path(outdir), Path(reports)
+    cache = cache_directory(cache, inputs, outdir, reports) if cache is not None else None
     if file_record(inputs / 'provenance.json')['sha256'] != payload['collection_sha256']:
         raise ValueError('alignment collection changed')
     threads = min(cpus, threads_per_og)
@@ -134,8 +169,17 @@ def run_batch(batch, inputs, outdir, reports, receipt, cpus=12, threads_per_og=4
     def process(og):
         fasta, output, provenance = inputs / f'{og}.faa', outdir / f'{og}.faa', reports / f'{og}.json'
         reused = reusable(fasta, output, provenance, threads, executable)
+        if not reused and cache is not None and reusable(
+                fasta, cache / f'{og}.faa', cache / f'{og}.json', threads, executable):
+            copy_report(cache / f'{og}.json', provenance)
+            move_alignment(cache / f'{og}.faa', output)
+            reused = True
         if not reused:
             align(fasta, output, provenance, threads=threads, command=command)
+        if cache is not None:
+            # A selected OG lives in the final directory, not in both locations.
+            (cache / f'{og}.faa').unlink(missing_ok=True)
+            (cache / f'{og}.json').unlink(missing_ok=True)
         return og, [record(p) for p in (fasta, output, provenance)], reused
 
     members, reused_count = {}, 0
@@ -167,6 +211,7 @@ if __name__ == '__main__':
         p.add_argument('--' + flag, required=True)
     p.add_argument('--cpus', type=int, default=12)
     p.add_argument('--threads-per-og', type=int, default=4)
+    p.add_argument('--cache')
     args = vars(parser.parse_args())
     action = args.pop('action')
     (plan if action == 'plan' else run_batch)(**args)

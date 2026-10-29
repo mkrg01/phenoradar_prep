@@ -76,9 +76,9 @@ Use the existing commands for these three tasks:
 
 Normal `status` does not checksum artifacts or scan scratch storage. It reports
 unknown when Slurm observations are unavailable; a disappeared job or 100% of
-workflow steps alone does not prove whole-analysis completion. Export and the
-completion record must finish too. Terminal output is a summary; redirected
-output remains JSON, and `--json` requests JSON explicitly.
+workflow steps alone does not prove whole-analysis completion. Native output
+validation and the completion record must finish too. Terminal output is a
+summary; redirected output remains JSON, and `--json` requests JSON explicitly.
 
 Analysis dry-run creates no saved run, submission files, or workflow metadata.
 For a new name it previews sample selection; exact job counts become available

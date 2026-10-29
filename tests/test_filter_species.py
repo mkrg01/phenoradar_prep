@@ -102,13 +102,16 @@ def test_filtered_metadata_and_alignments_feed_phenoradar(snapshot, tmp_path):
     rows = [{**row, "family": "Plantaceae"} for row in read_tsv(path)]
     write_tsv(path, list(rows[0]), rows)
     filtered = source / "filtered"
-    export(source, ["Plant_A"], filtered, traits)
+    summary = export(source, ["Plant_A"], filtered, traits)
     metadata = read_tsv(filtered / "metadata/species_metadata_base.tsv")
     assert {r["species"] for r in metadata} == set(SPECIES[1:])
     assert all(r["family"] == "Plantaceae" and r["contrast_pair_id"] == "" for r in metadata)
     ready = read_tsv(filtered / 'metadata/species_metadata.tsv')
     assert {r['species'] for r in ready} == set(SPECIES[1:])
     assert all(r['family'] == 'Plantaceae' and r['contrast_pair_id'] == '' for r in ready)
+    recorded = {Path(entry['path']).name: entry['sha256'] for entry in summary['code']}
+    assert recorded['consumer_metadata.py'] == sha256(ROOT / 'workflow/scripts/consumer_metadata.py')
+    assert recorded['analysis_validation.py'] == sha256(ROOT / 'workflow/scripts/analysis_validation.py')
     before = state(source)
     report = validate(source, exclusions=["Plant_A"])
     assert report["source"] == str(filtered)

@@ -269,7 +269,7 @@ def print_pending(pending, target):
     if pending['partial']:
         print('Counts are partial until these checkpoints finish: ' + ', '.join(pending['pending_checkpoints']))
     if target == 'all':
-        print('After workflow steps: export PhenoRadar inputs and record whole-analysis completion.')
+        print('After workflow steps: validate native outputs and record whole-analysis completion.')
 
 
 def submit(path, target='all', dry_run=False, resources=None):

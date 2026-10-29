@@ -52,8 +52,18 @@ Results are in `results/<build>/downstream/<analysis>/orthogroups/alignments/`:
 - `occupancy.tsv`: counts, fractions and selection decisions for all candidate OGs.
 - `provenance.json`: completed alignment inventory and provenance.
 
-Read the completed inventory to identify active OGs. Existing alignments below
-the threshold remain available for reuse but are not published to PhenoRadar.
+After successful completion, the directory's `*.faa` files are exactly the
+selected OGs listed in `provenance.json`. Former outputs below the threshold are
+moved to `work/<run>/orthogroups/alignments/cache/` (under `work_root` when set).
+Re-adopted OGs are verified against their input, alignment and aligner records,
+then moved back without recomputation. Deleting this optional cache saves disk
+space but requires recomputation if those OGs are selected again.
+OGs no longer present in the current raw collection are removed from both the
+final directory and cache, as with obsolete outputs before this cache existed.
+
+Moving excluded results shrinks the final output directory; retaining the cache
+does not reduce total stored alignment data. Files are moved rather than kept
+in both locations. Across filesystems, a temporary copy is needed during a move.
 
 Remove the final `_g{number}` to recover the sample ID, then join
 `metadata/samples.tsv` for biological species. Alignment columns identify sites;

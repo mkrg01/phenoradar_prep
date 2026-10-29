@@ -85,8 +85,8 @@ settings and never rebuild upstream sample products.
 
 | Target | Work requested |
 | --- | --- |
-| `all` (default) | Merge OG expression/QC, run enabled branches, and validate native outputs |
-| `alignments` | [All-copy OG alignments](alignments.md) |
+| `all` (default) | Merge OG/per-sequence expression, run enabled branches, validate native outputs, and record completion |
+| `alignments` | [All-copy OG alignments](alignments.md) and per-sequence TPM |
 | `kegg` | [KO annotation and expression](kegg.md) |
 | `phylogeny_prepare` | BUSCO input audit, outgroup, and marker plan |
 | `phylogeny` | Infer trees selected by `phylogeny.trees` |

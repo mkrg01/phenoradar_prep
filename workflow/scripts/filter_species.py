@@ -19,6 +19,16 @@ from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNM
                     PHYLOGENY_BRANCHES, REPRESENTATIVES, SEQUENCE_EXPRESSION,
                     BASE_METADATA, CONSUMER_METADATA)
 
+# Share workflow dependencies and the completed export's code provenance.
+EXPORT_CODE = (
+    "filter_species.py", "filter_species_phylogeny.py", "contrast_pairs.py",
+    "plot_contrast_tree.py", "species_traits.py", "sample_identity.py",
+    "phylogeny_root.py", "phylogeny_outgroup.py", "phenoradar_metadata.py",
+    "consumer_metadata.py", "trait_encoding.py", "analysis_validation.py",
+    "alignment_selection.py", "mapping_tables.py", "og_kegg.py",
+    "select_kegg_representatives.py", "aggregate_ko_tpm.py", "layout.py", "common.py",
+)
+
 ALL_PHYLOGENY = PHYLOGENY_BRANCHES["all"]
 PHENOTYPED_PHYLOGENY = PHYLOGENY_BRANCHES["phenotyped"]
 
@@ -575,10 +585,7 @@ def export(source, exclusions, outdir=None, traits=None, contrast_trait="C4", se
                    "retained_runs": sorted(job.keep_runs), "counts": job.counts, "sections": inventory["sections"],
                    "inputs": list(job.records.values()), "outputs": outputs, "not_exported": job.ignored,
                    "contrast": {"trait": contrast_trait, "seed": seed},
-                   "code": [file_record(Path(__file__).with_name(name)) for name in
-                            ["filter_species.py", "filter_species_phylogeny.py", "contrast_pairs.py",
-                             "plot_contrast_tree.py", "species_traits.py", "sample_identity.py", "phylogeny_root.py",
-                             "phenoradar_metadata.py", "trait_encoding.py", "layout.py", "common.py"]],
+                   "code": [file_record(Path(__file__).with_name(name)) for name in EXPORT_CODE],
                    "policies": {"sequence_inference_recomputed": False,
                                 "contrast_pairs": "recomputed from completed molecular trees after exclusions; NCBI representative analysis untouched",
                                 "expression_values": "original strings preserved",

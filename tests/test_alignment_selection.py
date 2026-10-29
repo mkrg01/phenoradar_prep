@@ -68,30 +68,106 @@ def test_zero_and_one_fractions_and_empty_selection(occupancy_inputs):
     assert saved['alignments'] == [] and saved['selection']['min_sample_fraction'] == 1
 
 
-def test_threshold_changes_reuse_alignments_and_keep_excluded_results(occupancy_inputs, tmp_path):
+def test_threshold_changes_publish_only_selected_and_move_cached_results_without_copies(occupancy_inputs, tmp_path):
     raw, occupancy, selected = occupancy_inputs
     out, reports, plans = tmp_path / 'out', tmp_path / 'reports', tmp_path / 'plans'
+    cache = tmp_path / 'work/cache'
     famsa = tmp_path / 'famsa'
     famsa.write_text(f'#!{sys.executable}\nfrom pathlib import Path\nimport sys\n'
                      'Path(sys.argv[-1]).write_bytes(Path(sys.argv[-2]).read_bytes())\n')
     famsa.chmod(0o755)
     # A completed result excluded by the new default must survive untouched.
     align(raw / 'OGlow.faa', out / 'OGlow.faa', reports / 'OGlow.json', threads=4, command=str(famsa))
-    old = (out / 'OGlow.faa').stat().st_mtime_ns
+    old = (out / 'OGlow.faa').stat()
+    original = {}
     for fraction, expected, reused in [(0.5, {'OGhalf', 'OGthree'}, 0),
                                        (0.75, {'OGthree'}, 1),
+                                       (1, set(), 0),
                                        (0.25, {'OGlow', 'OGhalf', 'OGthree'}, 3)]:
         select(raw, occupancy, selected, fraction)
         plan(selected, plans)
-        receipt = out / 'batches/batch_000000.json'
-        run_batch(plans / 'batch_000000.json', selected, out, reports, receipt,
-                  cpus=4, command=str(famsa))
-        assert json.loads(receipt.read_text())['reused'] == reused
-        finish(selected, out, reports)
+        if expected:
+            receipt = out / 'batches/batch_000000.json'
+            run_batch(plans / 'batch_000000.json', selected, out, reports, receipt,
+                      cpus=4, command=str(famsa), cache=cache)
+            assert json.loads(receipt.read_text())['reused'] == reused
+        finish(selected, out, reports, cache=cache)
         saved = json.loads((out / 'provenance.json').read_text())
         assert {r['orthogroup'] for r in saved['alignments']} == expected
         assert saved['selection']['min_sample_fraction'] == fraction
-        assert (out / 'OGlow.faa').stat().st_mtime_ns == old
+        assert {p.stem for p in out.glob('*.faa')} == expected
+        assert {p.stem for p in cache.glob('*.faa')} == {'OGlow', 'OGhalf', 'OGthree'} - expected
+        files = [*out.glob('*.faa'), *cache.glob('*.faa')]
+        assert len(files) == 3  # No duplicated alignment storage.
+        if not original:
+            original = {p.name: (p.read_bytes(), p.stat().st_mtime_ns, p.stat().st_ino) for p in files}
+        assert {p.name: (p.read_bytes(), p.stat().st_mtime_ns, p.stat().st_ino) for p in files} == original
+        low = (out if 'OGlow' in expected else cache) / 'OGlow.faa'
+        assert low.stat().st_mtime_ns == old.st_mtime_ns
+        assert low.stat().st_ino == old.st_ino
+
+
+@pytest.mark.parametrize('problem', ['input', 'alignment', 'missing_alignment', 'missing_report', 'threads', 'executable'])
+def test_cache_reuse_rejects_changed_inputs_outputs_and_execution(occupancy_inputs, tmp_path, problem):
+    raw, occupancy, selected = occupancy_inputs
+    out, reports, plans, cache = [tmp_path / name for name in ['out', 'reports', 'plans', 'cache']]
+    command = tmp_path / 'famsa'
+    command.write_text(f'#!{sys.executable}\nfrom pathlib import Path\nimport sys\n'
+                       'Path(sys.argv[-1]).write_bytes(Path(sys.argv[-2]).read_bytes())\n')
+    command.chmod(0o755)
+    align(raw / 'OGlow.faa', out / 'OGlow.faa', reports / 'OGlow.json', threads=4, command=str(command))
+    select(raw, occupancy, selected, 1)
+    finish(selected, out, reports, cache=cache)
+    threads = 4
+    if problem == 'input':
+        path = raw / 'OGlow.faa'
+        path.write_text(path.read_text().replace('MAA', 'MGA'))
+    elif problem == 'alignment':
+        path = cache / 'OGlow.faa'
+        path.write_text(path.read_text().replace('MAA', 'MGA'))
+    elif problem == 'missing_alignment':
+        (cache / 'OGlow.faa').unlink()
+    elif problem == 'missing_report':
+        (cache / 'OGlow.json').unlink()
+    elif problem == 'threads':
+        threads = 2
+    else:
+        command.write_text(command.read_text() + '# new aligner build\n')
+    select(raw, occupancy, selected, 0.25)
+    plan(selected, plans)
+    receipt = out / 'batches/batch_000000.json'
+    run_batch(plans / 'batch_000000.json', selected, out, reports, receipt,
+              cpus=4, threads_per_og=threads, command=str(command), cache=cache)
+    assert json.loads(receipt.read_text())['reused'] == 0
+    assert (out / 'OGlow.faa').read_bytes() == (raw / 'OGlow.faa').read_bytes()
+    assert not list(cache.glob('*.faa'))
+
+
+def test_failed_finish_does_not_move_former_outputs(occupancy_inputs, tmp_path):
+    raw, occupancy, selected = occupancy_inputs
+    out, reports, cache = [tmp_path / name for name in ['out', 'reports', 'cache']]
+    out.mkdir()
+    (out / 'OGlow.faa').write_bytes((raw / 'OGlow.faa').read_bytes())
+    select(raw, occupancy, selected, 0.5)
+    with pytest.raises(FileNotFoundError):
+        finish(selected, out, reports, cache=cache)
+    assert (out / 'OGlow.faa').exists()
+    assert not cache.exists()
+
+
+def test_removed_candidates_are_pruned_from_final_and_cache(occupancy_inputs, tmp_path):
+    raw, occupancy, selected = occupancy_inputs
+    select(raw, occupancy, selected, 1)
+    out, cache = tmp_path / 'out', tmp_path / 'cache'
+    out.mkdir(); cache.mkdir()
+    (out / 'obsolete.faa').write_text('>Plant_R1_g1\nMAA\n')
+    (cache / 'old.faa').write_text('>Plant_R1_g1\nMAA\n')
+    (cache / 'old.json').write_text('{}')
+    (out / 'OGlow.faa').write_bytes((raw / 'OGlow.faa').read_bytes())
+    (cache / 'notes.txt').write_text('keep')
+    finish(selected, out, tmp_path / 'reports', cache=cache)
+    assert not list(out.glob('*.faa'))
+    assert {p.name for p in cache.iterdir()} == {'OGlow.faa', 'notes.txt'}
 
 
 def test_selection_rejects_changed_sources(occupancy_inputs):
@@ -110,6 +186,8 @@ def test_selection_exports_omit_preserved_below_threshold_results(occupancy_inpu
     out.mkdir(parents=True)
     (out / 'OGlow.faa').write_bytes((raw / 'OGlow.faa').read_bytes())
     finish(selected, out, tmp_path / 'reports')
+    assert not list(out.glob('*.faa'))
+    assert (selected.parent / 'cache/OGlow.faa').is_file()
     samples = [{**r, 'scientific_name': r['species'], 'taxid': str(i + 1)}
                for i, r in enumerate(read_tsv(tmp_path / 'samples.tsv')[:4])]
     write_tsv(source / 'metadata/samples.tsv', list(samples[0]), samples)

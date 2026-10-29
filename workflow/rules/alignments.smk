@@ -2,6 +2,7 @@ from alignment_batches import batch_targets
 
 SELECTED_ALIGNMENT_INPUTS = f'{WORK}/{ORTHOGROUP_ALIGNMENTS}/selected'
 ALIGNMENT_OCCUPANCY = f'{WORK}/{ORTHOGROUP_ALIGNMENTS}/occupancy'
+ALIGNMENT_CACHE = f'{WORK}/{ORTHOGROUP_ALIGNMENTS}/cache'
 
 
 def alignment_targets(wc):
@@ -78,7 +79,7 @@ rule align_orthogroup_batch:
         code=f'{SCRIPTS}/alignment_batches.py',
         aligner=f'{SCRIPTS}/align_orthogroups.py'
     output: receipt=f'{ALIGNMENTS}/batches/{{batch}}.json'
-    params: inputs=SELECTED_ALIGNMENT_INPUTS, outdir=ALIGNMENTS, reports=f'{LOG}/{ORTHOGROUP_ALIGNMENTS}'
+    params: inputs=SELECTED_ALIGNMENT_INPUTS, outdir=ALIGNMENTS, reports=f'{LOG}/{ORTHOGROUP_ALIGNMENTS}', cache=ALIGNMENT_CACHE
     threads: 12
     resources: mem_mb=32000
     conda: '../envs/alignment.yaml'
@@ -87,7 +88,7 @@ rule align_orthogroup_batch:
     shell:
         '{PYTHON:q} {input.code:q} batch --batch {input.batch:q} --inputs {params.inputs:q} '
         '--outdir {params.outdir:q} --reports {params.reports:q} --receipt {output.receipt:q} '
-        '--cpus {threads} > {log:q} 2>&1'
+        '--cpus {threads} --cache {params.cache:q} > {log:q} 2>&1'
 
 
 rule finish_alignments:
@@ -96,14 +97,14 @@ rule finish_alignments:
         batches=lambda wc: batch_targets(checkpoints.plan_alignment_batches.get().output.plan,
                                         ALIGNMENTS, f'{LOG}/{ORTHOGROUP_ALIGNMENTS}'),
         code=f"{SCRIPTS}/alignment_selection.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/busco_phylogeny.py"]
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/alignment_batches.py"]
     output:
         provenance=f"{ALIGNMENTS}/provenance.json",
         occupancy=f"{ALIGNMENTS}/occupancy.tsv"
-    params: outdir=ALIGNMENTS, reports=f"{LOG}/{ORTHOGROUP_ALIGNMENTS}"
+    params: outdir=ALIGNMENTS, reports=f"{LOG}/{ORTHOGROUP_ALIGNMENTS}", cache=ALIGNMENT_CACHE
     resources: mem_mb=8000
     conda: "../envs/alignment.yaml"
     log: f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/finish.log"
     shell:
         "{PYTHON:q} {input.code:q} finish --inputs {input.proteins:q} --outdir {params.outdir:q} "
-        "--reports {params.reports:q} > {log:q} 2>&1"
+        "--reports {params.reports:q} --cache {params.cache:q} > {log:q} 2>&1"

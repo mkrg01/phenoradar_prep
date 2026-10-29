@@ -321,7 +321,10 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
         execute()
         inventory = json.loads((out / 'provenance.json').read_text())
         assert {r['orthogroup'] for r in inventory['alignments']} == expected
-        assert all((out / name).stat().st_mtime_ns == t for name, t in times.items())
+        assert {p.stem for p in out.glob('*.faa')} == expected
+        cache = tmp_path / 'work/test/orthogroups/alignments/cache'
+        assert all(((out if Path(name).stem in expected else cache) / name).stat().st_mtime_ns == t
+                   for name, t in times.items())
         assert [p.stat().st_mtime_ns for p in (raw_collection, measured)] == source_times
     (out / 'occupancy.tsv').unlink()
     execute()
@@ -338,6 +341,8 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     assert events.read_text().splitlines().count("OG2") == 3
 
     # Quantification changes do not affect alignments.
+    # Compare with the repaired outputs, including the deliberately recomputed OG2.
+    times = {p.name: p.stat().st_mtime_ns for p in out.glob('*.faa')}
     abundance = Path(tiny_inputs["quant_dir"]) / "Alpha_plant/A1/A1_abundance.tsv"
     values = read_tsv(abundance)
     values[0]["tpm"] = 40
