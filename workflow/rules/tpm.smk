@@ -69,6 +69,21 @@ else:
             '--output {output.tpm:q} --qc {output.qc:q}'
 
 
+rule merge_sequence_tpm:
+    input:
+        samples=f"{META}/samples.tsv",
+        abundance=lambda wc: [row["abundance"] for row in sample_rows(wc)],
+        code=f"{SCRIPTS}/sequence_expression.py",
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
+    output: f"{OUT}/{SEQUENCE_EXPRESSION}"
+    log: f"{LOG}/expression/sequence_tpm.log"
+    conda: "../envs/analysis.yaml"
+    resources: mem_mb=2000
+    shell:
+        "{PYTHON:q} {input.code:q} --samples {input.samples:q} --output {output:q} "
+        "> {log:q} 2>&1"
+
+
 rule merge_tpm:
     input:
         samples=f"{META}/samples.tsv",

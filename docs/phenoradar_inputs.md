@@ -13,10 +13,12 @@ Paths below are relative to the analysis directory.
 
 | Input | Path |
 | --- | --- |
-| Sample traits and family | `metadata/species_metadata.tsv` |
+| Input metadata: traits, taxonomy, and available contrast pairs | `metadata/species_metadata.tsv` |
+| Intermediate traits and taxonomy before contrast assignment | `metadata/species_metadata_base.tsv` |
 | Sample IDs, biological species, and runs | `metadata/samples.tsv` |
 | Original trait labels and numeric encoding | `metadata/trait_encoding.json` |
 | OG expression | `orthogroups/expression/tpm.tsv` |
+| Per-sequence expression | `expression/sequence_tpm.tsv.gz` (`species`, `sequence_id`, `tpm`) |
 | KO expression | `kegg/ko_tpm_sum.tsv` |
 | OG alignments | `orthogroups/alignments/{og}.faa` |
 | Species tree | `phylogeny/{all,phenotyped,representatives}/species_tree.nwk` |
@@ -25,14 +27,26 @@ Paths below are relative to the analysis directory.
 | OG-to-KO evidence | `kegg/og_kos.tsv` (`accepted=1` rows) |
 | KO group memberships | `kegg/ko_modules.tsv`, `kegg/ko_pathways.tsv` |
 
+`all` creates `metadata/species_metadata.tsv` after the configured contrast
+branches finish. It includes `species`, the trait, `contrast_pair_id`, and the
+available `kingdom`, `phylum`, `class`, `order`, `family`, and `genus` names.
+Unrecorded ranks remain blank. `species_metadata.json` records the source files
+and checksums.
+
+With one configured contrast branch, its pair IDs populate `contrast_pair_id`.
+Unpaired samples remain in the table with blank IDs. With multiple contrast
+branches, IDs are kept in separate columns such as `contrast_pair_id_all` and
+`contrast_pair_id_representatives`; `contrast_pair_id` stays blank. Choose the
+desired column using PhenoRadar's `data.contrast_pair_col`. With contrasts
+disabled, pair IDs remain blank; saved files from earlier runs are ignored.
+
 Optional files exist only after their branch has completed. QC, representative
 selection, and provenance stay beside the results; they are not extra expression
 inputs. Choose the tree and pair branch deliberately. Pair IDs are local to each
-branch and are not merged into base metadata.
-Base metadata has blank pair IDs. Use a grouping column such as `family` with
-base metadata, or use the chosen contrast branch's pair assignments for
-contrast-based cross-validation. Join by computational sample ID when adding
-family or other base annotations to branch metadata.
+branch. The final input metadata combines their assignments with taxonomy;
+manual joins are unnecessary. Base metadata remains available for targets run
+before contrast analysis. Use `family` or `order` as a grouping column when not
+using contrast pairs.
 
 ## Expression settings
 
@@ -63,6 +77,12 @@ averaged. Use `metadata/samples.tsv` to identify biological species.
 OG `tpm` is normalized over retained OGs. KO `tpm_sum` sums original OG TPM
 without renormalization. Review [TPM interpretation](outputs.md#tpm-interpretation)
 and [KO ambiguity and missing values](kegg.md#assignment-and-quantification).
+
+For future expression-weighted amino-acid features, the per-sequence table can
+be joined to OG alignments by sample and exact FASTA sequence ID. It contains
+original gene TPM, including zero values and unmapped genes; it does not contain
+precomputed site features. Current PhenoRadar does not yet implement this MSA
+feature input. See [per-sequence TPM](outputs.md#tpm-interpretation) for the contract.
 
 Trait columns contain `0`, `1`, or missing values. Text states are
 [encoded once](inputs.md#traits); their source labels remain in

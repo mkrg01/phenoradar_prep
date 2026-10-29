@@ -100,6 +100,30 @@ def test_completed_controller_needs_current_record_and_outputs(saved):
     assert 'orthogroups/expression/tpm.tsv' in report['completion']['missing']
 
 
+def test_new_output_is_required_only_by_analyses_with_its_frozen_producer(saved):
+    receipt(saved)
+    complete(saved)
+    observed = queue(saved.parent.parent, accounting='COMPLETED')
+    assert status(saved, run=observed)['state'] == 'complete'
+    manifest = json.loads((saved / 'analysis.json').read_text())
+    manifest['implementation'] = [{'path': '/repo/workflow/scripts/sequence_expression.py'}]
+    report = status(saved, manifest=manifest, run=observed)
+    assert report['state'] == 'incomplete'
+    assert report['completion']['missing'] == ['expression/sequence_tpm.tsv.gz']
+    output = saved / 'expression/sequence_tpm.tsv.gz'
+    output.parent.mkdir()
+    output.write_bytes(b'data')  # Lightweight status checks presence only.
+    assert status(saved, manifest=manifest, run=observed)['state'] == 'complete'
+
+
+def test_consumer_metadata_is_required_for_new_frozen_analyses():
+    implementation = [{'path': '/repo/workflow/scripts/consumer_metadata.py'}]
+    assert 'metadata/species_metadata_base.tsv' not in required_outputs({})
+    assert {'metadata/species_metadata_base.tsv', 'metadata/species_metadata.tsv',
+            'metadata/species_metadata.json'} <= set(required_outputs({}, implementation))
+    assert 'filtered/metadata/species_metadata.tsv' in required_outputs({'exclude_species': ['Plant_A']}, implementation)
+
+
 @pytest.mark.parametrize('phase', ['validating', 'exporting'])
 def test_runtime_phase_100_percent_does_not_mean_whole_completion(saved, monkeypatch, phase):
     receipt(saved)

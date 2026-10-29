@@ -19,6 +19,7 @@ SPECIES = ["Plant_A", "Plant_B-x", "Plant_C"]
 META_FIELDS = ["species", "C4", "contrast_pair_id", "family"]
 EXPR_FIELDS = ["species", "run", "orthogroup", "tpm"]
 KO_FIELDS = ["species", "run", "ko", "tpm_sum"]
+SEQ_FIELDS = ["species", "sequence_id", "tpm"]
 
 
 @pytest.fixture
@@ -28,6 +29,9 @@ def snapshot(tmp_path):
                     scientific_name=species.replace("_", " "), taxid=str(10 + i))
                for i, species in enumerate(SPECIES)]
     write_tsv(source / "metadata/samples.tsv", list(samples[0]), samples)
+    write_tsv(source / "expression/sequence_tpm.tsv.gz", SEQ_FIELDS,
+              [dict(species=r["species"], sequence_id=r["species"] + "_g1", tpm="0.00000")
+               for r in samples])
     write_tsv(source / "metadata/species_metadata.tsv", META_FIELDS,
               [dict(species=species, C4=trait, contrast_pair_id="", family="Plantaceae")
                for species, trait in zip(SPECIES, ["0", "1", ""])])
@@ -68,12 +72,13 @@ def state(folder):
 def test_discovery_uses_only_existing_absolute_dependencies(snapshot):
     inventory = discover(snapshot)
     assert all(Path(path).is_absolute() and Path(path).is_file() for path in inventory["files"])
-    assert all(inventory["sections"][key] == "ready" for key in ["orthogroups", "kegg", "alignments"])
+    assert all(inventory["sections"][key] == "ready" for key in ["orthogroups", "kegg", "alignments", "sequence_expression"])
     assert not any("/orthogroups/mapping/" in path or "/proteins/" in path for path in inventory["files"])
 
 
 @pytest.mark.parametrize("branch,fields,value_column", [
     ("orthogroups/expression/tpm.tsv", EXPR_FIELDS, "tpm"), ("kegg/ko_tpm_sum.tsv", KO_FIELDS, "tpm_sum"),
+    ("expression/sequence_tpm.tsv.gz", SEQ_FIELDS, "tpm"),
 ])
 @pytest.mark.parametrize("bad_value", ["", "NA", "NaN", "inf", "-0.1", "oops"])
 def test_expression_requires_finite_nonnegative_numbers(snapshot, tmp_path, branch, fields, value_column, bad_value):
@@ -84,7 +89,8 @@ def test_expression_requires_finite_nonnegative_numbers(snapshot, tmp_path, bran
         validate(snapshot)
 
 
-@pytest.mark.parametrize("branch,fields", [("orthogroups/expression/tpm.tsv", EXPR_FIELDS), ("kegg/ko_tpm_sum.tsv", KO_FIELDS)])
+@pytest.mark.parametrize("branch,fields", [("orthogroups/expression/tpm.tsv", EXPR_FIELDS), ("kegg/ko_tpm_sum.tsv", KO_FIELDS),
+                                         ("expression/sequence_tpm.tsv.gz", SEQ_FIELDS)])
 @pytest.mark.parametrize("problem", ["duplicate", "missing_species", "wrong_run", "unknown_species"])
 def test_expression_coordinates_must_match_selected_samples(snapshot, tmp_path, branch, fields, problem):
     rows = read_tsv(snapshot / branch)
@@ -93,7 +99,10 @@ def test_expression_coordinates_must_match_selected_samples(snapshot, tmp_path, 
     elif problem == "missing_species":
         rows.pop()
     elif problem == "wrong_run":
-        rows[0]["run"] = rows[1]["run"]
+        if "run" in fields:
+            rows[0]["run"] = rows[1]["run"]
+        else:
+            rows[0]["sequence_id"] = rows[1]["sequence_id"]
     else:
         rows[0]["species"] = "Unknown_plant"
     write_tsv(snapshot / branch, fields, rows)
@@ -107,6 +116,11 @@ def test_metadata_must_cover_selected_species_without_duplicates(snapshot, tmp_p
     write_tsv(path, META_FIELDS, rows[:-1] + [rows[0]])
     with pytest.raises(ValueError):
         validate(snapshot)
+
+
+def test_older_snapshot_without_sequence_expression_remains_valid(snapshot):
+    (snapshot / "expression/sequence_tpm.tsv.gz").unlink()
+    assert validate(snapshot)["sections"]["sequence_expression"] == "absent"
 
 
 @pytest.mark.parametrize("layout", ["native", "mixed", "legacy"])
@@ -182,7 +196,7 @@ def test_wellformed_kegg_map_changes_fail_completion_checksum(snapshot, tmp_path
 def make_filtered(source, exclusions):
     filtered = source / "filtered"
     keep = set(SPECIES) - set(exclusions)
-    for relative in ["metadata/samples.tsv", "metadata/species_metadata.tsv", "orthogroups/expression/tpm.tsv", "orthogroups/expression/mapping_qc.tsv"]:
+    for relative in ["metadata/samples.tsv", "metadata/species_metadata.tsv", "orthogroups/expression/tpm.tsv", "orthogroups/expression/mapping_qc.tsv", "expression/sequence_tpm.tsv.gz"]:
         rows = read_tsv(source / relative)
         write_tsv(filtered / relative, list(rows[0]), [row for row in rows if row["species"] in keep])
     records = [{**file_record(path), "path": str(path.relative_to(filtered)), "storage": "file"}

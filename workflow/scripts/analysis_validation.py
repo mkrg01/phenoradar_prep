@@ -10,7 +10,7 @@ from filter_species import fasta_records, manifest, safe_name, table, validate_e
 from phenoradar_metadata import read_base, with_pairs
 from sample_identity import expression_run, sample_run_map
 from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
-                    PHYLOGENY_BRANCHES, REPRESENTATIVES)
+                    PHYLOGENY_BRANCHES, REPRESENTATIVES, SEQUENCE_EXPRESSION, CONSUMER_METADATA, BASE_METADATA)
 
 
 def discover(source, exclusions=()):
@@ -65,6 +65,8 @@ def discover(source, exclusions=()):
 
     folder("metadata")
     include("run.json")
+    if branch("sequence_expression", [SEQUENCE_EXPRESSION]):
+        include(SEQUENCE_EXPRESSION)
     if branch("orthogroups", [f"{ORTHOGROUP_EXPRESSION}/tpm.tsv", f"{ORTHOGROUP_EXPRESSION}/mapping_qc.tsv"]):
         folder(ORTHOGROUP_EXPRESSION)
     if branch("mapping", [f"{ORTHOGROUP_MAPPING}/{name}" for name in
@@ -205,11 +207,13 @@ def discover(source, exclusions=()):
                 original_runs={r["run"]: r["species"] for r in original_samples if r["species"] not in exclusions})
 
 
-def validate_expression(path, runs, feature, value):
+def validate_expression(path, runs, feature, value, *, collect_features=True):
     """Validate run-level values without choosing or combining biological replicates."""
     samples = sample_run_map(dict(species=sample, run=run) for run, sample in runs.items())
     reader = table(path, ["species", feature, value])
-    next(reader)
+    fields = next(reader)
+    if feature == "sequence_id" and fields != ["species", "sequence_id", "tpm"]:
+        raise ValueError(f"sequence expression requires exactly species, sequence_id, tpm: {path}")
     seen, features, current_features = set(), set(), set()
     current = None
     for row in reader:
@@ -223,7 +227,10 @@ def validate_expression(path, runs, feature, value):
         if name in current_features:
             raise ValueError(f"duplicate run/feature coordinate: {path}: {run}/{name}")
         current_features.add(name)
-        features.add(name)
+        if feature == "sequence_id" and species_from_gene_id(name) != row["species"]:
+            raise ValueError(f"sequence_id belongs to a different sample: {path}: {name}")
+        if collect_features:
+            features.add(name)
         try:
             number = float(row[value])
         except ValueError as error:
@@ -333,9 +340,18 @@ def validate(source, exclusions=(), trait="C4"):
     metadata = read_base(source / "metadata/species_metadata.tsv", trait)
     if {r["species"] for r in metadata} != species:
         raise ValueError("PhenoRadar metadata species differ from samples")
+    consumer = source / CONSUMER_METADATA
+    if (source / BASE_METADATA).exists() or consumer.with_suffix('.json').exists():
+        from consumer_metadata import validate as validate_consumer
+        ready = validate_consumer(consumer, trait)
+        if {r["species"] for r in ready} != species:
+            raise ValueError("consumer metadata species differ from samples")
     for pairs in inventory["contrasts"]:
         with_pairs(metadata, pairs, trait)
     artifacts, orthogroups = inventory["artifacts"], set()
+    if SEQUENCE_EXPRESSION in artifacts:
+        validate_expression(artifacts[SEQUENCE_EXPRESSION], runs, "sequence_id", "tpm",
+                            collect_features=False)
     for dest, feature, value, qc in [(f"{ORTHOGROUP_EXPRESSION}/tpm.tsv", "orthogroup", "tpm", f"{ORTHOGROUP_EXPRESSION}/mapping_qc.tsv"),
                                     ("kegg/ko_tpm_sum.tsv", "ko", "tpm_sum", "kegg/mapping_qc.tsv")]:
         if dest in artifacts:

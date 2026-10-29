@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare minimal species metadata for PhenoRadar from selected workflow inputs."""
+"""Prepare sample traits and available taxonomy for PhenoRadar."""
 import argparse
 import csv
 import re
@@ -8,13 +8,16 @@ from common import write_tsv
 from species_traits import read_species_traits
 from sample_identity import traits_for_samples
 
+TAXONOMY_RANKS = ["kingdom", "phylum", "class", "order", "family", "genus"]
+
 
 def fields(trait="C4"):
     if (not isinstance(trait, str) or not trait.strip() or trait != trait.strip()
             or any(c in trait for c in "\t\r\n")
-            or trait in {"species", "contrast_pair_id", "family"}):
+            or trait in {"species", "contrast_pair_id", *TAXONOMY_RANKS}
+            or trait.startswith("contrast_pair_id_")):
         raise ValueError("trait must name a non-reserved output column")
-    return ["species", trait, "contrast_pair_id", "family"]
+    return ["species", trait, "contrast_pair_id", *TAXONOMY_RANKS]
 
 
 def _table(path, required):
@@ -44,7 +47,8 @@ def _trait(value, species):
 
 
 def _base_rows(rows, trait):
-    required = fields(trait)
+    fields(trait)
+    required = ["species", trait, "contrast_pair_id", "family"]
     result, seen = [], set()
     for row in rows:
         if not set(required) <= set(row) or any(row[key] is None for key in required):
@@ -53,17 +57,37 @@ def _base_rows(rows, trait):
         if name in seen:
             raise ValueError("duplicate species in PhenoRadar metadata: " + name)
         seen.add(name)
-        result.append({"species": name, trait: _trait(row[trait], name),
+        result.append({**row, "species": name, trait: _trait(row[trait], name),
                        "contrast_pair_id": row["contrast_pair_id"].strip(),
-                       "family": row["family"].strip()})
+                       **{rank: row[rank].strip() for rank in TAXONOMY_RANKS if rank in row}})
     if not result:
         raise ValueError("empty PhenoRadar metadata")
     return result
 
 
 def read_base(path, trait="C4"):
-    """Read validated minimal metadata without consulting original raw inputs."""
-    return _base_rows(_table(path, fields(trait)), trait)
+    """Accept historical four-column tables and retain additional annotations."""
+    fields(trait)
+    return _base_rows(_table(path, ["species", trait, "contrast_pair_id", "family"]), trait)
+
+
+def taxonomy_for(metadata, selected):
+    """Join by computational sample ID, leaving unavailable ranks blank."""
+    result = {}
+    for row in _table(metadata, ["species", "family"]):
+        name = _species(row["species"])
+        if name not in selected:
+            raise ValueError("selected metadata contains unknown species: " + name)
+        ranks = {rank: row.get(rank, "").strip() for rank in TAXONOMY_RANKS}
+        if name in result:
+            for rank in TAXONOMY_RANKS:
+                if result[name][rank] != ranks[rank]:
+                    raise ValueError(f"conflicting {rank} for species: {name}")
+        result[name] = ranks
+    if set(result) != set(selected):
+        raise ValueError("species missing from selected taxonomy metadata: "
+                         + ", ".join(sorted(set(selected) - set(result))))
+    return result
 
 
 def with_pairs(rows, pairs, trait="C4"):
@@ -108,25 +132,17 @@ def prepare(samples, metadata, traits, output, trait="C4", pairs=None):
     if not selected:
         raise ValueError("empty selected sample table")
 
-    families, metadata_runs = {}, set()
+    taxonomy = taxonomy_for(metadata, selected)
+    metadata_runs = set()
     has_runs = False
     for row in _table(metadata, ["species", "family"]):
         name = _species(row["species"])
-        if name not in selected:
-            raise ValueError("selected metadata contains unknown species: " + name)
-        family = row["family"].strip()
-        if name in families and families[name] != family:
-            raise ValueError("conflicting family for species: " + name)
-        families[name] = family
         if "run" in row:
             has_runs = True
             run = row["run"]
             if run in metadata_runs or runs.get(run) != name:
                 raise ValueError("selected metadata run/species differs from samples: " + run)
             metadata_runs.add(run)
-    if set(families) != set(selected):
-        raise ValueError("species missing from selected taxonomy metadata: "
-                         + ", ".join(sorted(set(selected) - set(families))))
     if has_runs and metadata_runs != set(runs):
         raise ValueError("runs missing from selected taxonomy metadata: "
                          + ", ".join(sorted(set(runs) - metadata_runs)))
@@ -135,7 +151,7 @@ def prepare(samples, metadata, traits, output, trait="C4", pairs=None):
     if not traits:
         print("PhenoRadar metadata: no phenotype source supplied; trait values are blank", flush=True)
     rows = [{"species": name, trait: _trait(annotations.get(name, ""), name),
-             "contrast_pair_id": "", "family": families[name]} for name in sorted(selected)]
+             "contrast_pair_id": "", **taxonomy[name]} for name in sorted(selected)]
     if pairs is not None:
         rows = with_pairs(rows, pairs, trait)
     write_tsv(output, columns, rows)

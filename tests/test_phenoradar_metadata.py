@@ -3,7 +3,7 @@
 import pytest
 
 from common import read_tsv, write_tsv
-from phenoradar_metadata import fields, prepare, read_base, with_pairs
+from phenoradar_metadata import TAXONOMY_RANKS, fields, prepare, read_base, with_pairs
 
 
 @pytest.fixture
@@ -27,13 +27,30 @@ def inputs(tmp_path):
 
 def test_prepare_preserves_missing_traits_and_collapses_consistent_runs(inputs):
     rows = prepare(**inputs)
-    assert rows == [
+    expected = [
         {"species": "Plant_A", "C4": "0", "contrast_pair_id": "", "family": "Family A"},
         {"species": "Plant_B-x", "C4": "1", "contrast_pair_id": "", "family": ""},
         {"species": "Plant_C", "C4": "", "contrast_pair_id": "", "family": ""},
     ]
+    assert rows == [{**{rank: "" for rank in TAXONOMY_RANKS}, **row} for row in expected]
     assert read_base(inputs["output"]) == rows
-    assert inputs["output"].read_text().splitlines()[0] == "species\tC4\tcontrast_pair_id\tfamily"
+    assert inputs["output"].read_text().splitlines()[0] == "\t".join(fields())
+
+
+def test_all_available_taxonomy_ranks_are_preserved(inputs):
+    rows = read_tsv(inputs['metadata'])
+    for row in rows:
+        row.update(kingdom='Plantae', phylum='Streptophyta', order='Order A', genus='Plant')
+    write_tsv(inputs['metadata'], list(rows[0]), rows)
+    output = prepare(**inputs)
+    assert all(row['order'] == 'Order A' and row['kingdom'] == 'Plantae' and row['class'] == '' for row in output)
+    assert read_base(inputs['output']) == output
+
+
+def test_legacy_metadata_remains_readable(inputs):
+    write_tsv(inputs['output'], ['species', 'C4', 'contrast_pair_id', 'family'],
+              [dict(species='Plant_A', C4='0', contrast_pair_id='', family='Family A')])
+    assert read_base(inputs['output'])[0]['family'] == 'Family A'
 
 
 def test_optional_traits_and_custom_binary_trait(inputs):
@@ -121,7 +138,7 @@ def test_bad_pair_merges_are_rejected(inputs, tmp_path, damage, message):
         with_pairs(rows, pairs)
 
 
-@pytest.mark.parametrize("trait", ["species", "family", "contrast_pair_id", "", " C4", "C4\n"])
+@pytest.mark.parametrize("trait", ["species", *TAXONOMY_RANKS, "contrast_pair_id", "contrast_pair_id_all", "", " C4", "C4\n"])
 def test_trait_column_cannot_conflict_with_output(trait):
     with pytest.raises(ValueError, match="non-reserved output column"):
         fields(trait)

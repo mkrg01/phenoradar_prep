@@ -12,7 +12,7 @@ rule filter_species:
         phylogeny_code=f"{SCRIPTS}/filter_species_phylogeny.py",
         contrast_code=[f"{SCRIPTS}/{name}.py" for name in
                        ["contrast_pairs", "plot_contrast_tree", "species_traits", "trait_encoding", "sample_identity", "phylogeny_root", "phenoradar_metadata"]],
-        common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/layout.py"],
+        common=[f"{SCRIPTS}/{name}.py" for name in ["common", "layout", "consumer_metadata", "phenoradar_metadata"]],
         kegg_code=[f"{SCRIPTS}/{name}.py" for name in
                    ["og_kegg", "select_kegg_representatives", "aggregate_ko_tpm"]]
     output: bundle=directory(f"{OUT}/filtered")

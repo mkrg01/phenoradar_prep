@@ -29,6 +29,9 @@ def run_layout(config):
 ORTHOGROUP_MAPPING = "orthogroups/mapping"
 ORTHOGROUP_EXPRESSION = "orthogroups/expression"
 ORTHOGROUP_ALIGNMENTS = "orthogroups/alignments"
+SEQUENCE_EXPRESSION = "expression/sequence_tpm.tsv.gz"
+BASE_METADATA = "metadata/species_metadata_base.tsv"
+CONSUMER_METADATA = "metadata/species_metadata.tsv"
 PHYLOGENY_BRANCHES = {"all": "phylogeny/all", "phenotyped": "phylogeny/phenotyped"}
 REPRESENTATIVES = "phylogeny/representatives"
 ROOTING = f"{PHYLOGENY_BRANCHES['all']}/rooting"

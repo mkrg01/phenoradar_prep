@@ -63,6 +63,11 @@ Under `results/<build>/downstream/<analysis>/phylogeny/<tree>/contrast/`:
 | `summary_tree_id.pdf`, `.svg` | Same tree with run, group, and pair IDs in tip labels |
 | `summary.json` | Counts, settings, and provenance |
 
+For PhenoRadar input, use `metadata/species_metadata.tsv` at the analysis root.
+The `all` target joins these pair assignments to the cohort's traits and taxonomy.
+When several tree branches are selected, each has a separate pair-ID column in
+that table. See [input metadata](phenoradar_inputs.md#input-files).
+
 The legend shows the configured trait name and source state labels. With
 [explicit text encoding](inputs.md#traits), the label mapped to `0` is gray
 and the label mapped to `1` is green; numeric inputs display `0`/`1`, including

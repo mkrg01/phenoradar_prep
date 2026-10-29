@@ -103,9 +103,12 @@ def test_filtered_metadata_and_alignments_feed_phenoradar(snapshot, tmp_path):
     write_tsv(path, list(rows[0]), rows)
     filtered = source / "filtered"
     export(source, ["Plant_A"], filtered, traits)
-    metadata = read_tsv(filtered / "metadata/species_metadata.tsv")
+    metadata = read_tsv(filtered / "metadata/species_metadata_base.tsv")
     assert {r["species"] for r in metadata} == set(SPECIES[1:])
     assert all(r["family"] == "Plantaceae" and r["contrast_pair_id"] == "" for r in metadata)
+    ready = read_tsv(filtered / 'metadata/species_metadata.tsv')
+    assert {r['species'] for r in ready} == set(SPECIES[1:])
+    assert all(r['family'] == 'Plantaceae' and r['contrast_pair_id'] == '' for r in ready)
     before = state(source)
     report = validate(source, exclusions=["Plant_A"])
     assert report["source"] == str(filtered)
@@ -133,8 +136,11 @@ def test_native_expression_subset_preserves_columns_values_and_manifest_lookup(s
                              "ko_tpm_sum.tsv", "ko_tpm_sum_wide.tsv"}:
                 fields.remove("run")
             write_tsv(path, fields, [{key: row[key] for key in fields} for row in rows])
-    before = state(source)
     out = source / "filtered"
+    sequence_path = "expression/sequence_tpm.tsv.gz"
+    write_tsv(source / sequence_path, ["species", "sequence_id", "tpm"],
+              [dict(species=s, sequence_id=s + "_g1", tpm="0.00000") for s in SPECIES])
+    before = state(source)
     export(source, ["Plant_A"], out, traits)
     for relative in ["orthogroups/expression/tpm.tsv", "orthogroups/expression/tpm_sum.tsv",
                      "orthogroups/expression/tpm_wide.tsv", "orthogroups/expression/tpm_sum_wide.tsv",
@@ -143,6 +149,9 @@ def test_native_expression_subset_preserves_columns_values_and_manifest_lookup(s
         assert "run" not in rows[0]
         assert rows == [row for row in read_tsv(source / relative) if row["species"] != "Plant_A"]
     assert validate(source, exclusions=["Plant_A"])["samples"] == 4
+    assert read_tsv(out / sequence_path) == [r for r in read_tsv(source / sequence_path)
+                                           if r["species"] != "Plant_A"]
+    assert (out / sequence_path).read_bytes()[:2] == b"\x1f\x8b"
     assert {name: value for name, value in state(source).items() if not name.startswith("filtered/")} == before
 
 

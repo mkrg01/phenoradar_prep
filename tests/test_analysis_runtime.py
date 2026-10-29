@@ -8,11 +8,12 @@ import pytest
 import analysis
 from analysis_runtime import read_state
 from dataset_assets import verify
+from common import read_tsv, write_tsv
 from test_datasets import dataset_project
 from test_portable_build import completed_project
 
 
-@pytest.mark.parametrize('invalid_output', [False, True])
+@pytest.mark.parametrize('invalid_output', [False, True, 'sequence'])
 def test_real_workflow_completion_and_validation_failure(completed_project, monkeypatch, invalid_output):
     root, build, environment, _ = completed_project
     config = root / 'minimal.yaml'
@@ -34,7 +35,12 @@ def test_real_workflow_completion_and_validation_failure(completed_project, monk
                          'software-deployment', 'sources', '--', target],
                          cwd=root, env={**environment, **kwargs['env']}, capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
-        if invalid_output:
+        if invalid_output == 'sequence':
+            table = path / 'expression/sequence_tpm.tsv.gz'
+            rows = read_tsv(table)
+            rows[0]['tpm'] = 'NaN'
+            write_tsv(table, list(rows[0]), rows)
+        elif invalid_output:
             table = path / 'orthogroups/expression/tpm.tsv'
             lines = table.read_text().splitlines()
             values = lines[1].split('\t')
@@ -59,6 +65,8 @@ def test_real_workflow_completion_and_validation_failure(completed_project, monk
         assert not (path / 'phenoradar_inputs').exists()
         assert done['output_layout'] == 'native'
         assert done['files']
+        assert str(path / 'expression/sequence_tpm.tsv.gz') in {e['path'] for e in done['files']}
+        assert str(path / 'metadata/species_metadata.tsv') in {e['path'] for e in done['files']}
         for entry in done['files']:
             verify(entry)
         assert analysis.status(path)['state'] == 'complete'

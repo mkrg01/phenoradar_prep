@@ -170,7 +170,8 @@ def validate_outputs(path, manifest):
     from analysis_status import required_outputs
     from analysis_validation import validate
     pipeline = manifest['pipeline']
-    missing = [name for name in required_outputs(pipeline) if not (path / name).is_file()]
+    missing = [name for name in required_outputs(pipeline, manifest.get('implementation', []))
+               if not (path / name).is_file()]
     if missing:
         raise ValueError('required analysis outputs are missing: ' + ', '.join(missing))
     return validate(path, exclusions=pipeline.get('exclude_species', []), trait=pipeline.get('trait', 'C4'))
@@ -207,7 +208,7 @@ def run(path, target='all', execution=None, local=False, cores=1, mem_mb=8000):
                 output = root / run_layout(manifest['pipeline'])[0]
                 validate_outputs(output, manifest)
                 state.phase('recording_completion')
-                generated = [output / name for name in ('run.json', 'metadata', 'proteins', 'orthogroups',
+                generated = [output / name for name in ('run.json', 'metadata', 'proteins', 'expression', 'orthogroups',
                                                        'kegg', 'phylogeny', 'filtered')]
                 files = [p for part in generated for p in ([part] if part.is_file() else sorted(part.rglob('*'))) if p.is_file()]
                 write_json(path/'completed.json', {'schema_version':2, 'output_layout':'native',

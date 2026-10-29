@@ -212,6 +212,9 @@ def test_invalid_source_is_rejected(molecular_snapshot, tmp_path, damage):
 
 def test_filter_recomputes_both_completed_trees_without_inference(molecular_snapshot, tmp_path):
     source, traits = molecular_snapshot
+    selected = source / 'metadata/metadata_high_busco.tsv'
+    rows = [{**r, 'family': 'Plantaceae', 'order': 'Plantales'} for r in read_tsv(selected)]
+    write_tsv(selected, list(rows[0]), rows)
     before = state(source)
     out = tmp_path / "filtered"
     report = export(source, ["E"], out, traits)
@@ -220,6 +223,12 @@ def test_filter_recomputes_both_completed_trees_without_inference(molecular_snap
         assert frozenset(["C", "D"]) in pair_members(out / branch / "contrast")
         assert not (out / branch / "species_tree.nwk").exists()
         assert not (out / branch / "gene_trees.nwk").exists()
+    from consumer_metadata import validate
+    metadata = validate(out / 'metadata/species_metadata.tsv')
+    assert all(r['family'] == 'Plantaceae' and r['order'] == 'Plantales' and r['contrast_pair_id'] == '' for r in metadata)
+    for branch in ['all', 'phenotyped']:
+        pairs = {r['species']: r['contrast_pair_id'] for r in read_tsv(out / f'phylogeny/{branch}/contrast/species_metadata.tsv')}
+        assert all(r[f'contrast_pair_id_{branch}'] == pairs.get(r['species'], '') for r in metadata)
     assert not (out / "phylogeny/representatives").exists()
     assert state(source) == before
     assert all(sha256(out / r["path"]) == r["sha256"] for r in report["outputs"])

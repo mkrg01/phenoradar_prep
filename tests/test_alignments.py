@@ -241,6 +241,9 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     famsa = famsa_binary()
     if not snakemake or not seqkit:
         pytest.skip("set SNAKEMAKE_BIN and SEQKIT_BIN for workflow integration")
+    # The final per-sequence table requires one run per computational sample key.
+    metadata = read_tsv(tiny_inputs['metadata'])
+    write_tsv(tiny_inputs['metadata'], list(metadata[0]), [r for r in metadata if r['run'] != 'A2'])
     # Include copies, repeated OG assignments, a singleton and an unmapped gene.
     fake_odb.write_text(fake_odb.read_text().replace(
         "line.endswith(('_g1','_g2'))", "line.endswith(('_g1','_g2','_g3'))").replace(
@@ -300,6 +303,9 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     assert sorted(events.read_text().splitlines()) == ["OG1", "OG2"]
     assert len(odb_events.read_text().splitlines()) == 1
     assert not (out.parent / "expression").exists()
+    sequence_tpm = out.parents[1] / 'expression/sequence_tpm.tsv.gz'
+    assert {r['sequence_id'] for r in read_tsv(sequence_tpm)} == {
+        f'{sample}_g{gene}' for sample in ['Alpha_plant', 'Beta_sp-X'] for gene in [1, 2, 3]}
     assert not (out.parents[1] / "phylogeny").exists()
     times = {p.name: p.stat().st_mtime_ns for p in out.glob("*.faa")}
     assert "Nothing to be done" in execute()
@@ -336,7 +342,10 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     values = read_tsv(abundance)
     values[0]["tpm"] = 40
     write_tsv(abundance, list(values[0]), values)
-    assert "Nothing to be done" in execute()
+    refreshed = execute()
+    assert 'rule merge_sequence_tpm:' in refreshed
+    assert all((out / name).stat().st_mtime_ns == t for name, t in times.items())
+    assert next(r['tpm'] for r in read_tsv(sequence_tpm) if r['sequence_id'] == 'Alpha_plant_g1') == '40'
     config["alignment"]["enabled"] = True
     configfile.write_text(yaml.safe_dump(config))
     times = {p.name: p.stat().st_mtime_ns for p in out.glob("*.faa")}

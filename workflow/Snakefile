@@ -77,6 +77,9 @@ from layout import (
     ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
     PHYLOGENY_BRANCHES, REPRESENTATIVES as REPRESENTATIVES_REL,
     ROOTING as ROOTING_REL,
+    SEQUENCE_EXPRESSION,
+    CONSUMER_METADATA,
+    BASE_METADATA,
 )
 from make_manifests import chunk_plan
 from taxonomy_check import validate_settings as validate_taxonomy_check_settings
@@ -131,6 +134,8 @@ ROOTING = f"{OUT}/{ROOTING_REL}"
 CONTRAST_OUTPUTS = [
     "contrast_pairs.tsv", "species_metadata.tsv", "summary.json", "summary_tree.nwk",
     "summary_tree.pdf", "summary_tree.svg", "summary_tree_id.pdf", "summary_tree_id.svg", "contrastive.nwk"]
+CONSUMER_METADATA_FINAL = ([f"{OUT}/filtered"] if EXCLUDE_SPECIES else
+                           [f"{OUT}/{CONSUMER_METADATA}", f"{OUT}/{Path(CONSUMER_METADATA).with_suffix('.json')}"])
 
 def phylogeny_targets(names):
     # Selecting targets must not change any inference job's parameters.
@@ -268,12 +273,14 @@ def kegg_batch_input(wildcards):
 rule all:
     input:
         f"{OUT}/run.json",
-        f"{META}/species_metadata.tsv",
+        f"{OUT}/{BASE_METADATA}",
+        CONSUMER_METADATA_FINAL,
         f"{TPM}/tpm.tsv",
         f"{TPM}/tpm_wide.tsv",
         f"{TPM}/tpm_sum.tsv",
         f"{TPM}/tpm_sum_wide.tsv",
         f"{TPM}/mapping_qc.tsv",
+        f"{OUT}/{SEQUENCE_EXPRESSION}",
         lambda wc: alignment_targets(wc) if config["alignment"]["enabled"] else [],
         KEGG_FINAL if config["kegg"]["enabled"] else [],
         lambda wc: requested_phylogeny("all", PHYLO_FINAL),
@@ -318,13 +325,14 @@ rule database:
 rule kegg:
     input:
         f"{OUT}/run.json",
-        f"{META}/species_metadata.tsv",
+        f"{OUT}/{BASE_METADATA}",
         KEGG_FINAL
 
 
 rule alignments:
     input:
         f"{OUT}/run.json",
+        f"{OUT}/{SEQUENCE_EXPRESSION}",
         lambda wc: alignment_targets(wc)
 
 

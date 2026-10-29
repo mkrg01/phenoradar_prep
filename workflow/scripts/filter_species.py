@@ -11,11 +11,13 @@ import shutil
 import sqlite3
 import tempfile
 
-from common import existing_product, RANDOM_SEED, file_record, now, species_from_gene_id, write_json, write_tsv
+from common import (atomic_writer, existing_product, RANDOM_SEED, file_record, now,
+                    species_from_gene_id, text_open, write_json, write_tsv)
 from mapping_tables import load_tables, read_species, relative_file, subset
 from sample_identity import expression_run, sample_run_map
 from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
-                    PHYLOGENY_BRANCHES, REPRESENTATIVES)
+                    PHYLOGENY_BRANCHES, REPRESENTATIVES, SEQUENCE_EXPRESSION,
+                    BASE_METADATA, CONSUMER_METADATA)
 
 ALL_PHYLOGENY = PHYLOGENY_BRANCHES["all"]
 PHENOTYPED_PHYLOGENY = PHYLOGENY_BRANCHES["phenotyped"]
@@ -26,6 +28,7 @@ BUNDLES = {
     "odb": [f"{ORTHOGROUP_MAPPING}/snapshot.json"],
     "tpm": [f"{ORTHOGROUP_EXPRESSION}/{n}.tsv" for n in ["tpm", "tpm_wide", "tpm_sum", "tpm_sum_wide", "mapping_qc"]],
     "alignments": [f"{ORTHOGROUP_ALIGNMENTS}/provenance.json"],
+    "sequence_expression": [SEQUENCE_EXPRESSION],
     "kegg": [f"kegg/{n}.tsv" for n in ["genes", "gene_kos", "ko_tpm_sum", "ko_tpm_sum_wide", "ko_support", "mapping_qc"]],
     "phylogeny": [f"{ALL_PHYLOGENY}/species_tree.nwk", f"{ALL_PHYLOGENY}/species_tree.json", f"{ALL_PHYLOGENY}/gene_trees.nwk",
                   f"{ALL_PHYLOGENY}/gene_trees.json", f"{ALL_PHYLOGENY}/species_coverage.tsv"],
@@ -57,7 +60,7 @@ def validate_exclusions(values):
 
 def table(path, required=()):
     """Yield the header followed by validated rows, without loading large tables."""
-    with Path(path).open(newline="") as handle:
+    with text_open(path, newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         fields = reader.fieldnames
         if not fields or len(fields) != len(set(fields)) or not set(required) <= set(fields):
@@ -260,7 +263,7 @@ class Export:
         seen = set()
         dest = self.stage / relative
         dest.parent.mkdir(parents=True, exist_ok=True)
-        with dest.open("w", newline="") as handle:
+        with atomic_writer(dest) as handle:
             writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", lineterminator="\n")
             writer.writeheader()
             for row in reader:
@@ -314,7 +317,7 @@ class Export:
             traits = self.inventory["sections"]["traits"]
             prepare(self.stage / "metadata/samples.tsv", selected,
                     self.input(traits["path"]) if traits["status"] == "ready" else None,
-                    self.stage / "metadata/species_metadata.tsv", trait=trait)
+                    self.stage / BASE_METADATA, trait=trait)
         self.counts["species"] = dict(before=len(self.species), after=len(self.keep))
         self.counts["runs"] = dict(before=len(self.rows), after=len(retained))
 
@@ -343,6 +346,14 @@ class Export:
             unique = relative.endswith("_wide.tsv") or relative.endswith("mapping_qc.tsv")
             required = ["species", "run"] if relative.endswith("mapping_qc.tsv") else ["species"]
             self.subset_table(relative, required, self.run_row, unique_runs=unique, complete_runs=True)
+
+    def sequence_expression(self):
+        from analysis_validation import validate_expression
+        # Check all source rows, including excluded samples, before publishing.
+        validate_expression(self.input(self.source / SEQUENCE_EXPRESSION), self.runs,
+                            "sequence_id", "tpm", collect_features=False)
+        self.subset_table(SEQUENCE_EXPRESSION, ["species", "sequence_id", "tpm"],
+                          self.run_row, complete_runs=True)
 
     def verify_gene_owners(self, db, table_name, gene_column, orthogroups=None):
         if self.inventory['sections']['odb']['status'] != 'ready': return
@@ -534,6 +545,15 @@ def export(source, exclusions, outdir=None, traits=None, contrast_trait="C4", se
                     export_phylogeny(job)
                 else:
                     getattr(job, name)()
+        # Assemble after pairs are recomputed, never inherit original pair IDs.
+        base = stage / BASE_METADATA
+        if base.is_file():
+            from consumer_metadata import create
+            pairs = {branch: stage / folder / "contrast/species_metadata.tsv"
+                     for branch, folder in PHYLOGENY_BRANCHES.items()
+                     if (stage / folder / "contrast/species_metadata.tsv").is_file()}
+            create(base, stage / "metadata/metadata_high_busco.tsv",
+                   stage / CONSUMER_METADATA, pairs, contrast_trait)
         # Record all known snapshot metadata, including the sources used to
         # decide that an optional branch is incomplete. Never edit those files.
         for path in inventory["files"]:

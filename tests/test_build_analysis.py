@@ -149,6 +149,14 @@ def test_complete_build_multiple_analyses_and_species_updates(dataset_project,fa
         assert load_complete(build)['tpm'] == {'multimap': 'error'}
         assert (output/'orthogroups/expression/runs/A1.tsv.gz').samefile(build/'database/expression/runs/A1.tsv.gz')
         assert {r['species'] for r in read_tsv(output/'orthogroups/expression/tpm.tsv')} == expected
+        sequence_rows = read_tsv(output/'expression/sequence_tpm.tsv.gz')
+        assert list(sequence_rows[0]) == ['species', 'sequence_id', 'tpm']
+        assert {r['species'] for r in sequence_rows} == expected
+        for sample in read_tsv(output/'metadata/samples.tsv'):
+            original_abundance = read_tsv(sample['abundance'])
+            assert [r for r in sequence_rows if r['species'] == sample['species']] == [
+                dict(species=sample['species'], sequence_id=r['target_id'], tpm=r['tpm'])
+                for r in original_abundance]
         assert not (output/'phenoradar_inputs').exists()
         # Expression-only downstream runs do not even stage proteins or mappings.
         assert not (output/'orthogroups/mapping').exists()

@@ -81,7 +81,7 @@ rule prepare_phenoradar_metadata:
         encoding=rules.normalize_traits.output.encoding,
         code=f"{SCRIPTS}/phenoradar_metadata.py",
         helpers=[f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
-    output: f"{META}/species_metadata.tsv"
+    output: f"{OUT}/{BASE_METADATA}"
     params: trait=config["trait"]
     log: f"{LOG}/phenoradar_metadata.log"
     conda: "../envs/analysis.yaml"
@@ -90,6 +90,31 @@ rule prepare_phenoradar_metadata:
         "{PYTHON:q} {input.code:q} --samples {input.samples:q} --metadata {input.metadata:q} "
         "--output {output:q} --trait {params.trait:q} "
         "--traits {input.traits:q} > {log:q} 2>&1"
+
+
+def consumer_pair_tables():
+    # Only configured branches are inputs; stale contrast files are ignored.
+    return ({branch: f"{OUT}/{TREE_BRANCHES[branch]}/contrast/species_metadata.tsv"
+             for branch in PHY["trees"]} if PHY["contrast_pairs"]["enabled"] else {})
+
+
+rule prepare_consumer_metadata:
+    input:
+        base=f"{OUT}/{BASE_METADATA}",
+        taxonomy=f"{META}/metadata_high_busco.tsv",
+        pairs=lambda wc: list(consumer_pair_tables().values()),
+        code=f"{SCRIPTS}/consumer_metadata.py",
+        helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "phenoradar_metadata", "sample_identity", "species_traits"]]
+    output:
+        table=f"{OUT}/{CONSUMER_METADATA}",
+        provenance=f"{OUT}/{Path(CONSUMER_METADATA).with_suffix('.json')}"
+    params: trait=config["trait"], pairs=lambda wc: json.dumps(consumer_pair_tables(), sort_keys=True)
+    log: f"{LOG}/consumer_metadata.log"
+    conda: "../envs/analysis.yaml"
+    resources: mem_mb=1000
+    shell:
+        "{PYTHON:q} {input.code:q} --base {input.base:q} --taxonomy {input.taxonomy:q} "
+        "--output {output.table:q} --trait {params.trait:q} --pair-tables {params.pairs:q} > {log:q} 2>&1"
 
 
 rule record_run:

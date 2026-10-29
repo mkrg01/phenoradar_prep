@@ -8,6 +8,7 @@ import subprocess
 
 from analysis_runtime import read_state
 from common import now
+from layout import SEQUENCE_EXPRESSION, CONSUMER_METADATA, BASE_METADATA
 
 FAILED = {'FAILED', 'OUT_OF_MEMORY', 'TIMEOUT', 'CANCELLED', 'NODE_FAIL',
           'BOOT_FAIL', 'DEADLINE', 'PREEMPTED', 'REVOKED'}
@@ -109,11 +110,18 @@ def legacy_progress(path, receipt):
     return result
 
 
-def required_outputs(pipeline):
+def required_outputs(pipeline, implementation=()):
     """Bounded presence checks for final branch markers, not per-OG validation."""
     required = ['run.json', 'metadata/samples.tsv', 'metadata/selection.json',
                 'metadata/species_metadata.tsv', 'orthogroups/expression/tpm.tsv',
                 'orthogroups/expression/mapping_qc.tsv']
+    # Frozen analyses predating this producer retain their original contract.
+    if any(Path(entry['path']).name == 'sequence_expression.py' for entry in implementation):
+        required.append(SEQUENCE_EXPRESSION)
+    if any(Path(entry['path']).name == 'consumer_metadata.py' for entry in implementation):
+        prefix = 'filtered/' if pipeline.get('exclude_species') else ''
+        required += [prefix + name for name in [BASE_METADATA, CONSUMER_METADATA,
+                     str(Path(CONSUMER_METADATA).with_suffix('.json'))] if prefix + name not in required]
     if pipeline.get('alignment', {}).get('enabled'):
         required += ['orthogroups/alignments/provenance.json']
     if pipeline.get('kegg', {}).get('enabled'):
@@ -154,7 +162,7 @@ def status(path, manifest=None, run=None):
     started = timestamp(saved.get('created_at'))
     finished = timestamp(created_at)
     current = completion.is_file() and finished is not None and (not latest or started is not None and finished >= started)
-    required = required_outputs(manifest.get('pipeline', {}))
+    required = required_outputs(manifest.get('pipeline', {}), manifest.get('implementation', []))
     missing = [name for name in required if not (path / name).is_file()] if current else []
     complete = current and not missing and saved.get('target', 'all') == 'all'
     queue_state = controller['state']

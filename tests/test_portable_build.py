@@ -207,12 +207,19 @@ def test_downstream_completion_records_outputs_without_its_own_receipt(completed
         write_json(downstream / 'metadata/selection.json', {})
         write_tsv(downstream / 'metadata/samples.tsv', ['species', 'run', 'odb_species', 'scientific_name', 'taxid'],
                   [dict(species='Alpha_plant_A1', run='A1', odb_species='Alpha_plant_A1', scientific_name='Alpha plant', taxid=42)])
-        write_tsv(downstream / 'metadata/species_metadata.tsv', ['species', 'C4', 'contrast_pair_id', 'family'],
+        write_tsv(downstream / 'metadata/species_metadata_base.tsv', ['species', 'C4', 'contrast_pair_id', 'family'],
                   [dict(species='Alpha_plant_A1', C4='', contrast_pair_id='', family='Plantaceae')])
         write_tsv(downstream / 'orthogroups/expression/tpm.tsv', ['species', 'run', 'orthogroup', 'tpm'],
                   [dict(species='Alpha_plant_A1', run='A1', orthogroup='OG1', tpm=1000000)])
         write_tsv(downstream / 'orthogroups/expression/mapping_qc.tsv', ['species', 'run'],
                   [dict(species='Alpha_plant_A1', run='A1')])
+        write_tsv(downstream / 'expression/sequence_tpm.tsv.gz', ['species', 'sequence_id', 'tpm'],
+                  [dict(species='Alpha_plant_A1', sequence_id='Alpha_plant_A1_g1', tpm='1000000')])
+        write_tsv(downstream / 'metadata/metadata_high_busco.tsv', ['species', 'family', 'order'],
+                  [dict(species='Alpha_plant_A1', family='Plantaceae', order='Plantales')])
+        from consumer_metadata import create
+        create(downstream / 'metadata/species_metadata_base.tsv', downstream / 'metadata/metadata_high_busco.tsv',
+               downstream / 'metadata/species_metadata.tsv')
     legacy = downstream / 'phenoradar_inputs/keep.txt'
     legacy.parent.mkdir()
     legacy.write_text('Existing input bundle\n')
@@ -224,7 +231,8 @@ def test_downstream_completion_records_outputs_without_its_own_receipt(completed
     paths = {Path(entry['path']).relative_to(downstream).as_posix() for entry in receipt['files']}
     assert paths == {'run.json', 'metadata/samples.tsv', 'metadata/selection.json',
                      'orthogroups/expression/tpm.tsv', 'orthogroups/expression/mapping_qc.tsv',
-                     'metadata/species_metadata.tsv'}
+                     'metadata/species_metadata.tsv', 'expression/sequence_tpm.tsv.gz',
+                     'metadata/metadata_high_busco.tsv', 'metadata/species_metadata_base.tsv', 'metadata/species_metadata.json'}
     analysis.run(downstream, local=True)
     assert analysis.status(downstream)['state'] == 'complete'
     (downstream / 'orthogroups/expression/tpm.tsv').write_text('changed\n')
