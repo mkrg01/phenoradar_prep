@@ -12,6 +12,81 @@ from dataset_assets import record
 from upgrade_analysis import verified_imports
 
 
+@pytest.fixture
+def scheduler_upgrade(tmp_path, monkeypatch):
+    import upgrade_analysis as module
+    from dataset import implementation
+    root = tmp_path / 'project'
+    (root / 'workflow/scripts').mkdir(parents=True)
+    for name in ('phase_config.py', 'slurm_submit.py', 'align_orthogroups.py'):
+        (root / 'workflow/scripts' / name).write_text('original\n')
+    (root / 'workflow/Snakefile').write_text('original workflow\n')
+    (root / 'run_pipeline.sh').write_text('launcher\n')
+    (root / 'VERSION').write_text('0.5.3\n')
+    subprocess.run(['git', 'init', '-q', str(root)], check=True)
+    def commit():
+        subprocess.run(['git', 'add', 'VERSION', 'workflow', 'run_pipeline.sh'], cwd=root, check=True)
+        subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+                        'commit', '-qm', 'snapshot'], cwd=root, check=True)
+        return subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+    monkeypatch.setattr(module, 'SCHEDULER_PREDECESSOR', commit())
+    old = implementation(root)
+    (root / 'VERSION').write_text('0.5.4\n')
+    (root / 'workflow/scripts/phase_config.py').write_text('fixed scheduler\n')
+    commit()
+    path = root / 'results/analysis'
+    (path / 'jobs').mkdir(parents=True)
+    cfg = {'alignment': {'min_sample_fraction': 0.5}, 'phylogeny': {'max_markers': None}}
+    for name in ('pipeline.yaml', 'analysis.yaml'):
+        (path / name).write_text(yaml.safe_dump(cfg))
+    manifest = {'root': str(root), 'pipeline': cfg, 'config': cfg, 'implementation': old,
+                'files': [record(path / n) for n in ('pipeline.yaml', 'analysis.yaml')]}
+    write_json(path / 'analysis.json', manifest)
+    write_json(path / 'checksums.json', {'analysis.json': record(path / 'analysis.json')['sha256']})
+    monkeypatch.setattr(module, 'load', lambda p: json.loads((p / 'analysis.json').read_text()))
+    monkeypatch.setattr(module, 'submission_guard', lambda *args: None)
+    return module, root, path, commit
+
+
+def test_scheduler_upgrade_preserves_outputs_settings_and_output_metadata(scheduler_upgrade):
+    module, root, path, _ = scheduler_upgrade
+    output = path / 'proteins/protein.fa.gz'
+    output.parent.mkdir(); output.write_bytes(b'completed output')
+    metadata = root / '.snakemake/metadata/record'
+    metadata.parent.mkdir(parents=True); metadata.write_text('unchanged metadata\n')
+    protected = [output, metadata, path / 'pipeline.yaml', path / 'analysis.yaml']
+    before = {p: (p.read_bytes(), p.stat().st_mtime_ns, p.stat().st_ino) for p in protected}
+    original = (path / 'analysis.json').read_bytes()
+    assert module.upgrade(path)['state'] == 'ready'
+    assert not list((path / 'jobs').glob('code_migration_*'))
+    result = module.upgrade(path, apply=True)
+    assert result['state'] == 'upgraded' and result['reset_metadata'] == 0
+    assert (path / 'jobs/code_migration_0001/analysis.json').read_bytes() == original
+    current = json.loads((path / 'analysis.json').read_text())
+    assert current['compatible_container_image'].endswith(':v0.5.3')
+    assert current['pipeline']['alignment']['min_sample_fraction'] == 0.5
+    for p in protected:
+        assert (p.read_bytes(), p.stat().st_mtime_ns, p.stat().st_ino) == before[p]
+    assert module.upgrade(path, apply=True)['state'] == 'already_upgraded'
+    assert len(list((path / 'jobs').glob('code_migration_*'))) == 1
+
+
+@pytest.mark.parametrize('problem', ['scientific_code', 'changed_condition', 'busy', 'completed'])
+def test_scheduler_upgrade_rejects_unsafe_changes(scheduler_upgrade, monkeypatch, problem):
+    module, root, path, commit = scheduler_upgrade
+    if problem == 'scientific_code':
+        (root / 'workflow/scripts/align_orthogroups.py').write_text('changed aligner\n')
+        commit()
+    elif problem == 'busy':
+        def blocked(*args): raise ValueError('queued/running jobs')
+        monkeypatch.setattr(module, 'submission_guard', blocked)
+    elif problem == 'completed':
+        (path / 'completed.json').write_text('{}')
+    with pytest.raises(ValueError):
+        module.upgrade(path, apply=True, min_sample_fraction=0.75 if problem == 'changed_condition' else None)
+    assert not list((path / 'jobs').glob('code_migration_*'))
+
+
 @pytest.mark.parametrize('saved,requested,expected', [({}, None, (0, 0)), ({}, 0.5, (0, 0.5)),
     ({'min_sample_fraction': 0.75}, None, (0.75, 0.75)),
     ({'min_sample_fraction': 0.75}, 0, (0.75, 0))])

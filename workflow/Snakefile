@@ -13,6 +13,11 @@ SCRIPTS = str(Path(workflow.basedir) / "scripts")
 sys.path.insert(0, SCRIPTS)
 from analysis_runtime import install_progress
 install_progress(workflow)
+
+onstart:
+    from slurm_submit import configure_scheduler
+    configure_scheduler(workflow)
+
 from common import RANDOM_SEED
 from configuration import validate_keys, validate_analysis
 from layout import input_layout, run_layout

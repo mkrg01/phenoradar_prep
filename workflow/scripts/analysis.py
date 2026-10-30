@@ -194,6 +194,9 @@ def run(path, target='all', execution=None, local=False, cores=1, mem_mb=8000):
     else: command += ['--slurm','--profile',str(profile),'--jobs',str(workflow_jobs(slurm))]
     command += ['--configfile',str(path/'pipeline.yaml')]
     pipeline_env = {**os.environ, 'PHENORADAR_ANALYSIS_PATH': str(path)}
+    pipeline_env.pop('PHENORADAR_FROZEN_IMAGE', None)
+    if manifest.get('compatible_container_image'):
+        pipeline_env['PHENORADAR_FROZEN_IMAGE'] = manifest['compatible_container_image']
     if manifest.get('compatible_launcher'):
         pipeline_env['SNAKEMAKE_BIN'] = str(verify(manifest['compatible_launcher']))
     with locked(path/'.run.lock'):

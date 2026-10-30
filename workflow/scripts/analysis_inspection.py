@@ -15,12 +15,16 @@ from unittest.mock import patch
 def inspect_workflow(manifest, slurm, target):
     """Run the adapter in a child so Snakemake logging/cwd never affect the CLI."""
     root = Path(manifest['root'])
+    environment = {**os.environ, 'PHENORADAR_READ_ONLY': '1', 'PYTHONDONTWRITEBYTECODE': '1'}
+    environment.pop('PHENORADAR_FROZEN_IMAGE', None)
+    if manifest.get('compatible_container_image'):
+        environment['PHENORADAR_FROZEN_IMAGE'] = manifest['compatible_container_image']
     result = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--inspect'],
         input=json.dumps({'root': str(root), 'analysis': manifest['pipeline']['output_root'],
                           'slurm': slurm, 'target': target,
                           'compatible_launcher': bool(manifest.get('compatible_launcher'))}),
         capture_output=True, text=True, timeout=300,
-        env={**os.environ, 'PHENORADAR_READ_ONLY': '1', 'PYTHONDONTWRITEBYTECODE': '1'})
+        env=environment)
     if result.returncode:
         raise ValueError('Cannot inspect pending work: ' + (result.stderr or result.stdout)[-3000:])
     return json.loads(result.stdout)

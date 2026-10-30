@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 import time
 import uuid
@@ -14,6 +15,34 @@ import uuid
 
 class UnknownSubmission(RuntimeError):
     pass
+
+
+def configure_scheduler(workflow):
+    """Use the sbatch gate as the only submission limiter in its controller."""
+    from snakemake_interface_executor_plugins.settings import ExecMode
+    if workflow.exec_mode != ExecMode.DEFAULT or workflow.executor_plugin.name != 'slurm':
+        return
+    shim = Path(__file__).resolve().parents[1] / 'slurm/sbatch'
+    actual = shutil.which('sbatch')
+    real = os.environ.get('PHENORADAR_REAL_SBATCH')
+    if (not actual or Path(actual).resolve() != shim or not real or
+            Path(real).resolve() == shim or not os.environ.get('PHENORADAR_SUBMIT_STATE')):
+        return  # Bare Snakemake invocations retain their own rate limiter.
+    # Fail before submitting workers if accounting is disabled/unreachable.
+    try:
+        subprocess.run(['sacct', '-X', '--noheader', '--starttime', 'today',
+                        '--name', 'phenoradar-probe-' + uuid.uuid4().hex,
+                        '--format=JobIDRaw,State'], capture_output=True, text=True,
+                       timeout=20, check=True)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError('Slurm accounting (sacct) is required for reliable completion checks; '
+                           'check accounting availability before restarting') from error
+    # Snakemake 9.8 enables a limiter even when its CLI option is omitted.
+    # onstart runs after construction and before the first scheduling round.
+    workflow.scheduler.job_rate_limiter = None
+    from snakemake.logging import logger
+    logger.info('Slurm submissions use the serialized sbatch gate (one per two seconds); '
+                'scheduler rate-limit timers are disabled.')
 
 
 def check_analysis_submissions(state_dir, analysis, queued):
@@ -124,15 +153,17 @@ def submit(argv, real_sbatch, state_dir, run=subprocess.run, sleep=time.sleep, c
             i += 1
         call = [real_sbatch, '--comment=' + comment, *clean]
         for attempt in range(3):
-            with locked(state_dir / 'rate.lock'):
-                gate = state_dir / 'rate.json'
-                last = json.loads(gate.read_text())['time'] if gate.exists() else 0
-                sleep(max(0, 2 - (clock() - last)))
-                save(gate, {'time': clock()})
-            state.update(state='submitting', attempts=attempt + 1)
-            save(receipt, state)
             try:
-                result = run(call, capture_output=True, text=True, **({'input': stdin} if stdin is not None else {}))
+                # Serialize the RPC itself, not just reservations. A paused
+                # submitter must not catch up and burst alongside the next one.
+                with locked(state_dir / 'rate.lock'):
+                    gate = state_dir / 'rate.json'
+                    last = json.loads(gate.read_text())['time'] if gate.exists() else 0
+                    sleep(max(0, 2 - (clock() - last)))
+                    state.update(state='submitting', attempts=attempt + 1)
+                    save(receipt, state)
+                    save(gate, {'time': clock()})
+                    result = run(call, capture_output=True, text=True, **({'input': stdin} if stdin is not None else {}))
             except OSError:
                 state['state'] = 'rejected'; save(receipt, state)
                 raise

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import yaml
 
-from analysis import load
+from analysis import load, submission_guard
 from analysis_build_index import create_index
 from build_products import load_complete
 from common import content_sha256, now, read_tsv, write_json
@@ -43,6 +43,65 @@ BATCHED_CHANGES = {'VERSION', 'workflow/rules/alignments.smk', 'workflow/scripts
                    'workflow/scripts/dataset_software.py'}
 CONTAINER_CHANGES = {'VERSION', 'workflow/container.smk', 'workflow/scripts/dataset_software.py',
                      'workflow/scripts/upgrade_analysis.py'}
+SCHEDULER_PREDECESSOR = '092e4a409fea7dc008f1629a8e7870a8ad43c873'
+SCHEDULER_CHANGES = {'VERSION', 'workflow/Snakefile', 'workflow/scripts/phase_config.py',
+                     'workflow/scripts/slurm_submit.py', 'workflow/scripts/versioning.py',
+                     'workflow/scripts/analysis.py', 'workflow/scripts/analysis_inspection.py',
+                     'workflow/scripts/upgrade_analysis.py'}
+
+
+def upgrade_scheduler(path, manifest, apply=False, min_sample_fraction=None):
+    """Migrate only v0.5.3 controller fixes, preserving its tool image and outputs."""
+    root = Path(manifest['root'])
+    before, after = occupancy_condition(manifest, min_sample_fraction)
+    if before != after:
+        raise ValueError('scheduler-only migration cannot change analysis conditions')
+    subprocess.run(['git', 'diff', '--quiet', 'HEAD'], cwd=root, check=True)
+    current = implementation(root)
+    previous = {str(Path(x['path']).relative_to(root)): x['sha256'] for x in manifest['implementation']}
+    observed = {str(Path(x['path']).relative_to(root)): x['sha256'] for x in current}
+    if observed == previous:
+        return {'state': 'already_upgraded'}
+    if set(previous) != set(observed):
+        raise ValueError('scheduler-only migration cannot add or remove workflow sources')
+    for relative, checksum in previous.items():
+        saved = subprocess.check_output(['git', 'show', f'{SCHEDULER_PREDECESSOR}:{relative}'], cwd=root)
+        if hashlib.sha256(saved).hexdigest() != checksum:
+            raise ValueError(f'frozen code differs from audited v0.5.3: {relative}')
+        if observed[relative] != checksum and relative not in SCHEDULER_CHANGES:
+            raise ValueError(f'scheduler migration cannot change scientific code or environments: {relative}')
+    submission_guard(path, manifest)
+    result = {'state': 'ready', 'from_commit': SCHEDULER_PREDECESSOR,
+              'changed_sources': sorted(p for p in observed if observed[p] != previous[p]),
+              'reset_metadata': 0}
+    if not apply:
+        return result
+    before_manifest = record(path / 'analysis.json')['sha256']
+    with locked(path / '.run.lock'), locked(path / 'jobs/.submit.lock'):
+        if record(path / 'analysis.json')['sha256'] != before_manifest:
+            raise ValueError('analysis changed during scheduler migration')
+        submission_guard(path, manifest)
+        numbers = [int(p.name.rsplit('_', 1)[1]) for p in (path / 'jobs').glob('code_migration_*')
+                   if re.fullmatch(r'code_migration_[0-9]+', p.name)]
+        backup = path / f'jobs/code_migration_{max(numbers, default=0) + 1:04d}'
+        backup.mkdir(exist_ok=False)
+        for name in ('analysis.json', 'checksums.json', 'run.json', 'pipeline.yaml', 'analysis.yaml'):
+            if (path / name).exists():
+                shutil.copy2(path / name, backup / name)
+        from versioning import IMAGE_REPOSITORY
+        image = f'docker://{IMAGE_REPOSITORY}:v0.5.3'
+        manifest['implementation'] = current
+        manifest['compatible_container_image'] = image
+        event = {'created_at': now(), 'from_commit': SCHEDULER_PREDECESSOR,
+                 'to_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip(),
+                 'backup': str(backup), 'container_image': image,
+                 'changed_sources': result['changed_sources'],
+                 'reason': 'Scheduler-only repair; scientific conditions, tool image, '
+                           'outputs and Snakemake output metadata are retained.'}
+        manifest.setdefault('code_migrations', []).append(event)
+        write_json(path / 'analysis.json', manifest)
+        write_json(path / 'checksums.json', {'analysis.json': record(path / 'analysis.json')['sha256']})
+        return dict(result, state='upgraded', backup=str(backup), container_image=image)
 
 
 def audit_source(root, saved, current):
@@ -152,6 +211,8 @@ def upgrade(path, apply=False, min_sample_fraction=None):
     root = Path(manifest['root'])
     if (path / 'completed.json').exists():
         raise ValueError('completed analyses are immutable')
+    if (root / 'VERSION').read_text().strip() == '0.5.4':
+        return upgrade_scheduler(path, manifest, apply, min_sample_fraction)
     if (root / 'VERSION').read_text().strip() != '0.4.19':
         raise ValueError('this audited upgrade requires v0.4.19')
     subprocess.run(['git', 'diff', '--quiet', 'HEAD'], cwd=root, check=True)

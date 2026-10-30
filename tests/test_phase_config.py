@@ -17,6 +17,8 @@ def test_analysis_profile_requests_32gb_for_tpm_merge(tmp_path):
     actual = yaml.safe_load((profile / 'config.yaml').read_text())
     assert actual['set-resources']['merge_tpm'] == {'mem_mb': 32000, 'runtime': 1440}
     assert actual['set-threads']['merge_tpm'] == 1
+    assert actual['slurm-status-command'] == 'sacct'
+    assert 'max-jobs-per-timespan' not in actual
 
 
 @pytest.mark.parametrize('duration,minutes', [

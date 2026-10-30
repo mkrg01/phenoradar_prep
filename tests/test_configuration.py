@@ -107,6 +107,16 @@ def test_image_follows_version_file(tmp_path):
     assert resolve_container_image(tmp_path) == f"docker://{IMAGE_REPOSITORY}:v1.0.1"
 
 
+def test_scheduler_migration_can_retain_original_tool_image(tmp_path, monkeypatch):
+    (tmp_path / 'VERSION').write_text('0.5.4\n')
+    image = f'docker://{IMAGE_REPOSITORY}:v0.5.3'
+    monkeypatch.setenv('PHENORADAR_FROZEN_IMAGE', image)
+    assert resolve_container_image(tmp_path) == image
+    monkeypatch.setenv('PHENORADAR_FROZEN_IMAGE', 'docker://unrelated/image:latest')
+    with pytest.raises(ValueError, match='invalid frozen'):
+        resolve_container_image(tmp_path)
+
+
 def test_run_record_keeps_resolved_image_separate_from_configuration(tmp_path):
     from record_run import record
     (tmp_path / "VERSION").write_text("0.2.0\n")

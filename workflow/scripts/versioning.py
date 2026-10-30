@@ -1,5 +1,6 @@
 """One release version for source archives, image selection, and CI."""
 from pathlib import Path
+import os
 import re
 
 
@@ -25,4 +26,11 @@ def read_version(root):
 
 def resolve_container_image(root):
     """Use the GHCR release recorded in the checkout's VERSION file."""
+    frozen = os.environ.get('PHENORADAR_FROZEN_IMAGE')
+    if frozen:
+        # Set only by the saved-analysis launcher after validating its manifest.
+        if not re.fullmatch(r'docker://' + re.escape(IMAGE_REPOSITORY) +
+                            r'(?::v[0-9]+\.[0-9]+\.[0-9]+|@sha256:[0-9a-f]{64})', frozen):
+            raise ValueError('invalid frozen analysis container image')
+        return frozen
     return f"docker://{IMAGE_REPOSITORY}:v{read_version(root)}"

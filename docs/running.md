@@ -39,14 +39,30 @@ installation must already have sufficiently strict administrator
 
 Continue with [building a database and running analyses](datasets.md).
 
-Slurm workers use greedy scheduling and a submission limit of one job per two
-seconds. Temporary explicit rejections are retried up to three times. After an
+Slurm workers use greedy scheduling. A serialized `sbatch` gate limits actual
+submissions to one per two seconds; the controller disables Snakemake's duplicate
+rate-limit timers. Completion checks use `sacct`, so Slurm accounting must be
+available and retain finished jobs. Temporary explicit rejections are retried up to three times. After an
 ambiguous timeout, the launcher looks for its unique submission token in Slurm
 before proceeding. If acceptance cannot be established, it stops and keeps the
 receipt in `.snakemake/slurm_submissions/`; reconcile that receipt before retrying.
 
 New downstream analyses create a compact, verified `build_inputs/` index.
 Workers read only the selected product receipts rather than the full database.
+
+## Resuming an unfinished v0.5.3 analysis with v0.5.4
+
+After its controller and workers have ended, use the existing upgrade command:
+
+```bash
+python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/carnivory
+python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/carnivory --apply
+./run_analysis.sh submit --analysis results/leaf/downstream/carnivory
+```
+
+This narrowly audited migration backs up the saved code records and updates only
+controller execution. It retains the v0.5.3 tool image, all scientific settings,
+outputs and output metadata; completed analyses cannot be migrated.
 
 ## Upgrading an unfinished v0.4.14 through v0.4.18 analysis
 
