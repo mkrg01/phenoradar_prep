@@ -65,6 +65,12 @@ def plan(payload):
                     self._metadata_path = str(root / '.snakemake/metadata')
                 if (root / '.snakemake/incomplete').is_dir():
                     self._incomplete_path = str(root / '.snakemake/incomplete')
+                # Environment identity checks must read the same deployment
+                # paths as execution. A temporary prefix invents changed Conda
+                # hashes and sends container queries to a nonexistent SIF.
+                self.conda_env_path = str(root / '.snakemake/conda')
+                self.conda_env_archive_path = str(root / '.snakemake/conda-archive')
+                self.container_img_path = str(root / '.snakemake/singularity')
 
             def _record(self, *args, **kwargs):
                 raise ValueError('Read-only inspection attempted to write workflow metadata')

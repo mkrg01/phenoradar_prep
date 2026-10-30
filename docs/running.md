@@ -50,7 +50,7 @@ receipt in `.snakemake/slurm_submissions/`; reconcile that receipt before retryi
 New downstream analyses create a compact, verified `build_inputs/` index.
 Workers read only the selected product receipts rather than the full database.
 
-## Resuming an unfinished v0.5.3 analysis with v0.5.4
+## Resuming an unfinished v0.5.3 or v0.5.4 analysis with v0.5.5
 
 After its controller and workers have ended, use the existing upgrade command:
 
@@ -61,8 +61,10 @@ python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/c
 ```
 
 This narrowly audited migration backs up the saved code records and updates only
-controller execution. It retains the v0.5.3 tool image, all scientific settings,
+controller execution. It retains the saved tool image, all scientific settings,
 outputs and output metadata; completed analyses cannot be migrated.
+Read-only pending-work inspection uses the existing Conda/container cache paths
+to recognize reusable outputs without installing or pulling environments.
 
 ## Upgrading an unfinished v0.4.14 through v0.4.18 analysis
 

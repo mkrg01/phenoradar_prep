@@ -1,5 +1,6 @@
 """Inspect real Snakemake metadata and grouping without altering a saved run."""
 import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -88,6 +89,59 @@ def test_container_declarations_are_inspected_without_preparing_images(workflow)
                         snakefile.read_text().replace('params: mode="initial"',
                         'conda: "envs/test.yaml"\n    params: mode="initial"'))
     assert inspect(workflow)['worker_jobs'] == 1
+
+
+@pytest.mark.parametrize('containerized', [False, True])
+def test_completed_environment_metadata_uses_real_readonly_cache_paths(workflow, monkeypatch, containerized):
+    root, _, _ = workflow
+    execute(root)
+    (root / 'VERSION').write_text('0.5.5\n')
+    env = root / 'workflow/envs/test.yaml'
+    env.parent.mkdir(); env.write_text('dependencies: [python]\n')
+    uri = 'docker://example.invalid/test:fixed'
+    snakefile = root / 'workflow/Snakefile'
+    source = snakefile.read_text().replace('params: mode="initial"',
+                                         'conda: "envs/test.yaml"\n    params: mode="initial"')
+    if containerized:
+        source = f'containerized: "{uri}"\n' + source
+        cache = root / '.snakemake/singularity'
+        cache.mkdir(exist_ok=True)
+        (cache / (hashlib.md5(uri.encode()).hexdigest() + '.simg')).write_bytes(b'cached test image')
+    snakefile.write_text(source)
+    fake_bin = root / 'test_bin'; fake_bin.mkdir()
+    tool = f'''#!{sys.executable}
+import json,sys
+from pathlib import Path
+if Path(sys.argv[0]).name == 'singularity':
+    if sys.argv[1:] == ['--version']:
+        print('singularity version 3.11.0'); raise SystemExit(0)
+    images = [Path(x) for x in sys.argv if x.endswith('.simg')]
+    assert len(images) == 1 and images[0].is_file(), 'inspection missed the existing SIF cache'
+    command = sys.argv[-1]
+else:
+    command = 'conda ' + ' '.join(sys.argv[1:])
+if command == 'conda info --json':
+    print(json.dumps({{'conda_prefix':'/opt/conda','platform':'linux-64'}}))
+elif command == 'conda --version': print('conda 26.1.1')
+elif command == 'type conda': print('conda is /opt/conda/bin/conda')
+elif command == 'conda config --get channel_priority --json': print('{{"get":{{"channel_priority":"strict"}}}}')
+else: raise SystemExit('inspection attempted an unexpected environment operation: '+command)
+'''
+    for name in ('singularity', 'conda'):
+        p = fake_bin / name; p.write_text(tool); p.chmod(0o755)
+    monkeypatch.setenv('PATH', str(fake_bin) + os.pathsep + os.environ['PATH'])
+    env_content = env.read_bytes()
+    prefix = b'' if containerized else str((root / '.snakemake/conda').resolve()).encode()
+    env_hash = hashlib.md5(prefix + env_content).hexdigest()
+    for output in ('middle', 'out', 'local'):
+        path = root / '.snakemake/metadata' / base64.urlsafe_b64encode(output.encode()).decode()
+        record = json.loads(path.read_text())
+        stack = (env_hash.encode() if output == 'middle' else b'') + (uri.encode() if containerized else b'')
+        record['software_stack_hash'] = hashlib.md5(stack).hexdigest()
+        path.write_text(json.dumps(record))
+    report = inspect(workflow)
+    assert report['pending'] == {}
+    assert sum(report['reused'].values()) == 3
 
 
 def test_pending_rule_resources_are_checked_against_worker_budget(workflow):

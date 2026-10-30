@@ -44,6 +44,7 @@ BATCHED_CHANGES = {'VERSION', 'workflow/rules/alignments.smk', 'workflow/scripts
 CONTAINER_CHANGES = {'VERSION', 'workflow/container.smk', 'workflow/scripts/dataset_software.py',
                      'workflow/scripts/upgrade_analysis.py'}
 SCHEDULER_PREDECESSOR = '092e4a409fea7dc008f1629a8e7870a8ad43c873'
+SCHEDULER_REPAIR = 'd2fa8dfc30901007ce5fb5460e9152c14b92c4e0'
 SCHEDULER_CHANGES = {'VERSION', 'workflow/Snakefile', 'workflow/scripts/phase_config.py',
                      'workflow/scripts/slurm_submit.py', 'workflow/scripts/versioning.py',
                      'workflow/scripts/analysis.py', 'workflow/scripts/analysis_inspection.py',
@@ -51,7 +52,7 @@ SCHEDULER_CHANGES = {'VERSION', 'workflow/Snakefile', 'workflow/scripts/phase_co
 
 
 def upgrade_scheduler(path, manifest, apply=False, min_sample_fraction=None):
-    """Migrate only v0.5.3 controller fixes, preserving its tool image and outputs."""
+    """Migrate audited controller fixes while preserving the saved tool image."""
     root = Path(manifest['root'])
     before, after = occupancy_condition(manifest, min_sample_fraction)
     if before != after:
@@ -64,14 +65,21 @@ def upgrade_scheduler(path, manifest, apply=False, min_sample_fraction=None):
         return {'state': 'already_upgraded'}
     if set(previous) != set(observed):
         raise ValueError('scheduler-only migration cannot add or remove workflow sources')
+    candidates = [revision for revision in (SCHEDULER_PREDECESSOR, SCHEDULER_REPAIR)
+                  if hashlib.sha256(subprocess.check_output(['git', 'show', f'{revision}:VERSION'],
+                                                            cwd=root)).hexdigest() == previous.get('VERSION')]
+    if len(candidates) != 1:
+        raise ValueError('frozen code must match audited v0.5.3 or v0.5.4')
+    revision = candidates[0]
+    source_version = subprocess.check_output(['git', 'show', f'{revision}:VERSION'], cwd=root, text=True).strip()
     for relative, checksum in previous.items():
-        saved = subprocess.check_output(['git', 'show', f'{SCHEDULER_PREDECESSOR}:{relative}'], cwd=root)
+        saved = subprocess.check_output(['git', 'show', f'{revision}:{relative}'], cwd=root)
         if hashlib.sha256(saved).hexdigest() != checksum:
-            raise ValueError(f'frozen code differs from audited v0.5.3: {relative}')
+            raise ValueError(f'frozen code differs from audited v{source_version}: {relative}')
         if observed[relative] != checksum and relative not in SCHEDULER_CHANGES:
             raise ValueError(f'scheduler migration cannot change scientific code or environments: {relative}')
     submission_guard(path, manifest)
-    result = {'state': 'ready', 'from_commit': SCHEDULER_PREDECESSOR,
+    result = {'state': 'ready', 'from_commit': revision,
               'changed_sources': sorted(p for p in observed if observed[p] != previous[p]),
               'reset_metadata': 0}
     if not apply:
@@ -89,10 +97,10 @@ def upgrade_scheduler(path, manifest, apply=False, min_sample_fraction=None):
             if (path / name).exists():
                 shutil.copy2(path / name, backup / name)
         from versioning import IMAGE_REPOSITORY
-        image = f'docker://{IMAGE_REPOSITORY}:v0.5.3'
+        image = manifest.get('compatible_container_image', f'docker://{IMAGE_REPOSITORY}:v{source_version}')
         manifest['implementation'] = current
         manifest['compatible_container_image'] = image
-        event = {'created_at': now(), 'from_commit': SCHEDULER_PREDECESSOR,
+        event = {'created_at': now(), 'from_commit': revision,
                  'to_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip(),
                  'backup': str(backup), 'container_image': image,
                  'changed_sources': result['changed_sources'],
@@ -211,7 +219,7 @@ def upgrade(path, apply=False, min_sample_fraction=None):
     root = Path(manifest['root'])
     if (path / 'completed.json').exists():
         raise ValueError('completed analyses are immutable')
-    if (root / 'VERSION').read_text().strip() == '0.5.4':
+    if (root / 'VERSION').read_text().strip() in {'0.5.4', '0.5.5'}:
         return upgrade_scheduler(path, manifest, apply, min_sample_fraction)
     if (root / 'VERSION').read_text().strip() != '0.4.19':
         raise ValueError('this audited upgrade requires v0.4.19')
