@@ -74,13 +74,14 @@ def test_sample_index_refreshes_after_checkpoint_replacement(tmp_path):
     assert list(species) == ['B'] and list(runs) == ['B1']
 
 
-def test_slurm_profile_uses_short_squeue_polling(tmp_path):
+def test_slurm_profile_uses_accounting_completion_checks(tmp_path):
     cfg = yaml.safe_load((Path(__file__).resolve().parents[1]/'config/build.yaml').read_text())
     profile = write_profile(tmp_path/'profile', cfg['slurm'])
     data = yaml.safe_load((profile/'config.yaml').read_text())
     assert data['jobs'] == 'unlimited'
     assert 'group-components' not in data  # Snakemake 9.8 groups fail with containerized Conda.
-    assert data['slurm-status-command'] == 'squeue'
+    assert data['slurm-status-command'] == 'sacct'
+    assert 'max-jobs-per-timespan' not in data
     assert data['slurm-init-seconds-before-status-checks'] == 10
     assert data['seconds-between-status-checks'] == 10
 
