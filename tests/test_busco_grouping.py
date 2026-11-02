@@ -59,6 +59,7 @@ apply_workflow_limits(workflow)
 def inspect_groups(project, overrides=None):
     pytest.importorskip("snakemake")
     from snakemake.api import SnakemakeApi
+    from snakemake.cli import parse_jobs
     from snakemake.executors import dryrun
     from snakemake.resources import DefaultResources
     from snakemake.settings.types import DAGSettings, ResourceSettings
@@ -68,7 +69,7 @@ def inspect_groups(project, overrides=None):
     profile_dir = write_profile(project / "profile", slurm)
     profile = yaml.safe_load((profile_dir / "config.yaml").read_text())
     resources = ResourceSettings(
-        cores=64, nodes=profile["jobs"],
+        cores=64, nodes=parse_jobs(profile["jobs"]),
         resources=profile["resources"],
         overwrite_threads=profile["set-threads"],
         overwrite_resources=profile["set-resources"],
@@ -93,7 +94,7 @@ def inspect_groups(project, overrides=None):
 
 def test_one_group_per_marker_and_tree_set_with_serial_resource_limits(marker_workflow):
     # Exactly one default group fits: series must take max(CPU/memory), not sum.
-    groups = inspect_groups(marker_workflow, {"total_limits": {"cpus": 5, "mem_gb": 16}})
+    groups = inspect_groups(marker_workflow, {"total_limits": {"cpus": 2, "mem_gb": 16}})
     assert len(groups) == len(BRANCHES) * len(MARKERS)
     assert {next(iter(group["members"])) for group in groups} == {
         (branch, marker) for branch in BRANCHES for marker in MARKERS}
@@ -101,7 +102,7 @@ def test_one_group_per_marker_and_tree_set_with_serial_resource_limits(marker_wo
         assert len(group["members"]) == 1
         assert group["rules"] == set(STAGES)
         resources = group["resources"]
-        assert resources["_cores"] == resources["workflow_cpus"] == 4
+        assert resources["_cores"] == resources["workflow_cpus"] == 1
         assert resources["mem_mb"] == resources["workflow_mem_mb"] == 8000
         assert resources["runtime"] == 3 * 24 * 60
 

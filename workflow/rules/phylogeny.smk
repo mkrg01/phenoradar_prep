@@ -160,7 +160,7 @@ rule align_busco_marker:
         fasta=lambda wc: f"{OUT}/{wc.phylo_branch}/markers/{wc.marker}.faa",
         command="famsa",
         settings=lambda wc: json.dumps({"min_taxa": PHY["min_taxa"], "sample_manifest": f"{OUT}/{wc.phylo_branch}/plan/species.tsv"}, sort_keys=True)
-    threads: 4
+    threads: 1
     resources: mem_mb=8000
     conda: "../envs/phylogeny.yaml"
     log: f"{LOG}/{{phylo_branch}}/align/{{marker}}.log"
@@ -209,7 +209,7 @@ rule infer_busco_gene_tree:
         tree=f"{PHYLO_RUN}/gene_trees/{{marker}}.nwk",
         qc=f"{PHYLO_RUN}/gene_trees/{{marker}}.json"
     params: command="VeryFastTree", seed=RANDOM_SEED
-    threads: 4
+    threads: 1
     resources: mem_mb=8000
     conda: "../envs/phylogeny.yaml"
     log: f"{LOG}/{{phylo_branch}}/tree/{{marker}}.log"

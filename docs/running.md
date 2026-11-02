@@ -133,6 +133,11 @@ A `null` total limit adds no workflow cap. Limits apply independently to each
 run and measure requested allocations, not actual usage. Cluster limits still
 apply.
 
+The supplied configs default to `total_limits.jobs: null`. New analyses keep
+finite CPU/memory budgets (64 CPUs/256 GB by default), so worker concurrency
+follows each job's allocation rather than a fixed worker count. Prepared analyses
+keep their saved settings; use resource overrides to change a later submission.
+
 ```yaml
 slurm:
   total_limits:

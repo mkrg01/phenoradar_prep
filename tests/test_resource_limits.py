@@ -21,7 +21,7 @@ import sys
 sys.path.insert(0, SCRIPTS)
 
 rule all:
-    input: expand("done/{n}", n=range(4))
+    input: expand("done/{n}", n=range(8))
 
 rule work:
     output: "done/{n}"
@@ -65,7 +65,7 @@ def run_workflow(project, overrides, *, dry_run=False):
     else:
         # Isolate allocation accounting from the remote submission rate limit:
         # these synthetic jobs finish before the next permitted Slurm submission.
-        command += ['--executor', 'local', '--cores', '8', '--max-jobs-per-timespan', '100/1s']
+        command += ['--executor', 'local', '--cores', '16', '--max-jobs-per-timespan', '100/1s']
     return subprocess.run(command + ['--', 'all'], cwd=path, text=True, capture_output=True, timeout=90)
 
 
@@ -74,6 +74,7 @@ def run_workflow(project, overrides, *, dry_run=False):
     ({'mem_gb': 13}, {}, 2),
     ({'cpus': 5}, {'cpus': 3}, 1),
     ({'mem_gb': 13}, {'mem_gb': 3}, 1),
+    ({'cpus': 13}, {}, 6),  # No implicit five-worker cap; CPU budget still binds.
 ])
 def test_budget_bounds_real_parallel_execution(budget_workflow, limits, job, peak):
     result = run_workflow(budget_workflow, {'total_limits': limits, 'per_job_resources': {'work': job}})
@@ -83,7 +84,7 @@ def test_budget_bounds_real_parallel_execution(budget_workflow, limits, job, pea
         active += 1 if action == 'start' else -1
         started += action == 'start'
         maximum = max(maximum, active)
-    assert (active, started, maximum) == (0, 4, peak)
+    assert (active, started, maximum) == (0, 8, peak)
 
 
 @pytest.mark.parametrize('limits,resource', [({'cpus': 2}, 'cpus'), ({'mem_gb': 10}, 'mem_gb')])

@@ -43,7 +43,7 @@ exclude_species:  # Species IDs (all samples) or exact sample IDs to omit before
 slurm:
   partition: null  # null: cluster default; multiple: "epyc,rome,medium".
   total_limits:  # Per analysis; CPU/memory include the controller allocation.
-    jobs: 5  # No workflow job-count cap; Slurm and finite CPU/memory budgets still apply.
+    jobs: null  # No workflow job-count cap; Slurm and finite CPU/memory budgets still apply.
     cpus: 64  # Total CPU request budget; null adds no workflow-wide limit.
     mem_gb: 256  # Total memory request budget in GB; null adds no workflow-wide limit.
   per_job_resources:  # Per-job cpus, mem_gb (GB), and time (days-HH:MM:SS).
@@ -92,7 +92,7 @@ slurm:
       mem_gb: 4
       time: "1-00:00:00"
     align_busco_marker:  # Align each BUSCO marker.
-      cpus: 4
+      cpus: 1
       mem_gb: 8
       time: "1-00:00:00"
     trim_busco_marker:  # Trim each BUSCO marker alignment.
@@ -100,7 +100,7 @@ slurm:
       mem_gb: 4
       time: "1-00:00:00"
     infer_busco_gene_tree:  # Infer each BUSCO gene tree with VeryFastTree.
-      cpus: 4
+      cpus: 1
       mem_gb: 8
       time: "1-00:00:00"
     infer_busco_species_tree:  # Infer the species tree with ASTRAL.

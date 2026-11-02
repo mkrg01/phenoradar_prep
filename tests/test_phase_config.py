@@ -21,6 +21,18 @@ def test_analysis_profile_requests_32gb_for_tpm_merge(tmp_path):
     assert 'max-jobs-per-timespan' not in actual
 
 
+def test_default_analysis_profile_parallelizes_single_cpu_busco_within_budgets(tmp_path):
+    public = yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['slurm']
+    assert public['total_limits']['jobs'] is None
+    settings = execution_settings(public, build=False)
+    profile = yaml.safe_load((write_profile(tmp_path / 'profile', settings) / 'config.yaml').read_text())
+    assert profile['jobs'] == 'unlimited'
+    assert profile['resources'] == {'workflow_cpus': 63, 'workflow_mem_mb': 248000}
+    for rule in ('align_busco_marker', 'trim_busco_marker', 'infer_busco_gene_tree'):
+        assert profile['set-threads'][rule] == 1
+    assert profile['set-threads']['align_orthogroup_batch'] == 12
+
+
 @pytest.mark.parametrize('duration,minutes', [
     ('1-00:00:00', 1440), ('3-00:00:00', 4320), ('14-00:00:00', 20160),
     ('02:00:00', 120), ('25:00:00', 1500), ('90', 90), ('90:30', 91),

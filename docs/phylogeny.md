@@ -124,6 +124,8 @@ VeryFastTree uses double precision and `-lg -gamma` (LG+CAT search with Gamma20
 length rescaling), reporting SH-like local support. ASTRAL-IV reports local
 posterior probabilities and CASTLES-II substitution lengths. Both use seed
 `12345`; no bootstrap or support filter is applied.
+VeryFastTree defaults to one thread: repeated four-thread runs of the pinned
+4.0.5 binary produced different topologies despite the same input and seed.
 
 Under `results/<build>/downstream/<analysis>/phylogeny/<set>/`:
 
@@ -146,9 +148,14 @@ On Slurm, each marker's alignment, trimming, and gene-tree inference share one
 Stages already complete before submission are reused on resume. Local execution
 keeps the normal scheduler.
 
-The group requests the largest CPU/memory requirement among its pending stages
-(default: 4 CPUs/8 GB) and sums their time limits. Per-rule resource overrides
-still apply. Species-tree inference remains separate at 32 CPUs/64 GB.
+Alignment, trimming and gene-tree inference each default to one CPU. The group
+requests the largest CPU/memory requirement among its pending stages
+(default: 1 CPU/8 GB) and sums their time limits. Different markers run in
+parallel within the analysis CPU/memory budgets. The default
+`total_limits.jobs: null` adds no job-count cap. Prepared analyses retain their
+saved allocations.
+Per-rule resource overrides still apply; increasing VeryFastTree threads can
+affect reproducibility. Species-tree inference remains separate at 32 CPUs/64 GB.
 See [resource overrides](running.md#resource-budgets).
 Logs are under `results/<build>/logs/downstream/<analysis>/phylogeny/`.
 
