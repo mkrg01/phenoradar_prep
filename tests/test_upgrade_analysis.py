@@ -13,7 +13,8 @@ from dataset_assets import record
 from upgrade_analysis import verified_imports
 
 
-@pytest.fixture(params=[('0.5.3', None), ('0.5.4', None), ('0.5.4', '0.5.3')])
+@pytest.fixture(params=[('0.5.3', None), ('0.5.4', None), ('0.5.4', '0.5.3'),
+                        ('0.5.5', None), ('0.5.5', '0.5.3')])
 def scheduler_upgrade(tmp_path, monkeypatch, request):
     import upgrade_analysis as module
     from dataset import implementation
@@ -38,6 +39,10 @@ def scheduler_upgrade(tmp_path, monkeypatch, request):
     snapshots['0.5.4'] = implementation(root)
     (root / 'VERSION').write_text('0.5.5\n')
     (root / 'workflow/scripts/analysis_inspection.py').write_text('read deployment cache paths\n')
+    monkeypatch.setattr(module, 'SCHEDULER_CACHE_REPAIR', commit())
+    snapshots['0.5.5'] = implementation(root)
+    (root / 'VERSION').write_text('0.5.6\n')
+    (root / 'workflow/scripts/slurm_submit.py').write_text('containerized group waits\n')
     commit()
     path = root / 'results/analysis'
     (path / 'jobs').mkdir(parents=True)
@@ -75,7 +80,8 @@ def test_scheduler_upgrade_preserves_outputs_settings_and_output_metadata(schedu
     expected_image = previous.get('compatible_container_image')
     if expected_image is None:
         saved = next(x for x in previous['implementation'] if x['path'].endswith('/VERSION'))
-        expected_image = ':v0.5.3' if saved['sha256'] == hashlib.sha256(b'0.5.3\n').hexdigest() else ':v0.5.4'
+        expected_image = ':v' + next(v for v in ('0.5.3', '0.5.4', '0.5.5')
+                                    if saved['sha256'] == hashlib.sha256((v + '\n').encode()).hexdigest())
     assert current['compatible_container_image'].endswith(expected_image)
     assert current['pipeline']['alignment']['min_sample_fraction'] == 0.5
     for p in protected:

@@ -17,11 +17,40 @@ class UnknownSubmission(RuntimeError):
     pass
 
 
+def configure_group_wait_files(workflow):
+    """Keep Snakemake 9.8's container-only Conda paths out of host waits."""
+    import snakemake
+    from snakemake_interface_executor_plugins.settings import DeploymentMethod, ExecMode
+    methods = getattr(getattr(workflow, 'deployment_settings', None), 'deployment_method', set())
+    if (snakemake.__version__ != '9.8.0' or workflow.exec_mode != ExecMode.DEFAULT or
+            workflow.executor_plugin.name != 'slurm' or
+            not {DeploymentMethod.CONDA, DeploymentMethod.APPTAINER} <= set(methods)):
+        return False
+    from snakemake.jobs import GroupJob, Job
+    original = GroupJob.get_wait_for_files
+    if not getattr(original, '_phenoradar_container_wait', False):
+        def group_wait_files(group):
+            if not getattr(group.dag.workflow, '_phenoradar_container_wait', False):
+                return original(group)
+            # Single jobs already exclude managed/containerized environments.
+            # Also exclude intermediate products generated inside this group.
+            return [path for job in group.jobs for path in Job.get_wait_for_files(job)
+                    if path not in group.all_products]
+        group_wait_files._phenoradar_container_wait = True
+        GroupJob.get_wait_for_files = group_wait_files
+    workflow._phenoradar_container_wait = True
+    from snakemake.logging import logger
+    logger.info('Containerized Slurm groups wait for external inputs and host Conda '
+                'environments only (Snakemake 9.8.0 compatibility).')
+    return True
+
+
 def configure_scheduler(workflow):
     """Use the sbatch gate as the only submission limiter in its controller."""
     from snakemake_interface_executor_plugins.settings import ExecMode
     if workflow.exec_mode != ExecMode.DEFAULT or workflow.executor_plugin.name != 'slurm':
         return
+    configure_group_wait_files(workflow)
     shim = Path(__file__).resolve().parents[1] / 'slurm/sbatch'
     actual = shutil.which('sbatch')
     real = os.environ.get('PHENORADAR_REAL_SBATCH')

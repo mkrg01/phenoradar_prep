@@ -30,6 +30,10 @@ Tool-dependent tests skip when executables are unavailable; `-ra` lists the reas
 
 `PHYLOGENY_CONDA_PREFIX` enables tests with actual stage environments. Slurm tests
 simulate submissions; use a dataset pilot to assess biological outputs and resources.
+For group/container changes, run `tests/slurm_busco_smoke.py` from an allocated
+host environment with a cached SIF, marker FASTA and species manifest (see `--help`).
+It checks identical alignments/column maps, tree inputs/tools/arguments, and completed-stage reuse.
+Tree byte equality is reported separately; `--require-identical-trees` makes it mandatory.
 
 ## Container checks
 
