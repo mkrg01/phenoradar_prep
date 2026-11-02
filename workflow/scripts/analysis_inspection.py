@@ -37,6 +37,7 @@ def plan(payload):
     if snakemake.__version__ != '9.8.0':
         raise ValueError('Pending-work inspection requires Snakemake 9.8.0')
     from snakemake.api import SnakemakeApi
+    from snakemake.cli import parse_jobs
     from snakemake.common import async_run
     import snakemake.workflow as workflow_module
     from snakemake.persistence import Persistence
@@ -78,7 +79,7 @@ def plan(payload):
             def _delete_record(self, *args, **kwargs):
                 raise ValueError('Read-only inspection attempted to delete workflow metadata')
 
-        resources = ResourceSettings(nodes=profile['jobs'],
+        resources = ResourceSettings(nodes=parse_jobs(profile['jobs']),
             resources=profile.get('resources', {}),
             overwrite_threads=profile.get('set-threads', {}),
             overwrite_resources=profile.get('set-resources', {}),

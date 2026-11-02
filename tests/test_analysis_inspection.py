@@ -69,7 +69,10 @@ def execute(root):
     assert result.returncode == 0, result.stderr
 
 
-def test_readonly_plan_counts_grouped_workers_separately(workflow):
+@pytest.mark.parametrize('jobs', [None, 5])
+def test_readonly_plan_counts_grouped_workers_separately(workflow, jobs):
+    root, manifest, slurm = workflow
+    workflow = root, manifest, merge_slurm(slurm, {'total_limits': {'jobs': jobs}}, build=False)
     report = inspect(workflow)
     assert report['workflow_steps'] == 3
     assert report['worker_jobs'] == 1
