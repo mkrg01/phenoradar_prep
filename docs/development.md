@@ -45,6 +45,8 @@ Orthologer rejects root execution.
 The [container test workflow](../tests/container/Snakefile) checks Apptainer activation.
 ODB checks execute the native FASTA checker and import a small protein FASTA;
 the same check must succeed before reference preparation or mapping chunks run.
+The probe uses a temporary local API-version fixture. Reference downloads and
+real mapping retain their normal API and pinned reference.
 The ODB environment deployment script binds Orthologer Python entry points to
 that environment's Python and records the repaired file hashes.
 

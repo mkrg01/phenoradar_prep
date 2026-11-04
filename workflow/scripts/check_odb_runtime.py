@@ -14,6 +14,8 @@ PROTEIN = ">query\nMKWVTFISLLFLFSSAYSRGVFRRDTHKSEIAHRFKDLGE\n"
 
 
 def check(command="ODB-mapper", prefix="", version="v12", work_dir=None):
+    if not isinstance(version, str) or not re.fullmatch(r"v[1-9][0-9]*", version):
+        raise ValueError("Orthologer runtime check requires a fixed OrthoDB release such as v12")
     env = odb_environment(prefix, version)
     command = Path(command_path(command, env))
     candidates = [Path(prefix)] if prefix else [command.parent.parent, command.resolve().parent.parent]
@@ -34,6 +36,12 @@ def check(command="ODB-mapper", prefix="", version="v12", work_dir=None):
         if not re.fullmatch(r"[A-Za-z0-9_./+-]+", str(work)):
             raise ValueError(f"ODB path contains unsupported characters: {work}")
         env.update(HOME=str(work), TMPDIR=str(work), PYTHONDONTWRITEBYTECODE="1")
+        # Native setup queries this metadata even for a reference-free import.
+        # Keep the probe offline; actual reference setup/mapping use their own env.
+        api = work / "api" / version
+        api.mkdir(parents=True)
+        (api / "orthodb_release_id").write_text(version + ".0\n")
+        env["ODBAPI_URL_BASE"] = (work / "api").as_uri()
         fasta = work / "input.faa"
         fasta.write_text(PROTEIN)
         commands = []
@@ -46,8 +54,10 @@ def check(command="ODB-mapper", prefix="", version="v12", work_dir=None):
                 outputs = [getattr(error, name, "") for name in ("stdout", "stderr")]
                 detail = "\n".join(value.decode(errors="replace") if isinstance(value, bytes)
                                    else value or "" for value in outputs)
-                raise RuntimeError(f"Orthologer runtime check failed: {argv[0]}\n{error}\n{detail[-8000:]}") from error
-            commands.append({"argv": list(map(str, argv)), "returncode": result.returncode})
+                previous = "\n".join(entry["stdout_tail"] + "\n" + entry["stderr_tail"] for entry in commands)
+                raise RuntimeError(f"Orthologer runtime check failed: {argv[0]}\n{error}\n{(previous + detail)[-8000:]}") from error
+            commands.append({"argv": list(map(str, argv)), "returncode": result.returncode,
+                             "stdout_tail": result.stdout[-2000:], "stderr_tail": result.stderr[-2000:]})
             return result.stdout.strip()
 
         # Execute directly: using `python check_fasta.py` would hide a broken shebang.
@@ -65,6 +75,7 @@ def check(command="ODB-mapper", prefix="", version="v12", work_dir=None):
         if len(sequences) != 1 or sequences[0].read_text() != PROTEIN.replace(">query", ">smoke:000000"):
             raise ValueError("Orthologer did not import the expected protein sequence")
         return {"completed_at": now(), "checks": {"fasta_type": detected, "fasta_import": "passed"},
+                "api_version_source": "local_smoke_fixture",
                 "software": [file_record(command), file_record(helper), file_record(orthologer)],
                 "commands": commands}
 
