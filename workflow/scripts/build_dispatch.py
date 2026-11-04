@@ -51,6 +51,8 @@ def apply_runtime(path, manifest):
     expected = json.loads((Path(path) / 'checksums.json').read_text())['build.json']
     if data['prepared_sha256'] != expected:
         raise ValueError('runtime record belongs to a different build snapshot')
+    if data.get('taxonomy_selection'):
+        verify(data['taxonomy_selection'])
     manifest['config']['genegalleon'] = data['genegalleon_config']
     manifest['genegalleon'] = data['genegalleon']
     manifest['software_lock'] = data['software_lock']
@@ -70,6 +72,8 @@ def save_runtime(path, manifest, references, raw_inputs, files, rebuilds):
             'software_lock': manifest['software_lock'], 'references': references,
             'busco_reference': manifest.get('busco_reference'),
             'taxonomy_reference': manifest.get('taxonomy_reference'),
+            'taxonomy_selection': record(Path(path) / 'taxonomy_selection.json')
+                                  if (Path(path) / 'taxonomy_selection.json').is_file() else None,
             'raw_inputs': raw_inputs, 'verified_files': files, 'rebuilds': rebuilds,
             'shared_files': [record(snapshot)] if snapshot.is_file() else []}
     data['sha256'] = digest(data)
@@ -165,6 +169,9 @@ def verify_and_stage(path, manifest, workers=4, software=None, cached_only=False
     from dataset_software import resolve as resolve_software
     from build_reports import read_context
     path = Path(path)
+    from taxonomy_selection import ensure as select_taxonomy
+    update_verification(path, 'running', phase='taxonomy')
+    select_taxonomy(path, manifest, software=software, cached_only=cached_only)
     previous = runtime_data(path)
     planned = {row['species']: row for row in read_context(path)['items']}
     references, rebuilds = {}, {}
@@ -195,6 +202,9 @@ def verify_and_stage(path, manifest, workers=4, software=None, cached_only=False
             verify(source)  # A changed shared manifest is not a per-sample repair.
         selected = {}
         rebuilds.update(saved['rebuilds'])
+        eligible = {item['species'] for item in manifest['items']}
+        saved['samples'] = {name: chosen for name, chosen in saved['samples'].items() if name in eligible}
+        rebuilds = {name: reason for name, reason in saved['rebuilds'].items() if name in eligible}
         damaged = failures({name: candidate_files(chosen) for name, chosen in saved['samples'].items()})
         rebuilds.update(damaged)
         for name, chosen in saved['samples'].items():

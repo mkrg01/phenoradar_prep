@@ -197,11 +197,12 @@ def inspect_items(store, items, analysis, requested=None, conditions=None, reusa
 
 def excluded_report(excluded):
     return [{"species": row["species"], "run": row["run"], **{s: "excluded" for s in STAGES},
-             "reason": "excluded_accession: " + row["reason"], "mapping": "excluded", "reference_id": ""}
+             "reason": row.get('source', 'excluded_accession') + ': ' + row["reason"], "mapping": "excluded", "reference_id": ""}
             for row in excluded]
 
 
-def plan(root, config, metadata=None, analysis_config=None, name=None, verify_files=True, repair=False):
+def plan(root, config, metadata=None, analysis_config=None, name=None, verify_files=True, repair=False,
+         preview_taxonomy=True):
     cfg, analysis = settings(root, config, analysis_config, name)
     metadata = absolute(root, metadata or cfg["metadata"])
     source = record(metadata)
@@ -214,6 +215,11 @@ def plan(root, config, metadata=None, analysis_config=None, name=None, verify_fi
     policy = read_exclusions(cfg["excluded_accessions"])
     fields, items = identities(metadata, source=source)
     items, excluded = partition(items, policy)
+    taxonomy_pending = False
+    if preview_taxonomy:
+        from taxonomy_selection import preview
+        items, taxonomy_excluded, taxonomy_pending = preview(cfg, items)
+        excluded += taxonomy_excluded
     normalize_private_paths(items, metadata)
     verify(source)
     if policy_record: verify(policy_record)
@@ -235,6 +241,10 @@ def plan(root, config, metadata=None, analysis_config=None, name=None, verify_fi
     report = inspect_items(cfg["store"], items, analysis, conditions=cfg["conditions"],
                            reusable=reusable, errors=errors, verify_files=verify_files,
                            rebuilds=rebuilds) + excluded_report(excluded)
+    if taxonomy_pending:
+        for row in report:
+            if row['mapping'] != 'excluded':
+                row['taxonomy'] = 'pending'
     selection['rebuilds'] = rebuilds or {}
     if repair:
         for item, row in zip(items, report):
@@ -289,13 +299,18 @@ def prepare(root, name, config, metadata=None, analysis_config=None, defer=False
 
 def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_at=None, defer=False):
     root = Path(root).resolve()
+    from taxonomy_selection import enabled as taxonomy_enabled
+    verify_after_prepare = not defer and taxonomy_enabled(settings(root, config, analysis_config, name)[0])
+    # Freeze candidates first so taxonomy precedes all product verification/import.
+    defer = defer or verify_after_prepare
     prepared_at = prepared_at or now()
     target = build_directory(root, name, config)
     name = target.name
     if target.exists():
         raise ValueError("dataset/run name already exists; resume it or choose a new name")
     cfg, analysis, metadata, fields, items, selection, report = plan(
-        root, config, metadata, analysis_config, name, verify_files=not defer, repair=defer)
+        root, config, metadata, analysis_config, name, verify_files=not defer, repair=defer,
+        preview_taxonomy=False)
     dataset_name = cfg.get('name') if cfg['name_mode'] == 'timestamp' else name
     if not isinstance(dataset_name, str) or not SAFE.fullmatch(dataset_name):
         raise ValueError('dataset name must be a simple directory name')
@@ -349,6 +364,9 @@ def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_a
         analysis["work_root"] = str(relative / "work/mapping")
         analysis["log_root"] = str(relative / "logs/database")
         analysis["input_root"] = str(target / "work/input")
+        from taxonomy_selection import enabled as taxonomy_enabled
+        if taxonomy_enabled(cfg):
+            analysis['taxonomy_db'] = str(target / 'taxonomy.sqlite')
         if defer:
             from build_dispatch import save_candidates
             save_candidates(staging, selection)
@@ -398,6 +416,9 @@ def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_a
         os.rename(staging, target)
     finally:
         if staging.exists(): shutil.rmtree(staging)
+    if verify_after_prepare:
+        from build_dispatch import verify_and_stage
+        verify_and_stage(target, load(target))
     return target
 
 
@@ -425,6 +446,8 @@ def load(path, check_code=False):
     manifest = expand_build(indexed)
     from build_dispatch import apply_runtime
     apply_runtime(path, manifest)
+    from taxonomy_selection import apply as apply_taxonomy
+    apply_taxonomy(path, manifest)
     verify(manifest["metadata"])
     for entry in manifest["auxiliary"].values(): verify(entry)
     if check_code:
@@ -761,6 +784,8 @@ def worker(path, task_id):
     from relabel_sample import relabel
     path = Path(path).resolve()
     manifest = load(path, check_code=True)
+    from taxonomy_selection import require as require_taxonomy
+    require_taxonomy(path, manifest)
     if not 1 <= task_id <= len(manifest['items']): raise ValueError('invalid task index')
     item = manifest['items'][task_id - 1]
     species, native = item['species'], item['row']['species_id']
@@ -842,6 +867,8 @@ def worker(path, task_id):
 def materialize(path):
     path = Path(path).resolve()
     manifest = load(path, check_code=True)
+    from taxonomy_selection import require as require_taxonomy
+    require_taxonomy(path, manifest)
     target = Path(manifest["analysis"]["input_root"])
     with locked(path / ".materialize.lock"):
         if (path / "input_receipt.json").exists():
@@ -933,6 +960,8 @@ def submit(path, until="database", species=None, dry_run=False, resources=None, 
         from build_dispatch import submit_verification
         return submit_verification(path, until, species, dry_run, resources, prepare_locally=prepare_locally)
     manifest = load(path, check_code=True)
+    from taxonomy_selection import require as require_taxonomy
+    require_taxonomy(path, manifest)
     wanted = set(Path(species).read_text().splitlines()) if species else None
     if wanted is not None:
         if not wanted: raise ValueError("pilot species must be present in frozen metadata")

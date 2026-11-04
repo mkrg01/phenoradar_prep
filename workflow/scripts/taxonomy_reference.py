@@ -19,7 +19,7 @@ REQUIRED = ('taxa.sqlite', 'taxa.sqlite.traverse.pkl', 'taxdump.tar.gz')
 
 
 def settings(root, config):
-    if set(config) - {'cache_dir'}:
+    if set(config) - {'cache_dir', 'database', 'missing_taxid'}:
         raise ValueError('unknown build.taxonomy settings')
     cache = config.get('cache_dir', 'resources/taxonomy')
     if cache is not None:
@@ -27,6 +27,13 @@ def settings(root, config):
             raise ValueError('taxonomy.cache_dir must be null or a directory path without newlines')
         cache = str((Path(root) / cache).resolve())
     config['cache_dir'] = cache
+    database = config.get('database')
+    if database is not None and (not isinstance(database, str) or not database.strip() or '\n' in database):
+        raise ValueError('taxonomy.database must be null or a SQLite path')
+    config['database'] = str((Path(root) / database).resolve()) if database else None
+    policy = config.setdefault('missing_taxid', 'exclude')
+    if policy not in ('exclude', 'error', None):
+        raise ValueError('taxonomy.missing_taxid must be exclude, error or null')
 
 
 def read_reference(root, expected=None):

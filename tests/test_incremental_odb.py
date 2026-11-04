@@ -54,6 +54,9 @@ def test_mixed_mapping_and_cross_run_reuse(tiny_inputs, fake_odb, frozen_referen
     seqkit = os.environ.get("SEQKIT_BIN") or shutil.which("seqkit")
     if not snakemake or not seqkit: pytest.skip("Snakemake and seqkit required")
     root = workflow_project
+    # Legacy sample keys identify one run, as in the standalone workflow test.
+    metadata = read_tsv(tiny_inputs["metadata"])
+    write_tsv(tiny_inputs["metadata"], list(metadata[0]), [row for row in metadata if row["run"] != "A2"])
     seed_taxonomy(tiny_inputs["taxonomy_db"])
     original_proteins = root / "original_proteins"
     original_proteins.mkdir()

@@ -202,17 +202,20 @@ def publish_products(build, data):
             if relative.parts[0] == 'quant' and relative.suffix != '.gz':
                 relative = Path(str(relative) + '.gz')
             add(entry, relative)
-        for name in ('source_metadata.tsv', 'excluded_accessions.tsv', 'excluded_runs.tsv'):
+        for name in ('source_metadata.tsv', 'excluded_accessions.tsv'):
             source = build / name
             if source.exists(): add(record(source), name)
         if 'excluded_accessions.tsv' not in files:
             write_tsv(staging / 'excluded_accessions.tsv', ['accession', 'reason'], [])
             created('excluded_accessions.tsv')
-        if 'excluded_runs.tsv' not in files:
-            write_tsv(staging / 'excluded_runs.tsv', ['species', 'run', 'reason'], data.get('excluded_runs', []))
-            created('excluded_runs.tsv')
+        # Verification can exclude TaxIDs after the prepared report was frozen.
+        exclusion_fields = ['species', 'run', 'reason']
+        write_tsv(staging / 'excluded_runs.tsv', exclusion_fields,
+                  [{key: row.get(key, '') for key in exclusion_fields} for row in data.get('excluded_runs', [])])
+        created('excluded_runs.tsv')
         # These are historical records; their original paths are never dereferenced.
-        for name in ('build.json', 'pipeline.yaml', 'checksums.json', 'reuse.json', 'metadata_provenance.json'):
+        for name in ('build.json', 'pipeline.yaml', 'checksums.json', 'reuse.json', 'metadata_provenance.json',
+                     'taxonomy_selection.json', 'taxonomy_selection.tsv', 'taxonomy_excluded_runs.tsv'):
             source = build / name
             if name == 'build.json' and (build / 'runtime.json').is_file():
                 from dataset import load

@@ -126,6 +126,9 @@ def check_environment(name):
             source.write_text(">a\nMKWVTFISLLFLFSSAYS\n>b\nMKWVTFISLFLFSSAYS\n")
             subprocess.run(["famsa", "-t", "1", str(source), str(target)], check=True)
             assert target.read_text().count(">") == 2
+        elif name == "odb":
+            from check_odb_runtime import check
+            assert check(work_dir=work)["checks"]["fasta_import"] == "passed"
     print(f"PASS {name}", flush=True)
 
 

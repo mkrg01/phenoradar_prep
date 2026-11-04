@@ -41,4 +41,7 @@ def software_records(command, prefix):
         for directory in ["bin", "etc"]:
             paths.extend(p for p in (root / directory).rglob("*") if p.is_file())
         records.extend(file_record(p) for p in sorted(set(paths)))
+        repair = Path(prefix, "share/phenoradar/odb-runtime.json")
+        if repair.is_file():
+            records.append(file_record(repair))
     return records

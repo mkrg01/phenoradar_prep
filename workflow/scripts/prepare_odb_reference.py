@@ -10,6 +10,7 @@ from pathlib import Path
 from common import atomic_writer, file_record, now, write_json
 from odb_environment import command_path, odb_environment, software_records
 from odb_settings import validate as validate_odb
+from check_odb_runtime import check as check_runtime
 
 
 def prepare(reference_dir, command="ODB-mapper", prefix="", version="v12", node=3193):
@@ -33,6 +34,8 @@ def prepare(reference_dir, command="ODB-mapper", prefix="", version="v12", node=
             return
         env = odb_environment(prefix, version)
         command = command_path(command, env)
+        # Check new downloads without adding run-specific dependencies to a frozen snapshot.
+        check_runtime(command=command, prefix=prefix, version=version, work_dir=root)
         settings = {"node": node, "version": version, "command": command}
         setup = root / "setup_identity.json"
         if setup.exists() and json.loads(setup.read_text()) != settings:

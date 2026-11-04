@@ -98,7 +98,28 @@ def tiny_inputs(tmp_path):
 @pytest.fixture
 def fake_odb(tmp_path):
     """A protocol double, confined to tests; never used in production configs."""
-    command = tmp_path / "fake_odb"
+    prefix = tmp_path / "odb-env"
+    (prefix / "bin").mkdir(parents=True)
+    helpers = prefix / "orthologer/bin"
+    helpers.mkdir(parents=True)
+    checker = helpers / "check_fasta.py"
+    checker.write_text(f'#!{sys.executable}\nprint("PROT")\n')
+    checker.chmod(0o755)
+    orthologer = prefix / "bin/orthologer"
+    orthologer.write_text(f'#!{sys.executable}\n' + '''import os, sys
+from pathlib import Path
+args = sys.argv
+project = Path(args[args.index('-w') + 1])
+if args[args.index('-c') + 1] == 'create':
+    (project / 'Sequences').mkdir(parents=True)
+else:
+    label, source = Path(args[args.index('-d') + 1]).read_text().split()
+    label = label.removeprefix('+')
+    data = Path(source).read_text().replace('>query', '>' + label + ':000000')
+    (project / 'Sequences' / (label + '.faa')).write_text(data)
+''')
+    orthologer.chmod(0o755)
+    command = prefix / "bin/ODB-mapper"
     command.write_text('''#!/usr/bin/env python3
 import json, os, sys, time
 from pathlib import Path

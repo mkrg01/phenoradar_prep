@@ -44,7 +44,7 @@ ODB_VERSION = config["odb"].get("version", "v12")
 INCREMENTAL_ODB = config["odb"].get("incremental", False)
 ODB_CACHE = config["odb"].get("cache_dir", "resources/odb_cache")
 PYTHON = "python"
-TAXONOMY_DB = "resources/taxonomy/taxa.sqlite"
+TAXONOMY_DB = config.get('taxonomy_db') or "resources/taxonomy/taxa.sqlite"
 TIMETREE_CACHE = "resources/timetree_cache"
 
 if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", str(config["run_name"])):

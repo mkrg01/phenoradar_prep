@@ -36,6 +36,7 @@ def dataset_project(tmp_path, tiny_inputs, monkeypatch):
     cfg["metadata"] = "input/metadata.tsv"
     cfg['busco']['cache_dir'] = None  # Synthetic GeneGalleon tests need no external reference download.
     cfg['taxonomy']['cache_dir'] = None
+    cfg['taxonomy']['missing_taxid'] = None  # Taxonomy eligibility has dedicated real-SQLite tests.
     build_config.write_text(yaml.safe_dump(cfg))
     analysis_config = root / 'config/analysis.yaml'
     analysis_cfg = yaml.safe_load(analysis_config.read_text())

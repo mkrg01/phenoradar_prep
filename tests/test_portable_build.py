@@ -130,6 +130,32 @@ def test_unsupported_database_schema_is_rejected(tmp_path, schema):
         load_complete(legacy.parent)
 
 
+@pytest.mark.parametrize('prepared_report', [True, False])
+def test_publication_uses_final_taxonomy_exclusions(dataset_project, tmp_path, prepared_report):
+    from portable_build import publish_products
+    source = imported(dataset_project)
+    data = load_complete(source)
+    excluded = dict(species='Removed_plant_D1', run='D1', taxid='999', resolved_taxid='',
+                    action='exclude', reason='taxid_unresolved', source='taxonomy')
+    data['excluded_runs'] = [excluded]
+    build = tmp_path / 'publication'
+    build.mkdir()
+    if prepared_report:
+        write_tsv(build / 'excluded_runs.tsv', ['species', 'run', 'reason'], [])
+    write_json(build / 'taxonomy_selection.json', {'rows': [excluded]})
+    fields = ['species', 'run', 'taxid', 'resolved_taxid', 'action', 'reason']
+    for name in ('taxonomy_selection.tsv', 'taxonomy_excluded_runs.tsv'):
+        write_tsv(build / name, fields, [{key: excluded[key] for key in fields}])
+    published = publish_products(build, data)
+    assert read_tsv(published.parent / 'excluded_runs.tsv') == [
+        {key: excluded[key] for key in ('species', 'run', 'reason')}]
+    assert load_complete(published)['excluded_runs'] == [excluded]
+    for name in ('taxonomy_selection.json', 'taxonomy_selection.tsv', 'taxonomy_excluded_runs.tsv'):
+        assert (published.parent / 'provenance' / name).read_bytes() == (build / name).read_bytes()
+    if prepared_report:
+        assert read_tsv(build / 'excluded_runs.tsv') == []
+
+
 def test_publishing_preserves_source_verification_after_hard_links(completed_project, tmp_path, monkeypatch):
     import common
     import dataset_assets as assets

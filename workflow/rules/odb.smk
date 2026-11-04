@@ -36,10 +36,25 @@ rule make_manifests:
         "--outdir {output:q} --chunk-size {params.chunk_size} > {log:q} 2>&1"
 
 
+rule check_odb_runtime:
+    input:
+        code=f"{SCRIPTS}/check_odb_runtime.py",
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/odb_environment.py"]
+    output: f"{WORK}/{ORTHOGROUP_MAPPING}/runtime.json"
+    params: version=ODB_VERSION
+    log: f"{LOG}/{ORTHOGROUP_MAPPING}/runtime.log"
+    conda: "../envs/odb.yaml"
+    threads: 1
+    resources: mem_mb=1000
+    shell:
+        "{PYTHON:q} {input.code:q} --version {params.version:q} --output {output:q} > {log:q} 2>&1"
+
+
 rule prepare_odb_reference:
     input:
         code=f"{SCRIPTS}/prepare_odb_reference.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/odb_environment.py", f"{SCRIPTS}/odb_settings.py"]
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/odb_environment.py", f"{SCRIPTS}/odb_settings.py",
+                 f"{SCRIPTS}/check_odb_runtime.py"]
     output:
         reference=f"{REFERENCE}/reference.json",
         inventory=f"{REFERENCE}/files.json",
@@ -62,6 +77,7 @@ rule prepare_odb_reference:
 
 rule odb_map:
     input:
+        runtime=f"{WORK}/{ORTHOGROUP_MAPPING}/runtime.json",
         manifests=odb_manifests,
         proteins=lambda wc: chunk_row(wc)["proteins"],
         reference=f"{REFERENCE}/reference.json",

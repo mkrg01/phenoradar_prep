@@ -1,5 +1,6 @@
 # Internal defaults for resolved Snakemake configurations; edit config/build.yaml or config/analysis.yaml.
 input_root: input
+taxonomy_db: null  # Internal build snapshot; null uses the shared taxonomy cache.
 run_name: run001
 output_root: null
 work_root: null

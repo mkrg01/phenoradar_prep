@@ -41,6 +41,10 @@ Tree byte equality is reported separately; `--require-identical-trees` makes it 
 Dockerfile on branch pushes and pull requests. Manual runs and releases also
 build the image and run [real-tool smoke checks](../tests/container_smoke.py).
 The [container test workflow](../tests/container/Snakefile) checks Apptainer activation.
+ODB checks execute the native FASTA checker and import a small protein FASTA;
+the same check must succeed before reference preparation or mapping chunks run.
+The ODB environment deployment script binds Orthologer Python entry points to
+that environment's Python and records the repaired file hashes.
 
 For a local image build, run `python workflow/scripts/generate_container.py` in
 the pinned workflow environment. The generated Dockerfile is a build artifact

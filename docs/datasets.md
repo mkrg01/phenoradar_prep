@@ -28,6 +28,20 @@ Use the build directory name printed by `submit` for `{build_name}` below.
 submits the required jobs. Add `--prepare-locally` to import already verified
 inputs on the submit host.
 
+New builds first check every candidate TaxID against one frozen taxonomy snapshot,
+including builds that reuse all sample products. `taxonomy.missing_taxid: exclude`
+omits unresolved IDs before import or sample dispatch; merged IDs remain included
+with their original identity. Use `error` to stop instead, or `null` for legacy
+selection. `taxonomy.database` can select an existing SQLite snapshot.
+
+Review `taxonomy_selection.tsv` and `taxonomy_excluded_runs.tsv` in the build.
+`taxonomy_selection.json` pins the decisions and reference checksum for resumes;
+mapping uses that same snapshot. Source metadata and manual exclusions are unchanged.
+Published `excluded_runs.tsv` reflects the final decisions; taxonomy records are
+copied into `provenance/`.
+An unreadable reference or an empty selected set stops the build. Plans show cached
+decisions, or report taxonomy eligibility as pending without downloading a reference.
+
 The completed database is `results/{build_name}/database/`. Builds record BUSCO
 scores for every sample; filtering belongs to the analysis.
 

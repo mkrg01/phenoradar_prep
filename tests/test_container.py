@@ -25,13 +25,13 @@ def test_generation_covers_optional_environments_and_hashes_deploy_scripts(tmp_p
     assert names == {p.stem for p in (ROOT / "workflow/envs").glob("*.yaml")}
     assert not (tmp_path / ".snakemake").exists()
     assert "@sha256:" in first and "miniforge3:latest" not in first
-    for name in ("dating", "monophy"):
+    for name in ("dating", "monophy", "odb"):
         assert f"COPY workflow/envs/{name}.post-deploy.sh" in first
-    before = re.search(r"COPY workflow/envs/dating.yaml (\S+)", first).group(1)
-    script = tmp_path / "workflow/envs/dating.post-deploy.sh"
+    before = re.search(r"COPY workflow/envs/odb.yaml (\S+)", first).group(1)
+    script = tmp_path / "workflow/envs/odb.post-deploy.sh"
     script.write_text(script.read_text() + "\n# Test a changed deployment recipe.\n")
     second = generate(tmp_path, snakemake)
-    after = re.search(r"COPY workflow/envs/dating.yaml (\S+)", second).group(1)
+    after = re.search(r"COPY workflow/envs/odb.yaml (\S+)", second).group(1)
     assert before != after
     assert generate(tmp_path, snakemake) == second
 

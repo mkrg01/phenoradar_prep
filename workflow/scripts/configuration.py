@@ -1,7 +1,7 @@
 """Accepted configuration keys, including optional tool-specific overrides."""
 KEYS = {
     "": "run_name selection translation odb alignment kegg phylogeny storage "
-        "trait trait_encoding exclude_species input_root build_manifest translation_cache expression_cache output_root work_root log_root",
+        "trait trait_encoding exclude_species input_root build_manifest translation_cache expression_cache output_root work_root log_root taxonomy_db",
     "storage": "keep_intermediates",
     "selection": "busco_threshold species_list",
     "translation": "table",
@@ -38,6 +38,8 @@ def validate_keys(config):
         value = config.get(key)
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ValueError(f"{key} must be null or a directory")
+    if config.get('taxonomy_db') is not None and (not isinstance(config['taxonomy_db'], str) or not config['taxonomy_db'].strip()):
+        raise ValueError('taxonomy_db must be null or a SQLite path')
     if type(config.get("storage", {}).get("keep_intermediates", False)) is not bool:
         raise ValueError("storage.keep_intermediates must be true or false")
     from alignment_selection import validate_fraction
