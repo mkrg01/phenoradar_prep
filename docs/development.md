@@ -40,6 +40,8 @@ Tree byte equality is reported separately; `--require-identical-trees` makes it 
 [CI](../.github/workflows/container.yml) runs the Python suite and generates a
 Dockerfile on branch pushes and pull requests. Manual runs and releases also
 build the image and run [real-tool smoke checks](../tests/container_smoke.py).
+Docker smoke checks use the caller's UID/GID and a writable temporary home;
+Orthologer rejects root execution.
 The [container test workflow](../tests/container/Snakefile) checks Apptainer activation.
 ODB checks execute the native FASTA checker and import a small protein FASTA;
 the same check must succeed before reference preparation or mapping chunks run.

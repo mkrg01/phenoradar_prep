@@ -116,7 +116,8 @@ def publish(repository, local_image, root=ROOT):
         command(["docker", "pull", immutable], root)
         check_image_labels(immutable, version, revision, root)
         command(["docker", "tag", immutable, local_image], root)
-        command(["docker", "run", "--rm", "--network", "none", "-v", f"{root}:/workspace:ro",
+        command(["docker", "run", "--rm", "--network", "none", "--user", f"{os.getuid()}:{os.getgid()}",
+                 "--env", "HOME=/tmp", "-v", f"{root}:/workspace:ro",
                  "-w", "/workspace", local_image, "python", "tests/container_smoke.py"], root)
     else:
         command(["docker", "tag", local_image, reference], root)

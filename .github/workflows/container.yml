@@ -33,4 +33,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Check all environments and real tools without network access
-        run: docker run --rm --network none -v "$PWD:/workspace:ro" -w /workspace phenoradar_prep:ci python tests/container_smoke.py
+        run: docker run --rm --network none --user "$(id -u):$(id -g)" --env HOME=/tmp -v "$PWD:/workspace:ro" -w /workspace phenoradar_prep:ci python tests/container_smoke.py
