@@ -106,6 +106,67 @@ def test_scheduler_upgrade_rejects_unsafe_changes(scheduler_upgrade, monkeypatch
     assert not list((path / 'jobs').glob('code_migration_*'))
 
 
+@pytest.fixture
+def validation_upgrade(scheduler_upgrade, monkeypatch):
+    from dataset import implementation
+    module, root, path, commit = scheduler_upgrade
+    for name in ('analysis.py', 'analysis_validation.py', 'upgrade_analysis.py'):
+        (root / 'workflow/scripts' / name).write_text('original controller\n')
+    (root / 'VERSION').write_text('0.5.7\n')
+    monkeypatch.setattr(module, 'VALIDATION_PREDECESSOR', commit())
+    manifest = json.loads((path / 'analysis.json').read_text())
+    manifest['implementation'] = implementation(root)
+    manifest['compatible_container_image'] = 'docker://ghcr.io/mkrg01/phenoradar_prep:v0.5.3'
+    write_json(path / 'analysis.json', manifest)
+    (root / 'VERSION').write_text('0.5.8\n')
+    (root / 'workflow/scripts/analysis.py').write_text('check host validation dependencies\n')
+    (root / 'workflow/scripts/analysis_validation.py').write_text('explain missing host dependency\n')
+    (root / 'workflow/scripts/upgrade_analysis.py').write_text('audited controller migration\n')
+    commit()
+    return module, root, path, commit
+
+
+def test_validation_upgrade_retains_scientific_outputs_and_saved_tool_image(validation_upgrade):
+    module, root, path, _ = validation_upgrade
+    tree = path / 'phylogeny/representatives/species_tree.nwk'
+    tree.parent.mkdir(parents=True); tree.write_text('(A,B);\n')
+    metadata = root / '.snakemake/metadata/tree'
+    metadata.parent.mkdir(parents=True); metadata.write_text('completed tree metadata\n')
+    protected = [tree, metadata, path / 'pipeline.yaml', path / 'analysis.yaml']
+    before = {p: (p.read_bytes(), p.stat().st_mtime_ns, p.stat().st_ino) for p in protected}
+    original = (path / 'analysis.json').read_bytes()
+    assert module.upgrade(path)['state'] == 'ready'
+    result = module.upgrade(path, apply=True)
+    assert result['state'] == 'upgraded' and result['reset_metadata'] == 0
+    assert (path / 'jobs/code_migration_0001/analysis.json').read_bytes() == original
+    updated = json.loads((path / 'analysis.json').read_text())
+    assert updated['compatible_container_image'].endswith(':v0.5.3')
+    assert updated['code_migrations'][-1]['reason'].startswith('Validation-only repair')
+    assert all((p.read_bytes(), p.stat().st_mtime_ns, p.stat().st_ino) == expected
+               for p, expected in before.items())
+    assert module.upgrade(path, apply=True)['state'] == 'already_upgraded'
+
+
+@pytest.mark.parametrize('problem', ['scientific_code', 'environment', 'changed_condition', 'busy', 'completed'])
+def test_validation_upgrade_rejects_unsafe_changes(validation_upgrade, monkeypatch, problem):
+    module, root, path, commit = validation_upgrade
+    if problem == 'scientific_code':
+        (root / 'workflow/scripts/align_orthogroups.py').write_text('different scientific code\n')
+        commit()
+    elif problem == 'environment':
+        env = root / 'workflow/envs/analysis.yaml'
+        env.parent.mkdir(); env.write_text('dependencies: [new_tool]\n')
+        commit()
+    elif problem == 'busy':
+        def blocked(*args): raise ValueError('queued/running jobs')
+        monkeypatch.setattr(module, 'submission_guard', blocked)
+    elif problem == 'completed':
+        (path / 'completed.json').write_text('{}')
+    with pytest.raises(ValueError):
+        module.upgrade(path, apply=True, min_sample_fraction=0.75 if problem == 'changed_condition' else None)
+    assert not list((path / 'jobs').glob('code_migration_*'))
+
+
 @pytest.mark.parametrize('saved,requested,expected', [({}, None, (0, 0)), ({}, 0.5, (0, 0.5)),
     ({'min_sample_fraction': 0.75}, None, (0.75, 0.75)),
     ({'min_sample_fraction': 0.75}, 0, (0.75, 0))])

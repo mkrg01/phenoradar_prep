@@ -181,11 +181,13 @@ def run(path, target='all', execution=None, local=False, cores=1, mem_mb=8000):
     path = Path(path).resolve()
     manifest = load(path, check_code=True)
     root = Path(manifest['root'])
+    validate_analysis(manifest['pipeline'], [target])
+    from analysis_validation import check_dependencies
+    check_dependencies(manifest['pipeline'], target)
     if not (path / 'build_inputs/index.json').exists():
         from analysis_build_index import create_index
         create_index(manifest['build']['path'], path / 'build_inputs',
                      species={r['species'] for r in manifest['selection'] if r['selected']})
-    validate_analysis(manifest['pipeline'], [target])
     slurm = load_execution(execution) if execution else manifest['config']['slurm']
     slurm = validate_slurm(slurm, build=False)
     profile = write_profile(path / 'jobs' / (Path(execution).stem if execution else 'local') / 'profile', slurm)
@@ -250,6 +252,8 @@ def submission_guard(path, manifest):
 def preflight(path, target, resources):
     manifest = load(path, check_code=True)
     validate_analysis(manifest['pipeline'], [target])
+    from analysis_validation import check_dependencies
+    check_dependencies(manifest['pipeline'], target)
     slurm = execution_settings(manifest['config']['slurm'], resources, build=False)
     worker_budgets(slurm)
     submission_guard(path, manifest)

@@ -66,6 +66,26 @@ outputs and output metadata; completed analyses cannot be migrated.
 Read-only pending-work inspection uses the existing Conda/container cache paths
 to recognize reusable outputs without installing or pulling environments.
 
+## Resuming v0.5.7 after a completion-validation failure
+
+Final native-output validation runs in the host environment, including `ete4`
+for tree checks. With v0.5.8, update that environment first:
+
+```bash
+conda env update -n phenoradar_prep -f environment.yaml
+conda activate phenoradar_prep
+python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/carnivory
+python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/carnivory --apply
+./run_analysis.sh submit --analysis results/leaf/downstream/carnivory --dry-run
+./run_analysis.sh submit --analysis results/leaf/downstream/carnivory
+```
+
+Wait for the previous controller and workers to end before migrating. The
+upgrade saves the old code records and retains scientific settings, the saved
+tool image, outputs and output metadata. Check that the preview reuses completed
+workflow steps; whole-analysis completion still requires successful validation
+and a new `completed.json`.
+
 ## Upgrading an unfinished v0.4.14 through v0.4.18 analysis
 
 With a clean v0.4.19 checkout, audit compatible reuse before applying it.

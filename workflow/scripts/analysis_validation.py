@@ -280,8 +280,25 @@ def validate_alignment(path, species):
         raise ValueError("empty alignment: " + str(path))
 
 
+def tree_validator():
+    try:
+        from ete4 import Tree
+    except ImportError as error:
+        raise ValueError(
+            "Tree validation requires ete4 in the host Python environment; "
+            "update the active environment from environment.yaml before submitting or resuming."
+        ) from error
+    return Tree
+
+
+def check_dependencies(pipeline, target='all'):
+    """Reject missing host dependencies before starting a whole-analysis run."""
+    if target == 'all' and pipeline.get('phylogeny', {}).get('trees'):
+        tree_validator()
+
+
 def validate_tree(path, species, subset=False):
-    from ete4 import Tree
+    Tree = tree_validator()
     text = path.read_text().strip()
     if text.count(";") != 1:
         raise ValueError("expected one Newick species tree")

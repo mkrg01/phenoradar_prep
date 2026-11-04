@@ -50,14 +50,18 @@ SCHEDULER_CHANGES = {'VERSION', 'workflow/Snakefile', 'workflow/scripts/phase_co
                      'workflow/scripts/slurm_submit.py', 'workflow/scripts/versioning.py',
                      'workflow/scripts/analysis.py', 'workflow/scripts/analysis_inspection.py',
                      'workflow/scripts/upgrade_analysis.py'}
+VALIDATION_PREDECESSOR = '9570db73de2c79e92ffd7d3d9fc04924911f20f4'
+VALIDATION_CHANGES = {'VERSION', 'workflow/scripts/analysis.py',
+                      'workflow/scripts/analysis_validation.py', 'workflow/scripts/upgrade_analysis.py'}
 
 
-def upgrade_scheduler(path, manifest, apply=False, min_sample_fraction=None):
+def upgrade_controller(path, manifest, apply=False, min_sample_fraction=None, *,
+                       predecessors, allowed, scope):
     """Migrate audited controller fixes while preserving the saved tool image."""
     root = Path(manifest['root'])
     before, after = occupancy_condition(manifest, min_sample_fraction)
     if before != after:
-        raise ValueError('scheduler-only migration cannot change analysis conditions')
+        raise ValueError(f'{scope}-only migration cannot change analysis conditions')
     subprocess.run(['git', 'diff', '--quiet', 'HEAD'], cwd=root, check=True)
     current = implementation(root)
     previous = {str(Path(x['path']).relative_to(root)): x['sha256'] for x in manifest['implementation']}
@@ -65,20 +69,20 @@ def upgrade_scheduler(path, manifest, apply=False, min_sample_fraction=None):
     if observed == previous:
         return {'state': 'already_upgraded'}
     if set(previous) != set(observed):
-        raise ValueError('scheduler-only migration cannot add or remove workflow sources')
-    candidates = [revision for revision in (SCHEDULER_PREDECESSOR, SCHEDULER_REPAIR, SCHEDULER_CACHE_REPAIR)
+        raise ValueError(f'{scope}-only migration cannot add or remove workflow sources')
+    candidates = [revision for revision in predecessors
                   if hashlib.sha256(subprocess.check_output(['git', 'show', f'{revision}:VERSION'],
                                                             cwd=root)).hexdigest() == previous.get('VERSION')]
     if len(candidates) != 1:
-        raise ValueError('frozen code must match audited v0.5.3 through v0.5.5')
+        raise ValueError(f'frozen code must match an audited {scope} predecessor')
     revision = candidates[0]
     source_version = subprocess.check_output(['git', 'show', f'{revision}:VERSION'], cwd=root, text=True).strip()
     for relative, checksum in previous.items():
         saved = subprocess.check_output(['git', 'show', f'{revision}:{relative}'], cwd=root)
         if hashlib.sha256(saved).hexdigest() != checksum:
             raise ValueError(f'frozen code differs from audited v{source_version}: {relative}')
-        if observed[relative] != checksum and relative not in SCHEDULER_CHANGES:
-            raise ValueError(f'scheduler migration cannot change scientific code or environments: {relative}')
+        if observed[relative] != checksum and relative not in allowed:
+            raise ValueError(f'{scope} migration cannot change scientific code or environments: {relative}')
     submission_guard(path, manifest)
     result = {'state': 'ready', 'from_commit': revision,
               'changed_sources': sorted(p for p in observed if observed[p] != previous[p]),
@@ -105,7 +109,7 @@ def upgrade_scheduler(path, manifest, apply=False, min_sample_fraction=None):
                  'to_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip(),
                  'backup': str(backup), 'container_image': image,
                  'changed_sources': result['changed_sources'],
-                 'reason': 'Scheduler-only repair; scientific conditions, tool image, '
+                 'reason': f'{scope.capitalize()}-only repair; scientific conditions, tool image, '
                            'outputs and Snakemake output metadata are retained.'}
         manifest.setdefault('code_migrations', []).append(event)
         write_json(path / 'analysis.json', manifest)
@@ -220,8 +224,14 @@ def upgrade(path, apply=False, min_sample_fraction=None):
     root = Path(manifest['root'])
     if (path / 'completed.json').exists():
         raise ValueError('completed analyses are immutable')
+    if (root / 'VERSION').read_text().strip() == '0.5.8':
+        return upgrade_controller(path, manifest, apply, min_sample_fraction,
+                                  predecessors=(VALIDATION_PREDECESSOR,),
+                                  allowed=VALIDATION_CHANGES, scope='validation')
     if (root / 'VERSION').read_text().strip() in {'0.5.4', '0.5.5', '0.5.6'}:
-        return upgrade_scheduler(path, manifest, apply, min_sample_fraction)
+        return upgrade_controller(path, manifest, apply, min_sample_fraction,
+                                  predecessors=(SCHEDULER_PREDECESSOR, SCHEDULER_REPAIR, SCHEDULER_CACHE_REPAIR),
+                                  allowed=SCHEDULER_CHANGES, scope='scheduler')
     if (root / 'VERSION').read_text().strip() != '0.4.19':
         raise ValueError('this audited upgrade requires v0.4.19')
     subprocess.run(['git', 'diff', '--quiet', 'HEAD'], cwd=root, check=True)
