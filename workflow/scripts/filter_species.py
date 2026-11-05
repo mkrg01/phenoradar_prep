@@ -21,7 +21,7 @@ from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNM
 
 # Share workflow dependencies and the completed export's code provenance.
 EXPORT_CODE = (
-    "filter_species.py", "filter_species_phylogeny.py", "contrast_pairs.py",
+    "filter_species.py", "filter_species_phylogeny.py", "contrast_pairs.py", "expanded_pair_clades.py",
     "plot_contrast_tree.py", "species_traits.py", "sample_identity.py",
     "phylogeny_root.py", "phylogeny_outgroup.py", "phenoradar_metadata.py",
     "consumer_metadata.py", "trait_encoding.py", "analysis_validation.py",
@@ -518,6 +518,7 @@ def export_contrast(job, branch, trait, seed):
                        out, trait=trait, seed=seed, exclude_species=sorted(job.excluded),
                        trait_encoding=job.input(encoding) if encoding.is_file() else None)
     plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out, samples=samples)
+    plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out, samples=samples, expanded=True)
     job.counts[f"{branch}_contrast"] = {k: report[k] for k in
                                        ["source_species", "retained_species", "observed_species", "contrast_pairs"]}
 

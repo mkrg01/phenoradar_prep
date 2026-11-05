@@ -50,7 +50,7 @@ if "representatives" in PHY["trees"]:
             encoding=rules.normalize_traits.output.encoding,
             tree=f"{ROOTING}/ncbi_tree.nwk",
             code=f"{SCRIPTS}/contrast_pairs.py",
-            helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "trait_encoding"]]
+            helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "trait_encoding", "expanded_pair_clades"]]
         output:
             samples=f"{REPRESENTATIVES}/selection/samples.tsv",
             traits=f"{REPRESENTATIVES}/selection/traits.tsv",
@@ -77,7 +77,7 @@ if "representatives" in PHY["trees"]:
                 outgroup=f"{REPRESENTATIVES}/rooting/outgroup.txt",
                 selection=rules.select_contrast_representatives.output,
                 code=f"{SCRIPTS}/contrast_pairs.py",
-                helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "trait_encoding"]]
+                helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "trait_encoding", "expanded_pair_clades"]]
             output:
                 tree=f"{CONTRAST}/summary_tree.nwk",
                 all=f"{CONTRAST}/summary_tree.all.tsv",
@@ -86,6 +86,7 @@ if "representatives" in PHY["trees"]:
                 contrast_all=f"{CONTRAST}/contrastive.all.tsv",
                 contrast_sampled=f"{CONTRAST}/contrastive.sampled.tsv",
                 pairs=f"{CONTRAST}/contrast_pairs.tsv",
+                expanded=f"{CONTRAST}/expanded_pair_clades.tsv",
                 metadata=f"{CONTRAST}/species_metadata.tsv",
                 qc=f"{CONTRAST}/summary.json"
             params:
@@ -106,7 +107,7 @@ rule plot_contrast_tree:
         summary=f"{OUT}/{{contrast_branch}}/summary.json",
         samples=f"{META}/samples.tsv",
         code=f"{SCRIPTS}/plot_contrast_tree.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/phylogeny_outgroup.py", f"{SCRIPTS}/sample_identity.py"]
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/phylogeny_outgroup.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/expanded_pair_clades.py"]
     output:
         pdf=f"{OUT}/{{contrast_branch}}/summary_tree.pdf", svg=f"{OUT}/{{contrast_branch}}/summary_tree.svg",
         id_pdf=f"{OUT}/{{contrast_branch}}/summary_tree_id.pdf", id_svg=f"{OUT}/{{contrast_branch}}/summary_tree_id.svg"
@@ -119,6 +120,27 @@ rule plot_contrast_tree:
         "--summary {input.summary:q} --samples {input.samples:q} --outdir {params.outdir:q} > {log:q} 2>&1"
 
 
+rule plot_expanded_pair_tree:
+    wildcard_constraints: contrast_branch=CONTRAST_BRANCH_PATTERN
+    input:
+        tree=f"{OUT}/{{contrast_branch}}/summary_tree.nwk",
+        metadata=f"{OUT}/{{contrast_branch}}/species_metadata.tsv",
+        summary=f"{OUT}/{{contrast_branch}}/summary.json",
+        samples=f"{META}/samples.tsv",
+        code=f"{SCRIPTS}/plot_contrast_tree.py",
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/expanded_pair_clades.py"]
+    output:
+        pdf=f"{OUT}/{{contrast_branch}}/expanded_pair_tree.pdf", svg=f"{OUT}/{{contrast_branch}}/expanded_pair_tree.svg",
+        id_pdf=f"{OUT}/{{contrast_branch}}/expanded_pair_tree_id.pdf", id_svg=f"{OUT}/{{contrast_branch}}/expanded_pair_tree_id.svg"
+    params: outdir=f"{OUT}/{{contrast_branch}}"
+    conda: "../envs/timetree.yaml"
+    resources: mem_mb=4000
+    log: f"{LOG}/{{contrast_branch}}/expanded_plot.log"
+    shell:
+        "{PYTHON:q} {input.code:q} --tree {input.tree:q} --metadata {input.metadata:q} "
+        "--summary {input.summary:q} --samples {input.samples:q} --expanded --outdir {params.outdir:q} > {log:q} 2>&1"
+
+
 rule identify_phylogeny_contrast_pairs:
     wildcard_constraints: phylo_branch=PAIR_BRANCH_PATTERN
     input:
@@ -129,7 +151,7 @@ rule identify_phylogeny_contrast_pairs:
         traits=rules.normalize_traits.output.traits,
         encoding=rules.normalize_traits.output.encoding,
         code=f"{SCRIPTS}/contrast_pairs.py",
-        helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "trait_encoding"]]
+        helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "trait_encoding", "expanded_pair_clades"]]
     output:
         observed=f"{PHYLO_RUN}/contrast/observed_tree.nwk",
         tree=f"{PHYLO_RUN}/contrast/summary_tree.nwk",
@@ -139,6 +161,7 @@ rule identify_phylogeny_contrast_pairs:
         contrast_all=f"{PHYLO_RUN}/contrast/contrastive.all.tsv",
         contrast_sampled=f"{PHYLO_RUN}/contrast/contrastive.sampled.tsv",
         pairs=f"{PHYLO_RUN}/contrast/contrast_pairs.tsv",
+        expanded=f"{PHYLO_RUN}/contrast/expanded_pair_clades.tsv",
         metadata=f"{PHYLO_RUN}/contrast/species_metadata.tsv",
         qc=f"{PHYLO_RUN}/contrast/summary.json"
     params: outdir=f"{PHYLO_RUN}/contrast", trait=config["trait"], seed=RANDOM_SEED

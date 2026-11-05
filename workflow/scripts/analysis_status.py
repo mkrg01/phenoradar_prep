@@ -136,6 +136,10 @@ def required_outputs(pipeline, implementation=()):
                                ('contrast_pairs', 'contrast/summary.json')]:
             if phy.get(option, {}).get('enabled'):
                 required.append(f'{prefix}/{marker}')
+                if option == 'contrast_pairs' and any(Path(e['path']).name == 'expanded_pair_clades.py' for e in implementation):
+                    required += [f'{prefix}/contrast/{name}' for name in [
+                        'expanded_pair_clades.tsv', 'expanded_pair_tree.pdf', 'expanded_pair_tree.svg',
+                        'expanded_pair_tree_id.pdf', 'expanded_pair_tree_id.svg']]
     return required
 
 

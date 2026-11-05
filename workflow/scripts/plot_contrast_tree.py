@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 
 from common import read_tsv
+from expanded_pair_clades import COLUMN, clade_roots
 
 
 def tip_identity(row, samples):
@@ -40,7 +41,7 @@ def paired_clades(phy, rows):
     return clades
 
 
-def plot(tree, metadata, summary, outdir, samples=None):
+def plot(tree, metadata, summary, outdir, samples=None, expanded=False):
     """Publication and ID phylograms, sharing topology, counts and pair colors."""
     import matplotlib
     matplotlib.use("Agg")
@@ -51,6 +52,7 @@ def plot(tree, metadata, summary, outdir, samples=None):
     from matplotlib.textpath import TextToPath
     from ete4 import Tree
     info = json.loads(Path(summary).read_text())
+    stems = ["expanded_pair_tree", "expanded_pair_tree_id"] if expanded else ["summary_tree", "summary_tree_id"]
     metadata_rows = read_tsv(metadata)
     rows = {r["species"]: r for r in metadata_rows if r["is_representative"] == "1"}
     if not Path(tree).read_text().strip():
@@ -61,7 +63,7 @@ def plot(tree, metadata, summary, outdir, samples=None):
         ax.text(0.5, 0.5, f"No species with observed {info['trait']}\n0 contrast pairs",
                 ha="center", va="center", transform=ax.transAxes)
         Path(outdir).mkdir(parents=True, exist_ok=True)
-        for stem in ["summary_tree", "summary_tree_id"]:
+        for stem in stems:
             for extension in ["pdf", "svg"]:
                 fig.savefig(Path(outdir) / f"{stem}.{extension}")
         plt.close(fig)
@@ -78,6 +80,13 @@ def plot(tree, metadata, summary, outdir, samples=None):
     clades = paired_clades(phy, rows)
     paired_nodes = {node for root in clades for node in root.traverse()}
     paired_edges = {node for root in clades for node in root.descendants()}
+    expanded_roots = clade_roots(phy, rows) if expanded else {}
+    expanded_nodes = {node for root in expanded_roots.values() for node in root.traverse()}
+    expanded_edges = {node for root in expanded_roots.values() for node in root.descendants()}
+    if expanded:
+        expected = {tip.name: pair for pair, root in expanded_roots.items() for tip in root.leaves()}
+        if any(row.get(COLUMN, "") != expected.get(name, "") for name, row in rows.items()):
+            raise ValueError("expanded-pair plot assignments differ from maximal clades")
     sample_rows = {}
     for row in read_tsv(samples) if samples else []:
         sample_rows.setdefault(row["species"], []).append(row)
@@ -109,17 +118,22 @@ def plot(tree, metadata, summary, outdir, samples=None):
             run = identities[node][2]
             fields += [f"run = {run}" if run else f"sample = {node.name}",
                        f"group = {row.get('group') or '-'}", f"pair = {row.get('contrast_pair_id') or '-'}"]
+            if expanded:
+                fields.append(f"expanded = {row.get(COLUMN) or '-'}")
         return " (" + "; ".join(fields) + ")"
     def label_width(node, detailed):
         name, scientific, _ = identities[node]
         return text_width(name, italic if scientific else upright) + text_width(suffix(node, detailed), upright)
     margin, gap, row_height, legend_height = 12, 10, 13, 58
+    if expanded:
+        legend_height += 18
     # Keep the same branch-length scale and row spacing in both figures.
     tree_width = max(180, 7.2 * 72 - margin * 2 - gap - max(label_width(n, False) for n in tips))
     name_x = margin + tree_width + gap
     legend_width = max(text_width(info["trait"], upright),
                        sum(text_width(labels[state], upright) + 20 for state in states) + gap,
-                       text_width("Contrast pair clade", upright) + 24 if clades else 0)
+                       text_width("Contrast pair clade", upright) + 24 if clades else 0,
+                       text_width("Expanded pair clade", upright) + 24 if expanded_roots else 0)
     height = (len(tips) - 1) * row_height + 44 + margin + legend_height
     maximum = max(distance.values())
     x = {node: margin + value / (maximum or 1) * tree_width for node, value in distance.items()}
@@ -132,19 +146,23 @@ def plot(tree, metadata, summary, outdir, samples=None):
                          "pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",
                          "lines.solid_capstyle": "butt", "savefig.facecolor": "white",
                          "text.parse_math": False}):
-        for detailed, stem in [(False, "summary_tree"), (True, "summary_tree_id")]:
+        for detailed, stem in zip([False, True], stems):
             width = max(7.2 * 72, name_x + max(label_width(n, detailed) for n in tips) + margin,
                         margin * 2 + legend_width)
             fig = plt.figure(figsize=(width / 72, height / 72))
             ax = fig.add_axes([0, 0, 1, 1], xlim=(0, width), ylim=(0, height))
             ax.set_axis_off()
+            for root in expanded_roots.values():
+                positions = [y[tip] for tip in root.leaves()]
+                ax.axhspan(min(positions) - row_height * 0.46, max(positions) + row_height * 0.46,
+                           color="#E8F1F8", linewidth=0, zorder=0)
             for node in phy.traverse():
                 if node.children:
                     ax.plot([x[node]] * 2, [min(y[c] for c in node.children), max(y[c] for c in node.children)],
-                            color="#C62828" if node in paired_nodes else "#202020", linewidth=0.7)
+                            color="#C62828" if node in paired_nodes else "#0072B2" if node in expanded_nodes else "#202020", linewidth=0.7)
                 for child in node.children:
                     ax.plot([x[node], x[child]], [y[child]] * 2,
-                            color="#C62828" if child in paired_edges else "#202020", linewidth=0.7)
+                            color="#C62828" if child in paired_edges else "#0072B2" if child in expanded_edges else "#202020", linewidth=0.7)
             for node in tips:
                 row = rows[node.name]
                 ax.plot([x[node] + 3, name_x - 4], [y[node]] * 2, color="#BBBBBB",
@@ -163,8 +181,12 @@ def plot(tree, metadata, summary, outdir, samples=None):
                       ncol=len(states), frameon=False, borderaxespad=0,
                       handlelength=0.8, handletextpad=0.5, columnspacing=1.5)
             if clades:
-                ax.add_artist(Legend(ax, [Line2D([], [], color="#C62828", linewidth=0.7)],
-                                     ["Contrast pair clade"], loc="upper left",
+                handles = [Line2D([], [], color="#C62828", linewidth=0.7)]
+                names = ["Contrast pair clade"]
+                if expanded_roots:
+                    handles.append(Line2D([], [], color="#0072B2", linewidth=0.7))
+                    names.append("Expanded pair clade")
+                ax.add_artist(Legend(ax, handles, names, loc="upper left",
                                      bbox_to_anchor=(margin, height - margin - 32),
                                      bbox_transform=ax.transData, frameon=False, borderaxespad=0,
                                      handlelength=1.2, handletextpad=0.6))
@@ -188,4 +210,5 @@ if __name__ == "__main__":
     for name in ["tree", "metadata", "summary", "outdir"]:
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--samples", help="Sample manifest with explicit scientific_name and run columns")
+    parser.add_argument("--expanded", action="store_true", help="Draw separate expanded-pair clade figures")
     plot(**vars(parser.parse_args()))

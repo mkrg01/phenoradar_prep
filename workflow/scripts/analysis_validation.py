@@ -365,6 +365,10 @@ def validate(source, exclusions=(), trait="C4"):
             raise ValueError("consumer metadata species differ from samples")
     for pairs in inventory["contrasts"]:
         with_pairs(metadata, pairs, trait)
+        summary = json.loads((pairs.parent / "summary.json").read_text())
+        if "expanded_pair_policy" in summary:
+            from expanded_pair_clades import validate_result
+            validate_result(pairs.parent, trait)
     artifacts, orthogroups = inventory["artifacts"], set()
     if SEQUENCE_EXPRESSION in artifacts:
         validate_expression(artifacts[SEQUENCE_EXPRESSION], runs, "sequence_id", "tpm",

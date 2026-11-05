@@ -15,7 +15,8 @@ def fields(trait="C4"):
     if (not isinstance(trait, str) or not trait.strip() or trait != trait.strip()
             or any(c in trait for c in "\t\r\n")
             or trait in {"species", "contrast_pair_id", *TAXONOMY_RANKS}
-            or trait.startswith("contrast_pair_id_")):
+            or trait.startswith("contrast_pair_id_")
+            or trait == "expanded_pair_clade_id" or trait.startswith("expanded_pair_clade_id_")):
         raise ValueError("trait must name a non-reserved output column")
     return ["species", trait, "contrast_pair_id", *TAXONOMY_RANKS]
 
@@ -96,6 +97,8 @@ def with_pairs(rows, pairs, trait="C4"):
     by_species = {row["species"]: row for row in result}
     for row in result:
         row["contrast_pair_id"] = ""
+        if "expanded_pair_clade_id" in row:
+            row["expanded_pair_clade_id"] = ""
     seen = set()
     for pair in _table(pairs, ["species", trait, "contrast_pair_id"]):
         name = _species(pair["species"])
@@ -108,6 +111,13 @@ def with_pairs(rows, pairs, trait="C4"):
         if _trait(pair[trait], name) != row[trait]:
             raise ValueError("contrast trait differs from base metadata: " + name)
         row["contrast_pair_id"] = pair["contrast_pair_id"].strip()
+        if "expanded_pair_clade_id" in pair:
+            expanded = pair["expanded_pair_clade_id"].strip()
+            if row["contrast_pair_id"] and expanded != row["contrast_pair_id"]:
+                raise ValueError("expanded clade differs from its anchoring pair: " + name)
+            if expanded and not row[trait]:
+                raise ValueError("missing-trait species has an expanded pair clade: " + name)
+            row["expanded_pair_clade_id"] = expanded
     return result
 
 

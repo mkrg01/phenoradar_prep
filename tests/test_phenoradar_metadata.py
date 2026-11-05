@@ -138,7 +138,8 @@ def test_bad_pair_merges_are_rejected(inputs, tmp_path, damage, message):
         with_pairs(rows, pairs)
 
 
-@pytest.mark.parametrize("trait", ["species", *TAXONOMY_RANKS, "contrast_pair_id", "contrast_pair_id_all", "", " C4", "C4\n"])
+@pytest.mark.parametrize("trait", ["species", *TAXONOMY_RANKS, "contrast_pair_id", "contrast_pair_id_all",
+                                   "expanded_pair_clade_id", "expanded_pair_clade_id_representatives", "", " C4", "C4\n"])
 def test_trait_column_cannot_conflict_with_output(trait):
     with pytest.raises(ValueError, match="non-reserved output column"):
         fields(trait)

@@ -2,6 +2,10 @@
 
 [Documentation](index.md) · [PhenoRadar inputs](phenoradar_inputs.md)
 
+Enabled contrast branches also export `expanded_pair_clade_id`, per-clade counts
+in `expanded_pair_clades.tsv`, and separate `expanded_pair_tree{,_id}.{pdf,svg}`
+figures. See [expanded pair clades](contrast_pairs.md#expanded-pair-clades).
+
 ## Directory layout
 
 | Path | Contents |

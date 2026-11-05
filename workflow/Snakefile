@@ -138,7 +138,9 @@ CONTRAST = f"{REPRESENTATIVES}/contrast"
 ROOTING = f"{OUT}/{ROOTING_REL}"
 CONTRAST_OUTPUTS = [
     "contrast_pairs.tsv", "species_metadata.tsv", "summary.json", "summary_tree.nwk",
-    "summary_tree.pdf", "summary_tree.svg", "summary_tree_id.pdf", "summary_tree_id.svg", "contrastive.nwk"]
+    "summary_tree.pdf", "summary_tree.svg", "summary_tree_id.pdf", "summary_tree_id.svg", "contrastive.nwk",
+    "expanded_pair_clades.tsv", "expanded_pair_tree.pdf", "expanded_pair_tree.svg",
+    "expanded_pair_tree_id.pdf", "expanded_pair_tree_id.svg"]
 CONSUMER_METADATA_FINAL = ([f"{OUT}/filtered"] if EXCLUDE_SPECIES else
                            [f"{OUT}/{CONSUMER_METADATA}", f"{OUT}/{Path(CONSUMER_METADATA).with_suffix('.json')}"])
 

@@ -300,7 +300,7 @@ def test_missing_id_figure_runs_only_plot_rule_on_frozen_inputs(molecular_snapsh
         "trees": ["all"], "contrast_pairs": {"enabled": True}}}))
     environment = command_environment({"python": sys.executable})
     argv = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(cfg),
-            "--cores", "1", "--allowed-rules", "contrast_pairs", "plot_contrast_tree", "--", "contrast_pairs"]
+            "--cores", "1", "--allowed-rules", "contrast_pairs", "plot_contrast_tree", "plot_expanded_pair_tree", "--", "contrast_pairs"]
 
     def run():
         process = subprocess.run(argv, cwd=workflow_project, env=environment, text=True,
@@ -310,7 +310,7 @@ def test_missing_id_figure_runs_only_plot_rule_on_frozen_inputs(molecular_snapsh
 
     run()
     out = target / "phylogeny/all/contrast"
-    for stem in ["summary_tree", "summary_tree_id"]:
+    for stem in ["summary_tree", "summary_tree_id", "expanded_pair_tree", "expanded_pair_tree_id"]:
         for ext in ["pdf", "svg"]:
             assert (out / f"{stem}.{ext}").is_file()
     assert "run = R1, replicate_A" in (out / "summary_tree_id.svg").read_text()
@@ -318,4 +318,7 @@ def test_missing_id_figure_runs_only_plot_rule_on_frozen_inputs(molecular_snapsh
     (out / "summary_tree_id.pdf").unlink()
     assert "plot_contrast_tree" in run()
     assert (out / "summary_tree_id.pdf").is_file()
+    (out / "expanded_pair_tree_id.svg").unlink()
+    assert "plot_expanded_pair_tree" in run()
+    assert (out / "expanded_pair_tree_id.svg").is_file()
     assert {path: state(target)[path] for path in before} == before

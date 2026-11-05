@@ -30,6 +30,8 @@ Paths below are relative to the analysis directory.
 `all` creates `metadata/species_metadata.tsv` after the configured contrast
 branches finish. It includes `species`, the trait, `contrast_pair_id`, and the
 available `kingdom`, `phylum`, `class`, `order`, `family`, and `genus` names.
+It also includes nullable `expanded_pair_clade_id` for the maximal clades
+anchored by those pairs; original pair IDs are preserved.
 Unrecorded ranks remain blank. `species_metadata.json` records the source files
 and checksums.
 
@@ -39,6 +41,28 @@ branches, IDs are kept in separate columns such as `contrast_pair_id_all` and
 `contrast_pair_id_representatives`; `contrast_pair_id` stays blank. Choose the
 desired column using PhenoRadar's `data.contrast_pair_col`. With contrasts
 disabled, pair IDs remain blank; saved files from earlier runs are ignored.
+Expanded IDs follow the same policy: `expanded_pair_clade_id_all` and
+`expanded_pair_clade_id_representatives` when multiple branches are configured,
+with the unsuffixed column blank. With contrasts disabled, expanded IDs are blank.
+
+For expanded-clade LOGO with current PhenoRadar, select the same expanded column
+for both settings so labeled samples without an assignment enter `external_test`:
+
+```yaml
+data:
+  contrast_pair_col: expanded_pair_clade_id
+split:
+  group_col: expanded_pair_clade_id
+  outer_cv_strategy: logo
+```
+
+This also uses expanded groups for any `pair_aware` feature ranking. To retain
+original pairs for ranking while splitting by expanded clades, current
+PhenoRadar requires explicit handling of labeled samples without a split group;
+changing only `split.group_col` on the full cohort produces a missing-group
+error. The default one-sample-per-label-per-group sampling increases the choice
+of species, not the size of each sampled training set. See
+[expanded-clade definitions and saved-result exports](contrast_pairs.md#expanded-pair-clades).
 
 Optional files exist only after their branch has completed. QC, representative
 selection, and provenance stay beside the results; they are not extra expression
