@@ -26,7 +26,7 @@ def test_invalid_or_unlimited_budgets_fail_before_pull(cpus, memory, env):
 def runtime(tmp_path, monkeypatch):
     config = tmp_path / 'site.conf'
     config.write_text('allow setuid = no\nmksquashfs procs = 0\n# mksquashfs mem = 1G\n')
-    state = {'suid': '0', 'fail': False, 'inspections': [], 'pulls': []}
+    state = {'suid': '0', 'fail': False, 'inspections': [], 'pulls': [], 'environments': []}
     def output(command, **kwargs):
         if command[1:] == ['buildcfg']:
             return f'APPTAINER_CONF_FILE={config}\nAPPTAINER_SUID_INSTALL={state["suid"]}\n'
@@ -39,6 +39,9 @@ def runtime(tmp_path, monkeypatch):
         env = kwargs['env']
         assert env['APPTAINER_CONFIG_FILE'] == env['SINGULARITY_CONFIG_FILE']
         assert Path(env['APPTAINER_TMPDIR']).is_dir()
+        state['environments'].append(dict(env))
+        Path(env['APPTAINER_CACHEDIR']).mkdir(parents=True, exist_ok=True)
+        (Path(env['APPTAINER_CACHEDIR']) / 'layer').write_bytes(b'OCI download')
         state['pulls'].append(Path(env['APPTAINER_CONFIG_FILE']).read_text())
         Path(command[-2]).write_bytes(b'partial' if state['fail'] else b'complete SIF')
         if state['fail']:
@@ -96,3 +99,35 @@ def test_setuid_runtime_without_site_caps_stops_before_unbounded_pull(tmp_path, 
     with pytest.raises(ValueError, match='administrator mksquashfs'):
         module.pull_image('apptainer', 'docker://release', tmp_path / 'image.sif', env={})
     assert not state['pulls']
+
+
+@pytest.mark.parametrize('fail', [False, True])
+def test_image_expansion_and_default_layer_cache_stay_in_owned_task_scratch(tmp_path, runtime, fail):
+    _, state = runtime
+    state['fail'] = fail
+    local = tmp_path / 'node'; local.mkdir()
+    sentinel = local / 'other-job'; sentinel.write_text('keep')
+    image = tmp_path / 'shared/image.sif'
+    supplied = {'PHENORADAR_TASK_SCRATCH': str(local)}
+    try:
+        module.pull_image('apptainer', 'docker://release', image, env=supplied)
+    except subprocess.CalledProcessError:
+        assert fail
+    env = state['environments'][0]
+    assert Path(env['APPTAINER_TMPDIR']).is_relative_to(local)
+    assert Path(env['APPTAINER_CACHEDIR']).is_relative_to(local)
+    assert env['APPTAINER_CACHEDIR'] == env['SINGULARITY_CACHEDIR']
+    assert list(local.iterdir()) == [sentinel]
+    assert supplied == {'PHENORADAR_TASK_SCRATCH': str(local)}
+    assert image.exists() is not fail
+
+
+def test_explicit_layer_cache_is_preserved(tmp_path, runtime):
+    _, state = runtime
+    local, cache = tmp_path / 'node', tmp_path / 'custom-cache'
+    local.mkdir(); cache.mkdir(); (cache / 'keep').write_text('caller owned')
+    module.pull_image('apptainer', 'docker://release', tmp_path / 'image.sif',
+                      env={'TMPDIR': str(local), 'APPTAINER_CACHEDIR': str(cache)})
+    assert state['environments'][0]['APPTAINER_CACHEDIR'] == str(cache)
+    assert (cache / 'keep').read_text() == 'caller owned' and (cache / 'layer').exists()
+    assert not list(local.iterdir())

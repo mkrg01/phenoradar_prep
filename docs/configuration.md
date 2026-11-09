@@ -117,6 +117,10 @@ Restart products remain on shared storage. Keeping intermediates forces project
 scratch and retains it. Interrupted jobs killed without a cleanup opportunity can
 leave scratch directories; their `owner.json` identifies the run.
 
+Image pulls also use the supplied task scratch or temporary directory for unpacking
+and disposable OCI layers. Only the completed SIF is published to the image cache.
+Explicit `APPTAINER_CACHEDIR`/`SINGULARITY_CACHEDIR` locations remain caller-owned.
+
 Storage ceilings cover the repository, including other builds and shared caches,
 but exclude external files and other group members' directories. New jobs refuse
 to start at 85% of a ceiling; active jobs stop at an observed 95%. Periodic

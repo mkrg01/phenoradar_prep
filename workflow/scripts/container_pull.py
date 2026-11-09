@@ -1,5 +1,6 @@
 """Pull SIF images with bounded compression and publish only complete images."""
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -83,15 +84,26 @@ def pull_image(runtime, uri, destination, *, cpus=1, memory_mb=16000, architectu
         if destination.exists():
             inspect(runtime, destination, env)
             return destination
-        with tempfile.TemporaryDirectory(prefix='.container-', dir=destination.parent) as temporary:
-            staging = Path(temporary)
+        with ExitStack() as cleanup:
+            staging = Path(cleanup.enter_context(tempfile.TemporaryDirectory(prefix='.container-', dir=destination.parent)))
             config, cpus, memory = compression_config(runtime, env, staging / 'runtime.conf', cpus, memory)
-            scratch = staging / 'tmp'
-            scratch.mkdir()
+            parent = (env.get('PHENORADAR_TASK_SCRATCH') or env.get('APPTAINER_TMPDIR')
+                      or env.get('SINGULARITY_TMPDIR') or env.get('TMPDIR'))
+            if parent:
+                parent = Path(parent)
+                if not parent.is_absolute() or not parent.is_dir():
+                    raise ValueError('container temporary directory must exist and be absolute')
+                scratch = Path(cleanup.enter_context(tempfile.TemporaryDirectory(prefix='phenoradar-image-', dir=parent)))
+            else:
+                scratch = staging / 'work'
+                scratch.mkdir()
+            (scratch / 'tmp').mkdir()
+            (scratch / 'oci-cache').mkdir()
             for prefix in ('APPTAINER', 'SINGULARITY'):
                 env[prefix + '_CONFIG_FILE'] = config
-                env[prefix + '_TMPDIR'] = str(scratch)
-            env['TMPDIR'] = str(scratch)
+                env[prefix + '_TMPDIR'] = str(scratch / 'tmp')
+                env.setdefault(prefix + '_CACHEDIR', str(scratch / 'oci-cache'))
+            env['TMPDIR'] = str(scratch / 'tmp')
             image = staging / 'image.sif'
             command = [runtime, 'pull']
             if architecture:
