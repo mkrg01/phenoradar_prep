@@ -4,7 +4,7 @@
 
 ## Installation and normal execution
 
-Use Linux x86-64/Bash with Conda, Slurm, and Apptainer/Singularity. Compute nodes
+Use Linux x86-64/Bash with Conda, Slurm or AGE, and Apptainer/Singularity. Compute nodes
 need `snakemake` and `singularity` on `PATH`; Apptainer must provide its
 `singularity` compatibility command.
 
@@ -15,6 +15,9 @@ each session:
 conda env create -n phenoradar_prep -f environment.yaml
 conda activate phenoradar_prep
 ```
+
+For an existing installation, run `conda env update -n phenoradar_prep -f
+environment.yaml` to add the AGE executor dependency.
 
 The launchers use the active environment and do not activate it automatically.
 Analysis tools run inside the workflow container. Use a published release and
@@ -38,6 +41,31 @@ installation must already have sufficiently strict administrator
 `mksquashfs procs` and `mksquashfs mem` limits. System settings are never edited.
 
 Continue with [building a database and running analyses](datasets.md).
+
+The same launchers and configs work with both schedulers. `execution.scheduler:
+auto` first checks the current allocation, then the available client commands
+(`sbatch/squeue/sacct` or `qsub/qstat/qacct`). `run_pipeline.sh` also detects the
+scheduler; explicit `--cores` runs locally. Inside an allocation it uses that
+allocation unless called with `--cluster` by a build/analysis controller.
+
+AGE discovers a single-node parallel environment and memory resource through
+`qconf`. If detection is ambiguous, set `execution.scheduler: slurm` or `age`
+(or `PHENORADAR_SCHEDULER`). Site resource overrides belong in the same config:
+
+```yaml
+execution:
+  scheduler: auto
+  age:
+    parallel_environment: def_slot
+    memory_resource: s_vmem
+```
+
+Those AGE overrides are normally unnecessary on HGC. Optional `age.queue` and
+`age.extra_resources` select site resources. Job memory is a **total** request;
+AGE converts it to per-slot memory. All slots must be on one node. AGE worker
+completion requires `qacct`; disappearance from `qstat` does not imply success.
+An ambiguous submission is recorded and blocks retry until reconciled, under
+`jobs/` for controllers/arrays or `.snakemake/cluster_submissions/` for workers.
 
 Slurm workers use greedy scheduling. A serialized `sbatch` gate limits actual
 submissions to one per two seconds; the controller disables Snakemake's duplicate
@@ -140,10 +168,11 @@ for the complete per-sample native workflow and database publication.
 
 ## Resource budgets
 
-Edit `slurm` in the relevant build or analysis config:
+Edit `execution` in the relevant build or analysis config:
 
 | Setting | Controls |
 | --- | --- |
+| `scheduler` | `auto` (default), `slurm`, or `age` |
 | `partition` | Slurm partition; `null` uses the cluster default |
 | `total_limits.jobs` | Running array tasks or queued/running Snakemake workers; excludes the controller |
 | `total_limits.cpus`, `total_limits.mem_gb` | Total requested CPUs/memory for one build or analysis, including its controller |
@@ -153,13 +182,14 @@ A `null` total limit adds no workflow cap. Limits apply independently to each
 run and measure requested allocations, not actual usage. Cluster limits still
 apply.
 
-The supplied configs default to `total_limits.jobs: null`. New analyses keep
+The generic configs default to `total_limits.jobs: null`; the angiosperm build
+caps workers at four. New analyses keep
 finite CPU/memory budgets (64 CPUs/256 GB by default), so worker concurrency
 follows each job's allocation rather than a fixed worker count. Prepared analyses
 keep their saved settings; use resource overrides to change a later submission.
 
 ```yaml
-slurm:
+execution:
   total_limits:
     jobs: 64
     cpus: null
@@ -178,18 +208,18 @@ fewer resources.
 The supplied config requests 4 CPUs, 128 GB, and 16 days per sample; the allocation
 remains reserved throughout processing.
 
-Samples run as array tasks, split into sequential batches to fit
-[Slurm's array limits](https://slurm.schedmd.com/job_array.html) and the workflow
-budget. Preparation must read these limits through `scontrol show config` before
+Samples run as array tasks, split into sequential batches to fit the scheduler's
+array limits and the workflow budget. Preparation reads these limits through
+`scontrol show config` (Slurm) or `qconf -sconf` (AGE) before
 submitting arrays. Failed samples do not block other samples; database publication
 waits for all of them to succeed.
 
-`per_job_resources.controller` sizes Slurm preparation and the controllers
+`per_job_resources.controller` sizes preparation and the controllers
 that manage mapping and analysis jobs. The default build controller requests
 four CPUs. Checksum verification uses up to four threads, limited to allocated
 CPUs.
 
-OG expression aggregation processes up to 50 runs per Slurm job. Set
+OG expression aggregation processes up to 50 runs per job. Set
 `per_job_resources.aggregate_tpm` for each batch (default: one CPU and 2 GB).
 Logs are named `orthogroups/expression/batch_*.log`; retries reuse completed runs.
 
@@ -201,7 +231,8 @@ override it.
 Resource overrides take precedence over rule defaults. Enable optional
 branches in the analysis settings.
 
-Memory uses positive integer GB (`mem_gb: 128` becomes `128000` MB). Quote Slurm
+Memory uses positive integer GB (`mem_gb: 128` becomes `128000` MB). Both backends
+accept the same quoted
 walltimes, such as `"1-00:00:00"` for one day or `"02:00:00"` for two hours.
 Time limits apply to each job, including the controller.
 
@@ -212,15 +243,17 @@ To change resources for an existing run:
 ./run_analysis.sh submit --analysis results/leaf/downstream/carnivory --resources config/analysis.yaml
 ```
 
-Only the supplied `slurm` settings change; scientific settings stay frozen.
+Only the supplied `execution` settings change; scientific settings stay frozen.
+Existing configs and saved builds using `slurm` remain supported; do not specify
+both `execution` and `slurm` in one file.
 Partial resource files may contain just the changed limits or job entries.
 
-GeneGalleon derives its tool limits from the actual Slurm allocation. Worker logs
+GeneGalleon derives its tool limits from the actual allocation. Worker logs
 show the allocation and tool budgets; retry resource overrides also change the
 assembler's limits.
 
 ## Re-running and recovery
 
-Use the run's `status` command, `squeue`, and `jobs/logs/` to inspect progress.
+Use the run's `status` command, `squeue`/`qstat`, and `jobs/logs/` to inspect progress.
 See [failure recovery](datasets.md#failure-and-recovery-behavior) for retry commands
 and [database reuse](datasets.md#reusing-completed-databases) for new builds.

@@ -116,10 +116,34 @@ def test_mount_preserves_other_mounts_and_quotes_paths(container):
     busco.mount_environment(env, {'dataset': '/shared/path, with spaces'})
     mounts = list(csv.reader(env['APPTAINER_MOUNT'].splitlines()))
     assert len(mounts) == 3
+    assert {len(row) for row in mounts} == {4}
     assert mounts[-1] == ['type=bind', 'src=/shared/path, with spaces', 'dst=' + busco.DESTINATION, 'ro']
     assert 'SINGULARITY_MOUNT' not in env
     with pytest.raises(ValueError, match='overlaps'):
         busco.mount_environment({'APPTAINER_MOUNT': 'type=bind,src=/a,dst=/usr/local'}, {'dataset': '/b'})
+
+
+@pytest.mark.parametrize('inherited', ['', 'type=bind,"src=/input,tree",dst=/input,ro,image-src=/'])
+def test_scratch_and_shared_reference_mounts_form_valid_csv(tmp_path, monkeypatch, container, inherited):
+    import storage_runtime
+    import taxonomy_reference
+    monkeypatch.setenv('APPTAINER_MOUNT', inherited)
+    monkeypatch.delenv('SINGULARITY_MOUNT', raising=False)
+    env = storage_runtime.environment(tmp_path, storage_runtime.settings({}))
+    busco.mount_environment(env, {'dataset': '/shared/busco,tree'})
+    taxonomy_reference.mount_environment(env, {'dataset': '/shared/taxonomy'})
+    rows = list(csv.reader(env['APPTAINER_MOUNT'].splitlines()))
+    # This is the external Go encoding/csv requirement that caused the real
+    # runtime failure, before any reference or RNA-seq data could be read.
+    assert len({len(row) for row in rows}) == 1
+    parsed = [dict(field.split('=', 1) if '=' in field else (field, '') for field in row) for row in rows]
+    scratch = next(row for row in parsed if row['src'] == str(tmp_path))
+    assert 'ro' not in scratch and 'readonly' not in scratch
+    assert all(row['type'] == 'bind' for row in parsed)
+    assert all('ro' in row for row in parsed if row['src'].startswith('/shared/'))
+    if inherited:
+        original = next(row for row in parsed if row['src'] == '/input,tree')
+        assert original['image-src'] == '/' and 'ro' in original
 
 
 @pytest.mark.parametrize('deferred', [False, True])

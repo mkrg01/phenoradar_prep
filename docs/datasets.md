@@ -84,7 +84,7 @@ Use the existing commands for these three tasks:
 
 | Command | Purpose |
 | --- | --- |
-| `status --analysis PATH` | Lightweight execution state, phase progress, Slurm waiting reason, and log paths |
+| `status --analysis PATH` | Lightweight execution state, phase progress, scheduler waiting reason, and log paths |
 | `status --analysis PATH --verify` | Also verify frozen inputs and recorded completed outputs; this can read large files |
 | `submit --analysis PATH --dry-run` | Check resources and duplicate jobs, then preview pending/reusable work and rerun reasons |
 

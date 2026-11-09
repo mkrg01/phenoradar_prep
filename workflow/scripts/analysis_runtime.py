@@ -23,10 +23,11 @@ def read_state(path):
 
 class RunState:
     def __init__(self, analysis, target, execution=None):
+        from scheduler import current_id
         self.path = Path(analysis) / 'jobs/run_state.json'
         self.token = uuid.uuid4().hex
         self.data = {'schema_version': 1, 'run_token': self.token, 'target': target,
-                     'controller_id': os.environ.get('SLURM_JOB_ID'),
+                     'controller_id': current_id(),
                      'execution': str(Path(execution).resolve()) if execution else None,
                      'started_at': now(), 'phase': 'starting'}
 
@@ -52,14 +53,15 @@ class ProgressHandler(logging.Handler):
         try:
             event = getattr(record, 'event', None)
             event = getattr(event, 'value', event)
-            submitted = re.search(r'has been submitted with SLURM jobid (\d+)', record.getMessage())
+            submitted = re.search(r"(?:has been submitted with SLURM jobid |with external jobid ')(\d+)", record.getMessage())
             progress = event == 'progress' and hasattr(record, 'done') and hasattr(record, 'total')
             if not (progress or submitted or record.levelno >= logging.ERROR):
                 return
             state = read_state(self.path)
             if state.get('run_token') != self.token:
                 return
-            if state.get('controller_id') != os.environ.get('SLURM_JOB_ID'):
+            from scheduler import current_id
+            if state.get('controller_id') != current_id():
                 return  # Worker Snakefiles must not overwrite controller observations.
             if progress:
                 if time.monotonic() - self.last_write < 5 and record.done < record.total:

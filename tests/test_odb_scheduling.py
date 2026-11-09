@@ -73,7 +73,7 @@ def test_hundred_species_chunks_and_cpu_dependent_batches(
             with gzip.open(path, 'wt') as handle:
                 handle.write(f">{name}_g1\nMK\n")
             path.with_suffix("").with_suffix(".json").write_text("{}\n")
-    targets = [str((mapping / "chunks" / row["chunk"] / f'{row["chunk"]}.og.annotations')
+    targets = [str((mapping / "chunks" / row["chunk"] / f'{row["chunk"]}.og.annotations.gz')
                    .relative_to(workflow_project)) for row in chunks]
     # An 8-thread override is capped by the two available CPUs; batch size follows the cap.
     dry = execute(targets, options=("--dry-run",), threads=8)
@@ -107,7 +107,7 @@ def test_translation_rules_use_individual_slurm_jobs(tiny_inputs, workflow_proje
     targets = [str((workflow_project/'results/grouped/proteins'/f'{name}_protein.fa.gz').resolve())
                for name in ('Alpha_plant','Beta_sp_X')]
     from phase_config import write_profile
-    slurm = yaml.safe_load((ROOT/'config/build.yaml').read_text())['slurm']
+    slurm = yaml.safe_load((ROOT/'config/build.yaml').read_text())['execution']
     slurm['total_limits'].update(limits)
     profile = write_profile(tmp_path/'profile', slurm)
     result = subprocess.run([snakemake, '--snakefile', str(ROOT/'workflow/Snakefile'),

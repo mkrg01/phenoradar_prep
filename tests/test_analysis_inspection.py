@@ -49,7 +49,7 @@ rule publish:
     shell: "echo ok > {output}"
 ''')
     (root / 'input').write_text('sequence\n')
-    public = yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['slurm']
+    public = yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['execution']
     return root, {'root': str(root), 'pipeline': {'output_root': 'results/test'}}, merge_slurm(public, {}, build=False)
 
 

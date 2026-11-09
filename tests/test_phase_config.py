@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_analysis_profile_requests_32gb_for_tpm_merge(tmp_path):
-    slurm = yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['slurm']
+    slurm = yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['execution']
     settings = execution_settings(slurm, None, build=False)
     profile = write_profile(tmp_path / 'profile', settings)
     actual = yaml.safe_load((profile / 'config.yaml').read_text())
@@ -22,7 +22,7 @@ def test_analysis_profile_requests_32gb_for_tpm_merge(tmp_path):
 
 
 def test_default_analysis_profile_parallelizes_single_cpu_busco_within_budgets(tmp_path):
-    public = yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['slurm']
+    public = yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['execution']
     assert public['total_limits']['jobs'] is None
     settings = execution_settings(public, build=False)
     profile = yaml.safe_load((write_profile(tmp_path / 'profile', settings) / 'config.yaml').read_text())
@@ -55,7 +55,7 @@ def test_invalid_or_unquoted_time_is_rejected(duration):
 @pytest.mark.parametrize('build', [True, False])
 def test_time_override_converts_without_changing_saved_resources(tmp_path, build):
     phase = 'build' if build else 'analysis'
-    slurm = yaml.safe_load((ROOT / f'config/{phase}.yaml').read_text())['slurm']
+    slurm = yaml.safe_load((ROOT / f'config/{phase}.yaml').read_text())['execution']
     original = yaml.safe_dump(slurm)
     override = tmp_path / 'resources.yaml'
     override.write_text(yaml.safe_dump({'slurm': {
@@ -77,7 +77,7 @@ def test_time_override_converts_without_changing_saved_resources(tmp_path, build
 
 @pytest.mark.parametrize('section', ['stages', 'default_resources', 'rules'])
 def test_all_time_fields_reject_yaml_numeric_values(section):
-    slurm = validate_slurm(yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['slurm'], build=False)
+    slurm = validate_slurm(yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['execution'], build=False)
     # YAML 1.1 can silently turn an unquoted 12:00:00 into the integer 43200.
     resource = yaml.safe_load('time: 12:00:00')
     if section == 'stages':
@@ -92,7 +92,7 @@ def test_all_time_fields_reject_yaml_numeric_values(section):
 
 @pytest.fixture
 def public_slurm():
-    return yaml.safe_load((ROOT / 'config/build.yaml').read_text())['slurm']
+    return yaml.safe_load((ROOT / 'config/build.yaml').read_text())['execution']
 
 
 def test_build_config_has_no_array_size_setting(public_slurm):
@@ -183,7 +183,9 @@ def test_single_array_job_must_fit_budget(public_slurm, key, value):
 def test_worker_profile_reserves_controller_and_preserves_requests(public_slurm, tmp_path):
     slurm = merge_slurm(public_slurm, {'total_limits': {'cpus': 33, 'mem_gb': 512}})
     profile = yaml.safe_load((write_profile(tmp_path / 'profile', slurm) / 'config.yaml').read_text())
-    assert profile['resources'] == {'workflow_cpus': 29, 'workflow_mem_mb': 504000}
+    controller = slurm['stages']['controller']
+    assert profile['resources'] == {'workflow_cpus': 33 - controller['cpus'],
+                                    'workflow_mem_mb': (512 - controller['mem_gb']) * 1000}
     assert profile['set-resource-scopes'] == {'workflow_cpus': 'global', 'workflow_mem_mb': 'global'}
     assert profile['set-threads']['odb_map'] == 16
     assert profile['set-resources']['odb_map']['mem_mb'] == 128000
@@ -217,7 +219,7 @@ def test_ambiguous_and_malformed_resources_rejected(public_slurm):
 
 @pytest.mark.parametrize('phase', ['build', 'analysis'])
 def test_null_job_limit_is_explicitly_unlimited(phase, tmp_path):
-    public = yaml.safe_load((ROOT / f'config/{phase}.yaml').read_text())['slurm']
+    public = yaml.safe_load((ROOT / f'config/{phase}.yaml').read_text())['execution']
     public['total_limits']['jobs'] = None
     slurm = validate_slurm(public, build=phase == 'build')
     assert slurm['jobs'] is None

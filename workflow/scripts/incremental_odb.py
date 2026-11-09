@@ -23,7 +23,7 @@ def load_snapshot(root, version, node):
     if record["schema_version"] == 2:
         from mapping_tables import load_tables
         return load_tables(root / "snapshot.json", verify_files=False), proteins
-    if record["annotations"]["path"] != "annotations.tsv":
+    if record["annotations"]["path"] not in {"annotations.tsv", "annotations.tsv.gz"}:
         raise ValueError(f"snapshot must contain annotations.tsv: {root}")
     return record, proteins
 
@@ -63,7 +63,7 @@ def plan(samples, protein_dir, outdir, cache_dir, reference=None,
                 from dataset_assets import verify
                 verify(relative_file(root, record["tables"][name]["table"]))
         else:
-            checked(dict(record["annotations"], path=str(root / "annotations.tsv")), cache_dir)
+            checked(relative_file(root, record['annotations']), cache_dir)
         index = len(sources)
         assigned.update({s: index for s in members})
         sources.append({"kind": "existing", "root": str(root.resolve()), "species": members,
@@ -119,16 +119,20 @@ def publish(samples, chunk_dir, protein_dir, cache_dir, label, version="v12", no
         fcntl.flock(lock, fcntl.LOCK_EX)
         if destination.exists():
             saved, _ = load_snapshot(destination, version, node)
-            if sha256(destination / "annotations.tsv") != saved["annotations"]["sha256"]:
+            if sha256(destination / saved['annotations']['path']) != saved["annotations"]["sha256"]:
                 raise ValueError(f"corrupt existing cache: {destination}")
             return destination
         staging = Path(tempfile.mkdtemp(prefix=".publishing-", dir=base))
         try:
-            shutil.copy2(root / f"{label}.og.annotations", staging / "annotations.tsv")
+            from product_storage import stage_product
+            annotation = next(entry for entry in provenance['results']
+                              if Path(entry['path']).name.removesuffix('.gz') == f'{label}.og.annotations')
+            name = 'annotations.tsv' + ('.gz' if annotation['path'].endswith('.gz') else '')
+            staged = stage_product(annotation, staging / name, final=destination / name)
             shutil.copy2(root / "provenance.json", staging / "mapping_provenance.json")
             record = {"schema_version": 1, "version": version, "node": node,
                       "proteins": proteins, "reference_sha256": identity["reference"]["sha256"],
-                      "annotations": dict(file_record(staging / "annotations.tsv"), path="annotations.tsv"),
+                      "annotations": dict(staged, path=name),
                       "mapping_provenance": dict(file_record(staging / "mapping_provenance.json"), path="mapping_provenance.json")}
             write_json(staging / "snapshot.json", record)
             os.rename(staging, destination)

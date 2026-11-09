@@ -63,6 +63,32 @@ def test_odb_cleanup_preserves_failed_resume_and_published_reuse(odb_job, tmp_pa
     assert not work.exists()
 
 
+def test_odb_node_scratch_and_archived_logs_keep_verified_reuse(odb_job, tmp_path, monkeypatch):
+    import tarfile
+    args, events = odb_job
+    command = Path(args['command'])
+    command.write_text(command.read_text().replace('    result.mkdir(exist_ok=True)',
+        "    result.mkdir(exist_ok=True)\n    (project / 'RunLogs').mkdir(exist_ok=True)\n"
+        "    (project / 'RunLogs/native.log').write_text('native diagnostic')"))
+    local = tmp_path / 'node-scratch'
+    local.mkdir()
+    monkeypatch.setenv('PHENORADAR_TASK_SCRATCH', str(local))
+    monkeypatch.setenv('PHENORADAR_COMPACT_ODB_LOGS', '1')
+    record = run_odb(**args)
+    archive = args['output_dir'] / 'RunLogs.tar.gz'
+    assert archive.is_file() and not (args['output_dir'] / 'RunLogs').exists()
+    with tarfile.open(archive) as packed:
+        assert packed.getnames() and all(name.startswith('RunLogs') for name in packed.getnames())
+    status = json.loads((args['work_dir'] / args['label'] / 'status.json').read_text())
+    assert Path(status['local_work']).is_relative_to(local)
+    assert not Path(status['local_work']).exists()
+    before = events.read_text()
+    assert run_odb(**args) == record and events.read_text() == before
+    archive.write_bytes(b'corrupt')
+    run_odb(**args)
+    assert events.read_text() != before
+
+
 def test_legacy_cleanup_preview_apply_and_active_job_lock(odb_job):
     args, _ = odb_job
     run_odb(**args, keep_intermediates=True)

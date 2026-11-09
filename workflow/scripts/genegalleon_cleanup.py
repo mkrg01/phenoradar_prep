@@ -8,7 +8,7 @@ from common import sha256
 from dataset_assets import stat_identity, verify
 
 
-POLICY_VERSION = 1
+POLICY_VERSION = 2
 DIRECTORIES = (
     'downloads/busco_downloads', 'downloads/ete_taxonomy',
     'output/transcriptome_assembly/assembled_transcripts_with_isoforms',

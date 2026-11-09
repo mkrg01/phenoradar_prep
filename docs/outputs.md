@@ -113,6 +113,26 @@ Keep `run.json`, branch provenance, reference snapshots, and the release's
 
 ## Storage cleanup
 
+New OrthoDB chunks store annotations and hits as lossless `.gz` files. Plain
+historical chunks and annotation caches remain readable; stored-byte and decoded
+content checksums verify compressed results before reuse.
+
+After a database completes, preview `./run_build.sh compact --build results/NAME`.
+Add `--apply` to archive successful native diagnostics and remove empty diagnostic
+directories, and retire unreferenced private ODB derivations. Products, input metadata, native observations, and failed native
+work remain in place. The archive and its checksum inventory are verified before
+source diagnostics retire; interrupted retirement can be retried. Debug retention
+and active or unresolved sample jobs prevent compaction.
+
+With `compact_logs: true`, successful samples compact their diagnostics and
+native digest cache as soon as their products verify, rather than waiting for
+the entire build. A completed database also retires its private ODB partition,
+table-construction, and checksum caches after all published files verify.
+Published snapshots, compressed source annotations, and lock identities remain;
+collection can regenerate these derivations without RNA-seq processing or ODB
+remapping. Legacy receipts without a native wrapper exit remain retained.
+Measurement peaks remain in the JSON receipt even when the bounded trace rotates.
+
 With the default `storage.keep_intermediates: false`, ODB and KofamScan remove
 temporary work after publishing results. GeneGalleon removes scratch after any
 attempt. Once all sample products are registered, cleanup also retires per-sample
@@ -142,6 +162,36 @@ reads and temporary work, use
 [`record --exclude-failed`](../datasets/README.md#abandoning-incomplete-samples).
 For debugging, [retain intermediates](configuration.md#intermediate-storage) when
 preparing the run.
+
+## Storage pilot
+
+Use the normal build command to measure 10–20 samples through quantification,
+ODB mapping, and database publication on either scheduler:
+
+```bash
+./run_build.sh plan --config datasets/angiosperm_leaf/build.yaml --pilot-size 20
+./run_build.sh submit --config datasets/angiosperm_leaf/build.yaml --pilot-size 20
+./run_build.sh status --build results/{printed_pilot_name} --storage --expected-samples 8000
+```
+
+The pilot uses an independent `_pilot` name and latest alias. It disables product
+reuse to measure actual work and preserves the original metadata. Selection spans
+available read-volume ranks (including both extremes), falling back to stable
+accession order when sizes are unavailable. Taxonomy verification must leave at
+least ten eligible samples.
+
+`reports/storage.json` contains retained build/project bytes and inodes, sampled
+shared/scratch/workspace peaks, and the configured budgets. Inodes include
+directories and symlinks; hard links are counted once. Extrapolation is available
+only after database completion has been verified, includes retained native hits,
+logs and caches, and uses `storage.projection_factor` (default 1.3). Per-attempt
+measurements are in `jobs/storage/`.
+
+These are measurements of the pilot, not a guarantee for 8,000 samples. Keep the
+same worker concurrency and ODB chunk size when comparing runs; a 20-sample pilot
+does not exercise a full default 50-sample ODB chunk. Measure larger chunks before
+scaling up. Space used outside the project and by other group members must be
+checked separately.
 
 ## TPM interpretation
 

@@ -13,7 +13,7 @@ from pathlib import Path
 import shutil
 import tempfile
 
-from common import file_record, read_tsv, species_from_gene_id, write_json, existing_product, protein_provenance, content_sha256
+from common import file_record, read_tsv, species_from_gene_id, write_json, existing_product, protein_provenance, content_sha256, text_open
 from product_storage import product_record
 from dataset_assets import SAFE, digest, link_file, record, stage_file, stat_identity, verify
 from translate_cds import fasta_ids
@@ -50,6 +50,11 @@ def checked(entry, cache_dir):
     saved = record(path)
     if saved['sha256'] != entry['sha256']:
         raise ValueError(f'ODB result changed after completion: {path}')
+    if 'content_sha256' in entry:
+        from product_storage import decoded_sha256
+        if decoded_sha256(path) != entry['content_sha256']:
+            raise ValueError(f'ODB decoded result changed after completion: {path}')
+        saved['content_sha256'] = entry['content_sha256']
     write_json(receipt, saved)
     return saved
 
@@ -112,7 +117,7 @@ def read_species(snapshot, species):
 
 def annotation_pairs(path):
     indices = None; saw_empty = False
-    with open(path) as handle:
+    with text_open(path) as handle:
         for number, line in enumerate(handle, 1):
             if not line.strip(): continue
             fields = line.rstrip('\r\n').split('\t')
@@ -135,7 +140,7 @@ def annotation_pairs(path):
 
 def partition(annotation, members, cache_dir):
     """Split each legacy/chunk annotation once, with a bounded file-handle pool."""
-    identity = digest([annotation['sha256'], sorted(members)])
+    identity = digest([content_sha256(annotation), sorted(members)])
     target = Path(cache_dir) / '.partitions' / identity
     with lock(target.with_suffix('.lock')):
         if (target / 'receipt.json').is_file(): return target
@@ -163,13 +168,13 @@ def partition(annotation, members, cache_dir):
 
 
 def species_table(name, odb_name, protein, annotation, parts, cache_dir, version, node, shard=None):
-    identity = digest([name, content_sha256(protein), annotation['sha256'], version, node])
+    identity = digest([name, content_sha256(protein), content_sha256(annotation), version, node])
     target = Path(cache_dir) / '.tables' / identity
     with lock(target.with_suffix('.lock')):
         receipt = target / 'receipt.json'
         if receipt.is_file():
             entry = json.loads(receipt.read_text())
-            if entry['protein_sha256'] != content_sha256(protein) or entry['annotation_sha256'] != annotation['sha256'] or entry['odb_species'] != odb_name:
+            if entry['protein_sha256'] != content_sha256(protein) or entry['annotation_sha256'] != content_sha256(annotation) or entry['odb_species'] != odb_name:
                 raise ValueError('cached species mapping identity differs')
             verify(relative_file(target, entry['table']))
             return dict(entry, table=relative_file(target, entry['table']))
@@ -201,7 +206,7 @@ def species_table(name, odb_name, protein, annotation, parts, cache_dir, version
                      'qc':{'protein_genes':len(genes), 'input_annotation_rows':rows,
                            'unique_gene_og_pairs':unique, 'duplicate_pairs_removed':rows-unique,
                            'ambiguous_genes':sum(len(v)>1 for v in pairs.values())},
-                     'annotation_sha256':annotation['sha256']}
+                     'annotation_sha256':content_sha256(annotation)}
             write_json(staging / 'receipt.json', entry)
             os.rename(staging, target)
         return dict(entry, table=relative_file(target, entry['table']))
@@ -284,14 +289,14 @@ def collect(samples, chunks, chunk_dir, protein_dir, outdir, cache_dir,
                     entries[name] = dict(entry, table=relative_file(root, entry['table']),
                                          reference_sha256=reference_for(snapshot, name))
                 continue
-            annotation = checked(dict(snapshot['annotations'], path=str(root/'annotations.tsv')), cache_dir)
+            annotation = checked(relative_file(root, snapshot['annotations']), cache_dir)
             reference = reference_for(snapshot, chunk['species'][0])
         else:
             root = Path(chunk_dir)/chunk['chunk']; provenance = json.loads((root/'provenance.json').read_text())
             if (provenance['identity']['version'], provenance['identity']['node']) != (version, node):
                 raise ValueError('mapped chunk version/node differs from build')
             for result in provenance['results']: checked(dict(result,path=str(root/Path(result['path']).name)), cache_dir)
-            annotation = next(r for r in provenance['results'] if r['path'].endswith('.og.annotations'))
+            annotation = next(r for r in provenance['results'] if r['path'].removesuffix('.gz').endswith('.og.annotations'))
             annotation = checked(dict(annotation,path=str(root/Path(annotation['path']).name)), cache_dir)
             original = {s:None for s in chunk['species']}
             reference = provenance['identity']['reference']['sha256']

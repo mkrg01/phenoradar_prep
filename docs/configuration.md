@@ -32,7 +32,7 @@ Use a new run for changed scientific conditions; use
 | `busco.cache_dir` | Shared reference directory; default `resources/busco`; `null` disables sharing |
 | `taxonomy.cache_dir` | Shared ETE/NCBI database; default `resources/taxonomy`; `null` disables sharing |
 | `translation.table` | NCBI genetic code; default `1` |
-| `slurm` | [Job resources and total limits](running.md#resource-budgets) |
+| `execution` | [Job resources and total limits](running.md#resource-budgets) |
 
 Resume saved builds with `submit --build PATH`. See
 [naming and previews](datasets.md#saved-settings-and-previews).
@@ -80,7 +80,7 @@ resuming samples; choose a new cache directory for a different snapshot.
 | `exclude_species` | Omit biological species IDs (all their samples) or exact sample IDs |
 | `selection.busco_threshold` | Minimum complete BUSCO fraction per sample; default `0.5` |
 | `inputs.calibrations` | Age bounds when dating uses `calibration_source: file` |
-| `slurm` | Job resources and total limits for this analysis |
+| `execution` | Job resources and total limits for this analysis |
 
 BUSCO lineage, genetic code, and OrthoDB reference are inherited from the build.
 Set unused input paths to `null` and disable branches that require those inputs.
@@ -92,6 +92,61 @@ default, enabling [cleanup](outputs.md#storage-cleanup). GeneGalleon computation
 is removed after successful and failed sample jobs; unfinished samples retain
 their restart data. Completed samples also retire [unneeded work](outputs.md#storage-cleanup).
 Set it to `true` before preparing a run to retain intermediates for debugging.
+
+The following policies apply to both schedulers:
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `storage.scratch_root` | `auto` | Choose `/data1`, node `$TMPDIR`, or `/tmp` on a different filesystem. `env`, `workspace`, or an absolute directory can override it |
+| `storage.allow_shared_scratch` | `true` | Permit the automatic project-scratch fallback; the angiosperm config disables it |
+| `storage.compact_logs` | `true` | Archive ODB RunLogs per chunk while retaining their checksums |
+| `storage.max_bytes`, `storage.max_inodes` | `null` | Optional project-wide allocated-byte and inode ceilings |
+| `storage.interval_seconds` | `60` | Storage inventory interval |
+| `storage.scratch_min_free_bytes` | `0` | Required free bytes when selecting scratch and while running |
+| `storage.scratch_min_free_inodes` | `0` | Required free inodes, checked before starting and at least once per second between inventories |
+| `storage.scratch_max_bytes` | `null` | Per-job scratch ceiling |
+| `storage.scratch_max_inodes` | `null` | Per-job scratch inode ceiling |
+| `storage.scratch_reserve_bytes`, `storage.scratch_reserve_inodes` | `0` | Reserve headroom against other cooperating jobs on the same node/filesystem before starting |
+| `storage.start_fraction`, `storage.stop_fraction` | `0.85`, `0.95` | Refuse new work and stop active work before the configured project ceilings |
+| `storage.series_max_bytes` | `1048576` | Bound each live measurement series; keep one compressed previous window and compress on completion |
+| `storage.task_limits` | `{}` | Override scratch limits/reservations by task or rule name, e.g. `sample` and `odb_map`, on both schedulers |
+| `storage.projection_factor` | `1.3` | Safety factor for pilot extrapolation |
+
+Scratch is selected on each execution node and cleaned after the attempt.
+Restart products remain on shared storage. Keeping intermediates forces project
+scratch and retains it. Interrupted jobs killed without a cleanup opportunity can
+leave scratch directories; their `owner.json` identifies the run.
+
+Storage ceilings cover the repository, including other builds and shared caches,
+but exclude external files and other group members' directories. New jobs refuse
+to start at 85% of a ceiling; active jobs stop at an observed 95%. Periodic
+inventories can miss short peaks, so these checks do not replace filesystem quotas.
+The angiosperm config sets 2.5 TB and 2.5 million inodes on either scheduler.
+
+The angiosperm sample policy reserves 1.2 TB per sample and stops at 1.15 TB;
+ODB jobs reserve 80 GB and stop at 75 GB. These are conservative pilot-based
+admission policies, not measured upper bounds for all samples or 50-sample chunks.
+Reservations count in full against currently free space, so admission is deliberately
+conservative. Locks coordinate this user's cooperating jobs, retain orphan data
+after crashes, and do not reserve space against unrelated applications or users.
+No child starts when admission fails. Adjust the policy for the available nodes
+after a representative pilot; read amounts and scientific conditions remain unchanged.
+
+To retry with a different scratch location or budget, set
+`PHENORADAR_STORAGE_POLICY=/absolute/path/storage-retry.yaml` when submitting.
+The file must contain only `storage:` settings; `task_limits` entries merge by name.
+This changes the operational policy without editing frozen build inputs. Each
+usage receipt records the policy checksum and effective limits. For example:
+
+```yaml
+storage:
+  scratch_root: /path/to/larger/local/scratch
+  task_limits:
+    sample:
+      scratch_reserve_bytes: 1500000000000
+      scratch_max_bytes: 1400000000000
+```
+See [pilot measurements](outputs.md#storage-pilot).
 
 ## Optional analyses and exports
 

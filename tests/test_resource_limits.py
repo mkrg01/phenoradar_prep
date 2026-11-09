@@ -55,7 +55,7 @@ def run_workflow(project, overrides, *, dry_run=False):
     executable = shutil.which('snakemake')
     if not executable: pytest.skip('Snakemake required')
     path, snakefile = project
-    public = yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['slurm']
+    public = yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['execution']
     slurm = merge_slurm(public, overrides, build=False)
     profile = write_profile(path / 'profile', slurm)
     command = [executable, '--snakefile', str(snakefile), '--profile', str(profile)]

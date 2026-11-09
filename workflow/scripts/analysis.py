@@ -25,11 +25,11 @@ from configuration import validate_analysis, validate_keys
 from layout import run_layout
 from dataset import absolute, implementation, inside, load_execution
 from dataset_assets import SAFE, digest, link_file, locked, record, verify
-from phase_config import deep_merge, execution_settings, merge_slurm, read_yaml, validate_slurm, worker_budgets, workflow_jobs, write_profile
+from phase_config import deep_merge, execution_config, execution_settings, merge_slurm, read_yaml, validate_slurm, worker_budgets, workflow_jobs, write_profile
 
 TARGETS = ('all','alignments','kegg','phylogeny','phylogeny_prepare','taxonomy_check',
            'contrast_pairs','phylogeny_calibrations','timetree')
-ANALYSIS_KEYS = {'build','inputs','trait','trait_encoding','selection','alignment','kegg','phylogeny','exclude_species','slurm','storage'}
+ANALYSIS_KEYS = {'build','inputs','trait','trait_encoding','selection','alignment','kegg','phylogeny','exclude_species','slurm','execution','storage'}
 
 
 def settings(root, config, build=None):
@@ -38,7 +38,8 @@ def settings(root, config, build=None):
     if set(override) - ANALYSIS_KEYS: raise ValueError('unknown analysis settings: ' + ', '.join(sorted(set(override) - ANALYSIS_KEYS)))
     base_config = read_yaml(root / 'config/analysis.yaml')
     cfg = deep_merge(base_config, override)
-    cfg['slurm'] = merge_slurm(base_config['slurm'], override.get('slurm', {}), build=False)
+    cfg.pop('execution', None)
+    cfg['slurm'] = merge_slurm(execution_config(base_config), execution_config(override), build=False)
     if 'lineage' in cfg['phylogeny']: raise ValueError('BUSCO lineage belongs to build.yaml')
     if set(cfg['inputs']) - {'species_trait','species_list','calibrations'}: raise ValueError('unknown analysis input')
     source = inside(root, absolute(root, build or cfg['build']))
@@ -190,12 +191,19 @@ def run(path, target='all', execution=None, local=False, cores=1, mem_mb=8000):
                      species={r['species'] for r in manifest['selection'] if r['selected']})
     slurm = load_execution(execution) if execution else manifest['config']['slurm']
     slurm = validate_slurm(slurm, build=False)
-    profile = write_profile(path / 'jobs' / (Path(execution).stem if execution else 'local') / 'profile', slurm)
+    from scheduler import resolve as resolve_scheduler, storage_environment
+    if not local:
+        slurm = resolve_scheduler(slurm)
+    profile = write_profile(path / 'jobs' / (Path(execution).stem if execution else 'local') / 'profile', slurm,
+                            root=root, pipeline=path / 'pipeline.yaml', usage=path / 'jobs/storage')
     command = [str(root/'run_pipeline.sh')]
     if local: command += ['--cores',str(cores),'--resources',f'mem_mb={mem_mb}']
-    else: command += ['--slurm','--profile',str(profile),'--jobs',str(workflow_jobs(slurm))]
+    else: command += ['--cluster','--profile',str(profile),'--jobs',str(workflow_jobs(slurm))]
     command += ['--configfile',str(path/'pipeline.yaml')]
-    pipeline_env = {**os.environ, 'PHENORADAR_ANALYSIS_PATH': str(path)}
+    pipeline_env = {**os.environ, 'PHENORADAR_ANALYSIS_PATH': str(path),
+                    **storage_environment(path / 'pipeline.yaml', root, path / 'jobs/storage')}
+    if not local:
+        pipeline_env['PHENORADAR_SCHEDULER'] = slurm['scheduler']
     pipeline_env.pop('PHENORADAR_FROZEN_IMAGE', None)
     if manifest.get('compatible_container_image'):
         pipeline_env['PHENORADAR_FROZEN_IMAGE'] = manifest['compatible_container_image']
@@ -232,13 +240,20 @@ def run(path, target='all', execution=None, local=False, cores=1, mem_mb=8000):
 def submission_guard(path, manifest):
     from analysis_status import submissions
     ids = []
+    from scheduler import detect, active_ids, worker_guard
+    backend = detect(manifest['config']['slurm'].get('scheduler', 'auto'))
     for receipt, old in submissions(path):
         if old['state'] in {'submitting','unknown'}:
-            raise ValueError(f'unresolved submission in {receipt}; inspect Slurm before retrying')
+            raise ValueError(f'unresolved submission in {receipt}; inspect the scheduler before retrying')
         if old.get('job_id'): ids.append(str(old['job_id']))
     # Also look for workers of an exited controller, using the existing scoped
     # submission records. Unrelated jobs never block this analysis.
     worker_records = Path(manifest['root']) / '.snakemake/slurm_submissions'
+    if backend == 'age':
+        if ids and any(identifier.split('_')[0] in ids for identifier in active_ids('age')):
+            raise ValueError('analysis still has queued/running jobs')
+        worker_guard(manifest['root'], path)
+        return
     if ids or worker_records.exists():
         import pwd
         queued = subprocess.check_output(['squeue','--noheader','--user',pwd.getpwuid(os.getuid()).pw_name,'--format=%i'],
@@ -255,6 +270,8 @@ def preflight(path, target, resources):
     from analysis_validation import check_dependencies
     check_dependencies(manifest['pipeline'], target)
     slurm = execution_settings(manifest['config']['slurm'], resources, build=False)
+    from scheduler import resolve as resolve_scheduler
+    slurm = resolve_scheduler(slurm)
     worker_budgets(slurm)
     submission_guard(path, manifest)
     from analysis_inspection import inspect_workflow
@@ -265,7 +282,7 @@ def preflight(path, target, resources):
 def print_pending(pending, target):
     qualifier = 'currently known ' if pending['partial'] else ''
     print(f"Pending: {pending['workflow_steps']} {qualifier}workflow steps; "
-          f"{pending['worker_jobs']} Slurm worker jobs (controller excluded)")
+          f"{pending['worker_jobs']} worker jobs (controller excluded)")
     for rule, count in sorted(pending['pending'].items()):
         print(f'  {rule}: {count}')
     print('Reusable workflow steps: ' + str(sum(pending['reused'].values())))
@@ -281,6 +298,7 @@ def print_pending(pending, target):
 
 def submit(path, target='all', dry_run=False, resources=None):
     from contextlib import nullcontext
+    from scheduler import batch_command, parse_id, storage_prefix
     path = Path(path).resolve()
     # Preview never creates locks, profiles, scripts, receipts, or cache files.
     # The real submission holds the lock across the same checks and sbatch.
@@ -294,26 +312,25 @@ def submit(path, target='all', dry_run=False, resources=None):
         invocation = [sys.executable,str(Path(manifest['root'])/'workflow/scripts/analysis.py'),'run','--analysis',str(path),
                       '--target',target,'--execution',str(execution)]
         job = slurm['stages']['controller']
-        cmd = ['sbatch','--parsable','--nodes=1','--ntasks=1',f"--cpus-per-task={job['cpus']}",f"--mem={job['mem_gb'] * 1000}M",f"--time={job['time']}",
-               '--chdir='+manifest['root'],'--job-name='+manifest['name'],f'--output={jobs}/logs/{number:04d}_%j.out',f'--error={jobs}/logs/{number:04d}_%j.err']
-        if slurm.get('partition'): cmd.append(f"--partition={slurm['partition']}")
-        cmd.append(str(script))
+        cmd = batch_command(slurm, job, manifest['root'], manifest['name'],
+                            f'{jobs}/logs/{number:04d}_%j.out', f'{jobs}/logs/{number:04d}_%j.err', script=script)
         if dry_run:
             print(shlex.join(cmd)); return cmd
         submission_guard(path, manifest)  # Catch jobs appearing during DAG inspection.
         (jobs/'logs').mkdir(parents=True, exist_ok=True)
         write_json(execution, {'slurm':slurm,'sha256':digest(slurm)})
-        script.write_text('#!/usr/bin/env bash\nset -euo pipefail\nexec ' + shlex.join(invocation) + '\n')
+        prefix = storage_prefix(path / 'pipeline.yaml', manifest['root'], jobs / 'storage', 'analysis')
+        script.write_text('#!/usr/bin/env bash\nset -euo pipefail\nexport PHENORADAR_SCHEDULER=' + slurm['scheduler'] + '\nexec ' + shlex.join([*prefix, *invocation]) + '\n')
         script.chmod(0o755)
         receipt = jobs/f'submission_{number:04d}.json'
         result = {'created_at':now(),'target':target,'command':cmd,'resources':record(execution),
-                  'plan':pending, 'state':'submitting','job_id':None}
+                  'plan':pending, 'state':'submitting','job_id':None, 'scheduler': slurm['scheduler']}
         write_json(receipt,result)
-        try: identifier = subprocess.check_output(cmd,text=True).strip().split(';')[0]
-        except (OSError,subprocess.CalledProcessError) as error:
+        try: identifier = parse_id(subprocess.check_output(cmd,text=True), slurm['scheduler'])
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
             # A failed RPC can still have reached Slurm. Preserve ambiguity;
             # subsequent submissions must reconcile the receipt first.
-            result['state'] = 'unknown' if isinstance(error, subprocess.CalledProcessError) else 'rejected'
+            result['state'] = 'unknown' if not isinstance(error, OSError) else 'rejected'
             write_json(receipt,result); raise
         if not identifier.isdigit():
             result['state']='unknown'; write_json(receipt,result); raise ValueError('unrecognized sbatch result; inspect queue before retrying')

@@ -399,7 +399,7 @@ def test_slurm_profile_parses_without_submitting_jobs(batch_workspace, tmp_path)
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     if not snakemake: pytest.skip("Snakemake required")
     pytest.importorskip("snakemake_executor_plugin_slurm")
-    slurm = merge_slurm(yaml.safe_load((ROOT / "config/build.yaml").read_text())["slurm"], {})
+    slurm = merge_slurm(yaml.safe_load((ROOT / "config/build.yaml").read_text())["execution"], {})
     profile = write_profile(checkout / "jobs/test/profile", slurm)
     (checkout / "workflow/Snakefile").write_text('''
 rule all:

@@ -2,7 +2,10 @@
 KEYS = {
     "": "run_name selection translation odb alignment kegg phylogeny storage "
         "trait trait_encoding exclude_species input_root build_manifest translation_cache expression_cache output_root work_root log_root taxonomy_db",
-    "storage": "keep_intermediates",
+    "storage": "keep_intermediates scratch_root compact_logs max_bytes max_inodes interval_seconds "
+               "scratch_min_free_bytes scratch_min_free_inodes scratch_max_bytes scratch_max_inodes "
+               "scratch_reserve_bytes scratch_reserve_inodes allow_shared_scratch "
+               "start_fraction stop_fraction series_max_bytes task_limits projection_factor",
     "selection": "busco_threshold species_list",
     "translation": "table",
     "odb": "ncbi_tax_id incremental cache_dir chunk_size version",
@@ -42,6 +45,8 @@ def validate_keys(config):
         raise ValueError('taxonomy_db must be null or a SQLite path')
     if type(config.get("storage", {}).get("keep_intermediates", False)) is not bool:
         raise ValueError("storage.keep_intermediates must be true or false")
+    from storage_runtime import settings as storage_settings
+    storage_settings(config.get('storage', {}))
     from alignment_selection import validate_fraction
     validate_fraction(config.get('alignment', {}).get('min_sample_fraction', 0.5))
     odb = config.get("odb", {})

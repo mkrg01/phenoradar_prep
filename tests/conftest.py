@@ -16,6 +16,12 @@ from common import file_record, write_json, write_tsv
 from snapshot_taxonomy import snapshot
 
 
+@pytest.fixture(autouse=True)
+def simulated_scheduler(monkeypatch):
+    # Existing scheduler tests use Slurm protocol doubles. Detection tests clear this.
+    monkeypatch.setenv('PHENORADAR_SCHEDULER', 'slurm')
+
+
 @pytest.fixture
 def workflow_project(tmp_path):
     """Run the real Snakefile with fixed storage paths in an isolated project."""

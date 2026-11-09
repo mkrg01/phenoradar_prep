@@ -64,7 +64,7 @@ def inspect_groups(project, overrides=None):
     from snakemake.resources import DefaultResources
     from snakemake.settings.types import DAGSettings, ResourceSettings
 
-    public = yaml.safe_load((ROOT / "config/analysis.yaml").read_text())["slurm"]
+    public = yaml.safe_load((ROOT / "config/analysis.yaml").read_text())["execution"]
     slurm = merge_slurm(public, overrides or {}, build=False)
     profile_dir = write_profile(project / "profile", slurm)
     profile = yaml.safe_load((profile_dir / "config.yaml").read_text())

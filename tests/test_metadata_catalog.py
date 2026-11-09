@@ -392,11 +392,13 @@ def test_curation_copies_input_and_rules_without_running_builds(curated_project,
 
 
 @pytest.mark.parametrize('action', ['fetch', 'curate'])
-def test_metadata_stage_uses_slurm_cpu_allocation(curated_project, monkeypatch, action):
+@pytest.mark.parametrize('allocation_key', ['SLURM_CPUS_PER_TASK', 'NSLOTS'])
+def test_metadata_stage_uses_cpu_allocation(curated_project, monkeypatch, action, allocation_key):
     root, dataset, cfg = curated_project
     source = root / 'source.tsv'
     write_tsv(source, FIELDS, [row(1, 'OLD1')])
-    monkeypatch.setenv('SLURM_CPUS_PER_TASK', '7')
+    monkeypatch.delenv('SLURM_CPUS_PER_TASK', raising=False)
+    monkeypatch.setenv(allocation_key, '7')
     monkeypatch.setattr(catalog, 'software_identity', lambda *a: ('runtime', Path('image'), {}))
     def run(runtime, image, root, arguments, binds=(), **kwargs):
         assert arguments[arguments.index('--threads') + 1] == '7'

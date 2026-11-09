@@ -2,6 +2,7 @@
 """Run one ODB chunk with content-based isolation of resumable work."""
 import argparse
 import fcntl
+import gzip
 import hashlib
 import json
 import os
@@ -9,12 +10,13 @@ import re
 import shutil
 import subprocess
 import tempfile
+import tarfile
 from pathlib import Path
 
 from common import atomic_writer, file_record, now, sha256, write_json
 from odb_environment import command_path, odb_environment, software_records
 from cleanup_work import cleanup
-from product_storage import decoded_sha256, stage_product
+from product_storage import decoded_sha256, stage_product, product_record
 from odb_settings import pin_reference
 
 
@@ -44,20 +46,54 @@ def completed_output(output, fingerprint, label):
         expected = {f'{label}.{suffix}' for suffix in ('og.annotations', 'og.hits', 'summary.txt')}
         results = record['results']
         if (record['fingerprint'] != fingerprint or len(results) != len(expected)
-                or {Path(entry['path']).name for entry in results} != expected):
+                or {Path(entry['path']).name.removesuffix('.gz') for entry in results} != expected):
             return None
         for entry in results + record.get('artifacts', []):
             path = Path(entry['path'])
-            if not path.is_relative_to(output) or path.is_symlink() or file_record(path) != entry:
+            if not path.is_relative_to(output) or path.is_symlink():
+                return None
+            actual = file_record(path)
+            if any(actual[key] != entry[key] for key in ('path', 'bytes', 'sha256')):
+                return None
+            if path.suffix == '.gz' and entry in results and (
+                    entry.get('content_sha256') != decoded_sha256(path)):
                 return None
         return record
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
 
+def compress_output(output, fingerprint, label):
+    """Migrate a verified publication; commit its receipt before retiring plain files.
+
+    The caller holds the job/output locks. Scientific content identities survive
+    encoding changes, and a crash before the receipt commit leaves plain reuse valid.
+    """
+    output = Path(output)
+    saved = completed_output(output, fingerprint, label)
+    if saved is None:
+        raise ValueError('cannot compress unverified ODB results')
+    result, retired = [], []
+    for entry in saved['results']:
+        path = Path(entry['path'])
+        if path.name.endswith(('.og.annotations', '.og.hits')):
+            result.append(stage_product(entry, Path(str(path) + '.gz')))
+            retired.append(path)
+        else:
+            result.append(entry)
+    if retired:
+        saved = dict(saved, results=result)
+        write_json(output / 'provenance.json', saved)
+        if completed_output(output, fingerprint, label) is None:
+            raise ValueError('compressed ODB publication failed verification')
+        for path in retired:
+            path.unlink()
+    return saved
+
+
 def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper", prefix="",
         version="v12", node=3193, jobs=16, *, batch_size, keep_intermediates=False, defer_cleanup=False,
-        reference_pin=None):
+        reference_pin=None, gzip_results=False):
     if not re.fullmatch(r"chunk_[0-9]+", label) or jobs < 1 or batch_size < jobs:
         raise ValueError("invalid chunk label or concurrency settings")
     if jobs > int(os.environ.get("SLURM_CPUS_PER_TASK", jobs)):
@@ -106,6 +142,12 @@ def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper", 
     if base.is_symlink() or (base / fingerprint).is_symlink():
         raise ValueError('ODB scratch must not be a symlink')
     work = base / fingerprint
+    persistent_work = work
+    if os.environ.get('PHENORADAR_TASK_SCRATCH'):
+        local = Path(os.environ['PHENORADAR_TASK_SCRATCH'])
+        if not local.is_absolute() or local.is_symlink() or not local.is_dir():
+            raise ValueError('ODB task scratch must be an existing absolute directory')
+        work = local / 'odb' / label / fingerprint
     if any(Path(p).resolve().is_relative_to(work) for p in [manifest, reference, *proteins]):
         raise ValueError('ODB scratch must not contain inputs')
     base.mkdir(parents=True, exist_ok=True)
@@ -116,8 +158,10 @@ def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper", 
         status = base / "status.json"
         cached = completed_output(out, fingerprint, label)
         if cached is not None:
+            if gzip_results:
+                cached = compress_output(out, fingerprint, label)
             write_json(status, {"state": "success", "completed_at": now(),
-                                "fingerprint": fingerprint, "work": str(work), "reused": True})
+                                "fingerprint": fingerprint, "work": str(persistent_work), "reused": True})
             if not keep_intermediates and not defer_cleanup:
                 cleanup(base, [fingerprint], base / 'cleanup.json')
             return cached
@@ -125,7 +169,8 @@ def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper", 
         work.mkdir(parents=True, exist_ok=True)
         (work / "completed.json").unlink(missing_ok=True)
         write_json(work / "identity.json", identity)
-        write_json(status, {"state": "running", "started_at": now(), "fingerprint": fingerprint, "work": str(work)})
+        write_json(status, {"state": "running", "started_at": now(), "fingerprint": fingerprint,
+                            "work": str(persistent_work), "local_work": str(work)})
         try:
             tool_manifest = Path(manifest).resolve()
             if any(p.endswith('.gz') for p in proteins):
@@ -152,31 +197,59 @@ def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper", 
             out.mkdir(parents=True, exist_ok=True)
             # Publish validated files individually and write provenance last.
             published = required + [project / "orthologer_conf.sh", work / "report.txt", work / "odbmapper_config.txt"]
+            result_records = []
             for path in published:
-                source_record = file_record(path)
-                with open(path, "rb") as src, atomic_writer(out / path.name, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
-                saved = file_record(out / path.name)
-                if any(saved[key] != source_record[key] for key in ('bytes', 'sha256')):
-                    raise ValueError(f'ODB publication differs from source: {path}')
+                compressed = gzip_results and path.name.endswith(('.og.annotations', '.og.hits'))
+                target = out / (path.name + ('.gz' if compressed else ''))
+                # Never hardlink node scratch into a durable publication.
+                if compressed:
+                    source_record = file_record(path)
+                    with path.open('rb') as source, atomic_writer(target, 'wb') as raw:
+                        with gzip.GzipFile(filename='', fileobj=raw, mode='wb', mtime=0, compresslevel=6) as zipped:
+                            shutil.copyfileobj(source, zipped)
+                    saved = product_record(target)
+                    if saved['content_sha256'] != source_record['sha256']:
+                        raise ValueError(f'compressed ODB publication differs from source: {path}')
+                    result_records.append(saved)
+                else:
+                    source_record = file_record(path)
+                    with open(path, 'rb') as src, atomic_writer(target, 'wb') as dst:
+                        shutil.copyfileobj(src, dst)
+                    saved = file_record(target)
+                    if any(saved[key] != source_record[key] for key in ('bytes', 'sha256')):
+                        raise ValueError(f'ODB publication differs from source: {path}')
+                    if path in required:
+                        result_records.append(saved)
             # Native exports are diagnostic; standard results suffice downstream.
             if keep_intermediates:
                 publish_tree(project / "Results", out / "native_results")
+            log_artifacts = []
             if (project / "RunLogs").exists():
-                publish_tree(project / "RunLogs", out / "RunLogs")
+                if os.environ.get('PHENORADAR_COMPACT_ODB_LOGS') == '1':
+                    archive = out / 'RunLogs.tar.gz'
+                    with atomic_writer(archive, 'wb') as handle:
+                        with tarfile.open(fileobj=handle, mode='w:gz') as packed:
+                            packed.add(project / 'RunLogs', arcname='RunLogs')
+                    log_artifacts = [file_record(archive)]
+                else:
+                    publish_tree(project / "RunLogs", out / "RunLogs")
+                    log_artifacts = [file_record(p) for p in sorted((out / 'RunLogs').rglob('*')) if p.is_file()]
             record = {"completed_at": now(), "fingerprint": fingerprint, "identity": identity,
-                      "results": [file_record(out / p.name) for p in required],
+                      "results": result_records,
                       "artifacts": [file_record(out / p.name) for p in published[len(required):]] +
-                                   [file_record(p) for p in sorted((out / 'RunLogs').rglob('*')) if p.is_file()]}
+                                   log_artifacts}
             write_json(out / "provenance.json", record)
             if completed_output(out, fingerprint, label) is None:
                 raise ValueError("ODB published results failed verification")
             write_json(work / "completed.json", record)
             write_json(status, {"state": "success", "completed_at": now(),
-                                "fingerprint": fingerprint, "work": str(work)})
+                                "fingerprint": fingerprint, "work": str(persistent_work), "local_work": str(work)})
         except BaseException:
-            write_json(status, {"state": "failed", "time": now(), "fingerprint": fingerprint, "work": str(work)})
+            write_json(status, {"state": "failed", "time": now(), "fingerprint": fingerprint,
+                                "work": str(persistent_work), "local_work": str(work)})
             raise
+        if work != persistent_work and not keep_intermediates:
+            shutil.rmtree(work)
         if not keep_intermediates and not defer_cleanup:
             cleanup(base, [fingerprint], base / "cleanup.json")
         return record
@@ -188,6 +261,7 @@ if __name__ == "__main__":
         parser.add_argument(f"--{flag}", required=True)
     parser.add_argument("--command", default="ODB-mapper")
     parser.add_argument("--reference-pin")
+    parser.add_argument("--gzip-results", action="store_true", help="Publish lossless compressed annotations and hits")
     parser.add_argument("--prefix", default="")
     parser.add_argument("--version", default="v12")
     parser.add_argument("--node", type=int, default=3193)

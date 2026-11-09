@@ -65,6 +65,18 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def mount_csv(rows):
+    """Serialize APPTAINER_MOUNT records with the field count its parser requires."""
+    rows = [list(row) for row in rows]
+    width = max(map(len, rows), default=0)
+    text = io.StringIO()
+    # Apptainer's Go CSV reader rejects rows of unequal length. Repeating the
+    # supported bind type pads short rows without changing paths or permissions.
+    csv.writer(text, lineterminator='\n').writerows(
+        row + ['type=bind'] * (width - len(row)) for row in rows)
+    return text.getvalue().rstrip('\n')
+
+
 @contextmanager
 def atomic_writer(path, mode="w"):
     path = Path(path)

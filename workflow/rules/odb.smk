@@ -84,8 +84,8 @@ rule odb_map:
         helpers=[f"{SCRIPTS}/cleanup_work.py", f"{SCRIPTS}/odb_map.sh", f"{SCRIPTS}/odb_environment.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/make_manifests.py", f"{SCRIPTS}/incremental_odb.py", f"{SCRIPTS}/odb_settings.py"],
         samples=f"{META}/samples.tsv"
     output:
-        annotations=f"{CHUNKS}/{{chunk}}/{{chunk}}.og.annotations",
-        hits=f"{CHUNKS}/{{chunk}}/{{chunk}}.og.hits",
+        annotations=f"{CHUNKS}/{{chunk}}/{{chunk}}.og.annotations.gz",
+        hits=f"{CHUNKS}/{{chunk}}/{{chunk}}.og.hits.gz",
         summary=f"{CHUNKS}/{{chunk}}/{{chunk}}.summary.txt",
         provenance=f"{CHUNKS}/{{chunk}}/provenance.json"
     params:
@@ -115,7 +115,7 @@ rule odb_map:
         "{PYTHON:q} {input.code:q} --manifest {params.manifest:q} --reference {params.reference:q} "
         "--output-dir {params.out:q} --work-dir {params.work:q} --label {wildcards.chunk:q} "
         "--command {params.command:q} --prefix={params.prefix:q} --version {params.version:q} "
-        "{params.pin:q} --node {params.node} --jobs {threads} --batch-size {params.batch} --defer-cleanup {params.keep:q} > {log:q} 2>&1; "
+        "{params.pin:q} --node {params.node} --jobs {threads} --batch-size {params.batch} --gzip-results --defer-cleanup {params.keep:q} > {log:q} 2>&1; "
         "if [ {params.incremental} -eq 1 ]; then "
         "{params.publish:q} --chunk-dir {params.out:q} --label {wildcards.chunk:q} >> {log:q} 2>&1; fi; "
         "if [ {params.keep_work} -eq 0 ]; then "

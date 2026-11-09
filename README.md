@@ -10,7 +10,7 @@ and phylogenetic analyses.
 
 ## Requirements
 
-Linux x86-64 with Conda, Slurm, and Apptainer/Singularity. See
+Linux x86-64 with Conda, Apptainer/Singularity, and Slurm or HGC AGE. See
 [installation](docs/running.md#installation-and-normal-execution) for host setup.
 
 ## Quick start

@@ -114,6 +114,14 @@ def complete(path):
                 'excluded_runs':manifest.get('excluded', []), 'tpm':{'multimap':'error'}}
         completed = publish_pointer(path, publish_products(path, data))
         publish_latest(path, load_complete(completed, verify_files=False))
+        if not manifest['config'].get('storage', {}).get('keep_intermediates', False):
+            from derived_cache_cleanup import retire
+            try:
+                published = load_complete(completed)
+                retire(path, [entry['path'] for entry in published['files']], apply=True)
+            except (OSError, ValueError) as error:
+                import warnings
+                warnings.warn(f'Completed database retained; derived cache cleanup deferred: {error}', RuntimeWarning)
         return completed
 
 

@@ -56,3 +56,20 @@ build_manifest: null
 
 storage:
   keep_intermediates: false  # Remove verified successful job scratch; true retains it for debugging.
+  scratch_root: auto
+  allow_shared_scratch: true
+  compact_logs: true
+  max_bytes: null
+  max_inodes: null
+  interval_seconds: 60
+  start_fraction: 0.85
+  stop_fraction: 0.95
+  series_max_bytes: 1048576
+  scratch_min_free_bytes: 0
+  scratch_min_free_inodes: 0
+  scratch_max_bytes: null
+  scratch_max_inodes: null
+  scratch_reserve_bytes: 0
+  scratch_reserve_inodes: 0
+  task_limits: {}
+  projection_factor: 1.3

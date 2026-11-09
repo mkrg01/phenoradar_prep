@@ -55,7 +55,7 @@ def plan(payload):
     analysis = root / payload['analysis']
     with tempfile.TemporaryDirectory(prefix='phenoradar-inspect-') as temporary:
         temporary = Path(temporary)
-        profile = yaml.safe_load((write_profile(temporary / 'profile', payload['slurm']) / 'config.yaml').read_text())
+        profile = yaml.safe_load((write_profile(temporary / 'profile', payload['slurm'], inspection=True) / 'config.yaml').read_text())
 
         class InspectionPersistence(Persistence):
             def __init__(self, *args, **kwargs):

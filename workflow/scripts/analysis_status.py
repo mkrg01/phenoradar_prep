@@ -159,8 +159,19 @@ def status(path, manifest=None, run=None):
         runtime = {}
     legacy = legacy_progress(path, latest) if latest and not runtime else {}
     phase = runtime.get('phase') or legacy.get('phase')
-    controller = observe_slurm(identifier, manifest['root'], saved.get('created_at'),
-                               runtime.get('recent_worker_ids', legacy.get('recent_worker_ids', [])), run=run)
+    workers = runtime.get('recent_worker_ids', legacy.get('recent_worker_ids', []))
+    if saved.get('scheduler') == 'age':
+        from scheduler import age_states
+        controller = {'job_id': identifier, 'state': 'unknown', 'reason': None, 'exit_code': None,
+                      'source': None, 'workers': [], 'errors': []}
+        try:
+            states = age_states([str(identifier), *map(str, workers)], run=run)
+            controller.update(states.get(str(identifier), {}))
+            controller['workers'] = [dict(job_id=i, **states[i]) for i in map(str, workers) if i in states]
+        except (OSError, subprocess.SubprocessError) as error:
+            controller['errors'].append(str(error))
+    else:
+        controller = observe_slurm(identifier, manifest['root'], saved.get('created_at'), workers, run=run)
     completion = path / 'completed.json'
     created_at = header_time(completion)
     started = timestamp(saved.get('created_at'))
@@ -177,7 +188,7 @@ def status(path, manifest=None, run=None):
     elif queue_state == 'PENDING' and controller.get('reason') == 'DependencyNeverSatisfied':
         state, action = 'blocked', 'The dependency cannot succeed; inspect prerequisite jobs before retrying.'
     elif queue_state == 'PENDING':
-        state, action = 'pending', 'Wait for the reported Slurm scheduling reason to clear.'
+        state, action = 'pending', 'Wait for the reported scheduling reason to clear.'
     elif queue_state in ACTIVE:
         state = 'finalizing' if phase in {'validating', 'exporting', 'recording_completion', 'complete'} else 'running'
         action = 'Wait for the current phase to finish.'
@@ -213,7 +224,7 @@ def print_status(report):
     print(f"State: {report['state']}" + (f" ({report['phase']})" if report['phase'] else ''))
     print(f"Controller: {controller['job_id'] or '-'} {controller['state']}")
     if controller.get('reason'):
-        print('Slurm reason: ' + controller['reason'])
+        print('Scheduler reason: ' + controller['reason'])
     progress = report.get('progress')
     if progress:
         print(f"Phase progress: {progress['done']}/{progress['total']} workflow steps")

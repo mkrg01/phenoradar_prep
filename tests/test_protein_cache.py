@@ -76,7 +76,8 @@ def test_sample_index_refreshes_after_checkpoint_replacement(tmp_path):
 
 def test_slurm_profile_uses_accounting_completion_checks(tmp_path):
     cfg = yaml.safe_load((Path(__file__).resolve().parents[1]/'config/build.yaml').read_text())
-    profile = write_profile(tmp_path/'profile', cfg['slurm'])
+    from phase_config import execution_config, validate_slurm
+    profile = write_profile(tmp_path/'profile', validate_slurm(execution_config(cfg), build=True))
     data = yaml.safe_load((profile/'config.yaml').read_text())
     assert data['jobs'] == 'unlimited'
     assert 'group-components' not in data  # Snakemake 9.8 groups fail with containerized Conda.

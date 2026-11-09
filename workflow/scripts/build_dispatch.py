@@ -265,10 +265,15 @@ def verify_and_stage(path, manifest, workers=4, software=None, cached_only=False
             pending = True
         else:
             receipt = path / 'jobs/status' / f'{name}.sample.json'
-            completed_here = receipt.is_file() and json.loads(receipt.read_text()).get('state') == 'complete'
+            previous_receipt = json.loads(receipt.read_text()) if receipt.is_file() else {}
+            completed_here = previous_receipt.get('state') == 'complete'
             reused = planned[name]['action'] == 'reuse' and not completed_here and name not in (previous or {}).get('rebuilds', {})
-            write_json(receipt, {'state': 'reused' if reused else 'complete',
-                                 'verification': 'verified', 'finished_at': now()})
+            # Product verification does not rewrite native exit/accounting history.
+            # Maintenance needs that evidence to retain failed native work.
+            write_json(receipt, dict(previous_receipt, state='reused' if reused else 'complete',
+                                    verification='verified', verified_at=now(),
+                                    finished_at=previous_receipt.get('finished_at', now()),
+                                    completion_basis='verified_products'))
         if not products['busco']:
             needs_busco = True
     if pending:
@@ -299,9 +304,10 @@ def dispatch(path, until='database', species=None, execution=None):
     from build_products import load_complete
     from dataset import load, load_execution, submit
     from verification_cache import verification_cache
+    from scheduler import current_id
     path = Path(path).resolve()
     with verification_cache(path.parent.parent / '.cache/verification.sqlite'), locked(path / '.verification.lock'):
-        update_verification(path, 'running', started_at=now(), job_id=os.environ.get('SLURM_JOB_ID'))
+        update_verification(path, 'running', started_at=now(), job_id=current_id())
         try:
             manifest = load(path, check_code=True)
             from phase_config import execution_settings
@@ -313,15 +319,18 @@ def dispatch(path, until='database', species=None, execution=None):
                 print('Database already complete; recorded products verified.')
                 return []
             rebuilds = verify_and_stage(path, manifest, workers=min(4, slurm['stages']['controller']['cpus']))
+            if manifest.get('pilot') and len(manifest['items']) < 10:
+                raise ValueError('Taxonomy selection left fewer than 10 pilot samples; prepare a new pilot with replacements')
             update_verification(path, 'running', phase='scheduling')
+            from scheduler import current_id
             commands = submit(path, until, species, resources=execution,
-                              dispatch_dependency=os.environ.get('SLURM_JOB_ID'))
+                              dispatch_dependency=current_id())
             update_verification(path, 'complete', phase='finished', finished_at=now(), rebuilds=rebuilds,
-                                job_id=os.environ.get('SLURM_JOB_ID'))
+                                job_id=current_id())
             print(f'Verification complete; rebuilding {len(rebuilds)} samples.')
             return commands
         except BaseException as error:
-            update_verification(path, 'failed', error=str(error), job_id=os.environ.get('SLURM_JOB_ID'))
+            update_verification(path, 'failed', error=str(error), job_id=current_id())
             raise
 
 
@@ -329,25 +338,26 @@ def save_database_submission(path, batch):
     for job in batch['jobs']:
         if job['stage'] == 'mapping':
             write_json(Path(path) / 'jobs/database.json',
-                       {'state': 'queued', 'job_id': job['job_id'], 'updated_at': now()})
+                       {'state': 'queued', 'job_id': job['job_id'], 'updated_at': now(),
+                        'scheduler': job.get('scheduler', 'slurm')})
 
 
-def check_submissions(jobs):
+def check_submissions(jobs, backend=None):
     """Reject active or ambiguous submissions before changing imported products."""
-    ids = []
+    from scheduler import active_ids, current_id
+    ids = {}
     for receipt in jobs.glob('submission_*.json'):
         if receipt.name.endswith('.resources.json'):
             continue
         for job in json.loads(receipt.read_text())['jobs']:
+            job_backend = job.get('scheduler', 'slurm')
             if job['state'] in {'submitting', 'unknown'}:
-                raise ValueError(f'unresolved submission in {receipt}; inspect Slurm before retrying')
-            if job.get('job_id'):
-                ids.append(job['job_id'])
-    if ids:
-        import pwd
-        queued = subprocess.check_output(['squeue', '--noheader', '--user', pwd.getpwuid(os.getuid()).pw_name,
-                                          '--format=%i'], text=True).splitlines()
-        if any(identifier.strip().split('_', 1)[0] in ids for identifier in queued):
+                raise ValueError(f'unresolved submission in {receipt}; inspect the scheduler before retrying')
+            if job.get('job_id') and not (job_backend == (backend or 'slurm') and str(job['job_id']) == current_id()):
+                ids.setdefault(job_backend, set()).add(str(job['job_id']))
+    for job_backend, identifiers in ids.items():
+        queued = active_ids(job_backend)
+        if any(identifier.strip().split('_', 1)[0] in identifiers for identifier in queued):
             raise ValueError('dataset still has queued/running jobs; wait before resubmitting')
 
 
@@ -393,6 +403,8 @@ def submit_verification(path, until, species=None, dry_run=False, resources=None
     # verify reusable artifacts.
     manifest = load(path, check_code=True)
     slurm = execution_settings(manifest['config']['slurm'], resources)
+    from scheduler import resolve
+    slurm = resolve(slurm)
     if any(row['action'] in {'new', 'partial', 'rebuild'} for row in context['items']):
         array_concurrency(slurm, 'sample')
     if until in {'mapping', 'database'} and species is None:
@@ -413,7 +425,7 @@ def submit_verification(path, until, species=None, dry_run=False, resources=None
             return submit_verification_job(path, manifest, context, slurm, until, species, dry_run)
         with locked(jobs / '.submit.lock'):
             if not dry_run:
-                check_submissions(jobs)
+                check_submissions(jobs, slurm['scheduler'])
         with cached_verification():
             try:
                 ready, software = cached_preparation(path, manifest, context)
@@ -452,10 +464,11 @@ def submit_verification(path, until, species=None, dry_run=False, resources=None
 
 def submit_verification_job(path, manifest, context, slurm, until, species, dry_run):
     from build_reports import print_plan
+    from scheduler import batch_command, parse_id, storage_prefix
     jobs = path / 'jobs'
     with locked(jobs / '.submit.lock'):
         if not dry_run:
-            check_submissions(jobs)
+            check_submissions(jobs, slurm['scheduler'])
         number = 1 + max([int(p.name.split('_')[1].split('.')[0])
                           for p in jobs.glob('submission_*.resources.json')] + [0])
         execution = jobs / f'submission_{number:04d}.resources.json'
@@ -467,31 +480,27 @@ def submit_verification_job(path, manifest, context, slurm, until, species, dry_
             frozen_list = jobs / f'{number:04d}_samples.txt'
             shutil.copy2(species, frozen_list)
             command += ['--species-list', str(frozen_list)]
-        script.write_text('#!/usr/bin/env bash\nset -euo pipefail\nexec ' + shlex.join(command) + '\n')
+        prefix = storage_prefix(path / 'pipeline.yaml', manifest['root'], path / 'jobs/storage', 'prepare')
+        script.write_text('#!/usr/bin/env bash\nset -euo pipefail\nexport PHENORADAR_SCHEDULER=' + slurm['scheduler'] + '\nexec ' + shlex.join([*prefix, *command]) + '\n')
         script.chmod(0o755)
         job = slurm['stages']['controller']
-        cmd = ['sbatch', '--parsable', '--nodes=1', '--ntasks=1', f'--cpus-per-task={job["cpus"]}',
-               f'--mem={job["mem_gb"] * 1000}M', f'--time={job["time"]}', '--chdir=' + manifest['root'],
-               '--job-name=' + manifest['name'] + '_verify',
-               f'--output={jobs}/logs/{number:04d}_verify_%j.out',
-               f'--error={jobs}/logs/{number:04d}_verify_%j.err']
-        if slurm.get('partition'):
-            cmd.append('--partition=' + slurm['partition'])
-        cmd.append(str(script))
+        cmd = batch_command(slurm, job, manifest['root'], manifest['name'] + '_verify',
+                            f'{jobs}/logs/{number:04d}_verify_%j.out',
+                            f'{jobs}/logs/{number:04d}_verify_%j.err', script=script)
         receipt = jobs / f'submission_{number:04d}.json'
         batch = {'created_at': now(), 'until': until, 'resources': record(execution),
                  'jobs': [{'stage': 'verify', 'indices': None, 'command': cmd,
-                           'job_id': None, 'state': 'submitting'}]}
+                           'job_id': None, 'state': 'submitting', 'scheduler': slurm['scheduler']}]}
         print_plan(context['items'])
         if dry_run:
             print(shlex.join(cmd))
-            print('Worker jobs will be generated after verification on Slurm.')
+            print('Worker jobs will be generated after scheduled verification.')
         else:
             write_json(receipt, batch)
             try:
-                identifier = subprocess.check_output(cmd, text=True).strip().split(';')[0]
-            except (OSError, subprocess.CalledProcessError):
-                batch['jobs'][0]['state'] = 'rejected'
+                identifier = parse_id(subprocess.check_output(cmd, text=True), slurm['scheduler'])
+            except (OSError, ValueError, subprocess.SubprocessError):
+                batch['jobs'][0]['state'] = 'unknown'
                 write_json(receipt, batch)
                 raise
             if not identifier.isdigit():
@@ -500,7 +509,7 @@ def submit_verification_job(path, manifest, context, slurm, until, species, dry_
                 raise ValueError('unrecognized sbatch result; inspect queue before retrying')
             batch['jobs'][0].update(state='submitted', job_id=identifier)
             write_json(receipt, batch)
-            update_verification(path, 'queued', job_id=identifier)
+            update_verification(path, 'queued', job_id=identifier, scheduler=slurm['scheduler'])
             print(f'Verification job: {identifier}')
         print(f'Status: ./run_build.sh status --build {path}')
         return [cmd]

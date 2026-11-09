@@ -660,9 +660,10 @@ print(importlib.resources.files('amalgkit.select_rule_sets').joinpath(sys.argv[1
 
 
 def metadata_stage(root, cfg, action, work, source=None):
-    threads = os.environ.get('SLURM_CPUS_PER_TASK')
+    allocation_key = 'SLURM_CPUS_PER_TASK' if 'SLURM_CPUS_PER_TASK' in os.environ else 'NSLOTS'
+    threads = os.environ.get(allocation_key)
     if threads is not None and (not threads.isdigit() or int(threads) < 1):
-        raise ValueError('SLURM_CPUS_PER_TASK must be a positive integer')
+        raise ValueError(f'{allocation_key} must be a positive integer')
     work = path_at(root, work)
     if not work.is_relative_to(Path(root).resolve() / 'work'):
         raise ValueError('metadata work directories must be under project work/')

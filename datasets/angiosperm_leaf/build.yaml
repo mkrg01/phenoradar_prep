@@ -17,10 +17,11 @@ genegalleon:
   image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:0342363342b56ab56161acf91774bf2243ffd76c9bdfca1fa7fb3df36ba440a4
   settings:
     assembly_method: rnaSPAdes
-slurm:
+execution:
+  scheduler: auto  # Detect the allocated job or available scheduler clients.
   partition: null
   total_limits:
-    jobs: null
+    jobs: 4
     cpus: null
     mem_gb: null
   per_job_resources:
@@ -38,7 +39,30 @@ slurm:
       time: 1-00:00:00
     controller:
       cpus: 4  # Preparation checksums use up to 4 threads.
-      mem_gb: 8
-      time: 64-00:00:00
+      mem_gb: 32  # The pilot's local publication exceeded the former 8 GB limit.
+      time: 60-00:00:00
 storage:
   keep_intermediates: false
+  scratch_root: auto
+  allow_shared_scratch: false  # Large scratch must not spill into the shared quota.
+  compact_logs: true  # Archive native ODB logs on every scheduler.
+  max_bytes: 2500000000000  # Optional project-wide allocated-byte budget.
+  max_inodes: 2500000  # Optional unique inode budget, including directories.
+  interval_seconds: 15
+  start_fraction: 0.85
+  stop_fraction: 0.95
+  scratch_min_free_bytes: 1000000000
+  scratch_min_free_inodes: 10000
+  task_limits:
+    sample:  # Conservative per-sample admission; adjust after a representative pilot.
+      scratch_reserve_bytes: 1200000000000
+      scratch_max_bytes: 1150000000000
+      scratch_reserve_inodes: 100000
+      scratch_max_inodes: 80000
+      scratch_min_free_bytes: 20000000000
+    odb_map:  # The 20-sample pilot does not establish a 50-sample upper bound.
+      scratch_reserve_bytes: 80000000000
+      scratch_max_bytes: 75000000000
+      scratch_reserve_inodes: 200000
+      scratch_max_inodes: 180000
+      scratch_min_free_bytes: 10000000000

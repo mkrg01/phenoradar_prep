@@ -66,7 +66,7 @@ def jobs(path, build, runs=None):
                 row = json.loads(receipt.read_text())
                 rows.append(dict(row, receipt_stage=stage))
                 evidence.append(file_record(receipt))
-                identifier = str(row.get('slurm_id') or row.get('job_id') or '')
+                identifier = str(row.get('scheduler_id') or row.get('slurm_id') or row.get('job_id') or '')
                 if re.fullmatch(r'[0-9]+(?:_[0-9]+)?', identifier):
                     identifiers.setdefault(identifier, set()).add(name)
         primary = next((r for r in rows if r['receipt_stage'] == 'sample'), None)
@@ -76,12 +76,14 @@ def jobs(path, build, runs=None):
                         'native': observation(workspace(path, build, item)), 'activity': None,
                         'submissions': [], 'submitted_id': None}
         receipts.extend(rows)
+    backend_hint = None
     for receipt in sorted((path / 'jobs').glob('submission_*.json')):
         if receipt.name.endswith('.resources.json'):
             continue
         for job in json.loads(receipt.read_text()).get('jobs', []):
             if job.get('stage') not in {*STAGES, 'sample'}:
                 continue
+            backend_hint = job.get('scheduler', backend_hint)
             indices = job.get('indices') or []
             names = {items[i - 1]['species'] for i in indices} & result.keys()
             if names:
@@ -96,16 +98,22 @@ def jobs(path, build, runs=None):
                 for index in indices:
                     name = items[index - 1]['species']
                     if name in result:
-                        identifier = f'{base}_{index - offset}'
+                        task = indices.index(index) + 1 if job.get('scheduler') == 'age' else index - offset
+                        identifier = f'{base}_{task}'
                         identifiers.setdefault(identifier, set()).add(name)
                         result[name]['submitted_id'] = identifier
-    accounting = scheduler_states([*receipts, *({'slurm_id': identifier} for identifier in identifiers)])
+    from scheduler import detect, active_ids
+    backend = backend_hint or next((row.get('scheduler') for row in receipts if row.get('scheduler')), None) or detect(required=False) or 'slurm'
+    accounting = scheduler_states([*receipts, *({'scheduler_id': identifier, 'scheduler': backend} for identifier in identifiers)])
     if identifiers:
         try:
-            output = subprocess.run(['squeue', '--noheader', '--array', '--user',
-                                     pwd.getpwuid(os.getuid()).pw_name, '--format=%i'],
-                                    capture_output=True, text=True, timeout=10, check=True).stdout
-            active = set(output.split())
+            if backend == 'age':
+                active = active_ids('age')
+            else:
+                output = subprocess.run(['squeue', '--noheader', '--array', '--user',
+                                         pwd.getpwuid(os.getuid()).pw_name, '--format=%i'],
+                                        capture_output=True, text=True, timeout=10, check=True).stdout
+                active = set(output.split())
             for identifier, names in identifiers.items():
                 base = identifier.split('_', 1)[0]
                 if (identifier in active or base in active
@@ -117,7 +125,7 @@ def jobs(path, build, runs=None):
             unknown.update(name for names in identifiers.values() for name in names)
     for name, state in result.items():
         primary = state['primary']
-        identifier = state['submitted_id'] or str(primary.get('slurm_id') or primary.get('job_id') or '')
+        identifier = state['submitted_id'] or str(primary.get('scheduler_id') or primary.get('slurm_id') or primary.get('job_id') or '')
         scheduler = accounting.get(identifier)
         job_state = primary.get('state', 'not_started')
         if scheduler:

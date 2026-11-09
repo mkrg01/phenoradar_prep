@@ -7,7 +7,7 @@
 #SBATCH --time=3-00:00:00
 #SBATCH --output=slurm-metadata-%j.out
 
-# Run directly or submit from the repository root with sbatch.
+# Run directly or submit from the repository root with sbatch / qsub -cwd.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 if [[ ! -f "$root/workflow/scripts/metadata_catalog.py" ]]; then
@@ -17,7 +17,7 @@ if [[ ! -f "$root/workflow/scripts/metadata_catalog.py" ]]; then
     elif [[ -n "${SLURM_SUBMIT_DIR:-}" && -f "$SLURM_SUBMIT_DIR/workflow/scripts/metadata_catalog.py" ]]; then
         root=$SLURM_SUBMIT_DIR
     else
-        echo "Metadata repository not found; submit from its root or use sbatch --chdir <repository>." >&2
+        echo "Metadata repository not found; submit from its root with sbatch --chdir or qsub -cwd." >&2
         exit 1
     fi
 fi

@@ -40,7 +40,8 @@ phylogeny:
     collapse_monophyletic: true  # Collapse monophyletic groups in figures only.
 exclude_species:  # Species IDs (all samples) or exact sample IDs to omit before analysis.
   - Paspalum_notatum_SRR13069628
-slurm:
+execution:
+  scheduler: auto  # Detect the allocated job or available scheduler clients.
   partition: null  # null: cluster default; multiple: "epyc,rome,medium".
   total_limits:  # Per analysis; CPU/memory include the controller allocation.
     jobs: null  # No workflow job-count cap; Slurm and finite CPU/memory budgets still apply.
@@ -50,7 +51,7 @@ slurm:
     controller:  # Runs Snakemake and manages its worker jobs.
       cpus: 1
       mem_gb: 8
-      time: "64-00:00:00"
+      time: "60-00:00:00"
     record_run:  # Record the resolved configuration and provenance.
       cpus: 1
       mem_gb: 8
@@ -133,3 +134,8 @@ slurm:
       time: "1-00:00:00"
 storage:
   keep_intermediates: false  # Remove verified successful job scratch; true retains it for debugging.
+  scratch_root: auto  # Prefer node-local temporary storage; workspace is the fallback.
+  compact_logs: true  # Archive native ODB logs on every scheduler.
+  max_bytes: null  # Optional project-wide allocated-byte budget.
+  max_inodes: null  # Optional unique inode budget, including directories.
+  interval_seconds: 60

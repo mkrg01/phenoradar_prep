@@ -32,6 +32,8 @@ def dataset_project(tmp_path, tiny_inputs, monkeypatch):
     # Tests start without any external database.
     build_config = root / "config/build.yaml"
     cfg = yaml.safe_load(build_config.read_text())
+    cfg['slurm'] = cfg.pop('execution')
+    cfg['storage']['scratch_root'] = 'workspace'
     cfg["reuse_from"] = None
     cfg["metadata"] = "input/metadata.tsv"
     cfg['busco']['cache_dir'] = None  # Synthetic GeneGalleon tests need no external reference download.
@@ -40,6 +42,7 @@ def dataset_project(tmp_path, tiny_inputs, monkeypatch):
     build_config.write_text(yaml.safe_dump(cfg))
     analysis_config = root / 'config/analysis.yaml'
     analysis_cfg = yaml.safe_load(analysis_config.read_text())
+    analysis_cfg['slurm'] = analysis_cfg.pop('execution')
     analysis_cfg['exclude_species'] = []  # Ignore exclusions in the user's active analysis config.
     for branch in ('alignment', 'kegg'):
         analysis_cfg[branch]['enabled'] = False  # Dedicated branch tests opt in with their own tools/references.
@@ -330,7 +333,7 @@ with (work / 'events.jsonl').open('a') as handle:
 assert os.environ['LC_ALL'] == os.environ['SINGULARITYENV_LC_ALL'] == os.environ['APPTAINERENV_LC_ALL'] == 'C'
 assert os.environ[prefix+'RUN_MULTISPECIES_SUMMARY'] == '0'
 assert os.environ['GG_OBSERVABILITY'] == '1'
-assert os.environ['GG_COMMON_TMP_ROOT'] == 'workspace'
+assert os.environ['GG_COMMON_TMP_ROOT'] == 'workspace' or Path(os.environ['GG_COMMON_TMP_ROOT']).is_dir()
 runtime = work / ('.genegalleon-runtime-' + str(os.getuid()))
 for directory in ('tmp', 'pycache'):
     cache = runtime / directory / 'helper'

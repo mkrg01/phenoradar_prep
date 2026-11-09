@@ -1,7 +1,10 @@
 """Public build/analysis settings and per-submission Slurm resources."""
 import copy
+import os
 import re
 import subprocess
+import shlex
+import sys
 from pathlib import Path
 import yaml
 
@@ -45,6 +48,13 @@ def time_minutes(value):
 DIRECT_JOBS = {'sample', 'assembly', 'busco', 'quant', 'controller'}
 WORKER_DEFAULTS = {'mem_gb': 8, 'time': '1-00:00:00'}
 BUDGET_RESOURCES = {'cpus': 'workflow_cpus', 'mem_gb': 'workflow_mem_mb'}
+
+
+def execution_config(config):
+    """The public execution section replaces slurm; old saved settings still load."""
+    if 'execution' in config and 'slurm' in config:
+        raise ValueError('use execution or legacy slurm settings, not both')
+    return config.get('execution', config.get('slurm', {}))
 
 
 def normalize_slurm(slurm, build=True):
@@ -114,9 +124,21 @@ def validate_slurm(slurm, build=True):
     slurm.setdefault('rules', {})
     if slurm.get('partition') is not None and (not isinstance(slurm['partition'], str) or not slurm['partition'].strip()):
         raise ValueError('slurm.partition must be null or a nonempty string')
-    allowed = {'partition','jobs','stages','default_resources','rules','total_limits'}
+    allowed = {'partition','jobs','stages','default_resources','rules','total_limits','scheduler','age'}
     if build: allowed.add('concurrency')
     if set(slurm) - allowed: raise ValueError('unknown slurm setting')
+    if slurm.get('scheduler', 'auto') not in {'auto', 'slurm', 'age'}:
+        raise ValueError('execution.scheduler must be auto, slurm or age')
+    age = slurm.get('age', {})
+    if not isinstance(age, dict) or set(age) - {'parallel_environment', 'memory_resource', 'queue', 'extra_resources'}:
+        raise ValueError('unknown execution.age settings')
+    for key in ('parallel_environment', 'memory_resource', 'queue'):
+        if age.get(key) is not None and (not isinstance(age[key], str) or not re.fullmatch(r'[A-Za-z0-9_.@*,-]+', age[key])):
+            raise ValueError(f'invalid execution.age.{key}')
+    extra = age.get('extra_resources', {})
+    if not isinstance(extra, dict) or any(not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', k) or
+            not (v is True or isinstance(v, (int, float, str)) and re.fullmatch(r'[A-Za-z0-9_.+-]+', str(v))) for k, v in extra.items()):
+        raise ValueError('invalid execution.age.extra_resources')
     for key in ('jobs', 'concurrency') if build else ('jobs',):
         if key not in slurm or (slurm[key] is not None and (type(slurm[key]) is not int or slurm[key] < 1)):
             raise ValueError(f'slurm.{key} must be a positive integer or null')
@@ -146,8 +168,9 @@ def validate_slurm(slurm, build=True):
 def execution_settings(frozen, resources=None, build=True):
     # Biological settings are never read from a resubmission resource override.
     override = read_yaml(resources) if resources else {}
-    if override and 'slurm' not in override: raise ValueError('resource override requires a slurm section')
-    return merge_slurm(frozen, override.get('slurm', {}), build)
+    if override and not ({'slurm', 'execution'} & override.keys()):
+        raise ValueError('resource override requires an execution or legacy slurm section')
+    return merge_slurm(frozen, execution_config(override), build)
 
 
 def resolve_array_size():
@@ -220,7 +243,7 @@ def _snakemake_resources(values):
     return resources
 
 
-def write_profile(destination, slurm):
+def write_profile(destination, slurm, *, root=None, pipeline=None, usage=None, inspection=False):
     # Also used with partial legacy resource dictionaries by low-level callers.
     # Snakemake profiles only use worker limits, not sample-array concurrency.
     slurm = normalize_slurm(slurm, build=False)
@@ -245,5 +268,19 @@ def write_profile(destination, slurm):
         profile['set-resource-scopes'] = {key: 'global' for key in budgets}
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
+    if not inspection and slurm.get('scheduler') == 'age':
+        from common import write_json
+        root = Path(root or os.getcwd()).resolve()
+        context = {'execution': slurm, 'root': str(root),
+                   'pipeline': str(pipeline or root / 'workflow/pipeline_defaults.yaml'),
+                   'usage': str(usage or root / '.snakemake/storage')}
+        settings = destination / 'execution.json'
+        write_json(settings, context)
+        script = Path(__file__).with_name('scheduler.py')
+        profile = {key: value for key, value in profile.items() if not key.startswith('slurm-')}
+        profile.update(executor='cluster-generic',
+                       **{'cluster-generic-submit-cmd': shlex.join([sys.executable, str(script), 'submit-job', '--settings', str(settings)]),
+                          'cluster-generic-status-cmd': shlex.join([sys.executable, str(script), 'status-job', '--state', str(root / '.snakemake/cluster_submissions')]),
+                          'cluster-generic-cancel-cmd': 'qdel'})
     (destination / 'config.yaml').write_text(yaml.safe_dump(profile, sort_keys=False))
     return destination

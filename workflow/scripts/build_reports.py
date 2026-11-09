@@ -71,7 +71,7 @@ def print_plan(rows, directory=None):
     reuse_mapping = mapping['reuse'] + mapping['planned_reuse']
     print(f'  OrthoDB mapping: {reuse_mapping} reuse; {sum(mapping.values()) - reuse_mapping} pending')
     if unverified:
-        print('Product checksums are pending verification on Slurm.')
+        print('Product checksums are pending scheduled verification.')
     if directory is not None:
         print(f'Details: {Path(directory) / "plan.tsv"}')
         if counts['blocked'] or counts['rebuild']:
@@ -110,13 +110,14 @@ def controller_state(data):
     from genegalleon_run import scheduler_states
     from sample_review import TERMINAL
     result = dict(data)
+    scheduler_name = 'AGE' if result.get('scheduler') == 'age' else 'Slurm'
     if result.get('job_id') and result.get('state') in {'queued', 'running'}:
         accounting = scheduler_states([result]).get(str(result['job_id']))
         if accounting:
             result['scheduler'] = accounting
             state = accounting['state']
             if state in TERMINAL:
-                result.update(state='failed', error=f'Slurm {state}; completion was not recorded')
+                result.update(state='failed', error=f'{scheduler_name} {state}; completion was not recorded')
             elif state in {'RUNNING', 'COMPLETING', 'SUSPENDED'}:
                 result['state'] = 'running'
     return result
@@ -129,6 +130,11 @@ def job_log_paths(path, submissions, identifier):
     job = submissions.get(base, {})
     options = dict(arg[2:].split('=', 1) for arg in job.get('command', [])
                    if arg.startswith('--') and '=' in arg)
+    if job.get('scheduler') == 'age':
+        command = job.get('command', [])
+        for flag, key in (('-o', 'output'), ('-e', 'error')):
+            if flag in command:
+                options[key] = command[command.index(flag) + 1]
     logs = {'stdout': '', 'stderr': ''}
     for stream, option in (('stdout', 'output'), ('stderr', 'error')):
         filename = options.get(option)
@@ -136,6 +142,7 @@ def job_log_paths(path, submissions, identifier):
             # Non-array jobs expand Slurm's %a to NO_VAL (0xfffffffe).
             filename = filename.replace('%A', base).replace('%a', task or '4294967294')
             filename = filename.replace('%j', identifier)
+            filename = filename.replace('$JOB_ID', base).replace('$TASK_ID', task or 'undefined')
             target = Path(filename)
             if not target.is_absolute():
                 target = Path(options.get('chdir', path)) / target
@@ -198,8 +205,8 @@ def progress(path, context):
             state = 'not_submitted'
         if verification.get('state') == 'failed' and state in {'verifying', 'not_submitted'}:
             state = 'blocked'
-        failure = primary.get('error') or (f'Slurm {scheduling}' if scheduling else '')
-        job_id = info.get('submitted_id') or primary.get('slurm_id') or primary.get('job_id') or ''
+        failure = primary.get('error') or (f'Scheduler {scheduling}' if scheduling else '')
+        job_id = info.get('submitted_id') or primary.get('scheduler_id') or primary.get('slurm_id') or primary.get('job_id') or ''
         logs = (job_log_paths(path, submissions, verification.get('job_id')) if state == 'blocked' else
                 job_log_paths(path, submissions, job_id))
         row.update(state=state, stage=info.get('stopped_at') or '',

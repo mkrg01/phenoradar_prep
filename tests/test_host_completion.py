@@ -25,7 +25,7 @@ def saved_tree(snapshot, monkeypatch):
     for option in ('contrast_pairs', 'dating', 'taxonomy_check'):
         pipeline['phylogeny'][option]['enabled'] = False
     pipeline['kegg']['enabled'] = False
-    slurm = yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['slurm']
+    slurm = yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['execution']
     manifest = {'root': str(snapshot.parent), 'pipeline': pipeline, 'config': {'slurm': slurm},
                 'build': {'path': 'database/manifest.json'}}
     write_json(snapshot / 'build_inputs/index.json', {})

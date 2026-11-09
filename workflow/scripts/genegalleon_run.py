@@ -93,9 +93,20 @@ def verified_stages(work, repository):
 
 def scheduler_states(jobs):
     """Accounting evidence supplements native records after OOM/SIGKILL/timeouts."""
-    ids = sorted({str(job.get('slurm_id') or job.get('job_id')) for job in jobs
-                  if re.fullmatch(r'[0-9]+(?:_[0-9]+)?', str(job.get('slurm_id') or job.get('job_id')))})
+    jobs = list(jobs)
+    from scheduler import detect, age_states
+    age = [job for job in jobs if job.get('scheduler') == 'age' or
+           not job.get('scheduler') and not job.get('slurm_id') and detect(required=False) == 'age']
+    age_ids = {str(job.get('scheduler_id') or job.get('job_id')) for job in age
+               if re.fullmatch(r'[0-9]+(?:_[0-9]+)?', str(job.get('scheduler_id') or job.get('job_id')))}
+    ids = sorted({str(job.get('scheduler_id') or job.get('slurm_id') or job.get('job_id')) for job in jobs
+                  if re.fullmatch(r'[0-9]+(?:_[0-9]+)?', str(job.get('scheduler_id') or job.get('slurm_id') or job.get('job_id')))} - age_ids)
     states = {}
+    if age_ids:
+        try:
+            states.update(age_states(sorted(age_ids)))
+        except (OSError, subprocess.SubprocessError):
+            pass
     for offset in range(0, len(ids), 512):
         batch = ids[offset:offset + 512]
         try:

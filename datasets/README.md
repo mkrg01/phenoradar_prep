@@ -99,6 +99,12 @@ Submit from the repository root. Metadata jobs request 4 CPUs, 128 GB, and three
 days; override these with the `sbatch` options `--mem` and `--time`.
 Logs go to `slurm-metadata-<jobid>.out`. Use `./run_metadata.sh` for direct execution.
 
+For AGE, the same script accepts `qsub -cwd -V -pe def_slot 4 -l
+s_vmem=32000M,h_rt=259200 run_metadata.sh update` (adjust the PE and memory
+resource names for the site). AGE ignores the `#SBATCH` defaults, so provide its
+resources explicitly. Database and analysis submissions detect the scheduler
+automatically through their normal launchers.
+
 `update` creates `work/datasets/<name>/YYYYMMDDTHHMMSSZ/` at execution start
 (UTC) and prints the path. Use `--work <new-path>` for a manual path under `work/`.
 Existing run names, including same-second collisions, cause an error.

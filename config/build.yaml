@@ -25,7 +25,8 @@ genegalleon:
   image_uri: docker://ghcr.io/kfuku52/genegalleon@sha256:0342363342b56ab56161acf91774bf2243ffd76c9bdfca1fa7fb3df36ba440a4  # Container pinned by OCI digest.
   settings:
     assembly_method: rnaSPAdes  # Transcriptome assembler passed to GeneGalleon.
-slurm:
+execution:
+  scheduler: auto  # Detect the allocated job or available scheduler clients.
   partition: null  # null: cluster default; multiple: "epyc,rome,medium".
   total_limits:  # Per build; CPU/memory include the controller allocation.
     jobs: null  # No workflow job-count cap; Slurm and finite CPU/memory budgets still apply.
@@ -46,7 +47,12 @@ slurm:
       time: "1-00:00:00"
     controller:  # Verifies uncached products (up to 4 threads) and manages worker jobs.
       cpus: 4
-      mem_gb: 8
-      time: "64-00:00:00"
+      mem_gb: 32  # Includes concurrent local publication processes.
+      time: "60-00:00:00"
 storage:
   keep_intermediates: false  # Remove scratch and completed sample work; true retains it for debugging.
+  scratch_root: auto  # Prefer node-local temporary storage; workspace is the fallback.
+  compact_logs: true  # Archive native ODB logs on every scheduler.
+  max_bytes: null  # Optional project-wide allocated-byte budget.
+  max_inodes: null  # Optional unique inode budget, including directories.
+  interval_seconds: 60

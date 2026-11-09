@@ -28,8 +28,9 @@ Tool-dependent tests skip when executables are unavailable; `-ra` lists the reas
 | Taxonomy check | R/MonoPhy from `workflow/envs/monophy.yaml` |
 | TimeTree client | Pinned nwkit from `workflow/envs/timetree.yaml` |
 
-`PHYLOGENY_CONDA_PREFIX` enables tests with actual stage environments. Slurm tests
-simulate submissions; use a dataset pilot to assess biological outputs and resources.
+`PHYLOGENY_CONDA_PREFIX` enables tests with actual stage environments. Scheduler
+tests simulate Slurm/AGE services; AGE tests also run a real Snakemake DAG through
+the shared launcher. Use a dataset pilot to assess biological outputs and resources.
 For group/container changes, run `tests/slurm_busco_smoke.py` from an allocated
 host environment with a cached SIF, marker FASTA and species manifest (see `--help`).
 It checks identical alignments/column maps, tree inputs/tools/arguments, and completed-stage reuse.

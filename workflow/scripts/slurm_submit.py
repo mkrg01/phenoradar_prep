@@ -137,6 +137,14 @@ def reconcile(token, started, workdir, run=subprocess.run):
 
 
 def submit(argv, real_sbatch, state_dir, run=subprocess.run, sleep=time.sleep, clock=time.time, stdin=None):
+    from scheduler import storage_prefix, wrap_slurm
+    if stdin is not None and os.environ.get('PHENORADAR_STORAGE_CONFIG'):
+        import shlex
+        prefix = storage_prefix(os.environ['PHENORADAR_STORAGE_CONFIG'], os.environ['PHENORADAR_PROJECT_ROOT'],
+                                os.environ['PHENORADAR_USAGE_ROOT'], 'workflow')
+        stdin = '#!/bin/bash\nexec ' + shlex.join([*prefix, 'bash', '-c', stdin]) + '\n'
+    else:
+        argv = wrap_slurm(argv)
     state_dir = Path(state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
     workdir = option(argv, '--chdir', option(argv, '-D', os.getcwd()))

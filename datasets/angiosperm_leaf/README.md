@@ -56,6 +56,12 @@ After the metadata job finishes, submit a new build:
 ./run_build.sh submit --config datasets/angiosperm_leaf/build.yaml
 ```
 
+The same commands detect Slurm or AGE automatically. For an independent
+10–20 sample capacity trial, add `--pilot-size 20` to `plan` and `submit`, then
+follow the [storage measurement instructions](../../docs/outputs.md#storage-pilot).
+The shared build config caps workers at four and targets 2.5 TB / 2.5 million
+inodes on both schedulers.
+
 Builds use `results/angiosperm_leaf_<UTC timestamp>/` and reuse compatible stages
 automatically. The command prints the exact path; `--name` sets a name manually.
 Current products are in `results/angiosperm_leaf_latest/database/`. Use an exact

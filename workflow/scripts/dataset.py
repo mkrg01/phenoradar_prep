@@ -46,12 +46,12 @@ def inside(root, path):
 
 
 def settings(root, config, analysis_config=None, name=None):
-    from phase_config import validate_slurm
+    from phase_config import execution_config, validate_slurm
     root = Path(root).resolve()
     cfg = read_yaml(config)
     if analysis_config is not None:
         raise ValueError("build does not accept analysis overrides; use run_analysis.sh")
-    unknown = set(cfg) - {"name", "name_mode", "metadata", "metadata_provenance", "reuse_from", "rebuild_samples", "translation", "busco", "taxonomy", "odb", "genegalleon", "slurm", "excluded_accessions", "storage"}
+    unknown = set(cfg) - {"name", "name_mode", "metadata", "metadata_provenance", "reuse_from", "rebuild_samples", "translation", "busco", "taxonomy", "odb", "genegalleon", "slurm", "execution", "excluded_accessions", "storage"}
     if unknown: raise ValueError(f"unknown build settings: {sorted(unknown)}; use config/build.yaml for build settings")
     cfg['name_mode'] = naming_mode(cfg)
     rebuild = cfg.setdefault('rebuild_samples', [])
@@ -93,7 +93,9 @@ def settings(root, config, analysis_config=None, name=None):
             raise ValueError(f"managed/invalid GeneGalleon setting: {key}")
         if not isinstance(value, (str, int, float, bool)):
             raise ValueError(f"GeneGalleon setting must be scalar: {key}")
-    cfg["slurm"] = validate_slurm(cfg["slurm"])
+    execution = execution_config(cfg)
+    cfg.pop('execution', None)
+    cfg['slurm'] = validate_slurm(execution)
     from database_reuse import normalize
     cfg["reuse_from"] = normalize(root, cfg.get("reuse_from"))
     build_name = name or (cfg.get("name") if cfg['name_mode'] == 'fixed' else None)
@@ -201,8 +203,24 @@ def excluded_report(excluded):
             for row in excluded]
 
 
+def pilot_items(items, count):
+    if type(count) is not int or not 10 <= count <= 20 or len(items) < count:
+        raise ValueError('pilot-size must be 10–20 and not exceed the eligible sample count')
+    def volume(item):
+        for field in ('total_bases', 'total_spots', 'size'):
+            try:
+                value = float(item['row'].get(field, ''))
+                if value > 0 and value != float('inf'):
+                    return value
+            except (ValueError, TypeError):
+                pass
+        return 0
+    ordered = sorted(items, key=lambda item: (volume(item), item['row']['run']))
+    return [ordered[round(i * (len(ordered) - 1) / (count - 1))] for i in range(count)]
+
+
 def plan(root, config, metadata=None, analysis_config=None, name=None, verify_files=True, repair=False,
-         preview_taxonomy=True):
+         preview_taxonomy=True, pilot_size=None):
     cfg, analysis = settings(root, config, analysis_config, name)
     metadata = absolute(root, metadata or cfg["metadata"])
     source = record(metadata)
@@ -221,6 +239,10 @@ def plan(root, config, metadata=None, analysis_config=None, name=None, verify_fi
         items, taxonomy_excluded, taxonomy_pending = preview(cfg, items)
         excluded += taxonomy_excluded
     normalize_private_paths(items, metadata)
+    source_samples = len(items)
+    if pilot_size is not None:
+        items = pilot_items(items, pilot_size)
+        cfg['reuse_from'], cfg['rebuild_samples'] = [], []
     verify(source)
     if policy_record: verify(policy_record)
     from database_reuse import select
@@ -238,6 +260,9 @@ def plan(root, config, metadata=None, analysis_config=None, name=None, verify_fi
         rebuilds = {**(rebuilds or {}), **dict.fromkeys(forced, 'explicitly requested by rebuild_samples')}
     selection = {"source_metadata": source, "metadata_provenance": provenance_record, "exclusion_policy": policy_record, "excluded": excluded,
                  "reusable": reusable, "reuse_sources": sources, "rebuilds": rebuilds or {}}
+    if pilot_size is not None:
+        selection['pilot'] = {'requested_samples': pilot_size, 'source_samples': source_samples,
+                              'selection': 'read-volume rank strata including both endpoints'}
     report = inspect_items(cfg["store"], items, analysis, conditions=cfg["conditions"],
                            reusable=reusable, errors=errors, verify_files=verify_files,
                            rebuilds=rebuilds) + excluded_report(excluded)
@@ -285,19 +310,23 @@ def build_directory(root, name, config):
     return root / "results" / name
 
 
-def prepare(root, name, config, metadata=None, analysis_config=None, defer=False):
+def prepare(root, name, config, metadata=None, analysis_config=None, defer=False, pilot_size=None):
     cfg = read_yaml(config)
     if name is None and naming_mode(cfg) == 'timestamp':
         prefix = build_directory(root, None, config).name
+        if pilot_size is not None:
+            prefix += '_pilot'
         parent = Path(root).resolve() / 'results'
         with locked(parent / f'.{prefix}.prepare.lock'):
             prepared_at = now()
             target = timestamp_directory(root, prefix, prepared_at)
-            return _prepare(root, target.name, config, metadata, analysis_config, prepared_at, defer)
-    return _prepare(root, name, config, metadata, analysis_config, defer=defer)
+            return _prepare(root, target.name, config, metadata, analysis_config, prepared_at, defer, pilot_size)
+    if pilot_size is not None and name is None:
+        name = str(cfg['name']) + '_pilot'
+    return _prepare(root, name, config, metadata, analysis_config, defer=defer, pilot_size=pilot_size)
 
 
-def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_at=None, defer=False):
+def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_at=None, defer=False, pilot_size=None):
     root = Path(root).resolve()
     from taxonomy_selection import enabled as taxonomy_enabled
     verify_after_prepare = not defer and taxonomy_enabled(settings(root, config, analysis_config, name)[0])
@@ -310,8 +339,10 @@ def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_a
         raise ValueError("dataset/run name already exists; resume it or choose a new name")
     cfg, analysis, metadata, fields, items, selection, report = plan(
         root, config, metadata, analysis_config, name, verify_files=not defer, repair=defer,
-        preview_taxonomy=False)
+        preview_taxonomy=False, pilot_size=pilot_size)
     dataset_name = cfg.get('name') if cfg['name_mode'] == 'timestamp' else name
+    if pilot_size is not None and cfg['name_mode'] == 'timestamp':
+        dataset_name += '_pilot'
     if not isinstance(dataset_name, str) or not SAFE.fullmatch(dataset_name):
         raise ValueError('dataset name must be a simple directory name')
     if cfg['name_mode'] == 'timestamp' and name == f'{dataset_name}_latest':
@@ -400,6 +431,8 @@ def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_a
                     "auxiliary": auxiliary, "excluded": selection["excluded"], "raw_inputs": raw_records, "implementation": implementation(root),
                     "genegalleon": gg_records, "software_lock": software_lock,
                     "busco_reference": busco_reference, "taxonomy_reference": taxonomy_reference}
+        if 'pilot' in selection:
+            manifest['pilot'] = selection['pilot']
         from sample_processing import software_version
         manifest['phenoradar_prep_version'] = software_version(root)
         manifest['deferred_verification'] = defer
@@ -603,7 +636,8 @@ def gg_environment(manifest, item, products, work, task_id):
                 "GG_COMMON_BUSCO_LINEAGE": manifest["analysis"]["phylogeny"]["lineage"],
                 "GG_COMMON_GENETIC_CODE": str(manifest["analysis"]["translation"]["table"]),
                 "GG_ARRAY_TASK_ID": str(task_id), "SLURM_ARRAY_TASK_ID": str(task_id),
-                "GG_OBSERVABILITY": "1", "GG_COMMON_TMP_ROOT": "workspace"})
+                "GG_OBSERVABILITY": "1",
+                "GG_COMMON_TMP_ROOT": os.environ.get('PHENORADAR_TASK_SCRATCH', 'workspace')})
     if not products['busco'] and manifest['config']['busco'].get('cache_dir'):
         from busco_reference import mount_environment, prepare as prepare_busco
         reference = manifest.get('busco_reference')
@@ -627,8 +661,8 @@ def gg_environment(manifest, item, products, work, task_id):
     # frozen-config fallback for workers invoked outside Slurm.
     from phase_config import validate_slurm
     requested = validate_slurm(manifest['config']['slurm'])['stages']['sample']
-    cpus = int(env.get('SLURM_CPUS_PER_TASK') or requested['cpus'])
-    memory_mb = int(env.get('SLURM_MEM_PER_NODE') or
+    cpus = int(env.get('PHENORADAR_TASK_CPUS') or env.get('SLURM_CPUS_PER_TASK') or requested['cpus'])
+    memory_mb = int(env.get('PHENORADAR_TASK_MEM_MB') or env.get('SLURM_MEM_PER_NODE') or
                     (int(env['SLURM_MEM_PER_CPU']) * cpus if env.get('SLURM_MEM_PER_CPU')
                      else requested['mem_gb'] * 1000))
     if cpus < 1 or memory_mb < 1:
@@ -722,7 +756,24 @@ def cleanup_genegalleon(path, manifest, item, stage, products, *, apply=True, di
                        for key in ('files', 'allocated_bytes', 'reclaimable_bytes')}}
         receipt = path / 'jobs/cleanup' / f"{item['species']}.{stage}.json"
         details = {'completed_sample_cleanup': POLICY_VERSION, 'retained': retained} if completed else None
-        return cleanup(path, targets, receipt, errors=errors, details=details)
+        result = cleanup(path, targets, receipt, errors=errors, details=details)
+        primary = path / 'jobs/status' / f"{item['species']}.sample.json"
+        job = json.loads(primary.read_text()) if primary.is_file() else {}
+        if (completed and result['state'] == 'complete' and job.get('native_exit_code') == 0
+                and manifest['config'].get('storage', {}).get('compact_logs', True)):
+            from native_archive import compact
+            protected = [products['reference']['cds']['path'], products['quant']['abundance']['path']]
+            protected.extend(products['busco'][key]['path'] for key in ('full', 'short') if products['busco'].get(key))
+            protected.extend(entry['path'] for entry in manifest.get('raw_inputs', {}).get(item['species'], {}).values())
+            try:
+                result['native_diagnostics'] = compact(work, protected, apply=True)
+            except (OSError, ValueError, EOFError) as error:
+                import warnings
+                result['state'] = 'pending'
+                result['errors'].append({'path': str(work), 'error': str(error)})
+                warnings.warn(f'Native diagnostic compaction incomplete; see {receipt}', RuntimeWarning)
+            write_json(receipt, result)
+        return result
 
 
 def register_native(path, manifest, item, products, eligible, env):
@@ -773,8 +824,10 @@ def register_native(path, manifest, item, products, eligible, env):
             provenance['relabel'] = relabel(out / 'amalgkit_quant' / native / run / f'{run}_abundance.tsv',
                                            target, native, species, 'quant')
             products[key] = register_quant(store, products['reference'], item, target, provenance)
+        from scheduler import current_id, detect
         write_json(Path(path) / 'jobs/status' / f'{species}.{stage}.json',
-                   {'state': 'complete', 'finished_at': now(), 'job_id': os.environ.get('SLURM_JOB_ID')})
+                   {'state': 'complete', 'finished_at': now(), 'job_id': current_id(),
+                    'scheduler': detect(required=False)})
     return products
 
 
@@ -794,7 +847,8 @@ def worker(path, task_id):
     with locked(Path(manifest['config']['store']) / species / '.worker.lock'):
         products = item_products(manifest, item)
         if all(products[key] for key in ('reference', 'busco', 'quant')):
-            write_json(receipt_path, {'state': 'reused', 'at': now()})
+            previous = json.loads(receipt_path.read_text()) if receipt_path.is_file() else {}
+            write_json(receipt_path, dict(previous, state='reused', at=now()))
             cleanup_genegalleon(path, manifest, item, 'sample', products)
             return
         metadata = work / 'input/amalgkit_metadata' / f'{native}_metadata.tsv'
@@ -810,10 +864,13 @@ def worker(path, task_id):
                     work / 'output/transcriptome_assembly/longest_cds' / f'{native}_longestCDS.fa.gz', species, native)
         env = gg_environment(manifest, item, products, work, 1)
         repository = Path(manifest['config']['genegalleon']['repository'])
+        from scheduler import current_id, detect
         receipt = {'state': 'running', 'started_at': now(), 'species': species,
-                   'run': item['row']['run'], 'job_id': os.environ.get('SLURM_JOB_ID')}
+                   'run': item['row']['run'], 'job_id': current_id(), 'scheduler': detect(required=False)}
         if os.environ.get('SLURM_ARRAY_JOB_ID') and os.environ.get('SLURM_ARRAY_TASK_ID'):
             receipt['slurm_id'] = os.environ['SLURM_ARRAY_JOB_ID'] + '_' + os.environ['SLURM_ARRAY_TASK_ID']
+        elif os.environ.get('JOB_ID') and os.environ.get('SGE_TASK_ID', '').isdigit():
+            receipt['scheduler_id'] = os.environ['JOB_ID'] + '_' + os.environ['SGE_TASK_ID']
         previous = json.loads(receipt_path.read_text()) if receipt_path.exists() else {}
         write_json(receipt_path, receipt)
         try:
@@ -925,19 +982,24 @@ def run_mapping(path, execution=None):
     from build_products import complete
     from phase_config import validate_slurm, workflow_jobs, write_profile
     path = Path(path).resolve()
+    from scheduler import current_id, resolve as resolve_scheduler, storage_environment
     receipt = path / 'jobs/database.json'
-    state = {'state': 'running', 'job_id': os.environ.get('SLURM_JOB_ID'), 'updated_at': now()}
+    state = {'state': 'running', 'job_id': current_id(), 'updated_at': now()}
     write_json(receipt, state)
     try:
         manifest = load(path, check_code=True)
         materialize(path)
         root = Path(manifest["root"])
         slurm = load_execution(execution) if execution else manifest["config"]["slurm"]
-        slurm = validate_slurm(slurm)
-        profile = write_profile(path / "jobs" / (Path(execution).stem if execution else "local") / "profile", slurm)
-        command = [str(root / "run_pipeline.sh"), "--slurm", "--profile", str(profile),
+        slurm = resolve_scheduler(validate_slurm(slurm))
+        state['scheduler'] = slurm['scheduler']
+        profile = write_profile(path / "jobs" / (Path(execution).stem if execution else "local") / "profile", slurm,
+                                root=root, pipeline=path / 'pipeline.yaml', usage=path / 'jobs/storage')
+        command = [str(root / "run_pipeline.sh"), "--cluster", "--profile", str(profile),
                    "--jobs", str(workflow_jobs(slurm)), "--configfile", str(path / "pipeline.yaml")]
-        subprocess.run([*command, "--", "database" if manifest["analysis"].get("output_root") else "mapping"], cwd=root, check=True)
+        env = dict(os.environ, **storage_environment(path / 'pipeline.yaml', root, path / 'jobs/storage'),
+                   PHENORADAR_SCHEDULER=slurm['scheduler'])
+        subprocess.run([*command, "--", "database" if manifest["analysis"].get("output_root") else "mapping"], cwd=root, check=True, env=env)
         complete(path)
     except BaseException as error:
         write_json(receipt, dict(state, state='failed', error=str(error), updated_at=now()))
@@ -947,8 +1009,10 @@ def run_mapping(path, execution=None):
 
 def load_execution(path):
     wrapper = json.loads(Path(path).read_text())
-    if digest(wrapper["slurm"]) != wrapper["sha256"]: raise ValueError("submission resources changed")
-    return wrapper["slurm"]
+    from phase_config import execution_config
+    saved = execution_config(wrapper)
+    if digest(saved) != wrapper["sha256"]: raise ValueError("submission resources changed")
+    return saved
 
 
 def submit(path, until="database", species=None, dry_run=False, resources=None, defer=False, dispatch_dependency=None,
@@ -975,7 +1039,9 @@ def submit(path, until="database", species=None, dry_run=False, resources=None, 
                          if any(state[stage] == 'pending' for stage in STAGES)
                          and (wanted is None or state['species'] in wanted)]}
     from phase_config import array_concurrency, execution_settings, resolve_array_size, worker_budgets
-    slurm = execution_settings(manifest["config"]["slurm"], resources)
+    from scheduler import resolve as resolve_scheduler, array_size as scheduler_array_size, batch_command, parse_id, storage_prefix
+    slurm = resolve_scheduler(execution_settings(manifest["config"]["slurm"], resources))
+    backend = slurm['scheduler']
     caps = {stage: array_concurrency(slurm, stage) for stage, indices in pending.items() if indices}
     if until in {"mapping", "database"} and wanted is None: worker_budgets(slurm)
     jobs = path / "jobs"
@@ -984,22 +1050,12 @@ def submit(path, until="database", species=None, dry_run=False, resources=None, 
     with locked(jobs / ".submit.lock"):
         records = sorted(p for p in jobs.glob("submission_*.json") if not p.name.endswith(".resources.json"))
         if not dry_run:
-            for record_path in records:
-                old = json.loads(record_path.read_text())
-                if any(r.get("state") in {"submitting", "unknown"} for r in old["jobs"]):
-                    raise ValueError(f"unresolved submission in {record_path}; inspect Slurm and record its job ID before retrying")
-                ids = [r["job_id"] for r in old["jobs"] if r.get("job_id")
-                       and str(r["job_id"]) != os.environ.get('SLURM_JOB_ID')]
-                if ids:
-                    import pwd
-                    queued = subprocess.check_output(["squeue", "--noheader", "--user", pwd.getpwuid(os.getuid()).pw_name,
-                                                      "--format=%i"], text=True).splitlines()
-                    active = [job.strip() for job in queued if job.strip().split("_", 1)[0] in ids]
-                    if active: raise ValueError("dataset still has queued/running jobs; inspect or cancel them before resubmitting: " + ", ".join(active))
+            from build_dispatch import check_submissions
+            check_submissions(jobs, backend)
         array_size = None
         if any(pending.values()):
-            array_size = resolve_array_size()
-            print(f"Using Slurm array limit: {array_size} sample index slots per batch", flush=True)
+            array_size = scheduler_array_size(slurm)
+            print(f"Using {backend} array limit: {array_size} sample index slots per batch", flush=True)
             stage_workspace(path, manifest, pending['sample'])
         batch_number = 1 + max([int(p.name.split("_")[1].split(".")[0]) for p in jobs.glob("submission_*.resources.json")] + [0])
         execution = jobs / f"submission_{batch_number:04d}.resources.json"
@@ -1020,51 +1076,58 @@ def submit(path, until="database", species=None, dry_run=False, resources=None, 
             job_resources = slurm["stages"]["controller" if stage == "mapping" else stage]
             label = stage + (f"_{offset + 1}_{offset + array_size}" if offset else "")
             script = jobs / f"{batch_number:04d}_{label}.sh"
-            python = str(Path(sys.executable).resolve())
+            python = str(Path(sys.executable).absolute())
             cli = Path(manifest["root"]) / "workflow/scripts/dataset.py"
             worker_command = [python, str(cli), "mapping" if stage == "mapping" else "worker", "--dataset", str(path)]
             if stage == "mapping":
                 worker_command += ["--execution", str(execution)]
                 invocation = shlex.join(worker_command)
-            else:
+            elif backend == 'slurm':
                 invocation = shlex.join(worker_command) + f' --task-id "$((SLURM_ARRAY_TASK_ID + {offset}))"'
-            script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + "exec " + invocation + "\n")
-            script.chmod(0o755)
-            cmd = ["sbatch", "--parsable", "--nodes=1", "--ntasks=1", f"--cpus-per-task={job_resources['cpus']}",
-                   f"--mem={job_resources['mem_gb'] * 1000}M", f"--time={job_resources['time']}", "--chdir=" + manifest["root"],
-                   f"--job-name={manifest['name']}_{label}", f"--output={jobs}/logs/{batch_number:04d}_{label}_%A_%a.out",
-                   f"--error={jobs}/logs/{batch_number:04d}_{label}_%A_%a.err"]
-            if slurm.get("partition"): cmd.append(f"--partition={slurm['partition']}")
+            else:
+                task_map = jobs / f'{batch_number:04d}_{label}.indices.json'
+                write_json(task_map, indices)
+                invocation = shlex.join([*worker_command, '--indices', str(task_map), '--indices-sha256', record(task_map)['sha256']]) + ' --task-id "$SGE_TASK_ID"'
+            prefix = storage_prefix(path / 'pipeline.yaml', manifest['root'], path / 'jobs/storage', stage)
             if indices:
-                array = ",".join(str(i - offset) for i in indices)
-                if caps[stage] is not None: array += "%" + str(caps[stage])
-                cmd.append("--array=" + array)
+                task_variable = 'SLURM_ARRAY_TASK_ID' if backend == 'slurm' else 'SGE_TASK_ID'
+                sample_map = jobs / f'{batch_number:04d}_{label}.workspaces.json'
+                write_json(sample_map, {str(i - offset if backend == 'slurm' else position):
+                                       str(workspace(path, manifest, manifest['items'][i - 1]))
+                                       for position, i in enumerate(indices, 1)})
+                prefix[-1:-1] = ['--sample-map', str(sample_map), '--task-variable', task_variable]
+            script.write_text("#!/usr/bin/env bash\nset -euo pipefail\nexport PHENORADAR_SCHEDULER=" + backend + "\nexec " + shlex.join(prefix) + ' ' + invocation + "\n")
+            script.chmod(0o755)
+            afterok, afterany = [], []
             if stage == 'mapping' and sample_jobs:
-                cmd.extend(['--dependency=afterok:' + ':'.join(sample_jobs), '--kill-on-invalid-dep=yes'])
+                afterok = sample_jobs
             elif previous:
                 # Serialize batches to respect the global cap; failures in one
                 # batch must not prevent independent samples in the next batch.
-                dependency = 'afterany:' + previous
+                afterany = [previous]
                 if dispatch_dependency:
-                    dependency += ',afterok:' + dispatch_dependency
-                    cmd.append('--kill-on-invalid-dep=yes')
-                cmd.append('--dependency=' + dependency)
+                    afterok = [dispatch_dependency]
             elif dispatch_dependency:
-                cmd.extend(['--dependency=afterok:' + dispatch_dependency, '--kill-on-invalid-dep=yes'])
-            cmd.append(str(script))
+                afterok = [dispatch_dependency]
+            cmd = batch_command(slurm, job_resources, manifest['root'], manifest['name'] + '_' + label,
+                                f'{jobs}/logs/{batch_number:04d}_{label}_%A_%a.out',
+                                f'{jobs}/logs/{batch_number:04d}_{label}_%A_%a.err', script=script,
+                                indices=[i - offset for i in indices] if indices else None,
+                                concurrency=caps.get(stage), afterok=afterok, afterany=afterany)
             commands.append(cmd)
-            job = {"stage": stage, "indices": indices, "array_offset": offset, "command": cmd, "job_id": None, "state": "submitting"}
+            job = {"stage": stage, "indices": indices, "array_offset": offset, "command": cmd, "job_id": None,
+                   "state": "submitting", 'scheduler': backend}
             batch["jobs"].append(job)
             if not dry_run:
                 # Record submission intent before invoking sbatch. Preserve already submitted IDs on later failure.
                 write_json(receipt, batch)
                 try:
                     output = subprocess.check_output(cmd, text=True).strip()
-                except (OSError, subprocess.CalledProcessError):
-                    job["state"] = "rejected"
+                    identifier = parse_id(output, backend)
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    job["state"] = "unknown"
                     write_json(receipt, batch)
                     raise
-                identifier = output.split(";")[0]
                 if not identifier.isdigit():
                     job["state"] = "unknown"
                     write_json(receipt, batch)
@@ -1087,23 +1150,27 @@ def submit(path, until="database", species=None, dry_run=False, resources=None, 
 
 
 def submit_named(root, name=None, config=None, metadata=None, until="database", species=None, dry_run=False, resources=None,
-                 defer=False, prepare_locally=False):
+                 defer=False, prepare_locally=False, pilot_size=None):
     """Freeze a new build, or submit an existing name with its saved conditions."""
     root = Path(root).resolve()
     config = absolute(root, config or "config/build.yaml")
     if name is None and naming_mode(read_yaml(config)) == 'timestamp':
-        target = prepare(root, None, config, metadata, defer=defer)
+        target = prepare(root, None, config, metadata, defer=defer, pilot_size=pilot_size)
         print(f"Prepared build: {target}. Resume with --build {target}.", flush=True)
         return submit(target, until, absolute(root, species) if species else None, dry_run,
                       absolute(root, resources) if resources else None, defer=defer, prepare_locally=prepare_locally)
+    if pilot_size is not None and name is None:
+        name = str(read_yaml(config)['name']) + '_pilot'
     target = build_directory(root, name, config)
     with locked(target.parent / f".{target.name}.prepare.lock"):
         if target.exists():
+            if pilot_size is not None:
+                raise ValueError('pilot build already exists; resume with --build or choose a new --name')
             if not (target / "build.json").is_file():
                 raise ValueError(f"existing path is not a prepared build: {target}; choose a new name")
             print(f"Using saved build: {target}. Source edits require a new name.", flush=True)
         else:
-            target = prepare(root, target.name, config, metadata, defer=defer)
+            target = prepare(root, target.name, config, metadata, defer=defer, pilot_size=pilot_size)
             print(f"Prepared build: {target}", flush=True)
     return submit(target, until, absolute(root, species) if species else None, dry_run,
                   absolute(root, resources) if resources else None, defer=defer, prepare_locally=prepare_locally)
@@ -1112,7 +1179,7 @@ def submit_named(root, name=None, config=None, metadata=None, until="database", 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True,
-                               metavar='{plan,submit,status,export-processing,cleanup,fetch-software}')
+                               metavar='{plan,submit,status,export-processing,cleanup,compact,fetch-software}')
     for name in ("plan", "prepare", "fetch-software"):
         help_text = {'plan': 'Verify reusable products and preview processing counts',
                      'fetch-software': 'Download and pin GeneGalleon software'}
@@ -1122,14 +1189,16 @@ def main():
         if name != "fetch-software": command.add_argument("--metadata")
         if name == "prepare": command.add_argument("--name", help="Explicit build name; otherwise follow name/name_mode in the build config")
         if name == 'plan':
+            command.add_argument('--pilot-size', type=int, help='Preview an independent 10–20 sample storage pilot')
             # Keep the former opt-in flag compatible; plans now always verify.
             command.add_argument('--verify', action='store_true', default=True, help=argparse.SUPPRESS)
             command.add_argument('--outdir', default='reports/plan', help='Directory for detailed TSV reports (default: reports/plan)')
             command.add_argument('--split', action='store_true', help='Also write reports grouped by planned action')
-    for name in ("status", "export-processing", "cleanup", "submit", "materialize", "worker", "mapping", "complete", "dispatch"):
+    for name in ("status", "export-processing", "cleanup", "compact", "submit", "materialize", "worker", "mapping", "complete", "dispatch"):
         help_text = {'status': 'Summarize recorded progress', 'cleanup': 'Inspect or remove inactive scratch',
+                     'compact': 'Archive successful native diagnostics after database verification',
                      'export-processing': 'Export sample_processing.tsv from a completed database',
-                     'submit': 'Save build inputs and submit Slurm preparation'}
+                     'submit': 'Save build inputs and submit preparation'}
         command = sub.add_parser(name, **({'help': help_text[name]} if name in help_text else {}))
         command.add_argument("--build", "--dataset", dest="dataset", required=name != "submit",
                              help="Path to an already prepared build")
@@ -1138,13 +1207,16 @@ def main():
         if name == 'export-processing':
             command.add_argument('--outdir', required=True, help='Directory for sample_processing.tsv')
         if name == "status":
-            command.add_argument("--storage", action="store_true", help="Include intermediate cleanup status")
+            command.add_argument("--storage", action="store_true", help="Include storage measurements and cleanup status")
             command.add_argument('--verify', action='store_true', help='Also verify registered product checksums')
             command.add_argument('--json', action='store_true', help='Print the detailed report as JSON')
             command.add_argument('--outdir', help='Write status.tsv and failed.tsv to this directory')
+            command.add_argument('--expected-samples', type=int, help='With --storage, project a verified completed build to this sample count')
         if name == 'dispatch': command.add_argument('--species-list')
         if name == "cleanup": command.add_argument("--apply", action="store_true", help="Delete inactive managed scratch; default is preview")
+        if name == 'compact': command.add_argument('--apply', action='store_true', help='Commit verified diagnostic archives; default is preview')
         if name == "submit":
+            command.add_argument('--pilot-size', type=int, help='Build an independent 10–20 sample storage pilot through OrthoDB')
             command.add_argument("--root", default=".")
             command.add_argument("--config", help="Settings for a new build; default: config/build.yaml")
             command.add_argument("--name", help="Explicit build name; otherwise follow name/name_mode in the build config")
@@ -1153,9 +1225,11 @@ def main():
             command.add_argument("--species-list")
             command.add_argument("--dry-run", action="store_true")
             command.add_argument('--prepare-locally', action='store_true',
-                                 help='Prepare verified cache hits locally; otherwise prepare on Slurm')
+                                 help='Prepare verified cache hits locally; otherwise prepare on the detected scheduler')
         if name == "worker":
             command.add_argument("--task-id", type=int, required=True)
+            command.add_argument('--indices')
+            command.add_argument('--indices-sha256')
     args = parser.parse_args()
     root = Path(getattr(args, "root", Path(__file__).resolve().parents[2])).resolve()
     with verification_cache(root / ".cache/verification.sqlite"):
@@ -1168,7 +1242,7 @@ def run_command(args, parser):
         config = absolute(root, args.config)
         if args.command == "plan":
             from build_reports import print_plan, write_plan
-            *_, report = plan(root, config, args.metadata, verify_files=args.verify, repair=True)
+            *_, report = plan(root, config, args.metadata, verify_files=args.verify, repair=True, pilot_size=args.pilot_size)
             directory = absolute(root, args.outdir)
             rows = write_plan(report, directory, verified=args.verify, split=args.split)
             print_plan(rows, directory)
@@ -1190,6 +1264,10 @@ def run_command(args, parser):
         if args.storage:
             from storage_management import run_storage
             report['storage'] = run_storage(args.dataset, 'build')
+            from storage_runtime import report as storage_usage
+            report['storage']['usage'] = storage_usage(args.dataset, args.expected_samples)
+        elif args.expected_samples is not None:
+            parser.error('--expected-samples requires --storage')
         if args.outdir:
             write_progress(report, args.outdir)
         if args.json:
@@ -1198,6 +1276,13 @@ def run_command(args, parser):
             print_progress(report)
             if args.outdir: print(f'Details: {Path(args.outdir) / "status.tsv"}')
             if args.storage: print(f'Storage cleanup: {report["storage"]["state"]}')
+            if args.storage:
+                usage = report['storage']['usage']
+                measured = usage['retained_build']
+                print(f"Retained build: {measured['allocated_bytes'] / 1e9:.3f} GB / {measured['inodes']:,} unique inodes")
+                if usage['projection']:
+                    print(f"Projection for {usage['expected_samples']:,} samples: " + json.dumps(usage['projection']))
+                print(f"Storage report: {Path(args.dataset) / 'reports/storage.json'} (sampled peaks are lower bounds)")
         return int(any(r['state'] in {'failed', 'blocked'} or r['verification'] == 'failed'
                        for r in report['samples']) or report['database']['state'] == 'failed'
                    or report['verification'].get('state') == 'failed')
@@ -1215,9 +1300,12 @@ def run_command(args, parser):
         report = run_storage(args.dataset, 'build', inspect=True, apply=args.apply)
         print(json.dumps(report, indent=2))
         return int(report['state'] == 'pending')
+    elif args.command == 'compact':
+        from build_compaction import run
+        print(json.dumps(run(args.dataset, apply=args.apply), indent=2))
     elif args.command == "submit":
         if args.dataset:
-            if any(value is not None for value in (args.name, args.config, args.metadata)):
+            if any(value is not None for value in (args.name, args.config, args.metadata, args.pilot_size)):
                 parser.error("--build cannot be combined with --name, --config, or --metadata; use --resources for retry resources")
             submit(absolute(args.root, args.dataset), args.until,
                    absolute(args.root, args.species_list) if args.species_list else None, args.dry_run,
@@ -1226,13 +1314,21 @@ def run_command(args, parser):
         else:
             submit_named(args.root, args.name, args.config, args.metadata, args.until,
                          args.species_list, args.dry_run, args.resources, defer=True,
-                         prepare_locally=args.prepare_locally)
+                         prepare_locally=args.prepare_locally, pilot_size=args.pilot_size)
     elif args.command == 'dispatch':
         from build_dispatch import dispatch
         dispatch(args.dataset, args.until, args.species_list,
                  args.execution)
     elif args.command == "materialize": print(materialize(args.dataset))
-    elif args.command == "worker": worker(args.dataset, args.task_id)
+    elif args.command == "worker":
+        task_id = args.task_id
+        if args.indices:
+            verify({'path': args.indices, 'sha256': args.indices_sha256})
+            indices = json.loads(Path(args.indices).read_text())
+            if not 1 <= task_id <= len(indices):
+                raise ValueError('array task is outside its frozen sample map')
+            task_id = indices[task_id - 1]
+        worker(args.dataset, task_id)
     elif args.command == "complete":
         from build_products import complete
         print(complete(args.dataset))

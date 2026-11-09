@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import tempfile
 
-from common import now, write_json
+from common import mount_csv, now, write_json
 from dataset_assets import ProductIntegrityError, UncachedVerification, digest, record, verify
 
 
@@ -164,9 +164,7 @@ def mount_environment(env, reference, destination=DESTINATION, label='BUSCO'):
             if fields not in rows:
                 rows.append(fields)
     rows.append(['type=bind', 'src=' + reference['dataset'], 'dst=' + destination, 'ro'])
-    text = io.StringIO()
-    csv.writer(text, lineterminator='\n').writerows(rows)
-    env['APPTAINER_MOUNT'] = text.getvalue().rstrip('\n')
+    env['APPTAINER_MOUNT'] = mount_csv(rows)
     env.pop('SINGULARITY_MOUNT', None)
 
 
