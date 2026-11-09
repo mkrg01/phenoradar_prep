@@ -18,22 +18,29 @@ from test_datasets import dataset_project
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_pilot_freezes_only_subset_without_a_site_specific_configuration(dataset_project, monkeypatch):
+@pytest.mark.parametrize('count', [10, 20, 30, 40])
+def test_pilot_freezes_only_subset_without_a_site_specific_configuration(dataset_project, monkeypatch, count):
     root = dataset_project
     rows = [{'scientific_name': f'Plant species{i}', 'run': f'TEST{i}', 'taxid': str(i + 100),
              'total_bases': str(i * 10000)} for i in range(40)]
     source = root / 'input/metadata.tsv'
     write_tsv(source, list(rows[0]), rows)
     monkeypatch.setattr(dataset, 'resolve_software', lambda *a, **k: pytest.fail('submit host downloaded software'))
-    build = dataset.prepare(root, None, root / 'config/build.yaml', defer=True, pilot_size=20)
+    build = dataset.prepare(root, None, root / 'config/build.yaml', defer=True, pilot_size=count)
     manifest = dataset.load(build)
-    assert len(manifest['items']) == len(read_tsv(build / 'metadata.tsv')) == 20
+    assert len(manifest['items']) == len(read_tsv(build / 'metadata.tsv')) == count
     assert len(read_tsv(source)) == 40 and len(read_tsv(build / 'source_metadata.tsv')) == 40
     assert manifest['pilot']['source_samples'] == 40
     assert manifest['dataset_name'].endswith('_pilot')
     assert manifest['config']['reuse_from'] == []
     assert set(item['row']['run'] for item in manifest['items']) >= {'TEST0', 'TEST39'}
     assert not list(root.glob('config/*hgc*'))
+
+
+@pytest.mark.parametrize('count', [True, 9, 10.0, 41])
+def test_pilot_rejects_invalid_sizes(count):
+    with pytest.raises(ValueError, match='at least 10'):
+        dataset.pilot_items([None] * 40, count)
 
 
 def test_storage_preserves_reference_mounts_and_replaces_parent_temporary_path(tmp_path, monkeypatch):

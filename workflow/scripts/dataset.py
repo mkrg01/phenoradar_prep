@@ -204,8 +204,8 @@ def excluded_report(excluded):
 
 
 def pilot_items(items, count):
-    if type(count) is not int or not 10 <= count <= 20 or len(items) < count:
-        raise ValueError('pilot-size must be 10–20 and not exceed the eligible sample count')
+    if type(count) is not int or count < 10 or len(items) < count:
+        raise ValueError('pilot-size must be at least 10 and not exceed the eligible sample count')
     def volume(item):
         for field in ('total_bases', 'total_spots', 'size'):
             try:
@@ -1189,7 +1189,7 @@ def main():
         if name != "fetch-software": command.add_argument("--metadata")
         if name == "prepare": command.add_argument("--name", help="Explicit build name; otherwise follow name/name_mode in the build config")
         if name == 'plan':
-            command.add_argument('--pilot-size', type=int, help='Preview an independent 10–20 sample storage pilot')
+            command.add_argument('--pilot-size', type=int, help='Preview an independent storage pilot (at least 10 samples)')
             # Keep the former opt-in flag compatible; plans now always verify.
             command.add_argument('--verify', action='store_true', default=True, help=argparse.SUPPRESS)
             command.add_argument('--outdir', default='reports/plan', help='Directory for detailed TSV reports (default: reports/plan)')
@@ -1216,7 +1216,7 @@ def main():
         if name == "cleanup": command.add_argument("--apply", action="store_true", help="Delete inactive managed scratch; default is preview")
         if name == 'compact': command.add_argument('--apply', action='store_true', help='Commit verified diagnostic archives; default is preview')
         if name == "submit":
-            command.add_argument('--pilot-size', type=int, help='Build an independent 10–20 sample storage pilot through OrthoDB')
+            command.add_argument('--pilot-size', type=int, help='Build an independent storage pilot through OrthoDB (at least 10 samples)')
             command.add_argument("--root", default=".")
             command.add_argument("--config", help="Settings for a new build; default: config/build.yaml")
             command.add_argument("--name", help="Explicit build name; otherwise follow name/name_mode in the build config")

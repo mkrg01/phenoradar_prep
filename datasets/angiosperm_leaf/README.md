@@ -57,7 +57,7 @@ After the metadata job finishes, submit a new build:
 ```
 
 The same commands detect Slurm or AGE automatically. For an independent
-10–20 sample capacity trial, add `--pilot-size 20` to `plan` and `submit`, then
+capacity trial of at least 10 samples, add `--pilot-size 20` to `plan` and `submit`, then
 follow the [storage measurement instructions](../../docs/outputs.md#storage-pilot).
 The shared build config caps workers at four and targets 2.5 TB / 2.5 million
 inodes on both schedulers.

@@ -165,7 +165,7 @@ preparing the run.
 
 ## Storage pilot
 
-Use the normal build command to measure 10–20 samples through quantification,
+Use the normal build command to measure at least 10 samples through quantification,
 ODB mapping, and database publication on either scheduler:
 
 ```bash
