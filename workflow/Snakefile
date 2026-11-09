@@ -298,8 +298,7 @@ rule all:
 
 rule references:
     input:
-        f"{REFERENCE}/reference.json",
-        f"{REFERENCE}/files.json"
+        f"{WORK}/{ORTHOGROUP_MAPPING}/reference-ready.json"
 
 
 rule kegg_references:

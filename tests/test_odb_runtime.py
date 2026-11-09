@@ -95,7 +95,7 @@ def test_failed_preflight_blocks_reference_and_mapping(
     config.write_text('run_name: runtime\n')
     result = subprocess.run([snakemake, '--snakefile', str(ROOT / 'workflow/Snakefile'),
         '--configfile', str(config), '--cores', '2', '--',
-        'resources/orthodb/v12_3193/reference.json'], cwd=workflow_project,
+        'references'], cwd=workflow_project,
         env=env, text=True, capture_output=True, timeout=90)
     assert result.returncode != 0
     log = workflow_project / 'logs/runtime/orthogroups/mapping/reference.log'

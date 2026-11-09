@@ -49,6 +49,12 @@ release; fallback to another release is rejected.
 
 New mapping jobs and retries share a pinned reference checksum. Reference
 checksums are recorded internally; missing historical records remain unknown.
+Preparation validates an existing snapshot before pinning it, and writes only
+a per-run `reference-ready.json` receipt under the mapping work directory.
+Code updates and forced preparation leave the shared reference files unchanged.
+Builds that reuse every mapping do not need reference preparation. If a pinned
+snapshot is missing or changed, restore the original snapshot before retrying;
+do not replace the pin with a checksum from a new download.
 
 To change releases, edit `odb.version` and
 [create a new build](datasets.md#update-orthodb-for-all-samples). Matching results

@@ -69,11 +69,9 @@ def plan(samples, protein_dir, outdir, cache_dir, reference=None,
         sources.append({"kind": "existing", "root": str(root.resolve()), "species": members,
                         "snapshot_sha256": sha256(root / "snapshot.json")})
     missing = sorted(set(rows) - set(assigned))
-    if reference_pin:
-        # Reuse is determined by release, clade and protein content. Pin only
-        # the reference used by new mapping jobs; historical marker hashes can
-        # differ because the marker also records creation time and local paths.
-        pin_reference(reference_pin, version, node, reference_hash if missing else None)
+    # Planning may precede reference preparation. Bind the marker hash only
+    # after prepare_odb_reference validates the snapshot needed by new chunks.
+    # Cache-only builds retain the version/node pin without preparing a reference.
     out = Path(outdir)
     out.mkdir(parents=True, exist_ok=True)
     if missing:

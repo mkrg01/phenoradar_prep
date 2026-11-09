@@ -56,14 +56,12 @@ rule prepare_odb_reference:
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/odb_environment.py", f"{SCRIPTS}/odb_settings.py",
                  f"{SCRIPTS}/check_odb_runtime.py"]
     output:
-        reference=f"{REFERENCE}/reference.json",
-        inventory=f"{REFERENCE}/files.json",
-        info=f"{REFERENCE}/dbinfo.txt",
-        settings=f"{REFERENCE}/config.txt"
+        f"{WORK}/{ORTHOGROUP_MAPPING}/reference-ready.json"
     params:
         root=REFERENCE,
         command="ODB-mapper",
         prefix="",
+        pin=f"{WORK}/odb_reference_pin.json",
         version=ODB_VERSION,
         node=config["odb"]["ncbi_tax_id"]
     log: f"{LOG}/{ORTHOGROUP_MAPPING}/reference.log"
@@ -72,7 +70,8 @@ rule prepare_odb_reference:
     resources: mem_mb=32000
     shell:
         "{PYTHON:q} {input.code:q} --reference-dir {params.root:q} --command {params.command:q} "
-        "--prefix={params.prefix:q} --version {params.version:q} --node {params.node} > {log:q} 2>&1"
+        "--prefix={params.prefix:q} --version {params.version:q} --node {params.node} "
+        "--receipt {output:q} --reference-pin {params.pin:q} > {log:q} 2>&1"
 
 
 rule odb_map:
@@ -80,8 +79,7 @@ rule odb_map:
         runtime=f"{WORK}/{ORTHOGROUP_MAPPING}/runtime.json",
         manifests=odb_manifests,
         proteins=lambda wc: chunk_row(wc)["proteins"],
-        reference=f"{REFERENCE}/reference.json",
-        inventory=f"{REFERENCE}/files.json",
+        reference_ready=f"{WORK}/{ORTHOGROUP_MAPPING}/reference-ready.json",
         code=f"{SCRIPTS}/run_odb_chunk.py",
         helpers=[f"{SCRIPTS}/cleanup_work.py", f"{SCRIPTS}/odb_map.sh", f"{SCRIPTS}/odb_environment.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/make_manifests.py", f"{SCRIPTS}/incremental_odb.py", f"{SCRIPTS}/odb_settings.py"],
         samples=f"{META}/samples.tsv"
@@ -92,6 +90,7 @@ rule odb_map:
         provenance=f"{CHUNKS}/{{chunk}}/provenance.json"
     params:
         manifest=lambda wc: f"{ODB_PLAN if INCREMENTAL_ODB else MANIFESTS}/{wc.chunk}.fs",
+        reference=f"{REFERENCE}/reference.json",
         out=lambda wc: f"{CHUNKS}/{wc.chunk}",
         work=f"{WORK}/{ORTHOGROUP_MAPPING}",
         command="ODB-mapper",
@@ -113,7 +112,7 @@ rule odb_map:
     benchmark: f"{LOG}/{ORTHOGROUP_MAPPING}/benchmarks/{{chunk}}.tsv"
     conda: "../envs/odb.yaml"
     shell:
-        "{PYTHON:q} {input.code:q} --manifest {params.manifest:q} --reference {input.reference:q} "
+        "{PYTHON:q} {input.code:q} --manifest {params.manifest:q} --reference {params.reference:q} "
         "--output-dir {params.out:q} --work-dir {params.work:q} --label {wildcards.chunk:q} "
         "--command {params.command:q} --prefix={params.prefix:q} --version {params.version:q} "
         "{params.pin:q} --node {params.node} --jobs {threads} --batch-size {params.batch} --defer-cleanup {params.keep:q} > {log:q} 2>&1; "

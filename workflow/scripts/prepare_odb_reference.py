@@ -7,13 +7,13 @@ import re
 import subprocess
 from pathlib import Path
 
-from common import atomic_writer, file_record, now, write_json
+from common import atomic_writer, file_record, now, sha256, write_json
 from odb_environment import command_path, odb_environment, software_records
-from odb_settings import validate as validate_odb
+from odb_settings import pin_reference, validate as validate_odb
 from check_odb_runtime import check as check_runtime
 
 
-def prepare(reference_dir, command="ODB-mapper", prefix="", version="v12", node=3193):
+def _initialize(reference_dir, command="ODB-mapper", prefix="", version="v12", node=3193):
     root = Path(reference_dir).resolve()
     validate_odb({'version': version})
     if type(node) is not int or node < 1:
@@ -62,6 +62,51 @@ def prepare(reference_dir, command="ODB-mapper", prefix="", version="v12", node=
                             "software": software_records(command, prefix)})
 
 
+def prepare(reference_dir, command="ODB-mapper", prefix="", version="v12", node=3193,
+            receipt=None, reference_pin=None):
+    """Validate the immutable snapshot before pinning it for this build.
+
+    Snakemake owns only the per-run receipt, so reruns cannot remove imported
+    reference files before the existing-snapshot check executes.
+    """
+    root = Path(reference_dir).resolve()
+    validate_odb({'version': version})
+    if type(node) is not int or node < 1:
+        raise ValueError("OrthoDB requires a positive node ID")
+    marker = root / 'reference.json'
+    if reference_pin:
+        pinned = pin_reference(reference_pin, version, node)
+        if pinned['reference_sha256']:
+            if not marker.is_file():
+                raise ValueError('pinned reference is missing; restore the original reference')
+            pin_reference(reference_pin, version, node, sha256(marker))
+    _initialize(root, command, prefix, version, node)
+    reference = file_record(marker)
+    data = json.loads(marker.read_text())
+    inventory = Path(data['inventory']['path'])
+    if not inventory.is_file() or sha256(inventory) != data['inventory']['sha256']:
+        raise ValueError('reference inventory missing or modified')
+    entries = json.loads(inventory.read_text())
+    if not entries:
+        raise ValueError('reference inventory is empty')
+    directory = Path(data['data_dir']).resolve()
+    for entry in entries:
+        path = (directory / entry['relative_path']).resolve()
+        if not path.is_relative_to(directory):
+            raise ValueError(f'reference file escapes data directory: {path}')
+        if not path.is_file() or path.stat().st_size != entry['bytes']:
+            raise ValueError(f'reference file missing or size changed: {path}')
+    if sha256(marker) != reference['sha256']:
+        raise ValueError('reference marker changed during validation')
+    if reference_pin:
+        pin_reference(reference_pin, version, node, reference['sha256'])
+    result = {'schema_version': 1, 'checked_at': now(), 'version': version, 'node': node,
+              'reference': reference, 'inventory': file_record(inventory), 'files_checked': len(entries)}
+    if receipt:
+        write_json(receipt, result)
+    return result
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference-dir", required=True)
@@ -69,4 +114,6 @@ if __name__ == "__main__":
     parser.add_argument("--prefix", default="")
     parser.add_argument("--version", default="v12")
     parser.add_argument("--node", type=int, default=3193)
+    parser.add_argument("--receipt")
+    parser.add_argument("--reference-pin")
     prepare(**vars(parser.parse_args()))
