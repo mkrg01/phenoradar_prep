@@ -1,0 +1,26 @@
+# Optional runtime policy for builds that saved older storage limits.
+storage:
+  max_bytes: null
+  max_inodes: null
+  scratch_min_free_bytes: 0
+  scratch_min_free_inodes: 0
+  scratch_reserve_bytes: 0
+  scratch_reserve_inodes: 0
+  scratch_max_bytes: null
+  scratch_max_inodes: null
+  task_limits:
+    sample:
+      scratch_min_free_bytes: 0
+      scratch_min_free_inodes: 0
+      scratch_reserve_bytes: 0
+      scratch_reserve_inodes: 0
+      scratch_max_bytes: null
+      scratch_max_inodes: null
+    odb_map:
+      scratch_min_free_bytes: 0
+      scratch_min_free_inodes: 0
+      scratch_reserve_bytes: 0
+      scratch_reserve_inodes: 0
+      scratch_max_bytes: null
+      scratch_max_inodes: null
+  allow_shared_scratch: true

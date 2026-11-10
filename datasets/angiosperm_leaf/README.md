@@ -59,8 +59,10 @@ After the metadata job finishes, submit a new build:
 The same commands detect Slurm or AGE automatically. For an independent
 capacity trial of at least 10 samples, add `--pilot-size 20` to `plan` and `submit`, then
 follow the [storage measurement instructions](../../docs/outputs.md#storage-pilot).
-The shared build config caps workers at four and targets 2.5 TB / 2.5 million
-inodes on both schedulers.
+The shared build config adds no worker-count cap, storage reservation, or
+byte/inode ceiling. The scheduler controls allocations; storage usage is measured
+and temporary files are cleaned normally. See [storage settings](../../docs/configuration.md#intermediate-storage)
+to choose scratch or change a saved build's operational policy.
 
 Builds use `results/angiosperm_leaf_<UTC timestamp>/` and reuse compatible stages
 automatically. The command prints the exact path; `--name` sets a name manually.
