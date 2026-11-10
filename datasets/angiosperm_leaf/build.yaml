@@ -21,7 +21,7 @@ execution:
   scheduler: auto  # Detect the allocated job or available scheduler clients.
   partition: null
   total_limits:
-    jobs: 4
+    jobs: null  # Let the scheduler control concurrency unless explicitly overridden.
     cpus: null
     mem_gb: null
   per_job_resources:
@@ -44,25 +44,8 @@ execution:
 storage:
   keep_intermediates: false
   scratch_root: auto
-  allow_shared_scratch: false  # Large scratch must not spill into the shared quota.
+  allow_shared_scratch: true
   compact_logs: true  # Archive native ODB logs on every scheduler.
-  max_bytes: 2500000000000  # Optional project-wide allocated-byte budget.
-  max_inodes: 2500000  # Optional unique inode budget, including directories.
-  interval_seconds: 15
-  start_fraction: 0.85
-  stop_fraction: 0.95
-  scratch_min_free_bytes: 1000000000
-  scratch_min_free_inodes: 10000
-  task_limits:
-    sample:  # Conservative per-sample admission; adjust after a representative pilot.
-      scratch_reserve_bytes: 1200000000000
-      scratch_max_bytes: 1150000000000
-      scratch_reserve_inodes: 100000
-      scratch_max_inodes: 80000
-      scratch_min_free_bytes: 20000000000
-    odb_map:  # The 20-sample pilot does not establish a 50-sample upper bound.
-      scratch_reserve_bytes: 80000000000
-      scratch_max_bytes: 75000000000
-      scratch_reserve_inodes: 200000
-      scratch_max_inodes: 180000
-      scratch_min_free_bytes: 10000000000
+  max_bytes: null  # Measure storage without imposing a project capacity budget.
+  max_inodes: null
+  interval_seconds: 60

@@ -98,7 +98,7 @@ The following policies apply to both schedulers:
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `storage.scratch_root` | `auto` | Choose `/data1`, node `$TMPDIR`, or `/tmp` on a different filesystem. `env`, `workspace`, or an absolute directory can override it |
-| `storage.allow_shared_scratch` | `true` | Permit the automatic project-scratch fallback; the angiosperm config disables it |
+| `storage.allow_shared_scratch` | `true` | Permit the automatic project-scratch fallback |
 | `storage.compact_logs` | `true` | Archive ODB RunLogs per chunk while retaining their checksums |
 | `storage.max_bytes`, `storage.max_inodes` | `null` | Optional project-wide allocated-byte and inode ceilings |
 | `storage.interval_seconds` | `60` | Storage inventory interval |
@@ -117,35 +117,36 @@ Restart products remain on shared storage. Keeping intermediates forces project
 scratch and retains it. Interrupted jobs killed without a cleanup opportunity can
 leave scratch directories; their `owner.json` identifies the run.
 
-Storage ceilings cover the repository, including other builds and shared caches,
-but exclude external files and other group members' directories. New jobs refuse
-to start at 85% of a ceiling; active jobs stop at an observed 95%. Periodic
-inventories can miss short peaks, so these checks do not replace filesystem quotas.
-The angiosperm config sets 2.5 TB and 2.5 million inodes on either scheduler.
+Image pulls also use the supplied task scratch or temporary directory for unpacking
+and disposable OCI layers. Only the completed SIF is published to the image cache.
+Explicit `APPTAINER_CACHEDIR`/`SINGULARITY_CACHEDIR` locations remain caller-owned.
 
-The angiosperm sample policy reserves 1.2 TB per sample and stops at 1.15 TB;
-ODB jobs reserve 80 GB and stop at 75 GB. These are conservative pilot-based
-admission policies, not measured upper bounds for all samples or 50-sample chunks.
-Reservations count in full against currently free space, so admission is deliberately
-conservative. Locks coordinate this user's cooperating jobs, retain orphan data
-after crashes, and do not reserve space against unrelated applications or users.
-No child starts when admission fails. Adjust the policy for the available nodes
-after a representative pilot; read amounts and scientific conditions remain unchanged.
+The supplied configs, including angiosperm, measure storage without reserving
+capacity or enforcing byte/inode ceilings. Normal cleanup and execution locks
+remain enabled. To use shared computation storage directly, set
+`storage.scratch_root: workspace` or an existing absolute directory; `auto`
+prefers node-local storage and permits a project-scratch fallback.
+
+Storage limits are optional. If configured, project ceilings cover the repository,
+including other builds and shared caches. New jobs refuse to start at 85% of a
+ceiling; active jobs stop at an observed 95%. Reservations coordinate this user's
+jobs on each node/filesystem, count in full against current free space, and do
+not reserve space against unrelated applications or users.
 
 To retry with a different scratch location or budget, set
 `PHENORADAR_STORAGE_POLICY=/absolute/path/storage-retry.yaml` when submitting.
 The file must contain only `storage:` settings; `task_limits` entries merge by name.
 This changes the operational policy without editing frozen build inputs. Each
-usage receipt records the policy checksum and effective limits. For example:
+usage receipt records the policy checksum and effective limits. To remove the
+capacity limits saved by an older build while retaining measurement and cleanup:
 
-```yaml
-storage:
-  scratch_root: /path/to/larger/local/scratch
-  task_limits:
-    sample:
-      scratch_reserve_bytes: 1500000000000
-      scratch_max_bytes: 1400000000000
+```bash
+PHENORADAR_STORAGE_POLICY=config/storage-unrestricted.yaml \
+  ./run_build.sh submit --build results/{saved_build}
 ```
+
+Saved CPU, memory, time and concurrency requests are unchanged by that policy;
+use [resource overrides](running.md#resource-budgets) to change them.
 See [pilot measurements](outputs.md#storage-pilot).
 
 ## Optional analyses and exports

@@ -100,6 +100,43 @@ def test_retry_policy_is_storage_only_and_records_content_identity(tmp_path, mon
         storage_policy(original, tmp_path)
 
 
+@pytest.mark.parametrize('label', ['sample', 'odb_map'])
+def test_unrestricted_policy_runs_saved_build_without_rewriting_inputs(tmp_path, label):
+    root, node = tmp_path / 'project', tmp_path / 'node'
+    root.mkdir(); node.mkdir()
+    pipeline = root / 'pipeline.yaml'
+    legacy = {'max_bytes': 1, 'max_inodes': 1, 'scratch_root': str(node),
+              'scratch_reserve_bytes': 10**30, 'scratch_reserve_inodes': 10**30,
+              'scratch_max_bytes': 1, 'scratch_max_inodes': 1,
+              'scratch_min_free_bytes': 10**30, 'scratch_min_free_inodes': 10**30,
+              'task_limits': {label: {'scratch_reserve_bytes': 10**30,
+                                      'scratch_max_bytes': 1, 'scratch_max_inodes': 1}}}
+    saved = yaml.safe_dump({'storage': legacy}).encode()
+    pipeline.write_bytes(saved)
+    repo = Path(__file__).parents[1]
+    policy = repo / 'config/storage-unrestricted.yaml'
+    marker = root / 'child-output'
+    result = subprocess.run([
+        sys.executable, str(repo / 'workflow/scripts/storage_runtime.py'), 'run',
+        '--pipeline', str(pipeline), '--root', str(root), '--usage', str(root / 'jobs/storage'),
+        '--label', label, '--', sys.executable, '-c',
+        'from pathlib import Path; Path(' + repr(str(marker)) + ').write_bytes(b"x"*10000)',
+    ], env=dict(os.environ, PHENORADAR_STORAGE_POLICY=str(policy)),
+       capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert marker.stat().st_size == 10000 and pipeline.read_bytes() == saved
+    receipt = json.loads(next((root / 'jobs/storage').glob('*.json')).read_text())
+    assert receipt['state'] == 'complete' and receipt['shared_peak']['allocated_bytes'] > 1
+    limits = receipt['storage_limits']
+    for key in ('max_bytes', 'max_inodes', 'scratch_max_bytes', 'scratch_max_inodes'):
+        assert limits[key] is None
+    for key in ('scratch_reserve_bytes', 'scratch_reserve_inodes',
+                'scratch_min_free_bytes', 'scratch_min_free_inodes'):
+        assert limits[key] == 0
+    assert limits['task_limits'] == {} and limits['policy_source']['sha256']
+    assert not list(node.iterdir())
+
+
 @pytest.mark.parametrize('variables,threads', [({'NSLOTS': '3'}, '3'),
     ({'PHENORADAR_TASK_CPUS': '2', 'NSLOTS': '8'}, '2'),
     ({'SLURM_CPUS_PER_TASK': '4', 'PHENORADAR_TASK_CPUS': '16'}, '4')])
