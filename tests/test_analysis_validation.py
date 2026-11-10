@@ -123,6 +123,31 @@ def test_older_snapshot_without_sequence_expression_remains_valid(snapshot):
     assert validate(snapshot)["sections"]["sequence_expression"] == "absent"
 
 
+def test_native_validation_reuses_all_expression_tables(snapshot, tmp_path, monkeypatch):
+    import analysis_validation
+    from verification_cache import verification_cache
+    cache = tmp_path / 'verification.sqlite'
+    with verification_cache(cache):
+        expected = validate(snapshot)
+    monkeypatch.setattr(analysis_validation, '_validate_expression',
+                        lambda *a, **k: pytest.fail('unexpected expression reread'))
+    with verification_cache(cache):
+        assert validate(snapshot) == expected
+
+
+def test_native_cached_verification_still_rejects_alignment_edits(snapshot, tmp_path):
+    from verification_cache import verification_cache
+    cache = tmp_path / 'verification.sqlite'
+    with verification_cache(cache):
+        validate(snapshot)
+    path = snapshot / 'orthogroups/alignments/OG1.faa'
+    previous = path.stat()
+    path.write_text(path.read_text().replace('aAC', 'GAC'))
+    os.utime(path, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+    with verification_cache(cache), pytest.raises(ValueError, match='checksum mismatch'):
+        validate(snapshot)
+
+
 @pytest.mark.parametrize("layout", ["native", "mixed", "legacy"])
 def test_expression_layouts_validate_without_modifying_inputs(snapshot, layout):
     for index, branch in enumerate(["orthogroups/expression/tpm.tsv", "kegg/ko_tpm_sum.tsv"]):

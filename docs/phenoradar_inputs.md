@@ -131,6 +131,11 @@ This checks recorded output hashes and consistency of sample IDs, expression,
 completed OG alignments, trees, and available annotations. Plain `status` remains
 a lightweight observation and does not read large output tables.
 
+Successful expression-row checks are reused from `.cache/verification.sqlite`
+when file content, sample/run mappings, requested columns, Python, and validation
+code agree. Changed file attributes require checking the content again. Missing
+or damaged cache entries fall back to full validation.
+
 For a [post hoc subset](species_filter.md), point all relevant inputs at
 `filtered/` under the same analysis. Do not mix filtered expression or metadata
 with the original tree; use the saved pruned tree or matching contrast branch.

@@ -25,6 +25,10 @@ class VerificationCache:
             self.connection.execute("CREATE TABLE IF NOT EXISTS documents "
                                     "(path TEXT, kind TEXT, source_sha256 TEXT, stat TEXT, "
                                     "payload_sha256 TEXT, payload BLOB, PRIMARY KEY(path, kind))")
+            self.connection.execute("CREATE TABLE IF NOT EXISTS validations "
+                                    "(kind TEXT, source_sha256 TEXT, context TEXT, "
+                                    "payload_sha256 TEXT, payload BLOB, "
+                                    "PRIMARY KEY(kind, source_sha256, context))")
             self.connection.commit()
             for filename, checksum, identity in self.connection.execute("SELECT path, sha256, stat FROM verified"):
                 try:
@@ -94,6 +98,40 @@ class VerificationCache:
             with self.connection:
                 self.connection.execute("INSERT OR REPLACE INTO documents VALUES (?, ?, ?, ?, ?, ?)",
                     (os.path.abspath(path), kind, checksum, json.dumps(identity), expected, payload))
+        except sqlite3.Error:
+            self._disconnect()
+
+    def validation(self, kind, checksum, context):
+        """Reuse a successful semantic check after its caller verifies the source."""
+        if self.connection is None:
+            return None
+        try:
+            row = self.connection.execute(
+                "SELECT payload_sha256, payload FROM validations "
+                "WHERE kind = ? AND source_sha256 = ? AND context = ?",
+                (kind, checksum, context)).fetchone()
+            if row is None:
+                return None
+            expected, payload = row
+            if hashlib.sha256(payload).hexdigest() != expected:
+                return None
+            data = json.loads(zlib.decompress(payload))
+            return data if isinstance(data, dict) else None
+        except sqlite3.Error:
+            self._disconnect()
+        except (ValueError, TypeError, zlib.error):
+            pass
+        return None
+
+    def remember_validation(self, kind, checksum, context, data):
+        if self.connection is None:
+            return
+        payload = zlib.compress(json.dumps(data, separators=(",", ":")).encode(), level=1)
+        expected = hashlib.sha256(payload).hexdigest()
+        try:
+            with self.connection:
+                self.connection.execute("INSERT OR REPLACE INTO validations VALUES (?, ?, ?, ?, ?)",
+                    (kind, checksum, context, expected, payload))
         except sqlite3.Error:
             self._disconnect()
 

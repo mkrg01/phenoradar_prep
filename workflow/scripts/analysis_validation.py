@@ -3,14 +3,22 @@ import csv
 import gzip
 import json
 import math
+import sys
 from pathlib import Path
 
 from common import existing_product, read_tsv, sha256, species_from_gene_id
+from dataset_assets import digest, record, stat_identity
 from filter_species import fasta_records, manifest, safe_name, table, validate_exclusions
 from phenoradar_metadata import read_base, with_pairs
 from sample_identity import expression_run, sample_run_map
 from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
                     PHYLOGENY_BRANCHES, REPRESENTATIVES, SEQUENCE_EXPRESSION, CONSUMER_METADATA, BASE_METADATA)
+from verification_cache import active_cache
+
+
+# Include transitive row-validation helpers and the Python parser/runtime.
+_EXPRESSION_VALIDATOR_SHA = digest({name: sha256(Path(__file__).with_name(name)) for name in
+    ('analysis_validation.py', 'filter_species.py', 'sample_identity.py', 'common.py')})
 
 
 def discover(source, exclusions=()):
@@ -208,6 +216,30 @@ def discover(source, exclusions=()):
 
 
 def validate_expression(path, runs, feature, value, *, collect_features=True):
+    """Cache successful row checks by verified content and the complete contract."""
+    cache = active_cache()
+    if cache is None or cache.connection is None:
+        return _validate_expression(path, runs, feature, value, collect_features=collect_features)
+    path = Path(path)
+    source = record(path)
+    context = digest(dict(validator=_EXPRESSION_VALIDATOR_SHA, python=list(sys.version_info),
+                          runs=sorted(runs.items()), feature=feature, value=value,
+                          collect_features=collect_features, gzip=str(path).endswith('.gz')))
+    indexed = cache.validation('expression-v1', source['sha256'], context)
+    features = indexed.get('features') if indexed is not None else None
+    valid = (isinstance(features, list) and all(isinstance(v, str) for v in features)
+             and features == sorted(set(features)) and (collect_features or not features))
+    if not valid:
+        features = sorted(_validate_expression(path, runs, feature, value,
+                                               collect_features=collect_features))
+    if stat_identity(path) != source['stat']:
+        raise ValueError(f'expression changed during verification: {path}')
+    if not valid:
+        cache.remember_validation('expression-v1', source['sha256'], context, {'features': features})
+    return set(features)
+
+
+def _validate_expression(path, runs, feature, value, *, collect_features=True):
     """Validate run-level values without choosing or combining biological replicates."""
     samples = sample_run_map(dict(species=sample, run=run) for run, sample in runs.items())
     reader = table(path, ["species", feature, value])
@@ -346,7 +378,7 @@ def validate(source, exclusions=(), trait="C4"):
                     raise ValueError("filtered checksum differs from original completion: " + relative)
                 expected_hashes[str(path)] = recorded[relative]
     for path, expected in expected_hashes.items():
-        if sha256(path) != expected:
+        if record(path)['sha256'] != expected:
             raise ValueError("completed input checksum mismatch: " + path)
     _, samples, by_species, runs = manifest(source / "metadata/samples.tsv")
     species = set(by_species)
