@@ -23,6 +23,7 @@ odb:
 alignment:
   enabled: false
   min_sample_fraction: 0.5  # Fraction of selected sample IDs represented in each OG; 0 keeps all OGs.
+  trimal_mode: gappyout  # Trim alignment columns with gappyout or automated1.
 kegg:
   enabled: false
   ambiguity: duplicate

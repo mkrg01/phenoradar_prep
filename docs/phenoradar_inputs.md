@@ -20,7 +20,7 @@ Paths below are relative to the analysis directory.
 | OG expression | `orthogroups/expression/tpm.tsv` |
 | Per-sequence expression | `expression/sequence_tpm.tsv.gz` (`species`, `sequence_id`, `tpm`) |
 | KO expression | `kegg/ko_tpm_sum.tsv` |
-| OG alignments | `orthogroups/alignments/{og}.faa` |
+| Trimmed OG alignments | `orthogroups/alignments/{og}.faa` |
 | Species tree | `phylogeny/{all,phenotyped,representatives}/species_tree.nwk` |
 | Dated species tree, when enabled | `phylogeny/{all,phenotyped}/dating/species_tree.dated.nwk` |
 | Branch-specific contrast pairs | `phylogeny/{tree}/contrast/species_metadata.tsv` |

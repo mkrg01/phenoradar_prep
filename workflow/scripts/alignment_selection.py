@@ -121,7 +121,7 @@ def select(inputs, occupancy, outdir, min_sample_fraction=0.5):
     return settings
 
 
-def finish(inputs, outdir, reports, cache=None):
+def finish(inputs, outdir, reports, cache=None, trimal_mode=None):
     """Publish selected OGs only, moving other alignments to a reusable work cache."""
     inputs, outdir, reports = Path(inputs), Path(outdir), Path(reports)
     cache = cache_directory(cache if cache is not None else inputs.parent / 'cache', inputs, outdir, reports)
@@ -134,6 +134,8 @@ def finish(inputs, outdir, reports, cache=None):
     for og in groups:
         report_path = reports / f'{og}.json'
         report = json.loads(report_path.read_text())
+        if trimal_mode is not None and report.get('trimming', {}).get('mode') != trimal_mode:
+            raise ValueError(f'OG alignment has not completed the requested trimAl mode: {og}')
         expected = outdir / f'{og}.faa'
         if Path(report['alignment']['path']).name != expected.name:
             raise ValueError(f'misplaced OG alignment: {og}')
@@ -187,5 +189,6 @@ if __name__ == '__main__':
             command.add_argument('--min-sample-fraction', type=float, default=0.5)
         if action == 'finish':
             command.add_argument('--cache')
+            command.add_argument('--trimal-mode', choices=['gappyout', 'automated1'])
     args = vars(parser.parse_args())
     globals()[args.pop('action')](**args)

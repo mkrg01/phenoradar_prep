@@ -179,7 +179,8 @@ rule trim_busco_marker:
         raw_qc=f"{PHYLO_RUN}/alignments/raw/{{marker}}.json",
         sample_manifest=f"{PHYLO_RUN}/plan/species.tsv",
         code=f"{SCRIPTS}/infer_phylogeny.py",
-        helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
+        helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"],
+        trimming=f"{SCRIPTS}/alignment_trimming.py"
     output:
         alignment=f"{PHYLO_RUN}/alignments/{{marker}}.faa",
         qc=f"{PHYLO_RUN}/alignments/{{marker}}.json",

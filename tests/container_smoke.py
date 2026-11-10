@@ -105,7 +105,7 @@ def check_environment(name):
                "analysis": ["pandas", "ete4", "matplotlib"], "dating": ["Bio", "ete4"],
                "monophy": ["ete4"], "phylogeny": ["Bio", "ete4", "numpy", "cdskit"],
                "timetree": ["Bio", "nwkit"]}
-    commands = {"alignment": ["famsa"], "kofam": ["exec_annotation", "hmmsearch"],
+    commands = {"alignment": ["famsa", "trimal"], "kofam": ["exec_annotation", "hmmsearch"],
                 "odb": ["ODB-mapper"], "seqkit": ["seqkit"],
                 "phylogeny": ["famsa", "trimal", "VeryFastTree"],
                 "dating": ["lsd2"], "monophy": ["Rscript"]}
@@ -126,6 +126,10 @@ def check_environment(name):
             source.write_text(">a\nMKWVTFISLLFLFSSAYS\n>b\nMKWVTFISLFLFSSAYS\n")
             subprocess.run(["famsa", "-t", "1", str(source), str(target)], check=True)
             assert target.read_text().count(">") == 2
+            from alignment_trimming import trim_records
+            from busco_phylogeny import fasta_records
+            records, columns, _, _ = trim_records(list(fasta_records(target)), 'trimal', 'gappyout', work)
+            assert len(records) == 2 and columns
         elif name == "odb":
             from check_odb_runtime import check
             assert check(work_dir=work)["checks"]["fasta_import"] == "passed"

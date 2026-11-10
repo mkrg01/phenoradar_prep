@@ -239,7 +239,8 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     seqkit = os.environ.get("SEQKIT_BIN") or shutil.which("seqkit")
     famsa = famsa_binary()
-    if not snakemake or not seqkit:
+    trimal = os.environ.get("TRIMAL_BIN") or shutil.which("trimal")
+    if not snakemake or not seqkit or not trimal:
         pytest.skip("set SNAKEMAKE_BIN and SEQKIT_BIN for workflow integration")
     # The final per-sequence table requires one run per computational sample key.
     metadata = read_tsv(tiny_inputs['metadata'])
@@ -274,7 +275,7 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     wrapper.chmod(0o755)
     events, fail_once, odb_events = tmp_path / "align_events", tmp_path / "fail_once", tmp_path / "odb_events"
     env = {**command_environment({"python": sys.executable, "seqkit": seqkit,
-                                 "ODB-mapper": fake_odb, "famsa": wrapper}),
+                                 "ODB-mapper": fake_odb, "famsa": wrapper, "trimal": trimal}),
            "FAMSA_EVENTS": str(events), "FAMSA_FAIL_ONCE": str(fail_once), "FAKE_ODB_LOG": str(odb_events)}
     base = [snakemake, "--snakefile", str(ROOT / "workflow/Snakefile"), "--configfile", str(configfile),
             "--cores", "2", "--resources", "mem_mb=16000",
@@ -299,6 +300,11 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     assert len(list(fasta_records(out / "OG2.faa"))) == 2
     assert len(list(fasta_records(out / "OG3.faa"))) == 1
     assert len(alignment_members(out)) == 7
+    for fasta in out.glob('*.faa'):
+        report = json.loads((tmp_path / 'logs/test/orthogroups/alignments' / f'{fasta.stem}.json').read_text())
+        assert report['trimming']['mode'] == 'gappyout'
+        assert report['sites'] == report['trimming']['sites']
+        assert report['trimming']['raw_sites'] >= report['sites'] > 0
     assert not (out / "members.tsv").exists()
     assert sorted(events.read_text().splitlines()) == ["OG1", "OG2"]
     assert len(odb_events.read_text().splitlines()) == 1

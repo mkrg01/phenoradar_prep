@@ -144,32 +144,10 @@ def trim(alignment, raw_qc, output, qc, columns, command, mode, settings):
         if not any(c in AMINO for _, seq in records for c in seq):
             report.update(status="all_missing")
         else:
-            Path(output).parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.TemporaryDirectory(prefix=".trimal-", dir=Path(output).parent) as tmp:
-                gap_view, raw = Path(tmp) / "missing_as_gaps.faa", Path(tmp) / "trimmed.faa"
-                # Masked X must count as missing in gap statistics. The real
-                # alignment is projected by column number afterwards to retain X.
-                viewed = {name: seq.replace("X", "-") for name, seq in records}
-                with open(gap_view, "w") as handle:
-                    for name, seq in viewed.items():
-                        handle.write(f">{name}\n{seq}\n")
-                argv = [command, "-in", str(gap_view), "-out", str(raw), "-fasta", "-keepheader",
-                        "-keepseqs", "-colnumbering", "-" + mode]
-                result = subprocess.run(argv, check=True, stdout=subprocess.PIPE, text=True)
-                maps = re.findall(r"^#ColumnsMap\t(.*)$", result.stdout, re.MULTILINE)
-                if len(maps) != 1 or not re.fullmatch(r"\d+(?:,\s*\d+)*\s*", maps[0]):
-                    raise ValueError("trimAl did not return a valid column map")
-                selected = [int(value) for value in maps[0].split(",")]
-                if selected != sorted(set(selected)) or selected[-1] >= len(records[0][1]):
-                    raise ValueError("trimAl column map is duplicated, unordered or out of range")
-                trimmed = list(fasta_records(raw))
-                if len(trimmed) != len(names) or {n for n, _ in trimmed} != set(names):
-                    raise ValueError("trimAl changed the species set despite -keepseqs")
-                if any(seq != "".join(viewed[name][i] for i in selected) for name, seq in trimmed):
-                    raise ValueError("trimAl residues disagree with its column map")
-                projected = [(name, "".join(seq[i] for i in selected)) for name, seq in records]
-                retained, report = alignment_qc(projected, settings)
-                final_columns = [selected[i] for i in report.pop("retained_columns_0based")]
+            from alignment_trimming import trim_records
+            projected, selected, argv, _ = trim_records(records, command, mode, Path(output).parent)
+            retained, report = alignment_qc(projected, settings)
+            final_columns = [selected[i] for i in report.pop("retained_columns_0based")]
     with atomic_writer(output) as handle:
         if report["status"] == "retained":
             for name, seq in retained:

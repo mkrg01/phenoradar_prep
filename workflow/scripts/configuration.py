@@ -9,7 +9,7 @@ KEYS = {
     "selection": "busco_threshold species_list",
     "translation": "table",
     "odb": "ncbi_tax_id incremental cache_dir chunk_size version",
-    "alignment": "enabled min_sample_fraction",
+    "alignment": "enabled min_sample_fraction trimal_mode",
     "kegg": "enabled ambiguity",
     "phylogeny": "trees lineage "
         "outgroup max_markers min_protein_length max_unknown_fraction "
@@ -49,6 +49,9 @@ def validate_keys(config):
     storage_settings(config.get('storage', {}))
     from alignment_selection import validate_fraction
     validate_fraction(config.get('alignment', {}).get('min_sample_fraction', 0.5))
+    trimal_mode = config.get('alignment', {}).get('trimal_mode', 'gappyout')
+    if not isinstance(trimal_mode, str) or trimal_mode not in {'gappyout', 'automated1'}:
+        raise ValueError('alignment.trimal_mode must be gappyout or automated1')
     odb = config.get("odb", {})
     from odb_settings import validate as validate_odb
     validate_odb(odb)

@@ -11,7 +11,7 @@ from pathlib import Path
 import shutil
 import tempfile
 
-from align_orthogroups import align, SAFE_OG
+from align_orthogroups import align, trim_existing, SAFE_OG
 from common import atomic_writer, file_record, write_json
 from dataset_assets import digest, record, stat_identity
 
@@ -29,7 +29,7 @@ def inspect_batches():
         _INSPECTION.reset(token)
 
 
-def plan(inputs, outdir, batch_size=500, heavy_bytes=16000000):
+def plan(inputs, outdir, batch_size=500, heavy_bytes=16000000, trimal_mode=None):
     if type(batch_size) is not int or batch_size < 1:
         raise ValueError('batch size must be positive')
     inputs, outdir = Path(inputs), Path(outdir)
@@ -54,6 +54,8 @@ def plan(inputs, outdir, batch_size=500, heavy_bytes=16000000):
         payload = {'batch': name, 'collection_sha256': collection['sha256'],
                    'orthogroups': sorted(og for og, _ in members),
                    'input_bytes': sum(size for _, size in members)}
+        if trimal_mode is not None:
+            payload['trimal_mode'] = trimal_mode
         payload['sha256'] = digest(payload)
         path = outdir / f'{name}.json'
         if not path.exists() or json.loads(path.read_text()) != payload:
@@ -98,9 +100,17 @@ def batch_targets(plan_dir, outdir, reports):
     return targets
 
 
-def reusable(fasta, output, report, threads, executable):
+def reusable(fasta, output, report, threads, executable, trimal_mode=None, trimal_executable=None):
     try:
         saved = json.loads(Path(report).read_text())
+        trimming = saved.get('trimming')
+        if trimal_mode is None:
+            if trimming is not None:
+                return False
+        elif (trimming is None or trimming.get('mode') != trimal_mode or
+              trimal_executable is None or
+              trimming.get('executable', {}).get('sha256') != trimal_executable['sha256']):
+            return False
         if saved['method'] != 'singleton':
             if saved['threads'] != threads or saved['executable']['sha256'] != executable['sha256']:
                 return False
@@ -150,13 +160,15 @@ def validate_groups(groups):
         raise ValueError('batch OG IDs must be unique, safe filename components')
 
 
-def run_batch(batch, inputs, outdir, reports, receipt, cpus=12, threads_per_og=4, command='famsa', cache=None):
+def run_batch(batch, inputs, outdir, reports, receipt, cpus=12, threads_per_og=4, command='famsa', cache=None, trimal_mode=None, trimal_command='trimal'):
     if any(type(value) is not int or value < 1 for value in (cpus, threads_per_og)):
         raise ValueError('CPU counts must be positive')
     payload = json.loads(Path(batch).read_text())
     if digest({k: v for k, v in payload.items() if k != 'sha256'}) != payload.get('sha256'):
         raise ValueError('alignment batch plan changed')
     validate_groups(payload['orthogroups'])
+    if payload.get('trimal_mode') != trimal_mode:
+        raise ValueError('trimAl mode differs from the alignment batch plan')
     inputs, outdir, reports = Path(inputs), Path(outdir), Path(reports)
     cache = cache_directory(cache, inputs, outdir, reports) if cache is not None else None
     if file_record(inputs / 'provenance.json')['sha256'] != payload['collection_sha256']:
@@ -166,16 +178,29 @@ def run_batch(batch, inputs, outdir, reports, receipt, cpus=12, threads_per_og=4
     binary = shutil.which(command)
     executable = file_record(binary) if binary else None
 
+    trimal_binary = shutil.which(trimal_command) if trimal_mode is not None else None
+    trimal_executable = file_record(trimal_binary) if trimal_binary else None
+    if trimal_mode is not None and trimal_executable is None:
+        raise FileNotFoundError(f'trimAl executable unavailable: {trimal_command}')
+
     def process(og):
         fasta, output, provenance = inputs / f'{og}.faa', outdir / f'{og}.faa', reports / f'{og}.json'
-        reused = reusable(fasta, output, provenance, threads, executable)
+        reused = reusable(fasta, output, provenance, threads, executable, trimal_mode, trimal_executable)
         if not reused and cache is not None and reusable(
-                fasta, cache / f'{og}.faa', cache / f'{og}.json', threads, executable):
+                fasta, cache / f'{og}.faa', cache / f'{og}.json', threads, executable, trimal_mode, trimal_executable):
             copy_report(cache / f'{og}.json', provenance)
             move_alignment(cache / f'{og}.faa', output)
             reused = True
         if not reused:
-            align(fasta, output, provenance, threads=threads, command=command)
+            if trimal_mode is not None and cache is not None and reusable(
+                    fasta, cache / f'{og}.faa', cache / f'{og}.json', threads, executable):
+                copy_report(cache / f'{og}.json', provenance)
+                move_alignment(cache / f'{og}.faa', output)
+            if trimal_mode is not None and reusable(fasta, output, provenance, threads, executable):
+                trim_existing(output, provenance, trimal_mode, trimal_command)
+            else:
+                align(fasta, output, provenance, threads=threads, command=command,
+                      trimal_mode=trimal_mode, trimal_command=trimal_command)
         if cache is not None:
             # A selected OG lives in the final directory, not in both locations.
             (cache / f'{og}.faa').unlink(missing_ok=True)
@@ -206,12 +231,15 @@ if __name__ == '__main__':
     p = sub.add_parser('plan')
     p.add_argument('--inputs', required=True); p.add_argument('--outdir', required=True)
     p.add_argument('--batch-size', type=int, default=500)
+    p.add_argument('--trimal-mode', choices=['gappyout', 'automated1'], default='gappyout')
     p = sub.add_parser('batch')
     for flag in ('batch', 'inputs', 'outdir', 'reports', 'receipt'):
         p.add_argument('--' + flag, required=True)
     p.add_argument('--cpus', type=int, default=12)
     p.add_argument('--threads-per-og', type=int, default=4)
     p.add_argument('--cache')
+    p.add_argument('--trimal-mode', choices=['gappyout', 'automated1'], default='gappyout')
+    p.add_argument('--trimal-command', default='trimal')
     args = vars(parser.parse_args())
     action = args.pop('action')
     (plan if action == 'plan' else run_batch)(**args)

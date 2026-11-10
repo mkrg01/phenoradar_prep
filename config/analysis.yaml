@@ -11,6 +11,7 @@ selection:
 alignment:
   enabled: true  # Include all-copy orthogroup alignments in the all target.
   min_sample_fraction: 0.5  # Align OGs present in at least this fraction of selected samples; 0 keeps all.
+  trimal_mode: gappyout  # Trim alignment columns with gappyout or automated1.
 kegg:
   enabled: true  # Include KO annotation and expression in the all target.
   ambiguity: duplicate  # Multi-KO orthogroups: duplicate TPM to each KO, drop the OG, or error.
@@ -80,7 +81,7 @@ execution:
       cpus: 1
       mem_gb: 8
       time: "1-00:00:00"
-    align_orthogroup_batch:  # Align weighted OG batches, internally parallel.
+    align_orthogroup_batch:  # Align and trim weighted OG batches, internally parallel.
       cpus: 12
       mem_gb: 32
       time: "1-00:00:00"

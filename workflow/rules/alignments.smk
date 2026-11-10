@@ -60,7 +60,7 @@ checkpoint plan_alignment_batches:
     output:
         fasta=directory(SELECTED_ALIGNMENT_INPUTS),
         plan=directory(f'{WORK}/{ORTHOGROUP_ALIGNMENTS}/batches')
-    params: occupancy=ALIGNMENT_OCCUPANCY, fraction=config['alignment']['min_sample_fraction']
+    params: occupancy=ALIGNMENT_OCCUPANCY, fraction=config['alignment']['min_sample_fraction'], trimal=config['alignment']['trimal_mode']
     resources: mem_mb=4000
     conda: '../envs/alignment.yaml'
     log: f'{LOG}/{ORTHOGROUP_ALIGNMENTS}/selection.log'
@@ -68,7 +68,7 @@ checkpoint plan_alignment_batches:
         '({PYTHON:q} {input.selection_code:q} select --inputs {input.proteins:q} '
         '--occupancy {params.occupancy:q} --outdir {output.fasta:q} '
         '--min-sample-fraction {params.fraction} && '
-        '{PYTHON:q} {input.code:q} plan --inputs {output.fasta:q} --outdir {output.plan:q}) > {log:q} 2>&1'
+        '{PYTHON:q} {input.code:q} plan --inputs {output.fasta:q} --outdir {output.plan:q} --trimal-mode {params.trimal:q}) > {log:q} 2>&1'
 
 
 rule align_orthogroup_batch:
@@ -77,9 +77,10 @@ rule align_orthogroup_batch:
         batch=alignment_batch_file,
         selection_manifest=f'{SELECTED_ALIGNMENT_INPUTS}/provenance.json',
         code=f'{SCRIPTS}/alignment_batches.py',
-        aligner=f'{SCRIPTS}/align_orthogroups.py'
+        aligner=f'{SCRIPTS}/align_orthogroups.py',
+        trimming=f'{SCRIPTS}/alignment_trimming.py'
     output: receipt=f'{ALIGNMENTS}/batches/{{batch}}.json'
-    params: inputs=SELECTED_ALIGNMENT_INPUTS, outdir=ALIGNMENTS, reports=f'{LOG}/{ORTHOGROUP_ALIGNMENTS}', cache=ALIGNMENT_CACHE
+    params: inputs=SELECTED_ALIGNMENT_INPUTS, outdir=ALIGNMENTS, reports=f'{LOG}/{ORTHOGROUP_ALIGNMENTS}', cache=ALIGNMENT_CACHE, trimal=config['alignment']['trimal_mode']
     threads: 12
     resources: mem_mb=32000
     conda: '../envs/alignment.yaml'
@@ -88,7 +89,7 @@ rule align_orthogroup_batch:
     shell:
         '{PYTHON:q} {input.code:q} batch --batch {input.batch:q} --inputs {params.inputs:q} '
         '--outdir {params.outdir:q} --reports {params.reports:q} --receipt {output.receipt:q} '
-        '--cpus {threads} --cache {params.cache:q} > {log:q} 2>&1'
+        '--cpus {threads} --cache {params.cache:q} --trimal-mode {params.trimal:q} > {log:q} 2>&1'
 
 
 rule finish_alignments:
@@ -101,10 +102,10 @@ rule finish_alignments:
     output:
         provenance=f"{ALIGNMENTS}/provenance.json",
         occupancy=f"{ALIGNMENTS}/occupancy.tsv"
-    params: outdir=ALIGNMENTS, reports=f"{LOG}/{ORTHOGROUP_ALIGNMENTS}", cache=ALIGNMENT_CACHE
+    params: outdir=ALIGNMENTS, reports=f"{LOG}/{ORTHOGROUP_ALIGNMENTS}", cache=ALIGNMENT_CACHE, trimal=config["alignment"]["trimal_mode"]
     resources: mem_mb=8000
     conda: "../envs/alignment.yaml"
     log: f"{LOG}/{ORTHOGROUP_ALIGNMENTS}/finish.log"
     shell:
         "{PYTHON:q} {input.code:q} finish --inputs {input.proteins:q} --outdir {params.outdir:q} "
-        "--reports {params.reports:q} --cache {params.cache:q} > {log:q} 2>&1"
+        "--reports {params.reports:q} --cache {params.cache:q} --trimal-mode {params.trimal:q} > {log:q} 2>&1"

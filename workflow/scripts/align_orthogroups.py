@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect every mapped protein and save untrimmed, gene-labelled OG alignments."""
+"""Collect every mapped protein and save gene-labelled OG alignments."""
 import argparse
 from collections import OrderedDict, defaultdict
 import json
@@ -83,7 +83,7 @@ def collect(samples, mapping, protein_dir, outdir):
             shutil.rmtree(outdir)
         staging.replace(outdir)
 
-def align(fasta, output, provenance, threads=1, command="famsa"):
+def align(fasta, output, provenance, threads=1, command="famsa", trimal_mode=None, trimal_command="trimal"):
     inputs = list(fasta_records(fasta))
     original = dict(inputs)
     if not inputs or len(original) != len(inputs):
@@ -115,6 +115,10 @@ def align(fasta, output, provenance, threads=1, command="famsa"):
                 raise ValueError("FAMSA returned unequal sequence lengths")
             if any(records[gene].replace("-", "") != seq for gene, seq in inputs):
                 raise ValueError("FAMSA changed input residues")
+    trimming = None
+    if trimal_mode is not None:
+        records, trimming = trim_alignment(list(records.items()), output.parent, trimal_mode, trimal_command)
+        records = dict(records)
     with atomic_writer(output) as handle:
         for gene, _ in inputs:
             handle.write(f">{gene}\n{records[gene]}\n")
@@ -123,7 +127,29 @@ def align(fasta, output, provenance, threads=1, command="famsa"):
         "sequences": len(inputs), "sites": len(next(iter(records.values()))),
         "method": "singleton" if len(inputs) == 1 else "famsa",
         "command": argv, "executable": executable, "threads": threads,
+        **({"trimming": trimming} if trimming is not None else {}),
     })
+
+
+def trim_alignment(records, directory, mode, command):
+    from alignment_trimming import trim_records
+    projected, selected, argv, executable = trim_records(records, command, mode, directory)
+    return projected, {"method": "trimAl", "mode": mode, "command": argv,
+                       "executable": executable, "raw_sites": len(records[0][1]),
+                       "sites": len(selected), "unknown_as_gap_for_selection": True,
+                       "original_residues_restored": True}
+
+
+def trim_existing(output, provenance, mode, command):
+    """Upgrade a verified completed untrimmed alignment without repeating FAMSA."""
+    output, provenance = Path(output), Path(provenance)
+    report = json.loads(provenance.read_text())
+    records, trimming = trim_alignment(list(fasta_records(output)), output.parent, mode, command)
+    with atomic_writer(output) as handle:
+        for name, sequence in records:
+            handle.write(f'>{name}\n{sequence}\n')
+    report.update(alignment=file_record(output), sites=trimming['sites'], trimming=trimming)
+    write_json(provenance, report)
 
 
 def finish(inputs, outdir, reports):

@@ -5,3 +5,4 @@ channels:
 dependencies:
   - python=3.12
   - famsa=2.4.1
+  - trimal=1.5.1
