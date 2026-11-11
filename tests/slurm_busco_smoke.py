@@ -26,7 +26,7 @@ def main():
     protected = {p: identity(p) for p in sources}
     work.mkdir(parents=True, exist_ok=False)
     rules = (root / 'workflow/rules/phylogeny.smk').read_text()
-    rules = 'rule align_busco_marker:' + rules.split('rule align_busco_marker:', 1)[1]
+    rules = 'def busco_marker_mem_mb' + rules.split('def busco_marker_mem_mb', 1)[1]
     rules = rules.split('rule merge_busco_gene_trees:', 1)[0]
     rules = rules.replace('"../envs/phylogeny.yaml"', repr(str(root / 'workflow/envs/phylogeny.yaml')))
     real_sbatch = os.environ.get('PHENORADAR_REAL_SBATCH') or shutil.which('sbatch')
@@ -47,6 +47,7 @@ def main():
         prefix = f'''import json
 import sys
 sys.path.insert(0, {str(root / "workflow/scripts")!r})
+from layout import REPRESENTATIVES as REPRESENTATIVES_REL
 from slurm_submit import configure_scheduler
 onstart:
     configure_scheduler(workflow)

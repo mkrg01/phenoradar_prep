@@ -1,5 +1,6 @@
 """Charge effective per-job requests against the controller's remaining budget."""
 import copy
+from inspect import signature
 
 
 BUDGETS = {'workflow_cpus': ('_cores', 'cpus', 1),
@@ -44,6 +45,10 @@ def _charge(probe, name, limit):
     value = probe.resources.get(resource)
     if type(value) is int:
         return lambda wildcards: checked(value)
+    if callable(value) and tuple(signature(value).parameters) == ('wildcards',):
+        # Wildcard-only requests can be charged when a group is first planned,
+        # even if its intermediate input files have not been produced yet.
+        return lambda wildcards, attempt: checked(probe.expand_resources(wildcards, None, attempt).get(resource))
 
     def charge(wildcards, input, threads, attempt):
         return checked(probe.expand_resources(wildcards, input, attempt).get(resource))

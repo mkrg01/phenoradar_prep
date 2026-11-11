@@ -101,7 +101,7 @@ def test_remote_profile_counts_dynamic_memory_and_thread_overrides(budget_workfl
     assert result.returncode == 0, result.stdout + result.stderr
     output = result.stdout + result.stderr
     assert 'workflow_cpus=3' in output
-    assert 'workflow_mem_mb=<TBD>' in output  # Input-dependent accounting resolves before scheduling.
+    assert 'workflow_mem_mb=2500' in output
     assert 'mem_mb=2500' in output
 
 

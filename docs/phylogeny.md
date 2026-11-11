@@ -149,9 +149,10 @@ Stages already complete before submission are reused on resume. Local execution
 keeps the normal scheduler.
 
 Alignment, trimming and gene-tree inference each default to one CPU. The group
-requests the largest CPU/memory requirement among its pending stages
-(default: 1 CPU/8 GB) and sums their time limits. Different markers run in
-parallel within the analysis CPU/memory budgets. The default
+requests the largest CPU/memory requirement among its pending stages and sums
+their time limits. A full group defaults to 1 CPU and 4 GB for `representatives`,
+or 1 CPU and 8 GB for `phenotyped` and `all`. Trimming alone requires 4 GB.
+Different markers run in parallel within the analysis CPU/memory budgets. The default
 `total_limits.jobs: null` adds no job-count cap. Prepared analyses retain their
 saved allocations.
 Per-rule resource overrides still apply; increasing VeryFastTree threads can

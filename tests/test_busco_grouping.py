@@ -8,7 +8,7 @@ import yaml
 from phase_config import merge_slurm, write_profile
 
 ROOT = Path(__file__).resolve().parents[1]
-BRANCHES = ("phylogeny/all", "phylogeny/representatives")
+BRANCHES = ("phylogeny/all", "phylogeny/phenotyped", "phylogeny/representatives")
 MARKERS = ("1at1", "2at1")
 STAGES = ("align_busco_marker", "trim_busco_marker", "infer_busco_gene_tree")
 
@@ -18,12 +18,13 @@ def marker_workflow(tmp_path):
     # Use the production rules, with already-collected tiny marker inputs.
     # No external alignment tools, containers, or Slurm commands are executed.
     rules = (ROOT / "workflow/rules/phylogeny.smk").read_text()
-    rules = "rule align_busco_marker:" + rules.split("rule align_busco_marker:", 1)[1]
+    rules = "def busco_marker_mem_mb" + rules.split("def busco_marker_mem_mb", 1)[1]
     rules = rules.split("rule merge_busco_gene_trees:", 1)[0]
     prefix = f"""
 import json
 import sys
 sys.path.insert(0, {str(ROOT / "workflow/scripts")!r})
+from layout import REPRESENTATIVES as REPRESENTATIVES_REL
 OUT = "results/test"
 LOG = "logs/test"
 SCRIPTS = {str(ROOT / "workflow/scripts")!r}
@@ -103,7 +104,9 @@ def test_one_group_per_marker_and_tree_set_with_serial_resource_limits(marker_wo
         assert group["rules"] == set(STAGES)
         resources = group["resources"]
         assert resources["_cores"] == resources["workflow_cpus"] == 1
-        assert resources["mem_mb"] == resources["workflow_mem_mb"] == 8000
+        branch, _ = next(iter(group["members"]))
+        expected_mem = 4000 if branch == "phylogeny/representatives" else 8000
+        assert resources["mem_mb"] == resources["workflow_mem_mb"] == expected_mem
         assert resources["runtime"] == 3 * 24 * 60
 
 

@@ -144,6 +144,10 @@ rule collect_busco_markers:
         "--species-dir {params.species_dir:q} --outdir {output.fasta:q} > {log:q} 2>&1"
 
 
+def busco_marker_mem_mb(wildcards):
+    return 4000 if wildcards.phylo_branch == REPRESENTATIVES_REL else 8000
+
+
 # Keep each marker chain in one cluster allocation; completed stages remain reusable.
 rule align_busco_marker:
     group: "busco_marker"
@@ -161,7 +165,7 @@ rule align_busco_marker:
         command="famsa",
         settings=lambda wc: json.dumps({"min_taxa": PHY["min_taxa"], "sample_manifest": f"{OUT}/{wc.phylo_branch}/plan/species.tsv"}, sort_keys=True)
     threads: 1
-    resources: mem_mb=8000
+    resources: mem_mb=busco_marker_mem_mb
     conda: "../envs/phylogeny.yaml"
     log: f"{LOG}/{{phylo_branch}}/align/{{marker}}.log"
     benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/align.{{marker}}.tsv"
@@ -211,7 +215,7 @@ rule infer_busco_gene_tree:
         qc=f"{PHYLO_RUN}/gene_trees/{{marker}}.json"
     params: command="VeryFastTree", seed=RANDOM_SEED
     threads: 1
-    resources: mem_mb=8000
+    resources: mem_mb=busco_marker_mem_mb
     conda: "../envs/phylogeny.yaml"
     log: f"{LOG}/{{phylo_branch}}/tree/{{marker}}.log"
     benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/tree.{{marker}}.tsv"
