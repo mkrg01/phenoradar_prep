@@ -118,9 +118,10 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
     run(["phenotyped"], "phylogeny_prepare")
     assert not full.exists() and not (observed / "species_tree.nwk").exists()
     assert {r["species"] for r in read_tsv(observed / "plan/species.tsv")} == set(species[1:])
-    assert (observed / "rooting/outgroup.txt").read_text().strip() == species[1]
+    assert (observed / "rooting/anchor.txt").read_text().strip() == species[1]
     assert all(int(r["species"]) == 5 for r in read_tsv(observed / "plan/marker_stats.tsv"))
     run(["phenotyped"])
+    assert (observed / "rooting/outgroup.txt").read_text().strip() == species[1]
     read_tree(observed / "species_tree.nwk", species[1:])
     observed_times = timestamps(observed)
     assert not full.exists() and not (result / "phylogeny/all/rooting").exists()

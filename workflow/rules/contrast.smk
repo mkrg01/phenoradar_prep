@@ -18,7 +18,7 @@ rule prepare_ncbi_guide:
         "--output {output.tree:q} --taxids {output.taxids:q} > {log:q} 2>&1"
 
 
-rule prepare_phylogeny_outgroup:
+rule prepare_phylogeny_anchor:
     input:
         samples=phylogeny_samples,
         taxonomy=TAXONOMY_DB,
@@ -27,17 +27,18 @@ rule prepare_phylogeny_outgroup:
         code=f"{SCRIPTS}/phylogeny_root.py",
         helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/phylogeny_outgroup.py", f"{SCRIPTS}/sample_identity.py"]
     output:
-        outgroup=f"{PHYLO_RUN}/rooting/outgroup.txt",
-        qc=f"{PHYLO_RUN}/rooting/outgroup.json"
+        anchor=f"{PHYLO_RUN}/rooting/anchor.txt",
+        qc=f"{PHYLO_RUN}/rooting/anchor.json"
     params:
         outgroup=json.dumps(PHY["outgroup"]),
         tree_flag="--tree" if PHY["outgroup"] == "auto" else ""
     conda: "../envs/timetree.yaml"
     resources: mem_mb=4000
-    log: f"{LOG}/{{phylo_branch}}/rooting/outgroup.log"
+    log: f"{LOG}/{{phylo_branch}}/rooting/anchor.log"
     shell:
         "{PYTHON:q} {input.code:q} prepare_root --samples {input.samples:q} --metadata {input.metadata:q} "
-        "--output {output.outgroup:q} --qc {output.qc:q} --outgroup-json {params.outgroup:q} --taxonomy-db {input.taxonomy:q} "
+        "--output {output.anchor:q} --qc {output.qc:q} --outgroup-json {params.outgroup:q} "
+        "--for-anchor --taxonomy-db {input.taxonomy:q} "
         "{params.tree_flag} {input.tree:q} > {log:q} 2>&1"
 
 

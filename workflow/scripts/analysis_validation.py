@@ -170,8 +170,10 @@ def discover(source, exclusions=()):
                             for directory in ["markers", "alignments", "alignments/raw", "gene_trees"]:
                                 for suffix in [".faa", ".nwk", ".json", ".columns.tsv"]:
                                     include(f"{relative}/{directory}/{og}{suffix}")
+            rooting_marker = ("anchor.json" if (source / relative / "rooting/anchor.json").is_file()
+                              else "outgroup.json")
             for directory, marker in [("selection", "selection.json"), ("plan", "provenance.json"),
-                                      ("rooting", "outgroup.json"), ("timetree", "provenance.json"),
+                                      ("rooting", rooting_marker), ("timetree", "provenance.json"),
                                       ("dating", "provenance.json"), ("taxonomy_check", "summary.json")]:
                 required = [f"{relative}/{directory}/{marker}"]
                 if directory == "dating":

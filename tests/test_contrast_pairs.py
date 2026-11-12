@@ -11,7 +11,7 @@ import yaml
 
 from common import RANDOM_SEED, read_tsv, write_tsv
 from species_traits import read_species_traits
-from phylogeny_root import ncbi_tree, prepare_root, resolve_outgroup
+from phylogeny_root import ncbi_tree, prepare_root, resolve_outgroup, root_species_tree, taxonomy_split
 from contrast_pairs import prepare, summarize, skim
 from plot_contrast_tree import plot
 
@@ -325,3 +325,43 @@ def test_root_validator_accepts_complete_clade_and_rejects_nonmonophyly(tmp_path
     for invalid in (["O1"], ["O1", "A"], names, ["O1", "missing"]):
         with pytest.raises(ValueError, match="outgroup"):
             rooted_tree(path, names, invalid)
+
+
+def test_automatic_anchor_and_multispecies_root_are_independent(tmp_path):
+    from ete4 import Tree
+    from itertools import combinations
+    from common import write_json
+    from phylogeny_outgroup import validate_root
+
+    samples, metadata, guide, anchor, anchor_qc = [
+        tmp_path / name for name in ["samples.tsv", "metadata.tsv", "guide.nwk", "anchor.txt", "anchor.json"]]
+    scores = {"O1": 95, "O2": 90, "A": 98, "B": 100, "C": 99}
+    write_tsv(samples, ["species", "species_id", "taxid", "cds"], [
+        {"species": name, "species_id": name, "taxid": i, "cds": "unused"}
+        for i, name in enumerate(scores, 1)])
+    write_tsv(metadata, ["species", "busco_percent"], [
+        {"species": name, "busco_percent": score} for name, score in scores.items()])
+    guide.write_text("((O1,O2),(A,(B,C)));\n")
+    prepare_root(samples, metadata, anchor, anchor_qc, tree=guide, for_anchor=True)
+    assert anchor.read_text() == "O1\n"
+    assert json.loads(anchor_qc.read_text())["outgroup"] == ["O1", "O2"]
+
+    raw, raw_qc, output, qc, outgroup, rooting_qc = [
+        tmp_path / name for name in
+        ["astral.nwk", "astral.json", "species_tree.nwk", "species_tree.json", "outgroup.txt", "outgroup.json"]]
+    raw.write_text("(O1:2,(O2:3,(A:4,(B:5,C:6)0.8:7)0.9:8):2);\n")
+    write_json(raw_qc, {"astral_root_anchor": "O1", "outgroup": ["O1"], "branch_length_method": "CASTLES-II"})
+    root_species_tree(samples, raw, raw_qc, anchor_qc, output, qc, outgroup, rooting_qc, guide=guide)
+    assert outgroup.read_text().splitlines() == ["O1", "O2"]
+    report = json.loads(qc.read_text())
+    assert report["astral_root_anchor"] == "O1" and report["outgroup"] == ["O1", "O2"]
+    assert report["branch_length_method"] == "CASTLES-II"
+    assert json.loads(rooting_qc.read_text())["method"] == "nwkit_taxonomy"
+    initial = Tree(raw.read_text(), parser=0)
+    final = Tree(output.read_text(), parser=0)
+    validate_root(final, ["O1", "O2"])
+    assert final.common_ancestor(["B", "C"]).support == pytest.approx(0.8)
+    assert all(final.get_distance(a, b) == pytest.approx(initial.get_distance(a, b))
+               for a, b in combinations(scores, 2))
+    with pytest.raises(ValueError, match="No root bipartition"):
+        taxonomy_split(initial, Tree("((O1,A),(O2,(B,C)));", parser=9))

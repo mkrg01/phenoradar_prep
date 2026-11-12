@@ -175,7 +175,8 @@ def contrast_targets(wc):
             for output in [*CONTRAST_OUTPUTS, *([] if name == "representatives" else ["observed_tree.nwk"])]]
 
 
-PHYLO_FINAL = phylogeny_targets(["species_tree.nwk", "species_tree.json", "species_coverage.tsv"])
+PHYLO_FINAL = phylogeny_targets([
+    "species_tree.nwk", "species_tree.json", "gene_trees.nwk", "gene_trees.json", "species_coverage.tsv"])
 TAXONOMY_CHECK_FINAL = phylogeny_targets(["taxonomy_check"])
 PHYLO_DATED = phylogeny_targets(["dating/species_tree.dated.nwk", "dating/provenance.json"])
 

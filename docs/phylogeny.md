@@ -39,7 +39,7 @@ Dating and taxonomy checks support only `all` and `phenotyped`.
 ./run_analysis.sh submit --analysis results/leaf/downstream/carnivory --target phylogeny
 ```
 
-For an input audit, marker plan, and outgroup check before inference, submit
+For an input audit, marker plan, and ASTRAL anchor check before inference, submit
 `--target phylogeny_prepare` first. `phylogeny` stops at inference; `all` also
 runs enabled postprocessing.
 
@@ -61,15 +61,22 @@ Each selector expands to all selected samples of that biological species.
 The complete group must lie on one side of a split in the molecular tree;
 a nonmonophyletic group stops inference. No extra species are added.
 
-`auto` chooses a single-species basal lineage using NCBI taxonomy, with nwkit's
-APG IV order tree as an angiosperm fallback. For a basal group containing several
-species, provide an explicit list. Review `rooting/outgroup.json`.
+`auto` chooses one ASTRAL anchor from a candidate basal lineage using the frozen
+NCBI guide and nwkit's APG IV order tree. BUSCO completeness ranks the samples
+within that lineage. An explicit outgroup uses the first sample in sorted order
+as the anchor. Review `rooting/anchor.json` before inference.
 
-ASTRAL uses one sample as its root anchor; the output is then rooted on the
-complete basal split. Taxonomy does not constrain the molecular topology.
-The substitution tree splits the root edge at its midpoint; LSD2 re-estimates
-that position. ASTRAL's single-anchor branch estimation for a multi-tip basal
-clade has not been independently benchmarked here; provenance records this limitation.
+After inference, automatic rooting uses nwkit's taxonomy root transfer with the
+NCBI guide, then the APG IV reference if needed. The final outgroup can contain
+multiple species. If neither reference defines a split present in the molecular
+tree, specify the outgroup explicitly. Explicit lists must match an entire
+side of an existing split. Review `rooting/outgroup.json` for the final choice.
+
+Rooting preserves the inferred topology and branch lengths. A new root splits
+its edge at the midpoint; LSD2 re-estimates that position. The branch lengths
+retain the effect of ASTRAL's single internal anchor. The ASTRAL output and
+provenance before final rooting are in `rooting/astral.nwk` and
+`rooting/astral.json`.
 
 ## Marker and sequence selection
 

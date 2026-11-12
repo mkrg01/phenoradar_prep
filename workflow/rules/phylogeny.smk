@@ -83,7 +83,7 @@ checkpoint select_phenotyped_species:
 checkpoint plan_phylogeny:
     input:
         samples=phylogeny_samples,
-        outgroup=f"{PHYLO_RUN}/rooting/outgroup.txt",
+        anchor=f"{PHYLO_RUN}/rooting/anchor.txt",
         tables=phylogeny_tables,
         code=f"{SCRIPTS}/busco_phylogeny.py",
         common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
@@ -101,7 +101,7 @@ checkpoint plan_phylogeny:
     resources: mem_mb=4000
     shell:
         "{PYTHON:q} {input.code:q} plan --samples {input.samples:q} "
-        "--outgroup-file {input.outgroup:q} --outdir {params.outdir:q} --settings {params.settings:q} > {log:q} 2>&1"
+        "--outgroup-file {input.anchor:q} --outdir {params.outdir:q} --settings {params.settings:q} > {log:q} 2>&1"
 
 
 rule extract_busco_proteins:
@@ -276,8 +276,10 @@ rule infer_busco_species_tree:
         helpers=[f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/prepare_phylogeny_tools.py", f"{SCRIPTS}/phylogeny_outgroup.py"],
         build_provenance=str(Path(ASTRAL).parent.parent / "aster.json"),
         binary=ASTRAL,
-        outgroup=f"{PHYLO_RUN}/rooting/outgroup.txt"
-    output: tree=f"{PHYLO_RUN}/species_tree.nwk", qc=f"{PHYLO_RUN}/species_tree.json"
+        anchor=f"{PHYLO_RUN}/rooting/anchor.txt"
+    output:
+        tree=f"{PHYLO_RUN}/rooting/astral.nwk",
+        qc=f"{PHYLO_RUN}/rooting/astral.json"
     params: command=ASTRAL, seed=RANDOM_SEED
     threads: 32
     resources: mem_mb=64000
@@ -287,8 +289,35 @@ rule infer_busco_species_tree:
     shell:
         "{PYTHON:q} {input.code:q} astral --trees {input.trees:q} --merge-qc {input.merge_qc:q} "
         "--manifest {input.manifest:q} --output {output.tree:q} --qc {output.qc:q} "
-        "--command {params.command:q} --outgroup-file {input.outgroup:q} --threads {threads} "
+        "--command {params.command:q} --outgroup-file {input.anchor:q} --threads {threads} "
         "--seed {params.seed} > {log:q} 2>&1"
+
+
+rule root_busco_species_tree:
+    input:
+        samples=phylogeny_samples,
+        taxonomy=TAXONOMY_DB,
+        guide=phylogeny_root_guide,
+        anchor_qc=f"{PHYLO_RUN}/rooting/anchor.json",
+        tree=f"{PHYLO_RUN}/rooting/astral.nwk",
+        tree_qc=f"{PHYLO_RUN}/rooting/astral.json",
+        code=f"{SCRIPTS}/phylogeny_root.py",
+        helpers=[f"{SCRIPTS}/{name}.py" for name in
+                 ["common", "phylogeny_outgroup", "sample_identity", "infer_phylogeny", "busco_phylogeny"]]
+    output:
+        tree=f"{PHYLO_RUN}/species_tree.nwk",
+        qc=f"{PHYLO_RUN}/species_tree.json",
+        outgroup=f"{PHYLO_RUN}/rooting/outgroup.txt",
+        rooting_qc=f"{PHYLO_RUN}/rooting/outgroup.json"
+    params: guide_flag="--guide" if PHY["outgroup"] == "auto" else ""
+    conda: "../envs/timetree.yaml"
+    resources: mem_mb=4000
+    log: f"{LOG}/{{phylo_branch}}/rooting/outgroup.log"
+    shell:
+        "{PYTHON:q} {input.code:q} root_species_tree --samples {input.samples:q} --taxonomy-db {input.taxonomy:q} "
+        "--tree {input.tree:q} --tree-qc {input.tree_qc:q} --anchor-qc {input.anchor_qc:q} "
+        "--output {output.tree:q} --qc {output.qc:q} --outgroup-file {output.outgroup:q} "
+        "--rooting-qc {output.rooting_qc:q} {params.guide_flag} {input.guide:q} > {log:q} 2>&1"
 
 
 rule prepare_timetree_calibrations:

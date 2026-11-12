@@ -475,6 +475,11 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
     timestamp = (out / "species_tree.nwk").stat().st_mtime_ns
     assert "Nothing to be done" in run()
     assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
+    astral_tree = out / "rooting/astral.nwk"
+    astral_timestamp = astral_tree.stat().st_mtime_ns
+    (out / "species_tree.nwk").unlink()
+    run()
+    assert astral_tree.stat().st_mtime_ns == astral_timestamp
     assert not (tmp_path / "results/test/orthogroups/mapping").exists()
     assert not (tmp_path / "results/test/orthogroups/expression").exists()
     # Recompute missing trees with the internal seed, retaining upstream work.
