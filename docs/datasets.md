@@ -10,6 +10,11 @@ A **build** produces a reusable sample database: assembly, BUSCO, quantification
 OrthoDB mapping, and OG expression. An **analysis** uses that database with its
 own sample selection, traits, and optional analyses.
 
+When an accession in an explicit reuse database has a different sample identity
+(for example, its scientific name changed), planning requires metadata review
+instead of silently treating it as a new sample. Products are not automatically
+relabeled across scientific identities.
+
 ## Build a reusable database
 
 Complete [installation](running.md#installation-and-normal-execution), prepare

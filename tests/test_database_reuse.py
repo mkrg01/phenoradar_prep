@@ -267,3 +267,27 @@ def test_two_sources_and_one_missing_sample_only_compute_missing_work(completed_
     assert planned['mapped_species'] == ['Gamma_plant_G1']
     assert len(events.read_text().splitlines()) == 1
     assert set(load_complete(build)['products']) == {item['species'] for item in items}
+
+
+def test_same_run_with_changed_name_requires_review(dataset_project):
+    """A renamed sample must not silently look like an unprocessed accession."""
+    from database_reuse import select
+    root = dataset_project
+    source = imported(root)
+    cfg, _ = dataset.settings(root, configure(root, str(source)))
+    rows = read_tsv(root / 'input/metadata.tsv')
+    rows[0]['scientific_name'] = 'Renamed plant'
+    for key in ('species_id', 'analysis_sample_id'):
+        rows[0].pop(key, None)
+    metadata = root / 'renamed.tsv'
+    write_tsv(metadata, list(rows[0]), rows)
+    _, items = identities(metadata)
+    selected, errors, _ = select(cfg['reuse_from'], items, cfg)
+    renamed = next(i for i in items if i['row']['scientific_name'] == 'Renamed plant')
+    assert renamed['species'] not in selected
+    assert 'same run has a different sample identity' in errors[renamed['species']]
+    assert renamed['row']['run'] in errors[renamed['species']]
+    report = dataset.plan(root, root / 'config/build.yaml', metadata=metadata, preview_taxonomy=False)[-1]
+    attention = next(row for row in report if row['species'] == renamed['species'])
+    assert attention['assembly'] == 'conflict'
+    assert 'same run has a different sample identity' in attention['reason']

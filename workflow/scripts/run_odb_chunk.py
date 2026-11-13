@@ -20,6 +20,39 @@ from product_storage import decoded_sha256, stage_product, product_record
 from odb_settings import pin_reference
 
 
+def stage_reference_data(source, destination):
+    """Keep mapper-writable todo lists private, without copying large databases.
+
+    Orthologer check_todo sorts lists in place (cp -f follows symlinks).
+    Real directories also keep newly generated lists out of the shared snapshot.
+    """
+    source, destination = Path(source).resolve(), Path(destination)
+    if destination.is_symlink():
+        raise ValueError('ODB reference workspace must not be a symlink')
+    destination.mkdir(parents=True, exist_ok=True)
+    for entry in sorted(source.rglob('*')):
+        target = destination / entry.relative_to(source)
+        if entry.is_dir():
+            if target.is_symlink():
+                raise ValueError(f'ODB reference workspace directory is a symlink: {target}')
+            target.mkdir(exist_ok=True)
+        elif entry.is_file():
+            if entry.suffix == '.todo':
+                if target.is_symlink() or (target.exists() and target.samefile(entry)):
+                    raise ValueError(f'ODB todo workspace shares the frozen reference: {target}')
+                if not target.exists():
+                    with entry.open('rb') as src, atomic_writer(target, 'wb') as dst:
+                        shutil.copyfileobj(src, dst)
+            elif target.is_symlink():
+                if target.resolve() != entry.resolve():
+                    raise ValueError(f'ODB reference workspace link changed: {target}')
+            elif target.exists():
+                raise ValueError(f'ODB reference workspace has unexpected file: {target}')
+            else:
+                target.symlink_to(entry.resolve())
+    return destination
+
+
 def publish_tree(source, destination):
     """Copy fully before replacing a prior generated tree; never mix old files."""
     destination = Path(destination)
@@ -185,8 +218,9 @@ def run(manifest, reference, output_dir, work_dir, label, command="ODB-mapper", 
                     tool_inputs.append(str(path))
                 with atomic_writer(tool_manifest) as handle:
                     handle.write('\n'.join(tool_inputs) + '\n')
+            local_data = stage_reference_data(data, work / "reference-data")
             subprocess.run(["bash", str(scripts / "odb_map.sh"), command, str(tool_manifest),
-                            label, str(node), version, str(data), str(work), str(jobs), str(batch_size)],
+                            label, str(node), version, str(local_data), str(work), str(jobs), str(batch_size)],
                            env=env, check=True)
             project = work / "odbmapper" / version / "pipeline"
             required = [project / "Results" / f"{label}.{suffix}" for suffix in

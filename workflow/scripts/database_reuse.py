@@ -173,6 +173,16 @@ def select(paths, items, cfg, verify_files=True, rebuilds=None):
     stage_paths = [path for path in paths if Path(path).name == 'build.json']
     database_sources = {path: record(path) for path in paths if path not in stage_paths}
     databases = {path: load_complete(path, verify_files=False) for path in database_sources}
+    # Accessions survive taxonomy/name updates; the derived sample key may not.
+    # Do not silently classify a known accession as new or relabel its products.
+    wanted_runs = {item['row']['run']: name for name, item in wanted.items()}
+    for path, data in databases.items():
+        for old_name, product in data['products'].items():
+            run = product['row']['run']
+            name = wanted_runs.get(run)
+            if name is not None and name != old_name:
+                errors[name] = (f'reuse_from same run has a different sample identity: '
+                                f'{run}: {old_name} -> {name}; review sample metadata: {path}')
     relevant = {path: data for path, data in databases.items() if wanted.keys() & data['products'].keys()}
     snapshots = {path: load_tables(verify(data['mapping']), verify_files=False)
                  for path, data in relevant.items() if odb_matches(data['odb'], cfg['odb'])}

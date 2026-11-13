@@ -525,3 +525,27 @@ def test_invalid_memory_config_fails_before_work(tmp_path, memory, message):
                             cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
     assert result.returncode != 0
     assert message in result.stdout + result.stderr
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="ODB shell runner requires Linux")
+def test_mapper_todo_sort_does_not_modify_frozen_reference(fake_odb, frozen_reference, tmp_path):
+    # Orthologer 3.8.1 check_todo sorts with cp -f, following file symlinks.
+    data = frozen_reference / 'odbmapper/v12/data'
+    todo = data / 'eukaryota/todo/g3193_n8ssc.todo'
+    todo.parent.mkdir(parents=True)
+    todo.write_text('beta\nalpha\n')
+    original = todo.read_bytes()
+    fake_odb.write_text(fake_odb.read_text().replace("elif action == 'MAP':", """elif action == 'MAP':
+    todo = root / 'data/eukaryota/todo/g3193_n8ssc.todo'
+    todo.write_text(''.join(sorted(todo.read_text().splitlines(keepends=True))))
+"""))
+    protein = tmp_path / 'protein.fa'; protein.write_text('>Alpha_plant_g1\nMK*\n')
+    manifest = tmp_path / 'proteins.fs'; manifest.write_text(str(protein) + '\n')
+    for label in ('chunk_000', 'chunk_001'):
+        run_odb(manifest, frozen_reference / 'reference.json', tmp_path / label,
+                tmp_path / 'work', label, command=str(fake_odb), jobs=1,
+                batch_size=1, keep_intermediates=True)
+        assert todo.read_bytes() == original
+    copies = list((tmp_path / 'work').glob('chunk_*/*/reference-data/eukaryota/todo/*.todo'))
+    assert len(copies) == 2
+    assert all(p.read_text() == 'alpha\nbeta\n' and not p.samefile(todo) for p in copies)
