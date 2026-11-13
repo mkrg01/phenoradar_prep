@@ -264,6 +264,37 @@ def test_screen_portable_database_and_reuse_retained_products(sample_project, mo
     assert {row['run'] for row in read_tsv(dataset.materialize(filtered) / 'metadata.tsv')} == {'B1', 'G1'}
     assert record(manifest['path']) == before
 
+    from build_products import load_complete
+    from mapping_tables import load_tables
+    from taxonomy_screen_filter import filter_database
+    rows, manifest = qc.database_panel(source)
+    evidence = root / 'evidence'
+    summaries = [dict(run=row['run'], status='discordant' if row['run'] == 'A1' else 'no_discordance')
+                 for row in rows]
+    write_tsv(evidence / 'summary.tsv', ['run', 'status'], summaries)
+    write_tsv(evidence / 'exclusion_candidates.tsv', ['accession', 'reason'],
+              [dict(accession='A1', reason='taxonomy evidence')])
+    screen = evidence / 'screen.json'
+    data = dict(kind='angiosperms353_qc', schema_version=3, database_manifest=manifest,
+                settings=dict(restricted_loci=False, omit_same_species=False, min_loci=50,
+                              max_registered_support='0.1'),
+                summary=record(evidence / 'summary.tsv'), exclusion_candidates=record(evidence / 'exclusion_candidates.tsv'),
+                samples={row['run']: dict(taxid=str(row['taxid']), cds=row['cds']) for row in rows})
+    write_json(screen, data)
+    output = root / 'filtered_database'
+    result = filter_database(source, screen, output)
+    assert (result['retained'], result['excluded']) == (2, 1)
+    derived = load_complete(output)
+    assert {p['row']['run'] for p in derived['products'].values()} == {'B1', 'G1'}
+    assert set(load_tables(derived['mapping']['path'])['tables']) == set(derived['products'])
+    assert read_tsv(output / 'excluded_accessions.tsv') == [dict(accession='A1', reason='taxonomy evidence')]
+    assert filter_database(source, screen, output) == result
+    assert record(manifest['path']) == before
+    data['samples'].pop('A1')
+    write_json(screen, data)
+    with pytest.raises(ValueError, match='every sample'):
+        filter_database(source, screen, root / 'incomplete_filter')
+
 
 @pytest.mark.parametrize('version,excluded_rank', [(1, 'family'), (2, 'genus'), (3, 'auto')])
 def test_record_uses_bound_screen_and_only_excludes_on_review_apply(sample_project, version, excluded_rank):

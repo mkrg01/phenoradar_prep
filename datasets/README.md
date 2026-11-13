@@ -21,7 +21,7 @@ For each original `taxid` (or resolved species TaxID when configured):
    ascending accession.
 4. Apply any optional `overrides.tsv` choice from the eligible candidates.
 
-Set `taxonomy_database` in `selection.yaml` to a fixed NCBI taxonomy SQLite
+Set `metadata_selection.taxonomy_database` in `build.yaml` to a fixed NCBI taxonomy SQLite
 snapshot to select one run per current species. Set `taxonomy.database` in the
 build configuration to the same path. Overrides use resolved species TaxIDs.
 Selection preserves the submitted name and TaxID and reports unresolved species.
@@ -166,14 +166,19 @@ plots from saved votes without searching the sequences again:
 ```
 
 For a copied portable database, pass `--database <database-dir>` to `screen-taxonomy`
-with the same output and resource options. Use `--taxonomy`
-to supply the original snapshot when available. Review `exclusion_candidates.tsv`
-and merge approved rows into a separate exclusion table. To build a filtered
-database, set `reuse_from` to the source database, `metadata` to its
-`metadata.tsv`, and `excluded_accessions` to the reviewed table in a new
-build config. Clear `metadata_provenance` if it points to a different input
-table. Run `run_build.sh plan` with that config to check reuse, then
-`run_build.sh submit --name <new-build> --config <new-config>`. To look for
+with the same output and resource options. Use `--taxonomy` to supply a frozen
+snapshot. Review `exclusion_candidates.tsv` and publish a separate database
+using all the discordant accessions in the completed report:
+
+```bash
+./run_metadata.sh filter-taxonomy --database <database-dir> \
+  --screen work/<build>-taxonomy/screen.json --output work/<build>-filtered/database
+```
+
+The filtered database reuses the original CDS, BUSCO, quantification, proteins,
+expression and species-local OrthoDB mappings for retained accessions. The source
+database remains available.
+To look for
 replacement runs, apply the exclusions during metadata selection before the new
 build. Turning the screen off leaves previously approved exclusions in effect.
 

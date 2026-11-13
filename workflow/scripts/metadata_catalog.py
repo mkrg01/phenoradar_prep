@@ -25,7 +25,7 @@ from phase_config import read_yaml, taxonomy_screen_settings
 from sample_identity import annotate
 
 DEFAULT_BUILD_CONFIG = 'datasets/angiosperm_leaf/build.yaml'
-TAXONOMY_COMMANDS = ('prepare-taxonomy', 'screen-taxonomy', 'report-taxonomy')
+TAXONOMY_COMMANDS = ('prepare-taxonomy', 'screen-taxonomy', 'report-taxonomy', 'filter-taxonomy')
 CONFIG_KEYS = {'schema_version', 'name', 'build_config', 'search_string', 'sample_group',
                'rule_set', 'rules', 'accepted_samples', 'previous_metadata',
                'excluded_accessions'}
@@ -939,6 +939,9 @@ def taxonomy_screen_command(root, cfg, args):
     qc = cfg['taxonomy_screen']
     if not qc['enabled']:
         return {'status': 'disabled'}
+    if args.command == 'filter-taxonomy':
+        from taxonomy_screen_filter import filter_database
+        return filter_database(path_at(root, args.database), path_at(root, args.screen), path_at(root, args.output))
     from angiosperms353 import build_panel, database_panel, load_panel, report, screen
 
     cutoff = getattr(args, 'max_registered_support', None)
@@ -1002,7 +1005,11 @@ def main():
         p = commands.add_parser(name)
         p.add_argument('--root', default='.')
         p.add_argument('--config', default=DEFAULT_BUILD_CONFIG, help='Build configuration')
-        if name == 'report-taxonomy':
+        if name == 'filter-taxonomy':
+            p.add_argument('--database', required=True, help='Original completed portable database')
+            p.add_argument('--screen', required=True, help='Completed production taxonomy screen.json')
+            p.add_argument('--output', required=True, help='New filtered portable database directory')
+        elif name == 'report-taxonomy':
             p.add_argument('--screen', required=True, help='Completed taxonomy screen.json')
             p.add_argument('--output', required=True, help='New report directory')
             p.add_argument('--max-registered-support', help='Override the configured vote threshold')
