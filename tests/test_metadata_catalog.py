@@ -899,3 +899,22 @@ def test_acceptance_rejects_mismatched_run_reference_before_publishing(curated_p
         catalog.accept_candidate(root, cfg, candidate)
     assert (dataset / 'metadata.tsv').read_bytes() == before
     assert not (root / 'unrelated').exists()
+
+def test_species_taxonomy_groups_merged_and_infraspecific_runs(fresh_project, tiny_inputs):
+    import sqlite3
+
+    root, dataset, cfg = fresh_project
+    taxonomy = root / 'taxa.sqlite'
+    shutil.copyfile(tiny_inputs['taxonomy_db'], taxonomy)
+    with sqlite3.connect(taxonomy) as db:
+        tid, = db.execute("SELECT taxid FROM species WHERE spname='Alpha plant'").fetchone()
+        db.execute('INSERT INTO merged VALUES (9998, ?)', (tid,))
+        db.execute("INSERT INTO species VALUES (9999, ?, 'Alpha plant subsp. plant', '', 'subspecies', '')", (tid,))
+    cfg['taxonomy_database'] = str(taxonomy)
+    write_tsv(dataset / 'overrides.tsv', ['taxid', 'run', 'reason'],
+              [dict(taxid=tid, run='REUSE', reason='verified historical run')])
+    summary, output = select(fresh_project, [row(9998, 'REUSE'), row(9999, 'LARGER', bases=1000)])
+    selected, = read_tsv(output / 'metadata.tsv')
+    assert summary['samples'] == 1
+    assert (selected['run'], selected['taxid'], selected['taxid_original'], selected['scientific_name']) == (
+        'REUSE', str(tid), '9998', 'Alpha plant')

@@ -169,9 +169,10 @@ def inspect_items(store, items, analysis, requested=None, conditions=None, reusa
                     continue
                 product = chosen['product']
                 result.append({"species": item["species"], "run": item["row"]["run"],
-                               **{stage: "reuse" for stage in STAGES}, "reason": "",
+                               **{stage: "reuse" for stage in STAGES}, "reason": ("taxonomy updated; relabel verified upstream products"
+                                          if chosen.get('taxonomy_relabel') else ""),
                                "mapping": "pending_inputs" if chosen.get('reuse_mapping') is False else "reuse",
-                               "reference_id": product['cds']['sha256']})
+                               "reference_id": "" if chosen.get('taxonomy_relabel') else product['cds']['sha256']})
                 continue
             products = resolve(store, item, analysis["phylogeny"]["lineage"], need_full=True, verify_files=verify_files)
             check_conditions(products, conditions)
@@ -406,6 +407,11 @@ def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_a
         else:
             from database_reuse import stage
             stage(staging, target, selection['reusable'], cfg)
+            for item in items:
+                chosen = selection['reusable'].get(item['species'])
+                if chosen and chosen.get('taxonomy_relabel'):
+                    reference, = (staging / 'work/cache/products' / item['species']).glob('*/reference.json')
+                    item['reference_id'] = json.loads(reference.read_text())['reference_id']
         reuse_receipt = {"sources": selection['reuse_sources'],
                          "samples": {s: entry['source'] for s, entry in selection['reusable'].items()}}
         write_json(staging / 'reuse.json', reuse_receipt)

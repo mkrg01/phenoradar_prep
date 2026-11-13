@@ -285,9 +285,69 @@ def test_same_run_with_changed_name_requires_review(dataset_project):
     selected, errors, _ = select(cfg['reuse_from'], items, cfg)
     renamed = next(i for i in items if i['row']['scientific_name'] == 'Renamed plant')
     assert renamed['species'] not in selected
-    assert 'same run has a different sample identity' in errors[renamed['species']]
+    assert 'changed sample identity requires a frozen taxonomy snapshot' in errors[renamed['species']]
     assert renamed['row']['run'] in errors[renamed['species']]
     report = dataset.plan(root, root / 'config/build.yaml', metadata=metadata, preview_taxonomy=False)[-1]
     attention = next(row for row in report if row['species'] == renamed['species'])
     assert attention['assembly'] == 'conflict'
-    assert 'same run has a different sample identity' in attention['reason']
+    assert 'changed sample identity requires a frozen taxonomy snapshot' in attention['reason']
+
+@pytest.mark.parametrize("merged", [False, True])
+@pytest.mark.parametrize("defer", [False, True])
+def test_taxonomy_change_stages_relabelled_upstream_products(dataset_project, merged, defer):
+    import gzip
+    import sqlite3
+    from build_dispatch import verify_and_stage
+
+    root = dataset_project
+    source = imported(root)
+    before = load_complete(source)['products']['Alpha_plant_A1']
+    taxonomy = root / 'input/taxa.sqlite'
+    rows = read_tsv(root / 'input/metadata.tsv')
+    old_taxid = rows[0]['taxid']
+    new_taxid = '9999' if merged else old_taxid
+    with sqlite3.connect(taxonomy) as db:
+        if merged:
+            db.execute('UPDATE species SET taxid=? WHERE taxid=?', (new_taxid, old_taxid))
+            db.execute('INSERT INTO merged VALUES (?, ?)', (old_taxid, new_taxid))
+        db.execute("UPDATE species SET spname='Renamed plant' WHERE taxid=?", (new_taxid,))
+    config = configure(root, str(source), taxonomy={'database': str(taxonomy), 'cache_dir': None,
+                                                    'missing_taxid': 'error'})
+    rows[0].update(scientific_name='Renamed plant', taxid=new_taxid)
+    metadata = root / 'renamed.tsv'
+    write_tsv(metadata, list(rows[0]), rows)
+    report = dataset.plan(root, config, metadata=metadata)[-1]
+    renamed, = [row for row in report if row['run'] == 'A1']
+    assert (renamed['assembly'], renamed['busco'], renamed['quant'], renamed['mapping']) == (
+        'reuse', 'reuse', 'reuse', 'pending_inputs')
+    build = dataset.prepare(root, 'renamed', config, metadata=metadata, defer=defer)
+    manifest = dataset.load(build)
+    if defer:
+        verify_and_stage(build, manifest)
+        manifest = dataset.load(build)
+    item, = [item for item in manifest['items'] if item['row']['run'] == 'A1']
+    products = dataset.item_products(manifest, item)
+    assert item['reference_id'] == products['reference']['reference_id']
+    assert products['reference']['taxid'] == new_taxid
+    with gzip.open(products['reference']['cds']['path'], 'rt') as current, gzip.open(before['cds']['path'], 'rt') as old:
+        assert current.read().replace('Renamed_plant_A1_g', 'Alpha_plant_A1_g') == old.read()
+    with gzip.open(products['quant']['abundance']['path'], 'rt') as current, gzip.open(before['abundance']['path'], 'rt') as old:
+        assert current.read().replace('Renamed_plant_A1_g', 'Alpha_plant_A1_g') == old.read()
+    assert products['busco']['counts'] == before['counts']
+    assert products['reference']['provenance']['taxonomy_relabel']['old']['taxid'] == old_taxid
+    assert record(before['cds']['path'])['sha256'] == before['cds']['sha256']
+
+
+def test_taxonomy_change_to_different_species_blocks_reuse(dataset_project):
+    root = dataset_project
+    source = imported(root)
+    cfg = configure(root, str(source), taxonomy={'database': str(root / 'input/taxa.sqlite'),
+                                                  'cache_dir': None, 'missing_taxid': 'error'})
+    rows = read_tsv(root / 'input/metadata.tsv')
+    rows[0].update(scientific_name=rows[1]['scientific_name'], taxid=rows[1]['taxid'])
+    metadata = root / 'reidentified.tsv'
+    write_tsv(metadata, list(rows[0]), rows)
+    report = dataset.plan(root, cfg, metadata=metadata)[-1]
+    changed, = [row for row in report if row['run'] == 'A1']
+    assert changed['assembly'] == 'conflict'
+    assert 'does not resolve to the same species' in changed['reason']

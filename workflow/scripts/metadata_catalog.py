@@ -20,7 +20,7 @@ import yaml
 from accession_exclusions import read_exclusions
 from build_versioning import metadata_history
 from common import file_record, now, read_tsv, sha256, write_json, write_tsv
-from dataset_assets import SAFE, counts, locked, verify
+from dataset_assets import SAFE, counts, locked, record, verify
 from sample_identity import annotate
 
 CONFIG_KEYS = {'schema_version', 'name', 'build_config', 'search_string', 'sample_group',
@@ -44,7 +44,7 @@ def configuration(root, path):
     path = path_at(root, path)
     cfg = yaml.safe_load(path.read_text())
     if (not isinstance(cfg, dict) or not CONFIG_KEYS <= set(cfg)
-            or set(cfg) - CONFIG_KEYS - {'overrides', 'busco_threshold'} or cfg['schema_version'] != 1):
+            or set(cfg) - CONFIG_KEYS - {'overrides', 'busco_threshold', 'taxonomy_database'} or cfg['schema_version'] != 1):
         raise ValueError('selection config requires the documented schema_version: 1 keys')
     for key in CONFIG_KEYS - {'schema_version'}:
         if not isinstance(cfg[key], str) or not cfg[key].strip():
@@ -54,6 +54,9 @@ def configuration(root, path):
     cfg.setdefault('overrides', None)
     if cfg['overrides'] is not None and (not isinstance(cfg['overrides'], str) or not cfg['overrides'].strip()):
         raise ValueError('overrides must be null or a TSV path')
+    taxonomy = cfg.setdefault('taxonomy_database', None)
+    if taxonomy is not None and (not isinstance(taxonomy, str) or not taxonomy.strip()):
+        raise ValueError('taxonomy_database must be null or a SQLite path')
     # New samples below this threshold become run exclusions during QC recording.
     # Existing adoption records remain authoritative during later selection.
     cfg.setdefault('busco_threshold', 0.5)
@@ -270,6 +273,8 @@ def selection_inputs(root, cfg):
             inputs[key] = {'path': str(path), 'missing': True}
         else:
             inputs[key] = file_record(path)
+    if cfg.get('taxonomy_database'):
+        inputs['taxonomy_database'] = record(path_at(root, cfg['taxonomy_database']))
     return inputs
 
 
@@ -356,7 +361,28 @@ def initialize(root, cfg, database, source_metadata, exclusions, replace=False):
 
 
 def select_candidates(root, cfg, source, output):
-    """Keep QC-approved accessions, then fill unrepresented taxids deterministically."""
+    """Keep QC-approved accessions, then fill unrepresented species deterministically."""
+    if not cfg.get('taxonomy_database'):
+        return select_with_taxonomy(root, cfg, source, output, None)
+    from taxonomy_identity import TaxonomyIdentity
+
+    with TaxonomyIdentity(path_at(root, cfg['taxonomy_database'])) as taxonomy:
+        return select_with_taxonomy(root, cfg, source, output, taxonomy)
+
+
+def canonical_row(row, taxon):
+    row['taxid_original'] = row.get('taxid_original') or row['taxid']
+    row['scientific_name_original'] = row.get('scientific_name_original') or row['scientific_name']
+    lineage = taxon[1]
+    row['taxid'], row['scientific_name'] = lineage['species']
+    for rank in ('domain', 'kingdom', 'phylum', 'class', 'order', 'family', 'genus', 'species'):
+        entry = lineage.get(rank) or (lineage.get('superkingdom') if rank == 'domain' else None)
+        if entry or 'taxid_' + rank in row:
+            row['taxid_' + rank] = entry[0] if entry else ''
+    return normalized_row(row)
+
+
+def select_with_taxonomy(root, cfg, source, output, taxonomy):
     source, output = path_at(root, source), path_at(root, output)
     if output.exists():
         raise ValueError(f'candidate directory already exists; choose a new attempt: {output}')
@@ -377,6 +403,12 @@ def select_candidates(root, cfg, source, output):
     previous_by_run = {row['run']: row for row in previous.values()}
     kept = {tid: retained_row(previous_by_run[row['run']], row) for tid, row in active_accepted.items()
             if row['run'] in previous_by_run}
+    if taxonomy:
+        for tid, row in active_accepted.items():
+            taxon = taxonomy.resolve(tid)
+            if not taxon or taxon[1].get('species', ('', ''))[0] != tid or (
+                    canonical_row(dict(row), taxon)['scientific_name'] != row['scientific_name']):
+                raise ValueError(f'accepted sample {row["run"]} requires taxonomy review before reselection')
     best, forced, observed, candidate_counts = {}, {}, {}, collections.Counter()
     source_changes = {}
     reasons, seen_runs, observed_taxids = collections.Counter(), set(), set()
@@ -406,6 +438,11 @@ def select_candidates(root, cfg, source, output):
                 observed_taxids.add(tid)
                 kept[tid] = retained_row(incoming, evidence)
                 source_changes[tid] = retained_source_changes(incoming, evidence, cfg)
+                if taxonomy:
+                    incoming_taxon = taxonomy.resolve(incoming['taxid']) if 'invalid_taxid' not in source_changes[tid] else None
+                    if incoming_taxon and incoming_taxon[1].get('species', ('', ''))[0] == tid:
+                        source_changes[tid] = [reason for reason in source_changes[tid]
+                                               if reason not in {'taxid_changed', 'scientific_name_changed'}]
                 rejection = next((reason for reason in source_changes[tid]
                                   if reason in {'invalid_taxid', 'sample_group', 'amalgkit_exclusion',
                                                 'missing_bioproject', 'invalid_total_bases'}), '')
@@ -421,6 +458,13 @@ def select_candidates(root, cfg, source, output):
             except ValueError:
                 reasons['invalid_taxid'] += 1
                 continue
+            taxon = taxonomy.resolve(tid) if taxonomy else None
+            if taxonomy:
+                if not taxon or 'species' not in taxon[1]:
+                    if values[index['sample_group']] == cfg['sample_group']:
+                        reasons['species_taxid_unresolved'] += 1
+                    continue
+                tid = taxon[1]['species'][0]
             project = values[index['bioproject']]
             reason = ''
             if values[index['sample_group']] != cfg['sample_group']:
@@ -445,13 +489,16 @@ def select_candidates(root, cfg, source, output):
                 continue
             candidate_counts[tid] += 1
             # Reserve reviewed taxids even when their accession is absent from this source.
-            if tid in overrides and run == overrides[tid]['run']:
-                forced[tid] = normalized_row(dict(zip(source_fields, values)))
-            if tid in active_accepted or tid in overrides:
-                continue
+            forced_match = tid in overrides and run == overrides[tid]['run']
             rank = (-bases, run)
-            if tid not in best or rank < best[tid][0]:
-                best[tid] = (rank, normalized_row(dict(zip(source_fields, values))))
+            best_match = tid not in active_accepted and tid not in overrides and (tid not in best or rank < best[tid][0])
+            if forced_match or best_match:
+                row = dict(zip(source_fields, values))
+                row = canonical_row(row, taxon) if taxonomy else normalized_row(row)
+                if forced_match:
+                    forced[tid] = row
+                else:
+                    best[tid] = (rank, row)
     if file_record(source) != before:
         raise ValueError('source metadata changed during selection')
     if file_record(cfg['_path']) != config_record or selection_inputs(root, cfg) != inputs:
@@ -500,6 +547,10 @@ def select_candidates(root, cfg, source, output):
                         'eligible_candidates': candidate_counts[tid]})
     merged_fields = list(dict.fromkeys([*fields, *source_fields, 'scientific_name_original',
                                       'species_id', 'analysis_sample_id']))
+    if taxonomy:
+        merged_fields = list(dict.fromkeys([*merged_fields, 'taxid_original', 'taxid_domain', 'taxid_kingdom',
+                                            'taxid_phylum', 'taxid_class', 'taxid_order',
+                                            'taxid_family', 'taxid_genus', 'taxid_species']))
     rows = [annotate(selected[tid]) for tid in sorted(selected, key=int)]
     unique_by(rows, 'run')
     # Match the workflow's normalized identity/collision checks before publishing a candidate.

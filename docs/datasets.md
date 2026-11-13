@@ -10,10 +10,13 @@ A **build** produces a reusable sample database: assembly, BUSCO, quantification
 OrthoDB mapping, and OG expression. An **analysis** uses that database with its
 own sample selection, traits, and optional analyses.
 
-When an accession in an explicit reuse database has a different sample identity
-(for example, its scientific name changed), planning requires metadata review
-instead of silently treating it as a new sample. Products are not automatically
-relabeled across scientific identities.
+A completed public run can be reused after a name change or TaxID update if
+both TaxIDs resolve to the same species in the configured taxonomy snapshot
+and input metadata and processing conditions agree. The new build copies and
+relabels CDS, BUSCO, abundance, and protein records as needed, retaining the
+source and taxonomy provenance. OrthoDB mapping and expression are planned
+again for these records. Unresolved identities, assignments to different
+species, private inputs, and explicitly pinned references require review.
 
 ## Build a reusable database
 

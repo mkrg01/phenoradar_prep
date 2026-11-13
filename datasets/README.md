@@ -11,7 +11,7 @@ builds use separate commands.
 ## Selection policy
 
 New candidates must pass AMALGKIT curation for the configured `sample_group`.
-For each original `taxid`:
+For each original `taxid` (or resolved species TaxID when configured):
 
 1. Apply exact accession exclusions. Other runs from the same taxid and
    BioProject remain eligible.
@@ -20,6 +20,13 @@ For each original `taxid`:
 3. Otherwise, choose the greatest positive `total_bases`, breaking ties by
    ascending accession.
 4. Apply any optional `overrides.tsv` choice from the eligible candidates.
+
+Set `taxonomy_database` in `selection.yaml` to a fixed NCBI taxonomy SQLite
+snapshot to select one run per current species. Use the same snapshot for
+`taxonomy.database` in the build configuration. Overrides use resolved species
+TaxIDs. Selection preserves the submitted name and TaxID, reports unresolved
+species, and requires review of accepted identities that differ from the
+snapshot.
 
 Review changes to accepted samples in `selection.tsv`. Their adopted names
 and sample IDs are retained across metadata updates.
