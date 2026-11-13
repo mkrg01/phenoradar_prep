@@ -15,8 +15,10 @@ both TaxIDs resolve to the same species in the configured taxonomy snapshot
 and input metadata and processing conditions agree. The new build copies and
 relabels CDS, BUSCO, abundance, and protein records as needed, retaining the
 source and taxonomy provenance. OrthoDB mapping and expression are planned
-again for these records. Unresolved identities, assignments to different
-species, private inputs, and explicitly pinned references require review.
+again for these records. If both current SRA and BioSample records confirm a
+different species, the selected run starts again from assembly and the build
+records the evidence in `reuse.json`. Unresolved or inconsistent assignments,
+private inputs, and explicitly pinned references require review.
 
 ## Build a reusable database
 

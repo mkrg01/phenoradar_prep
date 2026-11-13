@@ -165,6 +165,13 @@ def compatible_identity(first, second):
     return True
 
 
+class SpeciesReassignment(ValueError):
+    def __init__(self, old_species, new_species):
+        super().__init__(f'public Run moved between species TaxIDs {old_species} -> {new_species}')
+        self.old_species = old_species
+        self.new_species = new_species
+
+
 def taxonomy_relabel(item, product, taxonomy, snapshot):
     """Authorize a label change for a verified public run of the same species."""
     old, new = product['row'], item['row']
@@ -181,8 +188,10 @@ def taxonomy_relabel(item, product, taxonomy, snapshot):
     new_taxon = taxonomy.resolve(new['taxid'])
     old_species = old_taxon[1].get('species') if old_taxon else None
     new_species = new_taxon[1].get('species') if new_taxon else None
-    if old_species is None or old_species != new_species:
-        raise ValueError('changed sample identity does not resolve to the same species')
+    if old_species is None or new_species is None:
+        raise ValueError('changed sample identity has an unresolved species in the frozen taxonomy')
+    if old_species != new_species:
+        raise SpeciesReassignment(old_species[0], new_species[0])
     return {
         'old': {key: old.get(key, '') for key in SAMPLE_FIELDS},
         'new': {key: new.get(key, '') for key in SAMPLE_FIELDS},
@@ -191,7 +200,7 @@ def taxonomy_relabel(item, product, taxonomy, snapshot):
     }
 
 
-def select(paths, items, cfg, verify_files=True, rebuilds=None):
+def select(paths, items, cfg, verify_files=True, rebuilds=None, reassignments=None):
     """Find completed database products and processing checkpoints for the requested runs."""
     from contextlib import ExitStack
     from taxonomy_identity import TaxonomyIdentity
@@ -210,10 +219,32 @@ def select(paths, items, cfg, verify_files=True, rebuilds=None):
                 taxonomy = stack.enter_context(TaxonomyIdentity(verify(receipt)))
             return taxonomy_relabel(item, product, taxonomy, receipt)
 
-        return select_databases(paths, items, cfg, verify_files, rebuilds, relabel)
+        reassigned = {}
+        selected, errors, sources = select_databases(paths, items, cfg, verify_files, rebuilds, relabel, reassigned)
+        if reassigned:
+            from ncbi_sample import NCBISamples
+
+            ncbi = NCBISamples()
+            for item in items:
+                name, run = item['species'], item['row']['run']
+                if name not in reassigned or name in selected or name in errors:
+                    continue
+                old_species, new_species, source = reassigned[name]
+                reason = f'reuse_from {run}: public Run moved between species TaxIDs {old_species} -> {new_species}'
+                if reassignments is None:
+                    errors[name] = reason
+                    continue
+                try:
+                    confirmation = ncbi.confirm(run, new_species, taxonomy)
+                except ValueError as error:
+                    errors[name] = f'{reason}; {error}'
+                else:
+                    reassignments[name] = dict(confirmation, old_species_taxid=old_species,
+                                               source=source, snapshot=receipt, reason=reason)
+        return selected, errors, sources
 
 
-def select_databases(paths, items, cfg, verify_files, rebuilds, relabel):
+def select_databases(paths, items, cfg, verify_files, rebuilds, relabel, reassigned):
     from build_products import load_complete
     if not items:
         return {}, {}, []
@@ -288,6 +319,9 @@ def select_databases(paths, items, cfg, verify_files, rebuilds, relabel):
                 product['processing'] = completed_processing(product, source_config)
                 try:
                     change = relabel(wanted[name], product)
+                except SpeciesReassignment as change:
+                    reassigned.setdefault(name, (change.old_species, change.new_species, source))
+                    continue
                 except ValueError as error:
                     raise ValueError(f'reuse_from {wanted[name]["row"]["run"]}: {error}: '
                                      f'{old_name} -> {name}') from error

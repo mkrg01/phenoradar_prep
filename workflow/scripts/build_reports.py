@@ -35,7 +35,7 @@ def plan_rows(report, verified=False):
     for entry in report:
         row = dict(entry)
         row['action'] = action(row)
-        row['verification'] = ('failed' if row['action'] == 'rebuild' else
+        row['verification'] = row.get('verification') or ('failed' if row['action'] == 'rebuild' else
                                'verified' if verified and 'reuse' in [row.get(s) for s in STAGES] else
                                'pending' if 'reuse' in [row.get(s) for s in STAGES] else 'not_required')
         rows.append(row)
@@ -262,7 +262,7 @@ def verify_progress(path, report):
                 if chosen:
                     for entry in candidate_files(chosen):
                         verify(entry)
-                elif name in candidates['rebuilds']:
+                elif name in candidates['rebuilds'] and row['verification'] != 'not_required':
                     raise ValueError(candidates['rebuilds'][name])
                 else:
                     row['verification'] = 'not_required'

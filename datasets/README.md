@@ -22,14 +22,24 @@ For each original `taxid` (or resolved species TaxID when configured):
 4. Apply any optional `overrides.tsv` choice from the eligible candidates.
 
 Set `taxonomy_database` in `selection.yaml` to a fixed NCBI taxonomy SQLite
-snapshot to select one run per current species. Use the same snapshot for
-`taxonomy.database` in the build configuration. Overrides use resolved species
-TaxIDs. Selection preserves the submitted name and TaxID, reports unresolved
-species, and requires review of accepted identities that differ from the
-snapshot.
+snapshot to select one run per current species. Set `taxonomy.database` in the
+build configuration to the same path. Overrides use resolved species TaxIDs.
+Selection preserves the submitted name and TaxID and reports unresolved species.
 
-Review changes to accepted samples in `selection.tsv`. Their adopted names
-and sample IDs are retained across metadata updates.
+A confirmed change to another species releases the previous accepted identity.
+The run competes with eligible candidates in its current species, and the old
+species can select a replacement. Selection records the SRA and BioSample
+confirmation and retires the old acceptance when the candidate is published.
+
+For each NCBI refresh, prepare a new snapshot at a new path, then point both
+configurations to it before selecting or building:
+
+```bash
+python workflow/scripts/prepare_taxonomy.py --destination resources/taxonomy/2026-11-13/taxa.sqlite
+```
+
+Existing snapshots are reused when configured. A saved build checks the
+snapshot it used so that retries use the same classification.
 
 ## Recording results
 

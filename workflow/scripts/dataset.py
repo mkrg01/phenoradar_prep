@@ -230,6 +230,12 @@ def plan(root, config, metadata=None, analysis_config=None, name=None, verify_fi
         provenance = json.loads(verify(provenance_record).read_text())
         if not isinstance(provenance, dict) or not isinstance(provenance.get('metadata'), dict) or provenance['metadata'].get('sha256') != source['sha256']:
             raise ValueError('metadata provenance does not match the input metadata; update metadata or use its matching provenance')
+        selected_taxonomy = provenance.get('inputs', {}).get('taxonomy_database')
+        if selected_taxonomy:
+            from taxonomy_selection import cached_database
+            database = cached_database(cfg)
+            if database is None or record(database)['sha256'] != selected_taxonomy['sha256']:
+                raise ValueError('build taxonomy differs from metadata selection; use the same taxonomy snapshot')
     policy_record = record(cfg["excluded_accessions"]) if cfg["excluded_accessions"] else None
     policy = read_exclusions(cfg["excluded_accessions"])
     fields, items = identities(metadata, source=source)
@@ -248,6 +254,7 @@ def plan(root, config, metadata=None, analysis_config=None, name=None, verify_fi
     if policy_record: verify(policy_record)
     from database_reuse import select
     rebuilds = {} if repair else None
+    reassignments = {}
     aliases = {alias: item for item in items for alias in (item['species'], item['row']['run'])}
     unknown = set(cfg['rebuild_samples']) - aliases.keys()
     if unknown:
@@ -256,17 +263,23 @@ def plan(root, config, metadata=None, analysis_config=None, name=None, verify_fi
     if any(i['species'] in forced and i['row'].get('reference_id') for i in items):
         raise ValueError('remove reference_id from metadata before rebuilding a pinned sample')
     reusable, errors, sources = select(cfg['reuse_from'], [i for i in items if i['species'] not in forced],
-                                      cfg, verify_files=verify_files, rebuilds=rebuilds)
+                                      cfg, verify_files=verify_files, rebuilds=rebuilds, reassignments=reassignments)
     if forced:
         rebuilds = {**(rebuilds or {}), **dict.fromkeys(forced, 'explicitly requested by rebuild_samples')}
+    if reassignments:
+        rebuilds = {**(rebuilds or {}), **{name: evidence['reason'] for name, evidence in reassignments.items()}}
     selection = {"source_metadata": source, "metadata_provenance": provenance_record, "exclusion_policy": policy_record, "excluded": excluded,
-                 "reusable": reusable, "reuse_sources": sources, "rebuilds": rebuilds or {}}
+                 "reusable": reusable, "reuse_sources": sources, "rebuilds": rebuilds or {},
+                 "taxonomy_reassignments": reassignments}
     if pilot_size is not None:
         selection['pilot'] = {'requested_samples': pilot_size, 'source_samples': source_samples,
                               'selection': 'read-volume rank strata including both endpoints'}
     report = inspect_items(cfg["store"], items, analysis, conditions=cfg["conditions"],
                            reusable=reusable, errors=errors, verify_files=verify_files,
                            rebuilds=rebuilds) + excluded_report(excluded)
+    for row in report:
+        if row['species'] in reassignments:
+            row['verification'] = 'not_required'
     if taxonomy_pending:
         for row in report:
             if row['mapping'] != 'excluded':
@@ -414,6 +427,8 @@ def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_a
                     item['reference_id'] = json.loads(reference.read_text())['reference_id']
         reuse_receipt = {"sources": selection['reuse_sources'],
                          "samples": {s: entry['source'] for s, entry in selection['reusable'].items()}}
+        if selection['taxonomy_reassignments']:
+            reuse_receipt['taxonomy_reassignments'] = selection['taxonomy_reassignments']
         write_json(staging / 'reuse.json', reuse_receipt)
         auxiliary['reuse.json'] = dict(record(staging / 'reuse.json'), path=str(target / 'reuse.json'))
         busco_reference = taxonomy_reference = None

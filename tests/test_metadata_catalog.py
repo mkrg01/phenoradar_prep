@@ -918,3 +918,38 @@ def test_species_taxonomy_groups_merged_and_infraspecific_runs(fresh_project, ti
     assert summary['samples'] == 1
     assert (selected['run'], selected['taxid'], selected['taxid_original'], selected['scientific_name']) == (
         'REUSE', str(tid), '9998', 'Alpha plant')
+
+
+def test_confirmed_reassignment_reselects_old_and_new_species(curated_project, tiny_inputs, monkeypatch):
+    root, dataset, cfg = curated_project
+    taxonomy = root / 'taxa.sqlite'
+    shutil.copyfile(tiny_inputs['taxonomy_db'], taxonomy)
+    cfg['taxonomy_database'] = str(taxonomy)
+    source_rows = read_tsv(tiny_inputs['metadata'])
+    old, new = [source_rows[i] for i in (0, 2)]
+    adopted = row(old['taxid'], 'MOVED')
+    adopted['scientific_name'] = old['scientific_name']
+    write_tsv(dataset / 'metadata.tsv', FIELDS, [adopted])
+    write_tsv(dataset / 'accepted_samples.tsv', catalog.ACCEPTED_FIELDS,
+              [dict({key: adopted[key] for key in catalog.ACCEPTED_FIELDS[:4]},
+                    busco_complete=80, busco_total=100, source_build='completed')])
+    write_tsv(dataset / 'overrides.tsv', ['taxid', 'run', 'reason'],
+              [dict(taxid=new['taxid'], run='VERIFIED', reason='verified database product')])
+
+    def confirm(self, run, species, taxonomy):
+        assert run == 'MOVED' and species == new['taxid']
+        return dict(run=run, species_taxid=species, biosample='SAMN1')
+
+    monkeypatch.setattr('ncbi_sample.NCBISamples.confirm', confirm)
+    summary, output = select(curated_project, [
+        row(old['taxid'], 'REPLACEMENT'),
+        row(new['taxid'], 'MOVED', bases=1000),
+        row(new['taxid'], 'VERIFIED'),
+    ])
+    selected = read_tsv(output / 'metadata.tsv')
+    assert summary['samples'] == 2
+    assert {r['taxid']: r['run'] for r in selected} == {
+        old['taxid']: 'REPLACEMENT', new['taxid']: 'VERIFIED'}
+    provenance = json.loads((output / 'provenance.json').read_text())
+    assert provenance['taxonomy_reassignments'][0]['old_species_taxid'] == old['taxid']
+    assert catalog.accept_candidate(root, cfg, output)['retained_success_evidence'] == 0

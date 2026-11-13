@@ -30,7 +30,8 @@ Use a new run for changed scientific conditions; use
 | `genegalleon` | [Pinned software](datasets.md#pinned-genegalleon-source-and-sif) and assembly/quantification settings |
 | `busco.lineage` | BUSCO dataset; default `embryophyta_odb12` |
 | `busco.cache_dir` | Shared reference directory; default `resources/busco`; `null` disables sharing |
-| `taxonomy.cache_dir` | Shared ETE/NCBI database; default `resources/taxonomy`; `null` disables sharing |
+| `taxonomy.cache_dir` | Shared ETE/NCBI database; default `resources/taxonomy`; existing snapshots are reused |
+| `taxonomy.database` | Explicit SQLite snapshot for classification; use the snapshot recorded by metadata selection |
 | `translation.table` | NCBI genetic code; default `1` |
 | `execution` | [Job resources and total limits](running.md#resource-budgets) |
 

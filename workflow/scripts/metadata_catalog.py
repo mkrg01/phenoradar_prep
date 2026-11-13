@@ -403,7 +403,10 @@ def select_with_taxonomy(root, cfg, source, output, taxonomy):
     previous_by_run = {row['run']: row for row in previous.values()}
     kept = {tid: retained_row(previous_by_run[row['run']], row) for tid, row in active_accepted.items()
             if row['run'] in previous_by_run}
+    taxonomy_reassignments = []
     if taxonomy:
+        from ncbi_sample import NCBISamples
+        ncbi = NCBISamples()
         for tid, row in active_accepted.items():
             taxon = taxonomy.resolve(tid)
             if not taxon or taxon[1].get('species', ('', ''))[0] != tid or (
@@ -430,6 +433,17 @@ def select_with_taxonomy(root, cfg, source, output, taxonomy):
             if run in seen_runs:
                 raise ValueError(f'duplicate source run: {run}')
             seen_runs.add(run)
+            if taxonomy and run in accepted_by_run:
+                evidence = accepted_by_run[run]
+                raw_taxid = values[index['taxid']]
+                taxon = taxonomy.resolve(raw_taxid) if raw_taxid.isdigit() else None
+                new_species = taxon[1].get('species') if taxon else None
+                if new_species and new_species[0] != evidence['taxid']:
+                    confirmation = ncbi.confirm(run, new_species[0], taxonomy)
+                    taxonomy_reassignments.append(dict(confirmation, old_species_taxid=evidence['taxid']))
+                    active_accepted.pop(evidence['taxid'])
+                    kept.pop(evidence['taxid'], None)
+                    accepted_by_run.pop(run)
             if run in accepted_by_run:
                 evidence = accepted_by_run[run]
                 tid = taxid(evidence['taxid'])
@@ -491,7 +505,7 @@ def select_with_taxonomy(root, cfg, source, output, taxonomy):
             # Reserve reviewed taxids even when their accession is absent from this source.
             forced_match = tid in overrides and run == overrides[tid]['run']
             rank = (-bases, run)
-            best_match = tid not in active_accepted and tid not in overrides and (tid not in best or rank < best[tid][0])
+            best_match = tid not in overrides and (tid not in best or rank < best[tid][0])
             if forced_match or best_match:
                 row = dict(zip(source_fields, values))
                 row = canonical_row(row, taxon) if taxonomy else normalized_row(row)
@@ -509,7 +523,7 @@ def select_with_taxonomy(root, cfg, source, output, taxonomy):
                 forced[tid] = kept[tid]
             else:
                 raise ValueError(f'override is absent or excluded from eligible source candidates: {tid}/{override["run"]}')
-    selected = {tid: row for tid, (_, row) in best.items()}
+    selected = {tid: row for tid, (_, row) in best.items() if tid not in active_accepted}
     selected.update(kept)
     selected.update(forced)
     unresolved = sorted(row['run'] for tid, row in active_accepted.items()
@@ -569,6 +583,8 @@ def select_with_taxonomy(root, cfg, source, output, taxonomy):
                       'dataset': cfg['name'], 'source_metadata': before, 'selection_config': config_record,
                       'inputs': inputs, 'generator': file_record(Path(__file__)), 'summary': summary,
                       'metadata': file_record(staging / 'metadata.tsv'), 'selection': file_record(staging / 'selection.tsv')}
+        if taxonomy_reassignments:
+            provenance['taxonomy_reassignments'] = taxonomy_reassignments
         stage_info = source.parent / 'provenance.json'
         if stage_info.exists():
             provenance['source_provenance'] = file_record(stage_info)

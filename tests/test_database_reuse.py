@@ -338,16 +338,36 @@ def test_taxonomy_change_stages_relabelled_upstream_products(dataset_project, me
     assert record(before['cds']['path'])['sha256'] == before['cds']['sha256']
 
 
-def test_taxonomy_change_to_different_species_blocks_reuse(dataset_project):
+@pytest.mark.parametrize('confirmed', [True, False])
+def test_taxonomy_reassignment_rebuilds_only_confirmed_run(dataset_project, monkeypatch, confirmed):
     root = dataset_project
     source = imported(root)
     cfg = configure(root, str(source), taxonomy={'database': str(root / 'input/taxa.sqlite'),
                                                   'cache_dir': None, 'missing_taxid': 'error'})
     rows = read_tsv(root / 'input/metadata.tsv')
     rows[0].update(scientific_name=rows[1]['scientific_name'], taxid=rows[1]['taxid'])
+
+    def confirm(self, run, species, taxonomy):
+        assert run == 'A1' and species == rows[1]['taxid']
+        if not confirmed:
+            raise ValueError('BioSample organism does not resolve to the requested species')
+        return {'run': run, 'species_taxid': species, 'biosample': 'SAMN12345'}
+
+    monkeypatch.setattr('ncbi_sample.NCBISamples.confirm', confirm)
     metadata = root / 'reidentified.tsv'
     write_tsv(metadata, list(rows[0]), rows)
     report = dataset.plan(root, cfg, metadata=metadata)[-1]
     changed, = [row for row in report if row['run'] == 'A1']
-    assert changed['assembly'] == 'conflict'
-    assert 'does not resolve to the same species' in changed['reason']
+    assert {row['assembly'] for row in report if row['run'] != 'A1'} == {'reuse'}
+    if not confirmed:
+        assert changed['assembly'] == 'conflict'
+        assert 'BioSample organism does not resolve' in changed['reason']
+        return
+    assert changed['assembly'] == 'pending' and changed['rebuild']
+    assert changed['verification'] == 'not_required'
+    build = dataset.prepare(root, 'reassigned', cfg, metadata=metadata, defer=True)
+    receipt = json.loads((build / 'reuse.json').read_text())
+    assert receipt['taxonomy_reassignments']['Beta_sp-X_A1']['biosample'] == 'SAMN12345'
+    candidates = json.loads((build / 'reuse_candidates.json').read_text())
+    assert set(candidates['rebuilds']) == {'Beta_sp-X_A1'}
+    assert len(candidates['samples']) == 2

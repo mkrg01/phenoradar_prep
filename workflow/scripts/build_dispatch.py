@@ -173,6 +173,11 @@ def verify_and_stage(path, manifest, workers=4, software=None, cached_only=False
     update_verification(path, 'running', phase='taxonomy')
     select_taxonomy(path, manifest, software=software, cached_only=cached_only)
     previous = runtime_data(path)
+    reuse = manifest.get('auxiliary', {}).get('reuse.json')
+    if previous is None and reuse:
+        decisions = json.loads(verify(reuse).read_text()).get('taxonomy_reassignments', {})
+        for evidence in decisions.values():
+            verify(evidence['snapshot'])
     planned = {row['species']: row for row in read_context(path)['items']}
     references, rebuilds = {}, {}
     local_files = (previous or {}).get('verified_files', {})
