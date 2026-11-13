@@ -111,7 +111,7 @@ def test_legacy_stage_allocations_become_one_sample_without_mutating_snapshot(pu
     before = copy.deepcopy(legacy)
     normalized = validate_slurm(legacy)
     assert normalized['stages']['sample'] == {'cpus': 16, 'mem_gb': 128, 'time': '15-02:00:00'}
-    assert set(normalized['stages']) == {'sample', 'controller'}
+    assert set(normalized['stages']) == {'sample', 'controller', 'taxonomy_screen'}
     assert legacy == before
 
 

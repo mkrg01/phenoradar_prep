@@ -14,8 +14,8 @@
 !/datasets/*/
 !/datasets/README.md
 !/datasets/environment.yaml
+!/datasets/angiosperms353.environment.yaml
 !/datasets/*/README.md
-!/datasets/*/selection.yaml
 !/datasets/*/build.yaml
 !/datasets/*/select_rules.tsv
 !/datasets/*/overrides.tsv

@@ -21,11 +21,15 @@ from accession_exclusions import read_exclusions
 from build_versioning import metadata_history
 from common import file_record, now, read_tsv, sha256, write_json, write_tsv
 from dataset_assets import SAFE, counts, locked, record, verify
+from phase_config import read_yaml, taxonomy_screen_settings
 from sample_identity import annotate
 
+DEFAULT_BUILD_CONFIG = 'datasets/angiosperm_leaf/build.yaml'
+TAXONOMY_COMMANDS = ('prepare-taxonomy', 'screen-taxonomy', 'report-taxonomy')
 CONFIG_KEYS = {'schema_version', 'name', 'build_config', 'search_string', 'sample_group',
                'rule_set', 'rules', 'accepted_samples', 'previous_metadata',
                'excluded_accessions'}
+SELECTION_KEYS = {'search_string', 'sample_group', 'rule_set', 'rules', 'accepted_samples'}
 ACCEPTED_FIELDS = ['taxid', 'run', 'bioproject', 'scientific_name',
                    'busco_complete', 'busco_total', 'source_build']
 EXCLUSION_FIELDS = ['accession', 'taxid', 'bioproject', 'reason', 'source_build']
@@ -40,12 +44,26 @@ def path_at(root, value):
     return (Path(root) / value).resolve()
 
 
-def configuration(root, path):
+def configuration(root, path, *, require_selection=True):
     path = path_at(root, path)
-    cfg = yaml.safe_load(path.read_text())
+    document = read_yaml(path)
+    legacy = 'schema_version' in document
+    if legacy:
+        # Existing user-authored selection configs can still point to a build.
+        cfg = document
+    else:
+        build = document
+        selection = build.get('metadata_selection')
+        if selection is None and not require_selection:
+            return dict(_path=path, taxonomy_screen=taxonomy_screen_settings(build.get('taxonomy_screen', {})))
+        if (not isinstance(selection, dict) or not SELECTION_KEYS <= selection.keys()
+                or selection.keys() - SELECTION_KEYS - {'overrides', 'busco_threshold', 'taxonomy_database'}):
+            raise ValueError('build.yaml metadata_selection requires the documented metadata settings')
+        cfg = dict(selection, schema_version=1, name=build.get('name'), build_config=str(path),
+                   previous_metadata=build.get('metadata'), excluded_accessions=build.get('excluded_accessions'))
     if (not isinstance(cfg, dict) or not CONFIG_KEYS <= set(cfg)
             or set(cfg) - CONFIG_KEYS - {'overrides', 'busco_threshold', 'taxonomy_database'} or cfg['schema_version'] != 1):
-        raise ValueError('selection config requires the documented schema_version: 1 keys')
+        raise ValueError('metadata selection requires the documented settings')
     for key in CONFIG_KEYS - {'schema_version'}:
         if not isinstance(cfg[key], str) or not cfg[key].strip():
             raise ValueError(f'selection.{key} must be a nonempty string')
@@ -63,6 +81,9 @@ def configuration(root, path):
     threshold = cfg['busco_threshold']
     if type(threshold) not in (int, float) or not 0 <= threshold <= 1:
         raise ValueError('busco_threshold must be between zero and one')
+    if legacy:
+        build = read_yaml(path_at(root, cfg['build_config']))
+    cfg['taxonomy_screen'] = taxonomy_screen_settings(build.get('taxonomy_screen', {}))
     cfg['_path'] = path
     return cfg
 
@@ -289,10 +310,12 @@ def matching_container(root, cfg, build):
     return lock
 
 
-def record_successes(root, cfg, build_path, runs=None, dry_run=False, *, exclude_failed=False, plan=None):
+def record_successes(root, cfg, build_path, runs=None, dry_run=False, *, exclude_failed=False, plan=None,
+                     taxonomy_screen=None, exclude_taxonomy=None):
     """Record adoption, reviewed exclusions, and cleanup through one operation."""
     from sample_review import record
-    return record(root, cfg, build_path, runs, dry_run, exclude_failed=exclude_failed, plan=plan)
+    return record(root, cfg, build_path, runs, dry_run, exclude_failed=exclude_failed, plan=plan,
+                  taxonomy_screen=taxonomy_screen, exclude_taxonomy=exclude_taxonomy)
 
 
 def initialize(root, cfg, database, source_metadata, exclusions, replace=False):
@@ -912,14 +935,100 @@ def update_metadata(root, cfg, work=None, source=None, dry_run=False):
         raise
 
 
+def taxonomy_screen_command(root, cfg, args):
+    qc = cfg['taxonomy_screen']
+    if not qc['enabled']:
+        return {'status': 'disabled'}
+    from angiosperms353 import build_panel, database_panel, load_panel, report, screen
+
+    cutoff = getattr(args, 'max_registered_support', None)
+    legacy_cutoff = getattr(args, 'support', None)
+    if cutoff is None and legacy_cutoff is None:
+        cutoff = qc['max_registered_support']
+    config = file_record(cfg['_path'])
+    if args.command == 'report-taxonomy':
+        return report(path_at(root, args.screen), path_at(root, args.output),
+                      registered_support=cutoff, selection_config=config)
+    from angiosperms353_reference import KewReference
+    from prepare_taxonomy import prepare
+
+    cache = path_at(root, args.cache)
+    build_path = path_at(root, args.build) if getattr(args, 'build', None) else None
+    if build_path and build_path.name == 'build.json':
+        build_path = build_path.parent
+    if args.taxonomy:
+        taxonomy = path_at(root, args.taxonomy)
+        if not taxonomy.is_file():
+            raise ValueError(f'frozen taxonomy database missing: {taxonomy}')
+    elif build_path and (build_path / 'taxonomy.sqlite').is_file():
+        taxonomy = build_path / 'taxonomy.sqlite'
+    else:
+        taxonomy = cache / 'taxonomy.sqlite'
+        prepare(taxonomy)
+    if args.command == 'prepare-taxonomy':
+        reference = KewReference(cache)
+        reference.manifests()
+        loci = reference.loci(workers=args.workers)
+        return dict(method=qc['method'], cache=str(reference.cache), taxonomy=str(taxonomy), loci=len(loci))
+    if build_path or args.database:
+        if args.omit_same_species or args.loci:
+            raise ValueError('validation-only options require --samples')
+        if build_path:
+            samples, build = build_panel(build_path, args.runs)
+            database = None
+        else:
+            samples, database = database_panel(path_at(root, args.database), args.runs)
+            build = None
+    else:
+        if args.runs:
+            raise ValueError('--runs requires --build or --database')
+        samples, build, database = load_panel(path_at(root, args.samples)), None, None
+    only_loci = set(path_at(root, args.loci).read_text().split()) if args.loci else None
+    return screen(samples, cache=cache, taxonomy=taxonomy, build=build, output=path_at(root, args.output),
+                  database=database, selection_config=config, min_loci=args.min_loci,
+                  registered_support=cutoff, support=legacy_cutoff,
+                  threads=args.threads, ram=args.ram,
+                  omit_same_species=args.omit_same_species, only_loci=only_loci, blat=args.blat,
+                  batch_size=qc['batch_size'], root=root,
+                  config=read_yaml(path_at(root, cfg.get('build_config', cfg['_path']))),
+                  cluster=getattr(args, 'cluster', False))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    for name in ('update', 'record', 'init', 'seed', 'baseline', 'rules', 'fetch', 'curate', 'select', 'accept'):
+    for name in ('update', 'record', 'init', 'seed', 'baseline', 'rules', 'fetch', 'curate', 'select', 'accept',
+                 *TAXONOMY_COMMANDS):
         p = commands.add_parser(name)
         p.add_argument('--root', default='.')
-        p.add_argument('--config', default='datasets/angiosperm_leaf/selection.yaml')
-        if name == 'update':
+        p.add_argument('--config', default=DEFAULT_BUILD_CONFIG, help='Build configuration')
+        if name == 'report-taxonomy':
+            p.add_argument('--screen', required=True, help='Completed taxonomy screen.json')
+            p.add_argument('--output', required=True, help='New report directory')
+            p.add_argument('--max-registered-support', help='Override the configured vote threshold')
+        elif name in TAXONOMY_COMMANDS:
+            p.add_argument('--cache', default='resources/angiosperms353')
+            p.add_argument('--taxonomy', help='Frozen ETE taxonomy SQLite database')
+            if name == 'prepare-taxonomy':
+                p.add_argument('--workers', type=int, default=4)
+            else:
+                source = p.add_mutually_exclusive_group(required=True)
+                source.add_argument('--build', help='Read registered CDS products from this build')
+                source.add_argument('--database', help='Read CDS from a portable completed database')
+                source.add_argument('--samples', help='Validation TSV with run, taxid and cds columns')
+                p.add_argument('--runs', nargs='+', help='Limit screening to these run accessions')
+                p.add_argument('--output', required=True, help='New or resumable output directory')
+                p.add_argument('--cluster', action='store_true', help='Submit batch jobs to the configured scheduler')
+                p.add_argument('--min-loci', type=int, default=50)
+                cutoff = p.add_mutually_exclusive_group()
+                cutoff.add_argument('--max-registered-support', help='Override the configured vote threshold')
+                cutoff.add_argument('--support', help=argparse.SUPPRESS)
+                p.add_argument('--threads', type=int, help='Override the per-batch CPU count')
+                p.add_argument('--ram', type=int, help='Override the Captus and MMseqs2 memory budget in GB')
+                p.add_argument('--blat', help='Path to a compatible BLAT binary')
+                p.add_argument('--omit-same-species', action='store_true', help='Validation only')
+                p.add_argument('--loci', help='Validation only: file of marker IDs, one per line')
+        elif name == 'update':
             p.add_argument('--work', help='Work directory; default: work/datasets/<name>/<UTC timestamp>')
             p.add_argument('--metadata', help='Optional already curated AMALGKIT table; otherwise fetch and curate')
             p.add_argument('--dry-run', action='store_true', help='Write a candidate without publishing dataset metadata')
@@ -931,6 +1040,9 @@ def main():
             p.add_argument('--dry-run', action='store_true', help='Preview decisions and cleanup without changing tables or deleting files')
             p.add_argument('--exclude-failed', action='store_true', help='Exclude all inactive incomplete samples, including unstarted runs, and remove their reads/scratch; --dry-run previews without applying')
             p.add_argument('--plan', metavar='PLAN.tsv', help='Save an editable review plan and evidence; does not apply decisions')
+            p.add_argument('--taxonomy-screen', metavar='SCREEN.json', help='Use a completed build taxonomy screen')
+            p.add_argument('--exclude-taxonomy', nargs='?', const='auto', choices=['auto', 'family', 'genus'],
+                           help='Propose exclusions at the evaluated rank in a saved review plan')
         elif name == 'init':
             p.add_argument('--exclusions', help='Optional historical run exclusion table')
             p.add_argument('--replace', action='store_true')
@@ -958,18 +1070,26 @@ def main():
     args = parser.parse_args()
     root = Path(args.root).resolve()
     try:
-        cfg = configuration(root, args.config)
+        screening = args.command in TAXONOMY_COMMANDS
+        cfg = configuration(root, args.config, require_selection=not screening)
+        if screening:
+            result = taxonomy_screen_command(root, cfg, args)
+            print(json.dumps(result, indent=2))
+            return
         if args.command == 'update':
             result = update_metadata(root, cfg, args.work, args.metadata, args.dry_run)
         elif args.command == 'record':
+            if (args.taxonomy_screen or args.exclude_taxonomy) and not cfg['taxonomy_screen']['enabled']:
+                raise ValueError('enable taxonomy_screen in build.yaml to use a taxonomy screen')
             if args.apply:
-                if args.runs or args.exclude_failed or args.plan:
-                    raise ValueError('--apply cannot be combined with --runs, --exclude-failed or --plan')
+                if args.runs or args.exclude_failed or args.plan or args.taxonomy_screen or args.exclude_taxonomy:
+                    raise ValueError('--apply uses the options frozen when the review plan was prepared')
                 from sample_review import apply_plan
                 result = apply_plan(root, cfg, args.apply, dry_run=args.dry_run)
             else:
                 result = record_successes(root, cfg, args.build, args.runs, args.dry_run,
-                                          exclude_failed=args.exclude_failed, plan=args.plan)
+                                          exclude_failed=args.exclude_failed, plan=args.plan,
+                                          taxonomy_screen=args.taxonomy_screen, exclude_taxonomy=args.exclude_taxonomy)
         elif args.command == 'init':
             result = initialize_empty(root, cfg, args.exclusions, args.replace)
         elif args.command == 'seed':

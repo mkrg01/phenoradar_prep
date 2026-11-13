@@ -46,13 +46,17 @@ def inside(root, path):
 
 
 def settings(root, config, analysis_config=None, name=None):
-    from phase_config import execution_config, validate_slurm
+    from phase_config import execution_config, taxonomy_screen_settings, validate_slurm
     root = Path(root).resolve()
     cfg = read_yaml(config)
     if analysis_config is not None:
         raise ValueError("build does not accept analysis overrides; use run_analysis.sh")
-    unknown = set(cfg) - {"name", "name_mode", "metadata", "metadata_provenance", "reuse_from", "rebuild_samples", "translation", "busco", "taxonomy", "odb", "genegalleon", "slurm", "execution", "excluded_accessions", "storage"}
+    unknown = set(cfg) - {"name", "name_mode", "metadata", "metadata_provenance", "metadata_selection",
+                          "taxonomy_screen", "reuse_from", "rebuild_samples", "translation", "busco",
+                          "taxonomy", "odb", "genegalleon", "slurm", "execution", "excluded_accessions", "storage"}
     if unknown: raise ValueError(f"unknown build settings: {sorted(unknown)}; use config/build.yaml for build settings")
+    if 'taxonomy_screen' in cfg:
+        cfg['taxonomy_screen'] = taxonomy_screen_settings(cfg['taxonomy_screen'])
     cfg['name_mode'] = naming_mode(cfg)
     rebuild = cfg.setdefault('rebuild_samples', [])
     if not isinstance(rebuild, list) or any(not isinstance(s, str) or not s.strip() for s in rebuild):

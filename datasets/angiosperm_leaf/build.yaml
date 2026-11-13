@@ -3,6 +3,19 @@ name_mode: timestamp  # New builds append their UTC preparation time; --name ove
 metadata: datasets/angiosperm_leaf/metadata.tsv
 metadata_provenance: datasets/angiosperm_leaf/provenance.json
 excluded_accessions: datasets/angiosperm_leaf/excluded_accessions.tsv
+metadata_selection:
+  search_string: '"Angiosperms"[Organism] AND "Illumina"[Platform] AND "RNA-seq"[Strategy]'
+  sample_group: leaf
+  rule_set: plantae
+  rules: datasets/angiosperm_leaf/select_rules.tsv
+  accepted_samples: datasets/angiosperm_leaf/accepted_samples.tsv
+  overrides: datasets/angiosperm_leaf/overrides.tsv
+  busco_threshold: 0.5  # Below-threshold new runs are excluded by record; adopted runs are retained.
+taxonomy_screen:
+  enabled: false
+  method: angiosperms353
+  batch_size: 24  # Maximum samples per taxonomy screen job.
+  max_registered_support: 0.10
 reuse_from: auto
 translation:
   table: 1
@@ -29,6 +42,10 @@ execution:
       cpus: 4
       mem_gb: 128
       time: "16-00:00:00"
+    taxonomy_screen:
+      cpus: 4
+      mem_gb: 16
+      time: "08:00:00"
     odb_map:
       cpus: 16
       mem_gb: 128

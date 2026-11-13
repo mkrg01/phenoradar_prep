@@ -145,7 +145,7 @@ def test_plan_can_hold_a_failure_and_exclude_an_already_accepted_low_quality_run
     monkeypatch.delenv('FAKE_GG_HALF_BUSCO')
     catalog.record_successes(root, cfg, build, runs=['A1'])
     definition = yaml.safe_load(cfg['_path'].read_text())
-    definition['busco_threshold'] = 0.75
+    definition['metadata_selection']['busco_threshold'] = 0.75
     cfg['_path'].write_text(yaml.safe_dump(definition))
     cfg = catalog.configuration(root, cfg['_path'])
     fail(build, 2, monkeypatch)

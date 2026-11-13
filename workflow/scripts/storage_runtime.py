@@ -2,8 +2,6 @@
 import argparse
 from contextlib import contextmanager
 import csv
-import copy
-import hashlib
 import json
 import math
 import os
@@ -97,30 +95,6 @@ def task_settings(storage, label, command):
         if values:
             config[key] = None if any(v is None for v in values) else max(values)
     return settings(dict(config, task_limits={}))
-
-
-def storage_policy(storage, root):
-    """Operational retry policy changes storage only, never frozen science inputs."""
-    filename = os.environ.get('PHENORADAR_STORAGE_POLICY')
-    if not filename:
-        return storage, None
-    path = (Path(root) / filename).resolve()
-    raw = path.read_bytes()
-    document = yaml.safe_load(raw)
-    if not isinstance(document, dict) or set(document) != {'storage'} or not isinstance(document['storage'], dict):
-        raise ValueError('Storage retry policy must contain only a storage mapping')
-    result = copy.deepcopy(storage)
-    for key, value in document['storage'].items():
-        if key == 'task_limits' and isinstance(value, dict):
-            profiles = result.setdefault('task_limits', {})
-            for label, values in value.items():
-                if not isinstance(values, dict):
-                    raise ValueError('storage.task_limits entries must be mappings')
-                profiles[label] = dict(profiles.get(label, {}), **values)
-        else:
-            result[key] = value
-    settings(result)
-    return result, {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest()}
 
 
 @contextmanager
@@ -280,9 +254,8 @@ def main():
     command = argv[separator + 1:]
     if not command:
         parser.error('a command is required after --')
-    storage, policy = storage_policy(yaml.safe_load(Path(args.pipeline).read_text()).get('storage', {}), args.root)
+    storage = yaml.safe_load(Path(args.pipeline).read_text()).get('storage', {})
     config = task_settings(storage, args.label, command)
-    config['policy_source'] = policy
     sample_roots = []
     if args.sample_map:
         samples = json.loads(Path(args.sample_map).read_text())

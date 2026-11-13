@@ -49,7 +49,7 @@ Use the build name printed by `submit` in place of `{build_name}`:
 ./run_metadata.sh record --build results/{build_name}
 ```
 
-`record` applies the BUSCO completeness threshold in `selection.yaml`
+`record` applies `metadata_selection.busco_threshold` from `build.yaml`
 (`(single + duplicated) / total`, default `0.5`):
 
 | Sample result | Action |
@@ -104,6 +104,105 @@ Reapply the unchanged plan to retry cleanup.
 Completed accepted runs are retained if the BUSCO threshold changes. To withdraw
 one, explicitly choose `exclude` in a plan. Use a new plan filename for each review.
 
+## Sample taxonomy screening
+
+Enable the optional check in the dataset's `build.yaml`:
+
+```yaml
+taxonomy_screen:
+  enabled: true
+  method: angiosperms353
+  max_registered_support: 0.10
+  batch_size: 24
+```
+
+The default is `enabled: false`. Normal metadata updates and builds run
+independently of the screen. The `angiosperms353` method uses registered CDS
+assemblies and the build's frozen NCBI taxonomy if available. Install its
+[environment](angiosperms353.environment.yaml). Preparation downloads Kew
+v4.0 and a reusable taxonomy snapshot. Screening can also fetch missing markers.
+
+```bash
+conda env create -n phenoradar-taxonomy -f datasets/angiosperms353.environment.yaml
+conda activate phenoradar-taxonomy
+./run_metadata.sh prepare-taxonomy
+./run_metadata.sh screen-taxonomy --build results/<build> \
+  --output work/<build>-taxonomy --threads 8 --ram 16
+./run_metadata.sh record --build results/<build> \
+  --taxonomy-screen work/<build>-taxonomy/screen.json \
+  --exclude-taxonomy --plan work/<build>-taxonomy-review.tsv
+./run_metadata.sh record --apply work/<build>-taxonomy-review.tsv
+```
+
+Use `--cluster` to run one Slurm or AGE array task per batch. The task recovers
+markers, searches references, and counts votes. Concurrency follows
+`execution.total_limits` and each task requests
+`execution.per_job_resources.taxonomy_screen` (4 CPUs, 16 GB, 8 hours by default).
+Without `--cluster`, batches run sequentially. Set `taxonomy_screen.batch_size`
+to change the number of samples per batch. Rerun with the same output and
+scientific settings to reuse completed batches and recovered markers after
+a failure. Batch receipts record recovery and search/voting times. The final job
+writes the combined report once all batches succeed.
+
+Use `--taxonomy` to supply a frozen snapshot and `--runs` to screen and review
+the same subset. On Apple Silicon, specify a working native `--blat` if the
+packaged executable cannot find its system libraries. A completed
+screen has `summary.tsv`, per-marker `loci.tsv`, and `screen.json` with inputs,
+versions and settings. `registered_support.svg` pools all assessed samples.
+`registered_support_by_rank.svg` separates them by the rank used for each
+decision. Both show the cutoff and counts of assessed, flagged and unassessed
+samples. `exclusion_candidates.tsv` lists the flagged accessions for review.
+`record` includes the evidence when passed the screen.
+`--exclude-taxonomy` proposes accession exclusions at the evaluated rank in
+the existing editable plan. Applying the plan persists those decisions for the next
+build. Check the plan before applying, including the existing read/scratch cleanup.
+
+After changing the threshold in `build.yaml`, regenerate the calls and both
+plots from saved votes without searching the sequences again:
+
+```bash
+./run_metadata.sh report-taxonomy --screen work/<build>-taxonomy/screen.json \
+  --output work/<build>-taxonomy-new-threshold
+```
+
+For a copied portable database, pass `--database <database-dir>` to `screen-taxonomy`
+with the same output and resource options. Use `--taxonomy`
+to supply the original snapshot when available. Review `exclusion_candidates.tsv`
+and merge approved rows into a separate exclusion table. To build a filtered
+database, set `reuse_from` to the source database, `metadata` to its
+`metadata.tsv`, and `excluded_accessions` to the reviewed table in a new
+build config. Clear `metadata_provenance` if it points to a different input
+table. Run `run_build.sh plan` with that config to check reuse, then
+`run_build.sh submit --name <new-build> --config <new-config>`. To look for
+replacement runs, apply the exclusions during metadata selection before the new
+build. Turning the screen off leaves previously approved exclusions in effect.
+
+Captus runs one Scipio pass to recover Angiosperms353 CDS from single contigs. Loci with distinct
+retained copies are skipped. Kew reference genus and family are reconciled
+against the frozen taxonomy. Same-run reference sequences are removed, including
+merged Kew run IDs. MMseqs2 aligns the same locus only. For each rank, the
+highest-scoring eligible alignment for the registered taxon and all co-leading
+alternative taxa are compared at the same A/C/G/T positions, requiring at least
+150 positions and 70% of the query CDS. The highest identity wins. If several
+taxa share the highest identity, they split one vote equally, including the
+registered taxon when it ties for first.
+
+The screen follows the sample’s frozen NCBI lineage from genus toward the
+root and evaluates the first named rank with an unmasked reference in any
+recovered marker. It emits one result per run. If the selected rank has
+fewer than 50 comparable loci, the result is inconclusive. When no rank has
+a reference, the result is unassessed. At every evaluated rank, a registered
+vote share strictly below `taxonomy_screen.max_registered_support` (default 10%) flags the run for review.
+`--max-registered-support` overrides the config for a single run. `registered_support`
+and `discordance_support` are the registered and combined alternative vote
+shares and add up to 100% of the votes cast. Loci without a valid comparison
+cast no vote. `support` reports the leading alternative’s share.
+
+For validation, `--samples` accepts a TSV with `run`, `taxid` and `cds` columns.
+`source_runs` and `exclude_accessions` can mask additional known sources.
+`--omit-same-species` uses the TSV's `scientific_name` column to mask exact
+species-name matches. `--loci` limits the validation to a marker list.
+
 ## Choosing where to restart
 
 | Purpose | Command |
@@ -149,8 +248,7 @@ work; add `--resources <retry.yaml>` to adjust resources. See
 
 | File | Purpose |
 | --- | --- |
-| `selection.yaml` | Search, tissue, paths, and adoption BUSCO threshold |
-| `build.yaml` | Build settings and pinned GeneGalleon software |
+| `build.yaml` | Metadata selection, QC thresholds, build settings and pinned GeneGalleon software |
 | `select_rules.tsv` | AMALGKIT curation rules |
 | `excluded_accessions.tsv` | Excluded run accessions and reasons; `accession` required |
 | `overrides.tsv` | Optional choices with `taxid`, `run`, and `reason` |
@@ -168,7 +266,6 @@ For an exact historical snapshot, use the completed build's
 ## Adding another dataset
 
 Copy a dataset's configuration and rules; adjust its query, paths, tissue, BUSCO
-lineage, and OrthoDB node. Set `selection.yaml`'s `sample_group` to a group allowed
+lineage, and OrthoDB node. Set `metadata_selection.sample_group` to a group allowed
 by `select_rules.tsv`. Start with an exclusion table containing an `accession` header.
-Pass `--config datasets/<name>/selection.yaml` to metadata commands and the
-corresponding `build.yaml` to build commands.
+Pass `--config datasets/<name>/build.yaml` to metadata and build commands.

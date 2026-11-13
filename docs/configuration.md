@@ -25,6 +25,7 @@ Use a new run for changed scientific conditions; use
 | `name_mode` | `timestamp` (supplied config) creates dated builds; `fixed` resumes the named build |
 | `metadata`, `excluded_accessions` | Sample metadata and optional run exclusions |
 | `metadata_provenance` | Optional metadata history JSON, matched by checksum and copied into the database |
+| `metadata_selection`, `taxonomy_screen` | Optional [metadata and QC settings](../datasets/README.md#sample-taxonomy-screening) used by `run_metadata.sh` |
 | `reuse_from` | Previous build/database path, list of paths, `auto`, or `null`; see [reuse](datasets.md#reusing-completed-databases) |
 | `rebuild_samples` | Sample IDs or run accessions to restart from assembly in a new build; default `[]` |
 | `genegalleon` | [Pinned software](datasets.md#pinned-genegalleon-source-and-sif) and assembly/quantification settings |
@@ -134,21 +135,10 @@ ceiling; active jobs stop at an observed 95%. Reservations coordinate this user'
 jobs on each node/filesystem, count in full against current free space, and do
 not reserve space against unrelated applications or users.
 
-To retry with a different scratch location or budget, set
-`PHENORADAR_STORAGE_POLICY=/absolute/path/storage-retry.yaml` when submitting.
-The file must contain only `storage:` settings; `task_limits` entries merge by name.
-This changes the operational policy without editing frozen build inputs. Each
-usage receipt records the policy checksum and effective limits. To remove the
-capacity limits saved by an older build while retaining measurement and cleanup:
-
-```bash
-PHENORADAR_STORAGE_POLICY=config/storage-unrestricted.yaml \
-  ./run_build.sh submit --build results/{saved_build}
-```
-
-Saved CPU, memory, time and concurrency requests are unchanged by that policy;
-use [resource overrides](running.md#resource-budgets) to change them.
-See [pilot measurements](outputs.md#storage-pilot).
+Jobs use the `storage` settings saved when their build or analysis was prepared.
+To use different storage settings, edit `build.yaml` or `analysis.yaml` and prepare
+a new run. Each usage receipt records the effective limits. See
+[pilot measurements](outputs.md#storage-pilot).
 
 ## Optional analyses and exports
 

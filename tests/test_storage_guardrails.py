@@ -13,7 +13,7 @@ import yaml
 
 from common import write_json
 import scratch_reservation as admission
-from storage_runtime import settings, task_settings, storage_policy, environment
+from storage_runtime import settings, task_settings, environment
 from storage_meter import monitored, append_sample, compact_series
 from derived_cache_cleanup import retire
 from test_storage_meter import settings as monitor_settings
@@ -86,54 +86,33 @@ def test_both_scheduler_command_styles_select_the_same_task_policy():
     assert age['scratch_max_bytes'] == age['scratch_reserve_bytes'] == 123456
 
 
-def test_retry_policy_is_storage_only_and_records_content_identity(tmp_path, monkeypatch):
-    path = tmp_path / 'policy.yaml'
-    path.write_text('storage:\n  task_limits:\n    sample:\n      scratch_max_bytes: 2000\n      scratch_reserve_bytes: 2500\n')
-    monkeypatch.setenv('PHENORADAR_STORAGE_POLICY', str(path))
-    original = {'task_limits': {'sample': {'scratch_min_free_inodes': 100}}}
-    merged, receipt = storage_policy(original, tmp_path)
-    assert receipt['sha256'] and merged['task_limits']['sample']['scratch_max_bytes'] == 2000
-    assert merged['task_limits']['sample']['scratch_min_free_inodes'] == 100
-    assert 'scratch_max_bytes' not in original['task_limits']['sample']
-    path.write_text('storage: {}\ntranslation: {table: 2}\n')
-    with pytest.raises(ValueError, match='only a storage'):
-        storage_policy(original, tmp_path)
-
-
 @pytest.mark.parametrize('label', ['sample', 'odb_map'])
-def test_unrestricted_policy_runs_saved_build_without_rewriting_inputs(tmp_path, label):
+def test_saved_storage_settings_control_runtime(tmp_path, label):
     root, node = tmp_path / 'project', tmp_path / 'node'
     root.mkdir(); node.mkdir()
     pipeline = root / 'pipeline.yaml'
-    legacy = {'max_bytes': 1, 'max_inodes': 1, 'scratch_root': str(node),
-              'scratch_reserve_bytes': 10**30, 'scratch_reserve_inodes': 10**30,
-              'scratch_max_bytes': 1, 'scratch_max_inodes': 1,
-              'scratch_min_free_bytes': 10**30, 'scratch_min_free_inodes': 10**30,
-              'task_limits': {label: {'scratch_reserve_bytes': 10**30,
-                                      'scratch_max_bytes': 1, 'scratch_max_inodes': 1}}}
-    saved = yaml.safe_dump({'storage': legacy}).encode()
+    saved = yaml.safe_dump({'storage': {'scratch_root': str(node),
+                           'task_limits': {label: {'scratch_max_bytes': 10000000}}}}).encode()
     pipeline.write_bytes(saved)
     repo = Path(__file__).parents[1]
-    policy = repo / 'config/storage-unrestricted.yaml'
     marker = root / 'child-output'
     result = subprocess.run([
         sys.executable, str(repo / 'workflow/scripts/storage_runtime.py'), 'run',
         '--pipeline', str(pipeline), '--root', str(root), '--usage', str(root / 'jobs/storage'),
         '--label', label, '--', sys.executable, '-c',
         'from pathlib import Path; Path(' + repr(str(marker)) + ').write_bytes(b"x"*10000)',
-    ], env=dict(os.environ, PHENORADAR_STORAGE_POLICY=str(policy)),
-       capture_output=True, text=True, timeout=10)
+    ], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stdout + result.stderr
     assert marker.stat().st_size == 10000 and pipeline.read_bytes() == saved
     receipt = json.loads(next((root / 'jobs/storage').glob('*.json')).read_text())
     assert receipt['state'] == 'complete' and receipt['shared_peak']['allocated_bytes'] > 1
     limits = receipt['storage_limits']
-    for key in ('max_bytes', 'max_inodes', 'scratch_max_bytes', 'scratch_max_inodes'):
+    for key in ('max_bytes', 'max_inodes', 'scratch_max_inodes'):
         assert limits[key] is None
     for key in ('scratch_reserve_bytes', 'scratch_reserve_inodes',
                 'scratch_min_free_bytes', 'scratch_min_free_inodes'):
         assert limits[key] == 0
-    assert limits['task_limits'] == {} and limits['policy_source']['sha256']
+    assert limits['scratch_max_bytes'] == 10000000
     assert not list(node.iterdir())
 
 

@@ -15,6 +15,11 @@ taxonomy:
   cache_dir: resources/taxonomy  # Shared ETE/NCBI database; null uses per-sample downloads.
   missing_taxid: exclude  # Exclude unresolved IDs before sample jobs; error stops, null preserves legacy selection.
   database: null  # Optional existing SQLite snapshot for eligibility and mapping.
+taxonomy_screen:
+  enabled: false  # Opt in to the separate reference preparation, screening and report commands.
+  method: angiosperms353
+  batch_size: 24  # Maximum samples per taxonomy screen job.
+  max_registered_support: 0.10  # Flag registered support strictly below this fraction.
 odb:
   version: v12  # Reuse mapping when both this release and ncbi_tax_id match.
   chunk_size: 50  # Maximum samples per ODB mapping chunk.
@@ -37,6 +42,10 @@ execution:
       cpus: 4
       mem_gb: 128
       time: "16-00:00:00"
+    taxonomy_screen:
+      cpus: 4
+      mem_gb: 16
+      time: "08:00:00"
     odb_map:
       cpus: 16
       mem_gb: 128

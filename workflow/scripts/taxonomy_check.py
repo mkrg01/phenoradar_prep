@@ -18,9 +18,9 @@ from common import file_record, now, read_tsv, write_json, write_tsv
 
 DEFAULTS = {"enabled": False, "ranks": ["family", "subfamily", "tribe", "subtribe", "genus"],
             "outlierlevel": 0.5, "collapse_monophyletic": True}
-RANKS = set("superkingdom kingdom subkingdom superphylum phylum subphylum superclass class subclass "
+RANKS = set("domain superkingdom kingdom subkingdom superphylum phylum subphylum superclass class subclass "
             "infraclass superorder order suborder infraorder parvorder superfamily family subfamily "
-            "tribe subtribe genus subgenus section subsection series subseries species subspecies "
+            "supertribe tribe subtribe genus subgenus section subsection series subseries species subspecies "
             "varietas forma".split())
 MONOPHY_VERSION = "1.3.2"
 

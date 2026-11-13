@@ -1,0 +1,13 @@
+# Optional environment for DB-stage Angiosperms353 screening.
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.12
+  - pyyaml=6.0.3
+  - ete4=4.4.0
+  - captus=1.5.1
+  - ucsc-blat=502
+  - mmseqs2=18.8cc5c
+  - matplotlib-base=3.10.6

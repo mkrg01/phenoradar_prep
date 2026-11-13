@@ -1,8 +1,8 @@
 # Angiosperm leaf
 
 One representative leaf Illumina RNA-seq run per original NCBI taxid.
-[Selection settings](selection.yaml) define the search and BUSCO threshold;
-[build settings](build.yaml) pin the software and enable `reuse_from: auto`.
+[Build settings](build.yaml) define the search and BUSCO threshold, pin the
+software, and enable `reuse_from: auto`.
 See the [shared selection policy](../README.md#selection-policy).
 
 Uses the AMALGKIT `plantae` [curation rules](select_rules.tsv), restricted to

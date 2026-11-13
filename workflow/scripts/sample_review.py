@@ -11,7 +11,7 @@ import subprocess
 from accession_exclusions import read_exclusions
 from cleanup_work import owned_path
 from common import file_record, now, write_json, write_tsv
-from dataset_assets import counts, locked
+from dataset_assets import counts, locked, verify
 import metadata_catalog as catalog
 
 
@@ -144,7 +144,8 @@ def jobs(path, build, runs=None):
     return result
 
 
-def review(root, cfg, build_path, runs=None, exclude_failed=False):
+def review(root, cfg, build_path, runs=None, exclude_failed=False, *,
+           taxonomy_screen=None, exclude_taxonomy=None):
     from dataset import load, item_products, cleanup_genegalleon
     path = catalog.path_at(root, build_path)
     if path.name == 'build.json':
@@ -164,6 +165,15 @@ def review(root, cfg, build_path, runs=None, exclude_failed=False):
     requested = set(runs) if runs is not None else set(items)
     if requested - items.keys():
         raise ValueError('runs absent from build: ' + ', '.join(sorted(requested - items.keys())))
+    evidence = None
+    screened, summaries = {}, {}
+    if taxonomy_screen:
+        from angiosperms353 import exclusion_reason, load_screen
+        evidence, screened, summaries = load_screen(taxonomy_screen, path)
+        if exclude_taxonomy == 'auto' and any(len(ranks) != 1 for ranks in summaries.values()):
+            raise ValueError('automatic rank selection requires a screen with one decision per run')
+        if exclude_taxonomy and requested - screened.keys():
+            raise ValueError('taxonomy exclusion requires a screen for every reviewed run; limit --runs')
     states = jobs(path, build, requested)
     report, snapshots = [], {}
     for run in sorted(requested):
@@ -228,6 +238,22 @@ def review(root, cfg, build_path, runs=None, exclude_failed=False):
                                if not products.get(key))
                 suffix = 'before_start' if state['job_state'] == 'not_started' else entry['stopped_at'] or pending
                 entry.update(action='exclude', reason='processing_abandoned_' + suffix)
+        if run in screened and products.get('reference') and not state['activity']:
+            sample = screened[run]
+            if (sample['taxid'] != tid or sample['cds']['sha256'] != products['reference']['cds']['sha256']
+                    or any(rank['taxid'] != tid for rank in summaries[run].values())):
+                raise ValueError(f'{run}: Angiosperms353 screen used different CDS or taxonomy')
+            entry['taxonomy_screen'] = summaries[run]
+            candidate = (next(iter(summaries[run].values())) if exclude_taxonomy == 'auto'
+                         else summaries[run].get(exclude_taxonomy))
+            if (candidate and candidate['status'] == 'discordant' and 'exclude' in allowed
+                    and entry['action'] != 'exclude'):
+                rank = candidate['rank']
+                if candidate.get('voted_loci') or (rank == 'genus' and candidate.get('alternative_loci')):
+                    reason = exclusion_reason(candidate)
+                else:
+                    reason = f"angiosperms353_{rank}_discordant_{candidate['registered']}_to_{candidate['alternative']}"
+                entry.update(action='exclude', status='taxonomy_discordant', reason=reason)
         if 'exclude' in allowed:
             with sample_guard(path, build, item):
                 cleanup = cleanup_genegalleon(path, build, item, 'excluded', products,
@@ -238,7 +264,8 @@ def review(root, cfg, build_path, runs=None, exclude_failed=False):
         report.append(entry)
     return dict(schema_version=1, kind='sample_review', root=str(Path(root).resolve()),
                 build_manifest=file_record(path / 'build.json'), selection_config=file_record(cfg['_path']),
-                inputs=before, samples=report, snapshots=snapshots, busco_threshold=cfg['busco_threshold'])
+                inputs=before, samples=report, snapshots=snapshots, busco_threshold=cfg['busco_threshold'],
+                taxonomy_screen=evidence, exclude_taxonomy=exclude_taxonomy)
 
 
 def result_for(data, cfg, *, dry_run):
@@ -285,6 +312,7 @@ def apply_review(root, cfg, data, *, plan_path=None, plan_record=None):
     path = Path(data['build_manifest']['path']).parent
     build = load(path)
     result = result_for(data, cfg, dry_run=False)
+    evidence = data.get('taxonomy_screen')
     selected = [row for row in data['samples'] if row['action'] != 'hold']
     # Serialize with submit, then check the reviewed evidence while metadata is locked.
     with locked(path / 'jobs/.submit.lock'), locked(catalog.path_at(root, cfg['previous_metadata']).parent / '.metadata.lock'):
@@ -293,11 +321,16 @@ def apply_review(root, cfg, data, *, plan_path=None, plan_record=None):
                 or file_record(path / 'build.json') != data['build_manifest']
                 or (plan_path and file_record(plan_path) != plan_record)):
             raise ValueError('sample review inputs changed; repeat the review')
-        current = review(root, cfg, path, [row['run'] for row in selected])
+        if evidence:
+            verify(evidence)
+        current = review(root, cfg, path, [row['run'] for row in selected],
+                         taxonomy_screen=evidence['path'] if evidence else None,
+                         exclude_taxonomy=data.get('exclude_taxonomy'))
         checked = {row['run']: row for row in current['samples']}
         for entry in selected:
             run = entry['run']
             if (current['snapshots'][run] != data['snapshots'][run]
+                    or entry.get('taxonomy_screen') != checked[run].get('taxonomy_screen')
                     or entry['action'] not in checked[run]['allowed_actions']):
                 raise ValueError(f'sample review state changed for {run}; repeat the review')
         _, _, accepted = catalog.previous_state(root, cfg)
@@ -324,7 +357,7 @@ def apply_review(root, cfg, data, *, plan_path=None, plan_record=None):
         write_json(target.with_suffix('.provenance.json'), dict(kind='reviewed_samples', created_at=now(),
                    build_manifest=data['build_manifest'], selection_config=data['selection_config'],
                    inputs=data['inputs'], recorded_runs=result['recorded_runs'], excluded_runs=result['excluded_runs'],
-                   busco_threshold=data['busco_threshold'], samples=data['samples'],
+                   busco_threshold=data['busco_threshold'], samples=data['samples'], taxonomy_screen=evidence,
                    excluded_accessions=file_record(exclusion_path), accepted_samples=file_record(target)))
         # Commit the decision before deleting reads. A repeated application only retries cleanup.
         if plan_path:
@@ -333,8 +366,14 @@ def apply_review(root, cfg, data, *, plan_path=None, plan_record=None):
     return result
 
 
-def record(root, cfg, build_path, runs=None, dry_run=False, *, exclude_failed=False, plan=None):
-    data = review(root, cfg, build_path, runs, exclude_failed)
+def record(root, cfg, build_path, runs=None, dry_run=False, *, exclude_failed=False, plan=None,
+           taxonomy_screen=None, exclude_taxonomy=None):
+    if exclude_taxonomy and (not taxonomy_screen or not (plan or dry_run)):
+        raise ValueError('taxonomy exclusions require --taxonomy-screen and --plan or --dry-run')
+    if taxonomy_screen:
+        taxonomy_screen = catalog.path_at(root, taxonomy_screen)
+    data = review(root, cfg, build_path, runs, exclude_failed,
+                  taxonomy_screen=taxonomy_screen, exclude_taxonomy=exclude_taxonomy)
     result = result_for(data, cfg, dry_run=dry_run or bool(plan))
     if plan:
         target = catalog.path_at(root, plan)

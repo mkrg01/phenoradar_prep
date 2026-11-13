@@ -25,20 +25,15 @@ def sample_project(dataset_project):
     folder = root / 'datasets/leaf'
     folder.mkdir(parents=True)
     (folder / 'select_rules.tsv').write_text('rule_id\tenabled\nleaf\tyes\n')
-    definition = {'schema_version': 1, 'name': 'leaf', 'build_config': 'config/build.yaml',
-                  'search_string': 'plants', 'sample_group': 'leaf', 'rule_set': 'plantae',
-                  'rules': 'datasets/leaf/select_rules.tsv',
-                  'previous_metadata': 'input/metadata.tsv', 'accepted_samples': 'datasets/leaf/accepted_samples.tsv',
-                  'excluded_accessions': 'config/excluded_accessions.tsv'}
-    config = folder / 'selection.yaml'
-    config.write_text(yaml.safe_dump(definition))
+    selection = {'search_string': 'plants', 'sample_group': 'leaf', 'rule_set': 'plantae',
+                 'rules': 'datasets/leaf/select_rules.tsv', 'accepted_samples': 'datasets/leaf/accepted_samples.tsv'}
     write_tsv(root / 'config/excluded_accessions.tsv', ['accession', 'reason'], [])
-    cfg = catalog.configuration(root, config)
-    build_config = root / cfg['build_config']
+    build_config = root / 'config/build.yaml'
     build_settings = yaml.safe_load(build_config.read_text())
-    build_settings['excluded_accessions'] = definition['excluded_accessions']
+    build_settings.update(name='leaf', excluded_accessions='config/excluded_accessions.tsv', metadata_selection=selection)
     build_config.write_text(yaml.safe_dump(build_settings))
-    build = dataset.prepare(root, 'first', root / 'config/build.yaml')
+    cfg = catalog.configuration(root, build_config)
+    build = dataset.prepare(root, 'first', build_config)
     dataset.submit(build, until='quant', dry_run=True)
     return root, cfg, build
 
@@ -104,7 +99,7 @@ def test_exact_threshold_passes_and_later_threshold_change_does_not_revoke_adopt
     assert result['samples'][0]['busco_total'] == 2
     evidence = (root / cfg['accepted_samples']).read_bytes()
     definition = yaml.safe_load(cfg['_path'].read_text())
-    definition['busco_threshold'] = 0.75
+    definition['metadata_selection']['busco_threshold'] = 0.75
     cfg['_path'].write_text(yaml.safe_dump(definition))
     cfg = catalog.configuration(root, cfg['_path'])
     result = catalog.record_successes(root, cfg, build, runs=['A1'])

@@ -16,6 +16,30 @@ def read_yaml(path):
     return value
 
 
+DEFAULT_REGISTERED_SUPPORT = 0.10
+DEFAULT_TAXONOMY_BATCH_SIZE = 24
+TAXONOMY_SCREEN_METHOD = 'angiosperms353'
+
+
+def taxonomy_screen_settings(value):
+    defaults = {'enabled': False, 'method': TAXONOMY_SCREEN_METHOD,
+                'max_registered_support': DEFAULT_REGISTERED_SUPPORT,
+                'batch_size': DEFAULT_TAXONOMY_BATCH_SIZE}
+    if not isinstance(value, dict) or set(value) - defaults.keys():
+        raise ValueError('taxonomy_screen accepts enabled, method, max_registered_support and batch_size')
+    result = {**defaults, **value}
+    if type(result['enabled']) is not bool:
+        raise ValueError('taxonomy_screen.enabled must be true or false')
+    if result['method'] != TAXONOMY_SCREEN_METHOD:
+        raise ValueError(f'taxonomy_screen.method must be {TAXONOMY_SCREEN_METHOD}')
+    cutoff = result['max_registered_support']
+    if type(cutoff) not in (int, float) or not 0 <= cutoff <= 1:
+        raise ValueError('taxonomy_screen.max_registered_support must be between zero and one')
+    if type(result['batch_size']) is not int or result['batch_size'] < 1:
+        raise ValueError('taxonomy_screen.batch_size must be a positive integer')
+    return result
+
+
 def deep_merge(base, override):
     result = copy.deepcopy(base)
     for key, value in override.items():
@@ -45,7 +69,7 @@ def time_minutes(value):
 
 # Normalize the public layout to the historical execution schema. Saved manifests
 # and execution receipts retain their original shape and checksums on disk.
-DIRECT_JOBS = {'sample', 'assembly', 'busco', 'quant', 'controller'}
+DIRECT_JOBS = {'sample', 'assembly', 'busco', 'quant', 'controller', 'taxonomy_screen'}
 WORKER_DEFAULTS = {'mem_gb': 8, 'time': '1-00:00:00'}
 BUDGET_RESOURCES = {'cpus': 'workflow_cpus', 'mem_gb': 'workflow_mem_mb'}
 
@@ -146,8 +170,9 @@ def validate_slurm(slurm, build=True):
         if value is not None and (type(value) is not int or value < 1):
             raise ValueError(f'slurm.total_limits.{key} must be a positive integer or null')
     expected = {'sample','controller'} if build else {'controller'}
-    if not isinstance(slurm.get('stages'), dict) or set(slurm['stages']) != expected:
-        raise ValueError(f'slurm.per_job_resources must contain {sorted(expected)}')
+    allowed_stages = expected | {'taxonomy_screen'} if build else expected
+    if not isinstance(slurm.get('stages'), dict) or not expected <= slurm['stages'].keys() <= allowed_stages:
+        raise ValueError(f'slurm.per_job_resources must contain {sorted(expected)}; allowed stages: {sorted(allowed_stages)}')
     for stage, job in slurm['stages'].items():
         if not isinstance(job, dict) or set(job) != {'cpus','mem_gb','time'}:
             raise ValueError(f'invalid resources for {stage}')
