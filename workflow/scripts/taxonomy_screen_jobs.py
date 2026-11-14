@@ -15,7 +15,8 @@ import sys
 import time
 
 import angiosperms353 as qc
-from angiosperms353_reference import BASE_URL, RELEASE, RANKS, KewReference, ReferenceTaxonomy, accessions, kew_families
+from angiosperms353_reference import (BASE_URL, RELEASE, RANKS, KewReference, ReferenceTaxonomy, accessions,
+                                      prepare_reference_taxonomy)
 from common import atomic_writer, now, text_open, write_json
 from dataset_assets import SAFE, digest, locked, record, verify
 from phase_config import DEFAULT_TAXONOMY_BATCH_SIZE, array_concurrency, execution_config, normalize_slurm, time_minutes
@@ -82,7 +83,7 @@ def run_batch(output, plan, index, samples, threads, ram, storage):
         blat = str(verify(plan['tools']['blat']))
         if tool_versions() != {name: version for name, version in plan['tools'].items() if name != 'blat'}:
             raise ValueError('screen tool versions differ from the prepared plan')
-        families = kew_families(verify(plan['reference']['manifests'][-1]))
+        assignments = json.loads(verify(plan['reference']['taxonomy_assignments']).read_text())
         taxonomy = ReferenceTaxonomy(verify(plan['taxonomy']))
         settings = plan['settings']
         with closing(taxonomy.db), task_scratch(Path(plan['root']), task_settings(storage, 'taxonomy_screen', [])) as scratch:
@@ -101,16 +102,21 @@ def run_batch(output, plan, index, samples, threads, ram, storage):
                 for locus, sequence in markers.items():
                     by_locus[locus][sample_index] = sequence
             paths = {locus: verify(plan['reference']['loci'][locus]) for locus in sorted(by_locus)}
-            ancestry = [{rank: value[0] for rank, value in taxonomy.lineage(int(row['taxid'])).items() if rank in RANKS}
-                        for row in samples]
+            taxids = [int(row['taxid']) for row in samples]
+            lineages = [taxonomy.lineage(taxid) for taxid in taxids]
+            ancestry = [{rank: value[0] for rank, value in lineage.items() if rank in RANKS} for lineage in lineages]
             started = time.monotonic()
             with atomic_writer(work / 'loci.tsv.gz') as handle:
                 evidence = csv.DictWriter(handle, qc.LOCUS_FIELDS, delimiter='\t', lineterminator='\n')
                 evidence.writeheader()
-                summaries = qc.score_batch(samples, ancestry, by_locus, paths, taxonomy, families, scratch, work,
+                summaries = qc.score_batch(samples, ancestry, by_locus, paths, assignments, scratch, work,
                                            threads, ram, settings['omit_same_species'], settings['min_loci'],
                                            Decimal(settings['max_registered_support']), evidence)
-            for row in summaries:
+            for row, taxid, lineage in zip(summaries, taxids, lineages, strict=True):
+                node = taxonomy.node(taxid)
+                species_id, species_name = lineage.get('species', (None, ''))
+                row.update(resolved_taxid=node[0] if node else None, resolved_species_taxid=species_id,
+                           resolved_species_name=species_name)
                 for field in ('registered', 'alternative'):
                     row[f'{field}_name'] = taxonomy.node(row[field])[1] if row[field] is not None else ''
             search_and_vote_seconds = time.monotonic() - started
@@ -141,7 +147,7 @@ def finalize(output, plan):
             for entry in [saved['loci'], saved['summary'], saved['exclusion_candidates'], *saved['plots'].values()]:
                 verify(entry)
         else:
-            reference = [*plan['reference']['manifests'], *(plan['reference']['loci'][locus] for locus in loci)]
+            reference = [plan['reference']['taxonomy_assignments'], *plan['reference']['manifests'], *(plan['reference']['loci'][locus] for locus in loci)]
             for entry in [plan['taxonomy'], *reference, *[row['cds'] for row in plan['samples']],
                           plan['build_manifest'], plan['database_manifest']]:
                 if entry:
@@ -198,15 +204,17 @@ def prepare_plan(output, samples, cache, taxonomy, build, database, selection_co
         if saved['id'] != identity:
             raise ValueError('existing taxonomy screen has different inputs, software or scientific settings; use a new output')
         return saved
-    if any(p.name != '.screen.lock' for p in output.iterdir()):
+    if any(p.name not in {'.screen.lock', 'reference_taxonomy.json'} for p in output.iterdir()):
         raise ValueError(f'output contains files from another run: {output}')
     reference = KewReference(cache)
     manifests = reference.manifests()
     if only_loci is not None and not only_loci:
         raise ValueError('validation loci must be a nonempty subset of Kew Angiosperms353')
     paths = reference.loci(only_loci)
+    assignments = output / 'reference_taxonomy.json'
+    prepare_reference_taxonomy(paths, taxonomy, manifests[-1], assignments)
     plan = dict(inputs, id=identity, selection_config=selection_config,
-                reference=dict(manifests=[record(path) for path in manifests],
+                reference=dict(taxonomy_assignments=record(assignments), manifests=[record(path) for path in manifests],
                                loci={locus: record(path) for locus, path in paths.items()}))
     write_json(path, plan, compact=True)
     return plan
@@ -311,7 +319,7 @@ def screen(samples, *, cache, taxonomy, output, build=None, database=None, selec
     storage = config.get('storage', {})
     task_settings(storage, 'taxonomy_screen', [])
     settings = dict(min_loci=min_loci, max_registered_support=str(cutoff), batch_size=batch_size,
-                    rank_selection='closest_ancestor_with_reference', vote_denominator='comparable_loci',
+                    reference_taxonomy='ncbi_species_first', rank_selection='closest_ancestor_with_reference', vote_denominator='comparable_loci',
                     voting='common_identity_split_all_winners', min_bases=qc.MIN_BASES, coverage=qc.COVERAGE,
                     evalue=qc.EVALUE, captus_scipio_passes=1, mmseqs_kmer=10,
                     omit_same_species=omit_same_species, restricted_loci=only_loci is not None)

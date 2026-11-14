@@ -49,8 +49,11 @@ def test_taxonomy_reconciles_synonyms_and_rejects_family_conflict(tmp_path):
             INSERT INTO species VALUES (1,'root','no rank','1'), (2,'Family','family','2,7,1'),
               (3,'Otheraceae','family','3,1'), (4,'Genus','genus','4,6,5,2,7,1'),
               (5,'Subfamily','subfamily','5,2,7,1'), (6,'Tribe','tribe','6,5,2,7,1'),
-              (7,'Order','order','7,1');
-            INSERT INTO synonym VALUES (4,'Synonymus'), (2,'Oldaceae');
+              (7,'Order','order','7,1'), (8,'Genus species','species','8,4,6,5,2,7,1'),
+              (9,'Genus second','species','9,4,6,5,2,7,1'), (10,'Othergenus','genus','10,2,7,1');
+            INSERT INTO synonym VALUES (4,'Synonymus'), (2,'Oldaceae'), (11,'Othergenus species'),
+              (8,'Ambiguous species'), (9,'Ambiguous species');
+            INSERT INTO merged VALUES (11,8);
         ''')
     tax = reference.ReferenceTaxonomy(db)
     try:
@@ -60,6 +63,14 @@ def test_taxonomy_reconciles_synonyms_and_rejects_family_conflict(tmp_path):
         assert dict(zip(qc.RANKS, tax.reference_ranks('Synonymus', 'Oldaceae')))['tribe'] == 6
         unknown = dict(zip(qc.RANKS, tax.reference_ranks('Unknown', 'Family')))
         assert unknown['family'] == 2 and unknown['order'] == 7 and unknown['genus'] is None
+        assignment = tax.resolve_reference('Othergenus_species', 'Family')
+        assert assignment['method'] == 'species' and assignment['taxid'] == 8
+        assert assignment['ranks'][qc.RANKS.index('genus')] == 4
+        assert tax.resolve_reference('Othergenus_species', 'Otheraceae')['family_conflict']
+        ambiguous = tax.resolve_reference('Ambiguous_species', 'Family')
+        assert ambiguous['candidates'] == (8, 9)
+        assert ambiguous['ranks'][0] == 2 and ambiguous['ranks'][qc.RANKS.index('genus')] is None
+        assert tax.resolve_reference('Othergenus_unlisted', 'Family')['method'] == 'genus'
     finally:
         tax.db.close()
 
@@ -153,7 +164,7 @@ def test_later_genus_reference_prevents_fallback_on_insufficient_overlap(tmp_pat
     evidence.writerows = evidence.rows.extend
     markers = qc.markers(marker_path)
     summaries = qc.score_batch([sample], [lineage], {locus: {0: sequence} for locus, sequence in markers.items()},
-                               dict.fromkeys(markers, marker_path), None, None, tmp_path, tmp_path,
+                               dict.fromkeys(markers, marker_path), None, tmp_path, tmp_path,
                                1, 2, False, 1, Decimal('.20'), evidence)
     assert len(summaries) == 1
     assert summaries[0]['rank'] == 'genus'
@@ -334,23 +345,26 @@ def test_screen_batches_of_50_reuse_markers_after_failed_search(tmp_path, monkey
     cds.write_text('>sample__1\n' + 'A' * 200 + '\n')
     tree = tmp_path / 'kew.nwk'
     tree.write_text('(Order_Family_Genus_species_ERR999);')
+    reference_fasta = tmp_path / 'kew.fna'
+    reference_fasta.write_text('>1 Species:Genus_species Repository:INSDC Sequence_ID:ERR999\nAAAA\n')
     taxonomy = tmp_path / 'taxonomy.sqlite'
     with sqlite3.connect(taxonomy) as connection:
         connection.executescript("""
             CREATE TABLE species(taxid INT, spname TEXT, rank TEXT, track TEXT);
             CREATE TABLE merged(taxid_old INT, taxid_new INT);
+            CREATE TABLE synonym(taxid INT, spname TEXT COLLATE NOCASE);
             INSERT INTO species VALUES (10,'Genus','genus','10');
         """)
     monkeypatch.setattr(jobs, 'tool_versions', lambda: {'captus': 'test', 'mmseqs': 'test'})
     monkeypatch.setattr(jobs.KewReference, 'manifests', lambda self: [tree])
-    monkeypatch.setattr(jobs.KewReference, 'loci', lambda self, selected: {'1': cds})
+    monkeypatch.setattr(jobs.KewReference, 'loci', lambda self, selected: {'1': reference_fasta})
     extractions, scores = [], []
 
     def extract(samples, *_args, **_kwargs):
         extractions.append(len(samples))
         return [cds] * len(samples)
 
-    def score(batch, ancestry, queries, paths, tax, families, scratch, work, threads, ram, omit, minimum, cutoff,
+    def score(batch, ancestry, queries, paths, assignments, scratch, work, threads, ram, omit, minimum, cutoff,
               evidence):
         scores.append(len(batch))
         assert len(queries['1']) == len(batch)

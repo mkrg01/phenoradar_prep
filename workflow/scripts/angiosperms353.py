@@ -22,7 +22,8 @@ COVERAGE = '0.70'
 EVALUE = '1e-10'
 CIGAR = re.compile(r'([0-9]+)([MID=X])')
 COMPLEMENT = str.maketrans('ACGT', 'TGCA')
-SUMMARY_FIELDS = ['run', 'taxid', 'rank', 'registered', 'status', 'extracted_loci',
+SUMMARY_FIELDS = ['run', 'taxid', 'resolved_taxid', 'resolved_species_taxid', 'resolved_species_name',
+                  'rank', 'registered', 'status', 'extracted_loci',
                   'comparable_loci', 'registered_votes', 'tied_loci', 'registered_name', 'alternative', 'alternative_name',
                   'alternative_votes', 'support', 'alternative_counts', 'alternative_loci',
                   'voted_loci', 'alternative_votes_total', 'registered_support', 'discordance_support']
@@ -215,13 +216,13 @@ def vote(run, rank, locus, length, registered, hits, refs):
 
 
 @contextmanager
-def search_locus(locus, queries, reference_path, taxonomy, families, work, threads, ram, log_dir):
+def search_locus(locus, queries, reference_path, assignments, work, threads, ram, log_dir):
     """Search the complete same-locus database without a fixed top-k cap."""
     with tempfile.TemporaryDirectory(prefix=f'{locus}-', dir=work) as temp:
         path = Path(temp)
         refs = []
         with (path / 'target.fna').open('w') as handle:
-            for species, repository, accession, ranks, sequence in reference_rows(reference_path, locus, taxonomy, families):
+            for species, repository, accession, ranks, sequence in reference_rows(reference_path, locus, assignments):
                 handle.write(f'>{len(refs)}\n{sequence}\n')
                 refs.append((species, repository, accession, ranks, accessions(accession), sequence))
         if not refs:
@@ -463,13 +464,13 @@ def report(screen_path, output, *, registered_support, selection_config=None):
     return dict(output=str(output), samples=len(summaries), statuses=dict(Counter(row['status'] for row in summaries)))
 
 
-def score_batch(batch, ancestry, by_locus, paths, tax, families, work, log_dir, threads, ram,
+def score_batch(batch, ancestry, by_locus, paths, assignments, work, log_dir, threads, ram,
                 omit_same_species, min_loci, support, evidence):
     rows, extracted, selected = defaultdict(list), Counter(), {}
     ranks = [tuple(lineage) for lineage in ancestry]
     for locus, path in paths.items():
         queries = by_locus[locus]
-        with search_locus(locus, queries, path, tax, families, work, threads, ram, log_dir) as (refs, hits_path):
+        with search_locus(locus, queries, path, assignments, work, threads, ram, log_dir) as (refs, hits_path):
             ranks_by_query = {}
             for index in queries:
                 current = ranks[index]

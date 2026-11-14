@@ -1,7 +1,7 @@
 """Cache Kew Angiosperms353 markers and resolve reference taxonomy offline."""
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import nullcontext
+from contextlib import closing, nullcontext
 from functools import lru_cache
 import fcntl
 import gzip
@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from urllib.request import urlopen
 
-from common import atomic_writer, read_tsv, text_open
+from common import atomic_writer, read_tsv, text_open, write_json
 from taxonomy_check import Taxonomy
 
 RELEASE = '4.0'
@@ -156,16 +156,77 @@ class ReferenceTaxonomy(Taxonomy):
                      for rank in RANKS)
 
 
-def reference_rows(path, locus, taxonomy, families):
-    exact, genera = families
+    @lru_cache(maxsize=None)
+    def species_ids(self, name):
+        candidates = set()
+        for table in ('species', 'synonym'):
+            for (taxid,) in self.db.execute(f'SELECT taxid FROM {table} WHERE spname=? COLLATE NOCASE', (name,)):
+                node = self.node(taxid)
+                if node is not None and node[2] == 'species':
+                    candidates.add(node[0])
+        return tuple(sorted(candidates))
+
+    def resolve_reference(self, species, family):
+        name = ' '.join(species.replace('_', ' ').split())
+        candidates = self.species_ids(name)
+        if len(candidates) == 1:
+            taxid = candidates[0]
+            lineage = self.lineage(taxid)
+            family_ids = self.name_ids(family, 'family') if family else set()
+            family_conflict = bool(family_ids and lineage.get('family', (None,))[0] not in family_ids)
+            return dict(method='species', taxid=taxid, family_conflict=family_conflict,
+                        ranks=[lineage.get(rank, (None,))[0] for rank in RANKS])
+        if candidates:
+            lineages = [self.lineage(taxid) for taxid in candidates]
+            family_ids = {lineage.get('family', (None,))[0] for lineage in lineages}
+            expected = self.name_ids(family, 'family') if family else family_ids
+            # Retain a common family only if the references agree on it.
+            family_id = next(iter(family_ids)) if len(family_ids) == 1 and family_ids <= expected else None
+            lineage = self.lineage(family_id) if family_id is not None else {}
+            return dict(method='ambiguous_species', candidates=candidates,
+                        ranks=[lineage.get(rank, (None,))[0] for rank in RANKS])
+        ranks = self.reference_ranks(species.split('_', 1)[0], family)
+        method = 'genus' if ranks[RANKS.index('genus')] is not None else 'family' if ranks[0] else 'unresolved'
+        return dict(method=method, ranks=ranks)
+
+
+def reference_label(header, locus):
+    parts = header.split()
+    gene, tokens = (parts[0], parts[1:]) if parts else ('', [])
+    fields = dict(word.split(':', 1) for word in tokens if ':' in word)
+    keys = ('Species', 'Repository', 'Sequence_ID')
+    if gene != locus or not all(fields.get(key) for key in keys):
+        raise ValueError(f'unexpected FASTA header in Kew locus {locus}: {header}')
+    return tuple(fields[key] for key in keys)
+
+
+def reference_key(species, repository, accession):
+    return '|'.join((species, repository, accession))
+
+
+def prepare_reference_taxonomy(paths, taxonomy_path, tree_path, output):
+    """Resolve the union of FASTA reference labels once, before running any batch."""
+    labels = set()
+    for locus, path in paths.items():
+        with text_open(path) as handle:
+            labels.update(reference_label(line[1:], locus) for line in handle if line.startswith('>'))
+    if not labels:
+        raise ValueError('Kew reference files contain no sequence labels')
+    exact, genera = kew_families(tree_path)
+    tax = ReferenceTaxonomy(taxonomy_path)
+    with closing(tax.db):
+        resolved = {}
+        for species, repository, accession in sorted(labels):
+            genus = species.split('_', 1)[0]
+            family = exact.get(f'{species}_{accession}', genera.get(genus))
+            resolved[reference_key(species, repository, accession)] = dict(
+                kew_family=family, **tax.resolve_reference(species, family))
+    write_json(output, resolved, compact=True)
+
+
+def reference_rows(path, locus, assignments):
     for header, sequence in fasta(path):
-        fields = dict(word.split(':', 1) for word in header.split()[1:] if ':' in word)
-        if header.split()[0] != locus or not all(fields.get(k) for k in ('Species', 'Repository', 'Sequence_ID')):
-            raise ValueError(f'unexpected FASTA header in Kew locus {locus}: {header}')
-        species = fields['Species']
-        accession = fields['Sequence_ID']
-        genus = species.split('_', 1)[0]
-        family = exact.get(f'{species}_{accession}', genera.get(genus))
-        ranks = taxonomy.reference_ranks(genus, family)
+        species, repository, accession = reference_label(header, locus)
+        ranks = assignments[reference_key(species, repository, accession)]['ranks']
         if ranks[0] is not None and sequence:
-            yield species, fields['Repository'], accession, ranks, sequence
+            yield species, repository, accession, ranks, sequence

@@ -182,9 +182,17 @@ To look for
 replacement runs, apply the exclusions during metadata selection before the new
 build. Turning the screen off leaves previously approved exclusions in effect.
 
+Kew reference species names are matched to scientific names and synonyms in the
+frozen NCBI Taxonomy. A unique species TaxID supplies the reference lineage.
+Unmatched names use the genus and family, and ambiguous species names can
+contribute only at a shared, compatible family or higher rank. The screen
+records the reference assignments once and shares them across all batches.
+To refresh NCBI Taxonomy, prepare a snapshot at a new path and pass it with
+`--taxonomy`. The original sample TaxID and accession remain in the source
+database.
+
 Captus runs one Scipio pass to recover Angiosperms353 CDS from single contigs. Loci with distinct
-retained copies are skipped. Kew reference genus and family are reconciled
-against the frozen taxonomy. Same-run reference sequences are removed, including
+retained copies are skipped. Same-run reference sequences are removed, including
 merged Kew run IDs. MMseqs2 aligns the same locus only. For each rank, the
 highest-scoring eligible alignment for the registered taxon and all co-leading
 alternative taxa are compared at the same A/C/G/T positions, requiring at least
