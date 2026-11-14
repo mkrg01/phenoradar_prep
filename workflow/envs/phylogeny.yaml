@@ -6,6 +6,7 @@ dependencies:
   - python=3.12
   - biopython=1.85
   - ete4=4.3.0
+  - brotli-python
   - numpy
   - famsa=2.4.1
   - trimal=1.5.1

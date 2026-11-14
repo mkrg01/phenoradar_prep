@@ -7,6 +7,7 @@ channels:
 dependencies:
   - python=3.12
   - ete4=4.3.0  # Native output validation runs in the host environment.
+  - brotli-python
   - snakemake-executor-plugin-slurm
   - snakemake-executor-plugin-cluster-generic
   - snakemake-minimal=9.8.0

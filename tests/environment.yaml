@@ -12,6 +12,7 @@ dependencies:
   - biopython=1.85
   - cdskit=0.27.0
   - ete4=4.4.0  # Required by nwkit in this shared test environment.
+  - brotli-python
   - matplotlib-base=3.10.6
   - numpy
   - nwkit=0.27.0
