@@ -24,9 +24,9 @@ Tool-dependent tests skip when executables are unavailable; `-ra` lists the reas
 | Tests | Additional tools or overrides |
 | --- | --- |
 | Core and KEGG | Snakemake, seqkit (`SNAKEMAKE_BIN`, `SEQKIT_BIN`); ODB/KofamScan use test substitutes |
-| Alignments, phylogeny, dating | `FAMSA_BIN`, `TRIMAL_BIN`, `VERYFASTTREE_BIN`, `ASTRAL_BIN`, `LSD2_BIN` |
+| Alignments, phylogeny, dating | `FAMSA_BIN`, `TRIMAL_BIN`, `VERYFASTTREE_BIN`, `ASTRAL_BIN` |
 | Taxonomy check | R/MonoPhy from `workflow/envs/monophy.yaml` |
-| TimeTree client | Pinned nwkit from `workflow/envs/timetree.yaml` |
+| Fossil placement | Pinned NWKIT and AngioCal from `workflow/envs/dating.yaml` |
 
 `PHYLOGENY_CONDA_PREFIX` enables tests with actual stage environments. Scheduler
 tests simulate Slurm/AGE services; AGE tests also run a real Snakemake DAG through

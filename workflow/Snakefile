@@ -21,7 +21,7 @@ onstart:
 from common import RANDOM_SEED
 from configuration import validate_keys, validate_analysis
 from layout import input_layout, run_layout
-INPUTS, BUSCO_FULL, SPECIES_LIST, CALIBRATIONS = input_layout(config.get("input_root", "input"))
+INPUTS, BUSCO_FULL, SPECIES_LIST, FOSSIL_MAP = input_layout(config.get("input_root", "input"))
 from versioning import resolve_container_image
 USE_CONTAINER = DeploymentMethod.APPTAINER in workflow.deployment_settings.deployment_method
 try:
@@ -45,7 +45,6 @@ INCREMENTAL_ODB = config["odb"].get("incremental", False)
 ODB_CACHE = config["odb"].get("cache_dir", "resources/odb_cache")
 PYTHON = "python"
 TAXONOMY_DB = config.get('taxonomy_db') or "resources/taxonomy/taxa.sqlite"
-TIMETREE_CACHE = "resources/timetree_cache"
 
 if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", str(config["run_name"])):
     raise WorkflowError("run_name must be a simple directory name")
@@ -69,14 +68,6 @@ if not isinstance(PHY["lineage"], str) or not PHY["lineage"].strip():
     raise WorkflowError("phylogeny.lineage must be a nonempty string")
 if type(PHY["dating"]["enabled"]) is not bool:
     raise WorkflowError("phylogeny.dating.enabled must be true or false")
-if PHY["dating"]["calibration_source"] not in {"file", "timetree"}:
-    raise WorkflowError("phylogeny.dating.calibration_source must be file or timetree")
-from date_phylogeny import validate_settings as validate_lsd2_settings
-try:
-    PHY["dating"]["lsd2"] = validate_lsd2_settings(PHY["dating"].get("lsd2", {}))
-except ValueError as error:
-    raise WorkflowError(str(error))
-
 ASTRAL = str(Path(ROOT) / "resources/phylogeny_tools/bin/astral4_int128")
 from layout import (
     ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNMENTS,
@@ -178,7 +169,7 @@ def contrast_targets(wc):
 PHYLO_FINAL = phylogeny_targets([
     "species_tree.nwk", "species_tree.json", "gene_trees.nwk", "gene_trees.json", "species_coverage.tsv"])
 TAXONOMY_CHECK_FINAL = phylogeny_targets(["taxonomy_check"])
-PHYLO_DATED = phylogeny_targets(["dating/species_tree.dated.nwk", "dating/provenance.json"])
+PHYLO_DATED = phylogeny_targets(["dating/species_tree.dated.nwk", "dating/node_ages.tsv", "dating/provenance.json"])
 
 from snakemake.logging import logger
 PHYLOGENY_PLAN_REPORTED = False
@@ -366,7 +357,7 @@ rule contrast_pairs:
 rule phylogeny_calibrations:
     input:
         lambda wc: requested_phylogeny("phylogeny_calibrations", phylogeny_targets(
-            ["timetree/calibrations.tsv", "timetree/candidates.tsv", "timetree/provenance.json"]))
+            ["angiocal/calibrations.tsv", "angiocal/fossils.tsv", "angiocal/provenance.json"]))
 
 
 rule timetree:

@@ -73,7 +73,7 @@ tree, specify the outgroup explicitly. Explicit lists must match an entire
 side of an existing split. Review `rooting/outgroup.json` for the final choice.
 
 Rooting preserves the inferred topology and branch lengths. A new root splits
-its edge at the midpoint; LSD2 re-estimates that position. The branch lengths
+its edge at the midpoint. treePL uses the rooted split for dating. The branch lengths
 retain the effect of ASTRAL's single internal anchor. The ASTRAL output and
 provenance before final rooting are in `rooting/astral.nwk` and
 `rooting/astral.json`.

@@ -37,7 +37,6 @@ def root_on_outgroup(tree, outgroup):
     """Orient an existing split without pruning tips or changing unrooted edges.
 
     The midpoint used for Newick serialization is not an estimated time split;
-    LSD2 re-estimates the position along this edge during dating.
     """
     wanted = validate_outgroup(tree.leaf_names(), outgroup)
     if len(tree.children) == 2 and any(set(c.leaf_names()) == wanted for c in tree.children):

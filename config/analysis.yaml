@@ -3,7 +3,7 @@ build: results/angiosperm_leaf_20260928  # Completed build directory or database
 inputs:
   species_trait: input/species_trait.tsv  # Species traits (TSV); null when traits are unused.
   species_list: null  # Species/sample IDs, one per line; a path enables filtering, null disables it.
-  calibrations: null  # Calibration TSV required when phylogeny.dating.calibration_source is file.
+  fossil_calibration_map: null  # Optional reviewed AngioCal fossil ID to tree-tip mapping.
 trait: C4  # Trait-table column; use C4 when a C4 column is provided.
 trait_encoding: null  # For text states, e.g. {absent: 0, present: 1}; numeric 0/1 needs none.
 selection:
@@ -25,8 +25,8 @@ phylogeny:
   min_taxa: 4  # Minimum distinct biological species per marker; must be at least 4.
   trimal_mode: gappyout  # Alignment trimming: gappyout or automated1.
   dating:
+    # Angiosperms only: AngioCal v1.0 and treePL, with a 154 Ma root maximum.
     enabled: false  # Date selected trees; supports all/phenotyped only.
-    calibration_source: timetree  # Age bounds from timetree or file (inputs.calibrations).
   contrast_pairs:
     enabled: true  # Select trait contrast pairs on the chosen trees.
   taxonomy_check:
@@ -107,11 +107,11 @@ execution:
       cpus: 32
       mem_gb: 64
       time: "14-00:00:00"
-    prepare_timetree_calibrations:  # Retrieve TimeTree age constraints.
+    prepare_angiocal_calibrations:  # Place fossils from AngioCal v1.0.
       cpus: 1
       mem_gb: 4
       time: "1-00:00:00"
-    date_busco_species_tree:  # Date the species tree with LSD2.
+    date_busco_species_tree:  # Date the species tree with treePL.
       cpus: 1
       mem_gb: 4
       time: "1-00:00:00"

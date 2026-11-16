@@ -15,7 +15,6 @@ import yaml
 
 from busco_phylogeny import busco_full_path, busco_table, extract, fasta_records, plan, prepare_cds
 from common import RANDOM_SEED, read_tsv, write_json, write_tsv
-from date_phylogeny import date, calibration_rows
 from infer_phylogeny import alignment_qc, astral, merge, read_tree, trim
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -280,20 +279,6 @@ def test_alignment_qc_reports_low_information_without_a_count_cutoff(sequences, 
     assert report["informative_sites"] == informative
 
 
-def test_calibrations_require_absolute_ages_and_consistent_ancestors(tmp_path):
-    from ete4 import Tree
-    tree = Tree("((A:1,B:1)N2:2,(C:1,D:1)N3:2)N1;", parser=1)
-    path = tmp_path / "calibrations.tsv"
-    fields = ["taxa", "min_age_ma", "max_age_ma", "source"]
-    write_tsv(path, fields, [])
-    with pytest.raises(ValueError, match="at least one"):
-        calibration_rows(tree, path)
-    write_tsv(path, fields, [{"taxa": "A,C", "min_age_ma": 10, "max_age_ma": 20, "source": "test"},
-                             {"taxa": "A,B", "min_age_ma": 30, "max_age_ma": 40, "source": "test"}])
-    with pytest.raises(ValueError, match="inconsistent"):
-        calibration_rows(tree, path)
-
-
 def test_astral_rejects_non_int128_for_large_species_sets(tmp_path):
     manifest = tmp_path / "species.tsv"
     write_tsv(manifest, ["species"], [{"species": f"s{i}"} for i in range(5001)])
@@ -356,27 +341,6 @@ def test_renamed_binary_cannot_pass_int128_check(tmp_path):
         astral("unused", "unused", manifest, "unused", "unused", str(binary), "s0", 1, 1)
 
 
-def test_real_lsd2_outputs_time_units_and_honors_calibration(tmp_path):
-    lsd2 = os.environ.get("LSD2_BIN") or shutil.which("lsd2")
-    if not lsd2:
-        pytest.skip("set LSD2_BIN for real dating integration")
-    tree, provenance = tmp_path / "input.nwk", tmp_path / "input.json"
-    tree.write_text("(A:0.1,(B:0.08,(C:0.04,D:0.04):0.04):0.02);\n")
-    write_json(provenance, {"branch_length_unit": "substitutions_per_site", "outgroup": "A", "mean_gene_length": 250, "total_gene_sites": 750})
-    calibrations = tmp_path / "calibrations.tsv"
-    write_tsv(calibrations, ["taxa", "min_age_ma", "max_age_ma", "source"],
-              [{"taxa": "A,B", "min_age_ma": 100, "max_age_ma": 100, "source": "synthetic test only"}])
-    date(tree, provenance, calibrations, tmp_path / "dated", lsd2)
-    dated = read_tree(tmp_path / "dated/species_tree.dated.nwk")
-    assert dated.get_distance("A", "B") == pytest.approx(200)
-    assert dated.get_distance("C", "D") == pytest.approx(80, rel=0.01)
-    report = json.loads((tmp_path / "dated/provenance.json").read_text())
-    assert report["root_age_ma"] == pytest.approx(100)
-    assert report["concatenation_used"] is False
-    assert len(report["commands"]) == 1
-    assert report["root_position_reestimated"]
-
-
 def phylogeny_inputs(tmp_path):
     source = tmp_path / "input"
     source.mkdir()
@@ -424,10 +388,7 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
     if not all([snakemake, famsa, vft]) or not astral4.is_file():
         pytest.skip("set phylogeny tool paths and run prepare_phylogeny_tools.py for workflow integration")
     trimal = trimal_binary()
-    lsd2 = os.environ.get("LSD2_BIN") or shutil.which("lsd2")
     commands = {"python": sys.executable, "famsa": famsa, "trimal": trimal, "VeryFastTree": vft}
-    if lsd2:
-        commands["lsd2"] = lsd2
     env = command_environment(commands)
     source, species = phylogeny_inputs(tmp_path)
     # Real inference accepts mixed standard layouts and compression without overrides.
@@ -513,55 +474,3 @@ def test_real_phylogeny_workflow_and_unchanged_rerun(tmp_path, command_environme
     assert all(json.loads(p.read_text())["mode"] == "automated1" for p in (out / "alignments").glob("*.json"))
     timestamp = (out / "species_tree.nwk").stat().st_mtime_ns
     assert "Nothing to be done" in run()
-    # The dating target reuses the inferred species tree and does not restart loci.
-    if lsd2:
-        calibrations = source / "calibrations.tsv"
-        write_tsv(calibrations, ["taxa", "min_age_ma", "max_age_ma", "source"],
-                  [{"taxa": ",".join(species[:2]), "min_age_ma": 100, "max_age_ma": 100,
-                    "source": "synthetic workflow test only"}])
-        cfg["phylogeny"]["dating"] = {"enabled": True, "calibration_source": "file"}
-        config.write_text(yaml.safe_dump(cfg))
-        argv[-1] = "timetree"
-        run()
-        read_tree(out / "dating/species_tree.dated.nwk", species)
-        assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
-        dated_timestamp = (out / "dating/species_tree.dated.nwk").stat().st_mtime_ns
-        assert "Nothing to be done" in run()
-        assert (out / "dating/species_tree.dated.nwk").stat().st_mtime_ns == dated_timestamp
-        retained = {p: p.stat().st_mtime_ns for folder in [out / "gene_trees", out / "alignments/raw"]
-                    for p in folder.iterdir()}
-        (out / "dating/species_tree.dated.nwk").unlink()
-        run()
-        assert all(p.stat().st_mtime_ns == stamp for p, stamp in retained.items())
-        dating_report = json.loads((out / "dating/provenance.json").read_text())
-        tree_report = json.loads((out / "species_tree.json").read_text())
-        assert dating_report["method"] == "LSD2 least squares"
-        assert dating_report["numsites"] == tree_report["total_gene_sites"]
-        assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
-        # Changing variance weighting reruns dating while preserving inference.
-        dated_timestamp = (out / "dating/species_tree.dated.nwk").stat().st_mtime_ns
-        cfg["phylogeny"]["dating"]["lsd2"] = {"variance": 2}
-        config.write_text(yaml.safe_dump(cfg))
-        run()
-        assert (out / "dating/species_tree.dated.nwk").stat().st_mtime_ns != dated_timestamp
-        assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
-        assert all(p.stat().st_mtime_ns == stamp for p, stamp in retained.items())
-        dating_report = json.loads((out / "dating/provenance.json").read_text())
-        assert dating_report["settings"]["variance"] == 2
-        assert len(dating_report["commands"]) == 1
-        assert "Nothing to be done" in run()
-        # Removing the override selects the default automatic TimeTree branch. Exercise
-        # the full rule graph offline with a recorded synthetic API response.
-        from timetree_calibrations import cached_response
-        from test_timetree_calibrations import cache_missing_estimates, fake_fetch, payload
-        cache = workflow_project / "resources/timetree_cache"
-        cached_response(range(42, 48), cache, delay=0,
-                        backend=(fake_fetch(payload(range(42, 48))), {"synthetic": True}))
-        cache_missing_estimates(out / "species_tree.nwk", dict(zip(species, range(42, 48))), cache)
-        del cfg["phylogeny"]["dating"]["calibration_source"]
-        config.write_text(yaml.safe_dump(cfg))
-        run()
-        assert json.loads((out / "timetree/provenance.json").read_text())["status"] == "ready"
-        assert len(read_tsv(out / "timetree/calibrations.tsv")) == 1
-        assert (out / "species_tree.nwk").stat().st_mtime_ns == timestamp
-        assert "Nothing to be done" in run()

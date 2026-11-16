@@ -19,7 +19,7 @@ def plan_project(dataset_project):
     config = root / 'config/analysis.yaml'
     cfg = yaml.safe_load(config.read_text())
     cfg['build'] = str(build.relative_to(root))
-    cfg['inputs'] = {'species_trait': None, 'species_list': None, 'calibrations': None}
+    cfg['inputs'] = {'species_trait': None, 'species_list': None, 'fossil_calibration_map': None}
     cfg['selection']['busco_threshold'] = 0.5
     cfg['exclude_species'] = []
     cfg['alignment']['enabled'] = False

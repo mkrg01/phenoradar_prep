@@ -14,8 +14,7 @@ KEYS = {
     "phylogeny": "trees lineage "
         "outgroup max_markers min_protein_length max_unknown_fraction "
         "min_taxa trimal_mode dating contrast_pairs taxonomy_check",
-    "phylogeny.dating": "enabled calibration_source lsd2",
-    "phylogeny.dating.lsd2": "variance variance_parameter",
+    "phylogeny.dating": "enabled",
     "phylogeny.contrast_pairs": "enabled",
     "phylogeny.taxonomy_check": "enabled ranks outlierlevel collapse_monophyletic",
 }

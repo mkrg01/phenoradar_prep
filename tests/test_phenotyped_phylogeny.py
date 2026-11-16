@@ -63,7 +63,7 @@ def test_invalid_trees_fail_at_configuration(tmp_path, workflow_project, sets):
     assert result.returncode != 0 and "phylogeny.trees must be a list" in result.stdout
 
 
-def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow_project, command_environment, seed_taxonomy):
+def test_species_set_switching_preserves_inference(tmp_path, workflow_project, command_environment, seed_taxonomy):
     from test_phylogeny import phylogeny_inputs, trimal_binary
     nwkit = pytest.importorskip("nwkit")
     if nwkit.__version__ != "0.27.0":
@@ -73,10 +73,7 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
     vft = os.environ.get("VERYFASTTREE_BIN") or shutil.which("VeryFastTree")
     if not all([snakemake, famsa, vft]) or not (ROOT / "resources/phylogeny_tools/bin/astral4_int128").exists():
         pytest.skip("real inference tools required")
-    lsd2 = os.environ.get("LSD2_BIN") or shutil.which("lsd2")
     commands = {"python": sys.executable, "famsa": famsa, "trimal": trimal_binary(), "VeryFastTree": vft}
-    if lsd2:
-        commands["lsd2"] = lsd2
     env = command_environment(commands)
     source, species = phylogeny_inputs(tmp_path)
     # Removing the unobserved basal species must select a different outgroup.
@@ -142,42 +139,10 @@ def test_species_set_switching_preserves_inference_and_dating(tmp_path, workflow
     run(["phenotyped"])
     assert timestamps(full, observed) == inference_times
 
-    # Retrieve separate calibrations from recorded responses, without HTTP.
-    from timetree_calibrations import cached_response
-    from test_timetree_calibrations import cache_missing_estimates, fake_fetch, payload
-    cache = workflow_project / "resources/timetree_cache"
-    for ids in [range(42, 48), range(43, 48)]:
-        cached_response(ids, cache, delay=0,
-                        backend=(fake_fetch(payload(ids, mrca=str(list(ids)))), {"synthetic": True}))
-    for branch in [full, observed]:
-        cache_missing_estimates(branch / "species_tree.nwk", dict(zip(species, range(42, 48))), cache)
-    cfg["phylogeny"]["dating"] = {"enabled": True, "calibration_source": "timetree"}
-    run(["phenotyped"], "phylogeny_calibrations")
-    assert not (full / "timetree").exists()
-    assert json.loads((observed / "timetree/provenance.json").read_text())["status"] == "ready"
-    calibration_times = timestamps(observed / "timetree")
-    run(["all", "phenotyped"], "phylogeny_calibrations")
-    assert timestamps(observed / "timetree") == calibration_times
-    assert {r["species"] for r in read_tsv(full / "timetree/taxa.tsv")} == set(species)
-    assert {r["species"] for r in read_tsv(observed / "timetree/taxa.tsv")} == set(species[1:])
-
-    if lsd2:
-        run(["phenotyped"], "timetree")
-        read_tree(observed / "dating/species_tree.dated.nwk", species[1:])
-        assert not (full / "dating").exists()
-        dated_times = timestamps(observed / "dating")
-        # The phylogeny target stops at inference even with dating enabled.
-        run(["all", "phenotyped"])
-        assert not (full / "dating").exists()
-        run(["all", "phenotyped"], "timetree")
-        read_tree(full / "dating/species_tree.dated.nwk", species)
-        assert timestamps(observed / "dating") == dated_times
-        assert "Nothing to be done" in run(["all", "phenotyped"])
     assert all(p.stat().st_mtime_ns == stamp for p, stamp in inference_times.items())
 
     # Changed membership rebuilds only the observed inference, keeping all output.
     full_times = timestamps(full)
-    cfg["phylogeny"]["dating"]["enabled"] = False
     trait_rows[-1]["C4"] = "NA"
     write_tsv(traits, ["species", "C4"], trait_rows)
     run(["all", "phenotyped"])

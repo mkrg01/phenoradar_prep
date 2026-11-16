@@ -41,7 +41,7 @@ def settings(root, config, build=None):
     cfg.pop('execution', None)
     cfg['slurm'] = merge_slurm(execution_config(base_config), execution_config(override), build=False)
     if 'lineage' in cfg['phylogeny']: raise ValueError('BUSCO lineage belongs to build.yaml')
-    if set(cfg['inputs']) - {'species_trait','species_list','calibrations'}: raise ValueError('unknown analysis input')
+    if set(cfg['inputs']) - {'species_trait','species_list','fossil_calibration_map'}: raise ValueError('unknown analysis input')
     source = inside(root, absolute(root, build or cfg['build']))
     source = inside(root, completion_path(source))
     completed = load_complete(source)
@@ -112,7 +112,7 @@ def prepare(root, name, config, build=None):
         inputs = staging / 'input'
         for entry, relative in input_entries(completed):
             link_file(verify(entry), inputs / relative)
-        for key, filename in [('species_trait','species_trait.tsv'), ('calibrations','calibrations.tsv')]:
+        for key, filename in [('species_trait','species_trait.tsv'), ('fossil_calibration_map','fossil_calibration_map.tsv')]:
             if cfg['inputs'].get(key): shutil.copy2(absolute(root,cfg['inputs'][key]), inputs / filename)
         # One frozen selection combines the user list and explicit exclusions.
         (inputs / 'species_list.txt').write_text(''.join(s + '\n' for s in requested))

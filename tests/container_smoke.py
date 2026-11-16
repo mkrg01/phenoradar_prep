@@ -3,7 +3,6 @@
 import argparse
 import importlib
 import json
-import math
 import os
 from pathlib import Path
 import shutil
@@ -18,29 +17,48 @@ MANIFEST = Path("/opt/phenoradar/container.json")
 
 
 def dating(work):
-    from common import write_json, write_tsv
+    from angiocal_calibrations import prepare
+    from common import read_tsv, write_json, write_tsv
     from date_phylogeny import date
     from infer_phylogeny import read_tree
+
+    names = ("Nuphar_lutea", "Nymphaea_colorata", "Brasenia_schreberi", "Cabomba_caroliniana")
     tree = work / "tree.nwk"
-    tree.write_text("((A:0.03,B:0.07):0.04,(C:0.03,D:0.07):0.04);\n")
-    provenance = work / "tree.json"
-    write_json(provenance, {"branch_length_unit": "substitutions_per_site", "outgroup": ["A", "B"],
-                           "total_gene_sites": 32000})
-    bounds = work / "bounds.tsv"
-    write_tsv(bounds, ["taxa", "min_age_ma", "max_age_ma", "source"], [
-        {"taxa": "A,D", "min_age_ma": 100, "max_age_ma": 100, "source": "smoke root"},
-        {"taxa": "C,D", "min_age_ma": 50, "max_age_ma": 60, "source": "smoke internal"}])
+    tree.write_text("((Nuphar_lutea:0.06,Nymphaea_colorata:0.06):0.06,"
+                    "(Brasenia_schreberi:0.06,Cabomba_caroliniana:0.06):0.06);\n")
+    qc, samples, taxonomy = work / "tree.json", work / "samples.tsv", work / "taxa.sqlite"
+    write_json(qc, {"branch_length_unit": "substitutions_per_site", "outgroup": list(names[:2]),
+                    "total_gene_sites": 32000})
+    with sqlite3.connect(taxonomy) as db:
+        db.executescript("""
+            CREATE TABLE species(taxid INTEGER PRIMARY KEY, spname TEXT, rank TEXT, track TEXT);
+            CREATE TABLE synonym(taxid INTEGER, spname TEXT);
+            CREATE TABLE merged(taxid_old INTEGER, taxid_new INTEGER);
+            INSERT INTO species VALUES (3398,'Magnoliopsida','class','3398');
+            INSERT INTO species VALUES (10,'Nymphaeaceae','family','10,3398');
+            INSERT INTO species VALUES (20,'Cabombaceae','family','20,3398');
+        """)
+        for index, name in enumerate(names):
+            taxid, family = 42 + index, 10 if index < 2 else 20
+            db.execute("INSERT INTO species VALUES (?,?,?,?)",
+                       (taxid, name.replace("_", " "), "species", f"{taxid},{family},3398"))
+    write_tsv(samples, ["species", "taxid"],
+              [{"species": name, "taxid": 42 + index} for index, name in enumerate(names)])
+    mapping = work / "mapping.tsv"
+    write_tsv(mapping, ["fossil_id", "left_species", "right_species"],
+              [{"fossil_id": 166, "left_species": names[0], "right_species": names[2]}])
+    calibration = work / "angiocal"
+    prepare(tree, samples, taxonomy, calibration, mapping)
+    fossils = {row["fossil_id"]: row for row in read_tsv(calibration / "fossils.tsv")}
+    assert fossils["166"]["mapping_method"] == "explicit_map" and fossils["166"]["status"] == "applied"
+    assert fossils["165"]["mapping_method"] == "taxonomy_stem"
     output = work / "dating"
-    date(tree, provenance, bounds, output, "lsd2")
-    result = read_tree(output / "species_tree.dated.nwk", {"A", "B", "C", "D"})
-    assert all(math.isclose(result.get_distance(result, leaf), 100, abs_tol=2e-3)
-               for leaf in result.leaves())
-    age = 100 - result.get_distance(result, result.common_ancestor(["C", "D"]))
-    assert 50 - 2e-3 <= age <= 60 + 2e-3
+    date(tree, qc, calibration / "calibrations.tsv", output)
+    result = read_tree(output / "species_tree.dated.nwk", names)
+    assert all(113 - 2e-3 <= result.get_distance(result, leaf) <= 154 + 2e-3 for leaf in result.leaves())
     report = json.loads((output / "provenance.json").read_text())
     assert report["topology_preserved"] and report["build"]["source_patch_applied"] is False
-    assert report["root_position_reestimated"] and report["numsites"] == 32000
-    assert report["native_time_branch_lengths_preserved"] and len(report["commands"]) == 1
+    assert report["smoothing"] == 10 and report["root_max_age_ma"] == 154
 
 
 def monophy(work):
@@ -102,13 +120,13 @@ def check_environment(name):
     manifest = json.loads(MANIFEST.read_text())
     assert Path(sys.prefix) == Path(manifest["environments"][name]), sys.prefix
     imports = {"alignment": ["alignment_selection"],
-               "analysis": ["pandas", "ete4", "matplotlib"], "dating": ["Bio", "ete4"],
+               "analysis": ["pandas", "ete4", "matplotlib"], "dating": ["nwkit", "ete4"],
                "monophy": ["ete4"], "phylogeny": ["Bio", "ete4", "numpy", "cdskit"],
                "timetree": ["Bio", "nwkit"]}
     commands = {"alignment": ["famsa", "trimal"], "kofam": ["exec_annotation", "hmmsearch"],
                 "odb": ["ODB-mapper"], "seqkit": ["seqkit"],
                 "phylogeny": ["famsa", "trimal", "VeryFastTree"],
-                "dating": ["lsd2"], "monophy": ["Rscript"]}
+                "dating": ["treePL"], "monophy": ["Rscript"]}
     for module in imports.get(name, []):
         importlib.import_module(module)
     for command in commands.get(name, []):

@@ -55,12 +55,6 @@ def phylogeny_marker_files(wc, suffix):
     return [f'{OUT}/{wc.phylo_branch}/gene_trees/{r["marker"]}.{suffix}' for r in phylogeny_plan_rows(wc, "markers")]
 
 
-def dating_calibrations(wc):
-    if PHY["dating"]["calibration_source"] == "timetree":
-        return f"{OUT}/{wc.phylo_branch}/timetree/calibrations.tsv"
-    return CALIBRATIONS
-
-
 checkpoint select_phenotyped_species:
     input:
         samples=f"{META}/samples.tsv",
@@ -320,32 +314,32 @@ rule root_busco_species_tree:
         "--rooting-qc {output.rooting_qc:q} {params.guide_flag} {input.guide:q} > {log:q} 2>&1"
 
 
-rule prepare_timetree_calibrations:
+rule prepare_angiocal_calibrations:
     wildcard_constraints: phylo_branch=DATING_BRANCH_PATTERN
     input:
         tree=f"{PHYLO_RUN}/species_tree.nwk",
-        metadata=f"{META}/metadata_high_busco.tsv",
+        samples=lambda wc: (f"{PHENOTYPED}/selection/samples.tsv"
+                            if wc.phylo_branch == PHYLO_BRANCHES["phenotyped"] else f"{META}/samples.tsv"),
         taxonomy=TAXONOMY_DB,
-        code=f"{SCRIPTS}/timetree_calibrations.py",
-        helpers=[f"{SCRIPTS}/date_phylogeny.py", f"{SCRIPTS}/infer_phylogeny.py", f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
+        mapping=[FOSSIL_MAP] if Path(FOSSIL_MAP).is_file() else [],
+        code=f"{SCRIPTS}/angiocal_calibrations.py",
+        helpers=[f"{SCRIPTS}/{name}.py" for name in
+                 ["infer_phylogeny", "taxonomy_check", "busco_phylogeny",
+                  "common", "sample_identity", "phylogeny_outgroup"]]
     output:
-        calibrations=f"{PHYLO_RUN}/timetree/calibrations.tsv",
-        candidates=f"{PHYLO_RUN}/timetree/candidates.tsv",
-        details=f"{PHYLO_RUN}/timetree/candidates.json",
-        provenance=f"{PHYLO_RUN}/timetree/provenance.json",
-        nodes=f"{PHYLO_RUN}/timetree/nodes.nwk",
-        studies=f"{PHYLO_RUN}/timetree/studies.tsv",
-        taxa=f"{PHYLO_RUN}/timetree/taxa.tsv"
-    params: outdir=f"{PHYLO_RUN}/timetree", cache=TIMETREE_CACHE
+        calibrations=f"{PHYLO_RUN}/angiocal/calibrations.tsv",
+        fossils=f"{PHYLO_RUN}/angiocal/fossils.tsv",
+        provenance=f"{PHYLO_RUN}/angiocal/provenance.json"
+    params: outdir=f"{PHYLO_RUN}/angiocal", map_flag="--mapping" if Path(FOSSIL_MAP).is_file() else ""
     threads: 1
-    conda: "../envs/timetree.yaml"
+    conda: "../envs/dating.yaml"
     resources: mem_mb=4000
-    log: f"{LOG}/{{phylo_branch}}/timetree.log"
-    benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/timetree.tsv"
+    log: f"{LOG}/{{phylo_branch}}/angiocal.log"
+    benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/angiocal.tsv"
     shell:
-        "{PYTHON:q} {input.code:q} --tree {input.tree:q} --metadata {input.metadata:q} "
-        "--taxonomy-db {input.taxonomy:q} --outdir {params.outdir:q} "
-        "--cache-dir {params.cache:q} > {log:q} 2>&1"
+        "{PYTHON:q} {input.code:q} --tree {input.tree:q} --samples {input.samples:q} "
+        "--taxonomy {input.taxonomy:q} --outdir {params.outdir:q} "
+        "{params.map_flag} {input.mapping:q} > {log:q} 2>&1"
 
 
 rule date_busco_species_tree:
@@ -353,28 +347,19 @@ rule date_busco_species_tree:
     input:
         tree=f"{PHYLO_RUN}/species_tree.nwk",
         provenance=f"{PHYLO_RUN}/species_tree.json",
-        calibrations=dating_calibrations,
+        calibrations=f"{PHYLO_RUN}/angiocal/calibrations.tsv",
+        calibration_qc=f"{PHYLO_RUN}/angiocal/provenance.json",
+        fossils=f"{PHYLO_RUN}/angiocal/fossils.tsv",
         code=f"{SCRIPTS}/date_phylogeny.py",
-        helpers=[f"{SCRIPTS}/infer_phylogeny.py", f"{SCRIPTS}/busco_phylogeny.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/phylogeny_outgroup.py"]
+        helpers=[f"{SCRIPTS}/{name}.py" for name in
+                 ["infer_phylogeny", "busco_phylogeny", "common", "sample_identity", "phylogeny_outgroup"]]
     output:
         tree=f"{PHYLO_RUN}/dating/species_tree.dated.nwk",
         provenance=f"{PHYLO_RUN}/dating/provenance.json",
         ages=f"{PHYLO_RUN}/dating/node_ages.tsv",
-        calibrations=f"{PHYLO_RUN}/dating/calibrations.resolved.tsv",
-        raw=f"{PHYLO_RUN}/dating/lsd2.dated.nwk",
-        report=f"{PHYLO_RUN}/dating/lsd2.result",
-        native_nexus=f"{PHYLO_RUN}/dating/lsd2.result.date.nexus",
-        native_substitutions=f"{PHYLO_RUN}/dating/lsd2.result.nwk",
-        native_log=f"{PHYLO_RUN}/dating/lsd2.log",
-        command=f"{PHYLO_RUN}/dating/lsd2.command.json",
-        input_tree=f"{PHYLO_RUN}/dating/lsd2.input.nwk",
-        input_dates=f"{PHYLO_RUN}/dating/lsd2.dates.txt",
-        outgroups=f"{PHYLO_RUN}/dating/lsd2.outgroups.txt",
-        zeros=f"{PHYLO_RUN}/dating/numerical_zero_adjustments.tsv"
-        # Keep lsd2_runs undeclared so native diagnostics survive a failed job.
-    params:
-        outdir=f"{PHYLO_RUN}/dating", command="lsd2",
-        settings=json.dumps(PHY["dating"]["lsd2"], sort_keys=True)
+        config=f"{PHYLO_RUN}/dating/treepl.conf",
+        native_log=f"{PHYLO_RUN}/dating/treepl.log"
+    params: outdir=f"{PHYLO_RUN}/dating"
     conda: "../envs/dating.yaml"
     threads: 1
     resources: mem_mb=4000
@@ -382,5 +367,4 @@ rule date_busco_species_tree:
     benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/dating.tsv"
     shell:
         "{PYTHON:q} {input.code:q} --tree {input.tree:q} --provenance {input.provenance:q} "
-        "--calibrations {input.calibrations:q} --outdir {params.outdir:q} --command {params.command:q} "
-        "--threads {threads} --settings {params.settings:q} > {log:q} 2>&1"
+        "--calibrations {input.calibrations:q} --outdir {params.outdir:q} > {log:q} 2>&1"

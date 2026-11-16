@@ -9,7 +9,7 @@ INPUTS = {
 }
 BUSCO_FULL = "input/busco/full"
 SPECIES_LIST = "input/species_list.txt"
-CALIBRATIONS = "input/calibrations.tsv"
+FOSSIL_MAP = "input/fossil_calibration_map.tsv"
 
 
 def input_layout(root="input"):
@@ -17,7 +17,7 @@ def input_layout(root="input"):
     from pathlib import Path
     root = Path(root)
     inputs = {key: str(root / Path(value).relative_to("input")) for key, value in INPUTS.items()}
-    return inputs, str(root / "busco/full"), str(root / "species_list.txt"), str(root / "calibrations.tsv")
+    return inputs, str(root / "busco/full"), str(root / "species_list.txt"), str(root / Path(FOSSIL_MAP).name)
 
 def run_layout(config):
     """Explicit phase paths for new runs; retain old frozen configurations."""

@@ -6,7 +6,6 @@ import pytest
 import yaml
 
 from configuration import KEYS, validate_keys
-from date_phylogeny import validate_settings as validate_lsd2_settings
 from versioning import IMAGE_REPOSITORY, read_version, resolve_container_image
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,8 +14,6 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_config_and_optional_tool_defaults_cover_supported_keys():
     config = yaml.safe_load((ROOT / "workflow/pipeline_defaults.yaml").read_text())
     validate_keys(config)
-    assert "lsd2" not in config["phylogeny"]["dating"]
-    config["phylogeny"]["dating"]["lsd2"] = validate_lsd2_settings({})
     for section, keys in KEYS.items():
         values = config
         for part in section.split(".") if section else []:
@@ -25,7 +22,6 @@ def test_config_and_optional_tool_defaults_cover_supported_keys():
     from analysis import ANALYSIS_KEYS
     analysis = yaml.safe_load((ROOT / "config/analysis.yaml").read_text())
     assert set(analysis) <= ANALYSIS_KEYS
-    validate_keys({"phylogeny": {"dating": {"calibration_source": "file"}}})
     validate_keys({"run_name": "c4_run1"})
 
 

@@ -96,22 +96,6 @@ def test_alignment_min_taxa_counts_species_not_sample_replicates(tmp_path):
     assert qc['status']=='too_few_taxa'
 
 
-def test_timetree_keeps_same_species_samples_and_deduplicates_queries(tmp_path,tiny_inputs):
-    from timetree_calibrations import species_taxids,interpret_response
-    from test_timetree_calibrations import payload
-    metadata=tmp_path/'samples.tsv'
-    rows=[dict(species='Alpha_plant_A1',species_id='Alpha_plant',taxid='42'),
-          dict(species='Alpha_plant_A2',species_id='Alpha_plant',taxid='42'),
-          dict(species='Beta_sp-X_B1',species_id='Beta_sp-X',taxid='43')]
-    write_tsv(metadata,list(rows[0]),rows)
-    mapping,report=species_taxids(metadata,tiny_inputs['taxonomy_db'],{r['species'] for r in rows})
-    assert len(mapping)==3 and set(mapping.values())=={42,43}
-    query={'node':'N','clade_taxa':3,'query_taxa':sorted(mapping),
-           'children':[['Alpha_plant_A1','Alpha_plant_A2'],['Beta_sp-X_B1']]}
-    result=interpret_response(payload([42,43]),query,mapping)
-    assert result['query_taxids']==[42,43] and len(result['used_taxa'])==3
-
-
 def test_ncbi_guide_expands_duplicate_taxids(tmp_path,tiny_inputs,monkeypatch):
     import phylogeny_root
     from ete4 import Tree

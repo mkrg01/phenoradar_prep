@@ -5,7 +5,7 @@
 Required taxonomy, OrthoDB, and KEGG references are prepared automatically under
 `resources/`. Completed snapshots are reused without automatic updates; keep
 their provenance with results. GeneGalleon manages upstream references such as
-BUSCO. TimeTree uses a separate [response cache](dating.md#timetree-calibrations).
+BUSCO. The dating environment contains the [AngioCal fossil workbook](dating.md).
 
 ## Taxonomy reference
 

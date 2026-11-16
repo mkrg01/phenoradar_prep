@@ -4,8 +4,19 @@ channels:
   - nodefaults
 dependencies:
   - python=3.12
-  - biopython=1.85
-  - ete4=4.3.0
+  - ete4=4.4.0
   - brotli-python
-  # The adjacent Snakemake post-deploy script builds the pinned, unmodified LSD2 source.
+  - pip
+  - setuptools>=77.0.3
+  - defusedxml>=0.7
+  - pandas
+  - requests>=2.32.2
+  - urllib3>=2
+  - numpy
+  - scipy!=1.18.0,!=1.18.1
+  - matplotlib-base
+  - pillow
+  - make
+  # The post-deploy script installs the pinned treePL, NWKIT and AngioCal workbook.
+  - gcc_linux-64=13
   - gxx_linux-64=13
