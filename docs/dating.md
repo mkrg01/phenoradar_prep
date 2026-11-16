@@ -18,7 +18,8 @@ The input requires the selected tips' NCBI TaxIDs and the frozen taxonomy databa
 ```
 
 The first target prepares the fossil report for review. The second also prepares
-missing placements and fits the dated tree. Enabled dating runs with `all` too.
+missing placements, fits the dated tree, and plots it. Enabled dating runs with
+`all` too.
 
 NWKIT places stem fossils where the sampled clade and adjacent lineages agree
 with the frozen NCBI taxonomy. When the closest sister is absent, the minimum
@@ -39,6 +40,17 @@ contain the result. `treepl.conf`, `treepl.log` and `provenance.json` record the
 fit, checks, root age and whether it reached the upper bound. An estimate at 154
 Ma is constrained by that upper bound. The dates are conditional on the input
 topology, fossil placements, branch lengths, and smoothing.
+
+The workflow then writes `species_tree.dated.pdf` and `species_tree.dated.svg`
+as vector figures and `species_tree.dated.png` at 600 dpi in the same directory.
+The plot is 178 mm wide and shows the time axis, the configured trait, and
+NCBI families. Each family bar spans consecutive tips assigned to that family.
+The plot labels family bars containing at least one tip with trait state `1`.
+Leader lines connect the labels to their bars. If space is limited, the plot
+prioritizes longer bars.
+`species_tree.dated.tips.tsv` lists tips from top to bottom with species names,
+families, and original trait labels. The plot uses the estimated node ages and
+requests one CPU and 1 GB of memory.
 
 Placement and dating each use one CPU and request 4 GB by default. The dating
 environment installs checksum-verified copies of treePL, NWKIT, and the AngioCal

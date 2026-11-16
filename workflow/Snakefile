@@ -169,7 +169,9 @@ def contrast_targets(wc):
 PHYLO_FINAL = phylogeny_targets([
     "species_tree.nwk", "species_tree.json", "gene_trees.nwk", "gene_trees.json", "species_coverage.tsv"])
 TAXONOMY_CHECK_FINAL = phylogeny_targets(["taxonomy_check"])
-PHYLO_DATED = phylogeny_targets(["dating/species_tree.dated.nwk", "dating/node_ages.tsv", "dating/provenance.json"])
+PHYLO_DATED = phylogeny_targets([f"dating/{name}" for name in [
+    "species_tree.dated.nwk", "node_ages.tsv", "provenance.json", "species_tree.dated.pdf",
+    "species_tree.dated.svg", "species_tree.dated.png", "species_tree.dated.tips.tsv"]])
 
 from snakemake.logging import logger
 PHYLOGENY_PLAN_REPORTED = False

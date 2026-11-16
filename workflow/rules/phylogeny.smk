@@ -368,3 +368,33 @@ rule date_busco_species_tree:
     shell:
         "{PYTHON:q} {input.code:q} --tree {input.tree:q} --provenance {input.provenance:q} "
         "--calibrations {input.calibrations:q} --outdir {params.outdir:q} > {log:q} 2>&1"
+
+
+rule plot_dated_species_tree:
+    wildcard_constraints: phylo_branch=DATING_BRANCH_PATTERN
+    input:
+        tree=rules.date_busco_species_tree.output.tree,
+        ages=rules.date_busco_species_tree.output.ages,
+        samples=lambda wc: (f"{PHENOTYPED}/selection/samples.tsv"
+                            if wc.phylo_branch == PHYLO_BRANCHES["phenotyped"] else f"{META}/samples.tsv"),
+        traits=rules.normalize_traits.output.traits,
+        encoding=rules.normalize_traits.output.encoding,
+        taxonomy=TAXONOMY_DB,
+        code=f"{SCRIPTS}/plot_dated_tree.py",
+        helpers=[f"{SCRIPTS}/{name}.py" for name in
+                 ["common", "infer_phylogeny", "sample_identity", "species_traits", "taxonomy_check",
+                  "trait_encoding", "busco_phylogeny", "phylogeny_outgroup"]]
+    output:
+        pdf=f"{PHYLO_RUN}/dating/species_tree.dated.pdf",
+        svg=f"{PHYLO_RUN}/dating/species_tree.dated.svg",
+        png=f"{PHYLO_RUN}/dating/species_tree.dated.png",
+        tips=f"{PHYLO_RUN}/dating/species_tree.dated.tips.tsv"
+    params: outdir=f"{PHYLO_RUN}/dating", trait=PHY["trait"]
+    conda: "../envs/analysis.yaml"
+    threads: 1
+    resources: mem_mb=1000
+    log: f"{LOG}/{{phylo_branch}}/dating_plot.log"
+    shell:
+        "{PYTHON:q} {input.code:q} --tree {input.tree:q} --ages {input.ages:q} --samples {input.samples:q} "
+        "--taxonomy {input.taxonomy:q} --traits {input.traits:q} --encoding {input.encoding:q} "
+        "--trait {params.trait:q} --outdir {params.outdir:q} > {log:q} 2>&1"
