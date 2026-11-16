@@ -184,8 +184,11 @@ build. Turning the screen off leaves previously approved exclusions in effect.
 
 Kew reference species names are matched to scientific names and synonyms in the
 frozen NCBI Taxonomy. A unique species TaxID supplies the reference lineage.
-Unmatched names use the genus and family, and ambiguous species names can
-contribute only at a shared, compatible family or higher rank. The screen
+Unmatched names use the genus and family. When multiple species TaxIDs match,
+the Kew family annotation, when available, limits the candidates to that
+family. A single remaining candidate supplies its lineage. For multiple
+remaining candidates, the reference uses their shared lineage down to the
+most specific shared rank. The screen
 records the reference assignments once and shares them across all batches.
 To refresh NCBI Taxonomy, prepare a snapshot at a new path and pass it with
 `--taxonomy`. The original sample TaxID and accession remain in the source

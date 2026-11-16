@@ -50,9 +50,13 @@ def test_taxonomy_reconciles_synonyms_and_rejects_family_conflict(tmp_path):
               (3,'Otheraceae','family','3,1'), (4,'Genus','genus','4,6,5,2,7,1'),
               (5,'Subfamily','subfamily','5,2,7,1'), (6,'Tribe','tribe','6,5,2,7,1'),
               (7,'Order','order','7,1'), (8,'Genus species','species','8,4,6,5,2,7,1'),
-              (9,'Genus second','species','9,4,6,5,2,7,1'), (10,'Othergenus','genus','10,2,7,1');
+              (9,'Genus second','species','9,4,6,5,2,7,1'), (10,'Othergenus','genus','10,2,7,1'),
+              (12,'Othergenus third','species','12,10,2,7,1'),
+              (13,'Animalgenus','genus','13,3,1'), (14,'Animalgenus species','species','14,13,3,1');
             INSERT INTO synonym VALUES (4,'Synonymus'), (2,'Oldaceae'), (11,'Othergenus species'),
-              (8,'Ambiguous species'), (9,'Ambiguous species');
+              (8,'Ambiguous species'), (9,'Ambiguous species'), (14,'Ambiguous species'),
+              (8,'Genus species'), (14,'Genus species'),
+              (8,'Crossgenus species'), (12,'Crossgenus species');
             INSERT INTO merged VALUES (11,8);
         ''')
     tax = reference.ReferenceTaxonomy(db)
@@ -67,9 +71,18 @@ def test_taxonomy_reconciles_synonyms_and_rejects_family_conflict(tmp_path):
         assert assignment['method'] == 'species' and assignment['taxid'] == 8
         assert assignment['ranks'][qc.RANKS.index('genus')] == 4
         assert tax.resolve_reference('Othergenus_species', 'Otheraceae')['family_conflict']
+        disambiguated = tax.resolve_reference('Genus_species', 'Oldaceae')
+        assert disambiguated['method'] == 'species' and disambiguated['taxid'] == 8
+        assert disambiguated['candidates'] == (8, 14)
+        assert disambiguated['ranks'] == assignment['ranks']
         ambiguous = tax.resolve_reference('Ambiguous_species', 'Family')
-        assert ambiguous['candidates'] == (8, 9)
-        assert ambiguous['ranks'][0] == 2 and ambiguous['ranks'][qc.RANKS.index('genus')] is None
+        assert ambiguous['method'] == 'ambiguous_species' and 'taxid' not in ambiguous
+        assert ambiguous['candidates'] == (8, 9, 14)
+        assert ambiguous['ranks'] == assignment['ranks']
+        crossgenus = tax.resolve_reference('Crossgenus_species', 'Family')
+        assert crossgenus['ranks'][0] == 2 and crossgenus['ranks'][qc.RANKS.index('genus')] is None
+        assert all(rank is None for rank in tax.resolve_reference('Crossgenus_species', 'Otheraceae')['ranks'])
+        assert tax.resolve_reference('Crossgenus_species', None)['ranks'] == crossgenus['ranks']
         assert tax.resolve_reference('Othergenus_unlisted', 'Family')['method'] == 'genus'
     finally:
         tax.db.close()

@@ -169,22 +169,24 @@ class ReferenceTaxonomy(Taxonomy):
     def resolve_reference(self, species, family):
         name = ' '.join(species.replace('_', ' ').split())
         candidates = self.species_ids(name)
-        if len(candidates) == 1:
-            taxid = candidates[0]
-            lineage = self.lineage(taxid)
-            family_ids = self.name_ids(family, 'family') if family else set()
-            family_conflict = bool(family_ids and lineage.get('family', (None,))[0] not in family_ids)
-            return dict(method='species', taxid=taxid, family_conflict=family_conflict,
-                        ranks=[lineage.get(rank, (None,))[0] for rank in RANKS])
         if candidates:
-            lineages = [self.lineage(taxid) for taxid in candidates]
-            family_ids = {lineage.get('family', (None,))[0] for lineage in lineages}
-            expected = self.name_ids(family, 'family') if family else family_ids
-            # Retain a common family only if the references agree on it.
-            family_id = next(iter(family_ids)) if len(family_ids) == 1 and family_ids <= expected else None
-            lineage = self.lineage(family_id) if family_id is not None else {}
-            return dict(method='ambiguous_species', candidates=candidates,
-                        ranks=[lineage.get(rank, (None,))[0] for rank in RANKS])
+            family_ids = self.name_ids(family, 'family') if family else set()
+            lineages = {taxid: self.lineage(taxid) for taxid in candidates}
+            if len(candidates) > 1 and family:
+                lineages = {taxid: lineage for taxid, lineage in lineages.items()
+                            if lineage.get('family', (None,))[0] in family_ids}
+            first = next(iter(lineages.values()), {})
+            # Shared TaxIDs retain the most specific supported assignment and its ancestors.
+            ranks = [first[rank][0] if rank in first and all(
+                lineage.get(rank) == first[rank] for lineage in lineages.values()) else None
+                for rank in RANKS]
+            result = dict(ranks=ranks)
+            if len(candidates) > 1:
+                result['candidates'] = candidates
+            if len(lineages) == 1:
+                return dict(result, method='species', taxid=next(iter(lineages)),
+                            family_conflict=bool(family_ids and ranks[0] not in family_ids))
+            return dict(result, method='ambiguous_species')
         ranks = self.reference_ranks(species.split('_', 1)[0], family)
         method = 'genus' if ranks[RANKS.index('genus')] is not None else 'family' if ranks[0] else 'unresolved'
         return dict(method=method, ranks=ranks)
