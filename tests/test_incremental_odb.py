@@ -1,4 +1,5 @@
 """Cached ODB products map only missing species and survive dataset removal/readdition."""
+import gzip
 import json
 import os
 import shutil
@@ -17,14 +18,16 @@ from translate_cds import translate
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def snapshot(root, proteins, species):
+def snapshot(root, proteins, species, compressed=False):
     root.mkdir(parents=True)
-    annotation = root / "annotations.tsv"
-    annotation.write_text("#query\tODB_OG\n" + "".join(f"{s}_g1\tOG1\n{s}_g2\tOG2\n" for s in species))
+    annotation = root / ("annotations.tsv.gz" if compressed else "annotations.tsv")
+    opener = gzip.open if compressed else open
+    with opener(annotation, "wt") as handle:
+        handle.write("#query\tODB_OG\n" + "".join(f"{s}_g1\tOG1\n{s}_g2\tOG2\n" for s in species))
     write_json(root / "snapshot.json", {"schema_version": 1, "version": "v12", "node": 3193,
         "proteins": [{"species": s, "odb_species": s.replace("-", "_"),
                       **file_record(proteins / (s.replace("-", "_") + "_protein.fa"))} for s in species],
-        "annotations": dict(file_record(annotation), path="annotations.tsv")})
+        "annotations": dict(file_record(annotation), path=annotation.name)})
 
 
 def test_plan_and_merge_do_not_leak_other_species_from_cache(tmp_path):
@@ -48,8 +51,10 @@ def test_plan_and_merge_do_not_leak_other_species_from_cache(tmp_path):
     assert not list(tmp_path.rglob('*.sqlite'))
 
 
+@pytest.mark.parametrize("compressed_snapshot", [False, True], ids=["plain", "gzip"])
 def test_mixed_mapping_and_cross_run_reuse(tiny_inputs, fake_odb, frozen_reference,
-                                          command_environment, workflow_project, seed_taxonomy):
+                                          command_environment, workflow_project, seed_taxonomy,
+                                          compressed_snapshot):
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     seqkit = os.environ.get("SEQKIT_BIN") or shutil.which("seqkit")
     if not snakemake or not seqkit: pytest.skip("Snakemake and seqkit required")
@@ -63,7 +68,7 @@ def test_mixed_mapping_and_cross_run_reuse(tiny_inputs, fake_odb, frozen_referen
     translate(str(Path(tiny_inputs["cds_dir"]) / "Alpha_plant_longestCDS.fa.gz"),
               original_proteins / "Alpha_plant_protein.fa", original_proteins / "Alpha_plant.json", seqkit=seqkit)
     old = root / "resources/odb_cache/v12_3193/completed"
-    snapshot(old, original_proteins, ["Alpha_plant"])
+    snapshot(old, original_proteins, ["Alpha_plant"], compressed=compressed_snapshot)
     reference = root / "resources/orthodb/v12_3193"
     reference.parent.mkdir(parents=True)
     reference.symlink_to(frozen_reference, target_is_directory=True)
