@@ -291,7 +291,6 @@ rule root_busco_species_tree:
     input:
         samples=phylogeny_samples,
         taxonomy=TAXONOMY_DB,
-        guide=phylogeny_root_guide,
         anchor_qc=f"{PHYLO_RUN}/rooting/anchor.json",
         tree=f"{PHYLO_RUN}/rooting/astral.nwk",
         tree_qc=f"{PHYLO_RUN}/rooting/astral.json",
@@ -303,7 +302,6 @@ rule root_busco_species_tree:
         qc=f"{PHYLO_RUN}/species_tree.json",
         outgroup=f"{PHYLO_RUN}/rooting/outgroup.txt",
         rooting_qc=f"{PHYLO_RUN}/rooting/outgroup.json"
-    params: guide_flag="--guide" if PHY["outgroup"] == "auto" else ""
     conda: "../envs/timetree.yaml"
     resources: mem_mb=4000
     log: f"{LOG}/{{phylo_branch}}/rooting/outgroup.log"
@@ -311,7 +309,7 @@ rule root_busco_species_tree:
         "{PYTHON:q} {input.code:q} root_species_tree --samples {input.samples:q} --taxonomy-db {input.taxonomy:q} "
         "--tree {input.tree:q} --tree-qc {input.tree_qc:q} --anchor-qc {input.anchor_qc:q} "
         "--output {output.tree:q} --qc {output.qc:q} --outgroup-file {output.outgroup:q} "
-        "--rooting-qc {output.rooting_qc:q} {params.guide_flag} {input.guide:q} > {log:q} 2>&1"
+        "--rooting-qc {output.rooting_qc:q} > {log:q} 2>&1"
 
 
 rule prepare_angiocal_calibrations:

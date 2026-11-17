@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""NCBI guide trees and conservative outgroup-species selection for both runs."""
+"""Prepare ASTRAL anchors and root inferred trees."""
 import argparse
 import json
+import sqlite3
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -30,31 +32,33 @@ def species_rows(samples):
     return dict(sorted(result.items()))
 
 
-def ncbi_tree(samples, taxonomy_db, output, taxids):
-    """Run nwkit constrain against the existing SQLite snapshot, without downloads.
-
-    In pinned nwkit 0.27.0, constrain uses lineage queries, not ETE's traversal
-    pickle. An isolated cache link supplies the frozen DB to its standard API.
-    """
-    nwkit_backend()
+@contextmanager
+def nwkit_taxonomy_cache(taxonomy_db, directory):
+    """Supply the frozen SQLite snapshot to nwkit's NCBI backend."""
     from ete4.ncbi_taxonomy.ncbiquery import DB_VERSION
-    import sqlite3
-    from nwkit.constrain import constrain_main
     database = Path(taxonomy_db).resolve()
     with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
         if db.execute("SELECT version FROM stats").fetchone()[0] != DB_VERSION:
             raise ValueError("taxonomy snapshot schema differs from ETE; prepare a compatible snapshot")
+    Path(directory).mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".ncbi-", dir=directory) as tmp:
+        cache = Path(tmp) / "ete4"
+        cache.mkdir()
+        (cache / "taxa.sqlite").symlink_to(database)
+        yield tmp
+
+
+def ncbi_tree(samples, taxonomy_db, output, taxids):
+    """Build the guide for ASTRAL's anchor from frozen NCBI lineages."""
+    nwkit_backend()
+    from nwkit.constrain import constrain_main
     rows = species_rows(samples)
     groups = {}
     for name, row in rows.items():
         groups.setdefault(row["taxid"], []).append(name)
     write_tsv(taxids, ["leaf_name", "taxid"],
               [{"leaf_name": name, "taxid": row["taxid"]} for name, row in rows.items()])
-    Path(output).parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".ncbi-", dir=Path(output).parent) as tmp:
-        cache = Path(tmp) / "ete4"
-        cache.mkdir()
-        (cache / "taxa.sqlite").symlink_to(database)
+    with nwkit_taxonomy_cache(taxonomy_db, Path(output).parent) as tmp:
         unique = Path(tmp) / "unique_taxids.tsv"
         write_tsv(unique, ["leaf_name", "taxid"], [{"leaf_name": names[0], "taxid": tid} for tid, names in groups.items()])
         args = SimpleNamespace(taxid_tsv=str(unique), species_list=None, backbone="ncbi", rank="no",
@@ -75,90 +79,23 @@ def ncbi_tree(samples, taxonomy_db, output, taxids):
             handle.write(tree.write(parser=9) + "\n")
 
 
-def apg_reference(representatives, taxids, taxonomy_db):
-    """Expand nwkit's bundled APG IV order tree using exact frozen NCBI taxids."""
-    from importlib import resources
-    from ete4 import Tree, NCBITaxa
-    from nwkit.constrain import (initialize_tree, delete_nomatch_leaves,
-                                polytomize_one2many_matches)
-    from nwkit.util import remove_singleton
-    source = resources.files("nwkit").joinpath("data_tree/apgiv.nwk")
-    tree = initialize_tree(Tree(source.read_text(), parser=0))
-    by_order = {leaf.name: leaf for leaf in tree.leaves()}
-    ncbi = NCBITaxa(dbfile=str(Path(taxonomy_db).resolve()), update=False)
-    try:
-        for name in representatives:
-            lineage_names = set(ncbi.get_taxid_translator(ncbi.get_lineage(int(taxids[name]))).values())
-            matches = set(by_order) & lineage_names
-            if len(matches) != 1:
-                raise ValueError(f"APG IV cannot resolve basal representative {name}; specify phylogeny.outgroup")
-            leaf = by_order[matches.pop()]
-            leaf.props["has_taxon"] = True
-            leaf.props["taxon_names"].append(name)
-    finally:
-        ncbi.db.close()
-    tree = delete_nomatch_leaves(tree)
-    tree = polytomize_one2many_matches(tree)
-    tree = remove_singleton(tree, verbose=False, preserve_branch_length=False)
-    return tree, file_record(source)
-
-
-def resolve_outgroup(tree, scores, reference=None, taxa=None, for_anchor=False):
-    """Select a basal lineage from the guide.
-
-    Reference resolution receives one representative per basal lineage.
-    Multi-species candidates are allowed when choosing an inference anchor.
-    """
-    nwkit_backend()
+def anchor_clade(tree, scores, taxa):
+    """Choose the smallest basal lineage in the NCBI guide for ASTRAL."""
     while len(tree.children) == 1:
         tree = tree.children[0]
-    names = set(tree.leaf_names())
-    taxa = taxa or {n: n for n in names}
     children = [set(child.leaf_names()) for child in tree.children]
     if len(children) < 2:
         raise ValueError("NCBI root has fewer than two basal lineages")
-    rank = lambda n: (-scores[n], n)
-    singletons = {}
-    for tips in children:
-        species = {taxa[n] for n in tips}
-        if len(species) == 1 and tips == {n for n in names if taxa[n] in species}:
-            singletons[min(tips, key=rank)] = sorted(tips)
+
+    def rank(tips):
+        return len({taxa[n] for n in tips}), min((-scores[n], n) for n in tips)
+
     detail = {"source": "ncbi", "basal_clade_sizes": sorted(map(len, children)),
               "basal_species_counts": sorted(len({taxa[n] for n in tips}) for tips in children)}
-    candidate = lambda tips: (len({taxa[n] for n in tips}), rank(min(tips, key=rank)))
-    if len(children) == 2:
-        if singletons:
-            return singletons[min(singletons, key=rank)], detail
-        if for_anchor:
-            return sorted(min(children, key=candidate)), detail
-        raise ValueError("NCBI root has two multi-species clades; specify phylogeny.outgroup explicitly")
-    if not singletons and not for_anchor:
-        raise ValueError("no complete single-species basal lineage; specify phylogeny.outgroup explicitly")
-    lineages = {min(tips, key=rank): sorted(tips) for tips in children}
-    representatives = sorted(lineages)
-    if reference is None:
-        raise ValueError("NCBI root is unresolved; a rooted reference or explicit phylogeny.outgroup is required")
-    try:
-        guide, source = reference(representatives)
-        while len(guide.children) == 1:
-            guide = guide.children[0]
-        if set(guide.leaf_names()) != set(representatives) or len(guide.children) != 2:
-            raise ValueError("reference root is unresolved or missing species; specify phylogeny.outgroup")
-        candidates = [c.name for c in guide.children if c.is_leaf and (for_anchor or c.name in singletons)]
-        if len(candidates) != 1:
-            raise ValueError("reference does not define a single basal lineage; specify phylogeny.outgroup")
-    except ValueError as exc:
-        if not for_anchor:
-            raise
-        detail.update(source="ncbi_smallest_basal_candidate", reference_error=str(exc))
-        return sorted(min(children, key=candidate)), detail
-    detail.update(source="nwkit_apgiv", reference=source, representatives=representatives,
-                  reference_tree=guide.write(parser=9))
-    return (lineages if for_anchor else singletons)[candidates[0]], detail
+    return sorted(min(children, key=rank)), detail
 
 
-def prepare_root(samples, metadata, output, qc, outgroup="auto", tree=None,
-                 taxonomy_db=None, for_anchor=False):
+def prepare_root(samples, metadata, output, qc, outgroup="auto", tree=None, for_anchor=False):
     if not (isinstance(outgroup, str) and outgroup.strip() or
             isinstance(outgroup, list) and outgroup and all(isinstance(n, str) and n.strip() for n in outgroup)):
         raise ValueError("outgroup must be auto, a species/sample ID or a nonempty list of IDs")
@@ -182,9 +119,7 @@ def prepare_root(samples, metadata, output, qc, outgroup="auto", tree=None,
         guide = Tree(Path(tree).read_text(), parser=9)
         if set(guide.leaf_names()) != set(rows):
             raise ValueError("rooting guide species differ from selected dataset")
-        outgroup, detail = resolve_outgroup(guide, scores,
-            reference=lambda names: apg_reference(names, {n: r["taxid"] for n, r in rows.items()}, taxonomy_db),
-            taxa=taxa, for_anchor=for_anchor)
+        outgroup, detail = anchor_clade(guide, scores, taxa)
         detail["guide"] = file_record(tree)
     outgroup = outgroup_ids(outgroup)
     validate_outgroup(rows, outgroup)
@@ -201,21 +136,35 @@ def prepare_root(samples, metadata, output, qc, outgroup="auto", tree=None,
                     "created_at": now()})
 
 
-def taxonomy_split(tree, guide):
-    """Use NWKIT's taxonomy root transfer to identify an exact molecular split."""
-    from nwkit.root import transfer_root
-    while len(guide.children) == 1:
-        guide = guide.children[0]
-    oriented = transfer_root(tree.copy(), guide)
-    # NWKIT defines the smaller reference side as outgroup, taking the first on ties.
-    outgroup = min((sorted(c.leaf_names()) for c in guide.children), key=len)
-    validate_root(oriented, outgroup)
-    return outgroup
+def taxonomy_split(tree, rows, taxonomy_db, directory):
+    """Use nwkit's default taxonomy sources to find the root split."""
+    nwkit = nwkit_backend()
+    from nwkit.root import DEFAULT_TAXONOMY_SOURCE_CHAIN, taxonomy_rooting
+
+    with nwkit_taxonomy_cache(taxonomy_db, directory) as tmp:
+        taxids = Path(tmp) / "taxids.tsv"
+        names = Path(tmp) / "species_map.tsv"
+        write_tsv(taxids, ["leaf_name", "taxid"],
+                  [{"leaf_name": name, "taxid": row["taxid"]} for name, row in rows.items()])
+        write_tsv(names, ["leaf_name", "species_label", "taxonomy_query"],
+                  [{"leaf_name": name, "species_label": species_id(row),
+                    "taxonomy_query": row.get("scientific_name") or species_id(row).replace("_", " ")}
+                   for name, row in rows.items()])
+        try:
+            rooted = taxonomy_rooting(tree.copy(), taxid_tsv=str(taxids), verbose=True,
+                                      args=SimpleNamespace(download_dir=tmp, species_map_tsv=str(names)))
+        except ValueError as exc:
+            raise ValueError(f"Automatic rooting failed. Specify phylogeny.outgroup explicitly. {exc}") from exc
+
+    outgroup = min((sorted(child.leaf_names()) for child in rooted.children), key=len)
+    detail = {"source": "nwkit", "method": "nwkit_taxonomy", "nwkit_version": nwkit.__version__,
+              "taxonomy_sources": DEFAULT_TAXONOMY_SOURCE_CHAIN.split(","),
+              "taxonomy_db": file_record(taxonomy_db)}
+    return outgroup, detail
 
 
 def root_species_tree(samples, tree, tree_qc, anchor_qc, output, qc, outgroup_file,
-                      rooting_qc, guide=None, taxonomy_db=None):
-    from ete4 import Tree
+                      rooting_qc, taxonomy_db=None):
     from ete4.parser.newick import make_parser
     from infer_phylogeny import read_tree
 
@@ -228,25 +177,12 @@ def root_species_tree(samples, tree, tree_qc, anchor_qc, output, qc, outgroup_fi
         raise ValueError("ASTRAL tree and anchor selection disagree")
     validate_root(inferred, [anchor])
     if selection["requested"] == "auto":
-        nwkit_backend()
-        try:
-            outgroup = taxonomy_split(inferred, Tree(Path(guide).read_text(), parser=9))
-            detail = {"source": "ncbi", "reference": file_record(guide)}
-        except ValueError as ncbi_error:
-            try:
-                reference, source = apg_reference(rows, {n: r["taxid"] for n, r in rows.items()}, taxonomy_db)
-                outgroup = taxonomy_split(inferred, reference)
-            except ValueError as apg_error:
-                raise ValueError(f"cannot root the inferred tree by taxonomy; specify phylogeny.outgroup "
-                                 f"(NCBI: {ncbi_error}; APG IV: {apg_error})") from apg_error
-            detail = {"source": "nwkit_apgiv", "reference": source, "ncbi_error": str(ncbi_error)}
-        detail["method"] = "nwkit_taxonomy"
+        outgroup, detail = taxonomy_split(inferred, rows, taxonomy_db, Path(output).parent)
     else:
         outgroup = outgroup_ids(selection["outgroup"])
         detail = {"source": "explicit", "method": "exact_outgroup"}
 
-    # NWKIT 0.27 transfers a root on a copy. Apply the verified split to the
-    # original with numerical supports treated as edge attributes by ETE.
+    # Apply the split to the original with numerical supports as edge attributes.
     for node in inferred.traverse():
         if not node.is_leaf and not node.is_root and node.name:
             node.support = float(node.name)
@@ -283,12 +219,10 @@ if __name__ == "__main__":
     p.add_argument("--outgroup", default="auto")
     p.add_argument("--outgroup-json", dest="outgroup", type=json.loads, default=argparse.SUPPRESS)
     p.add_argument("--tree")
-    p.add_argument("--taxonomy-db")
     p.add_argument("--for-anchor", action="store_true")
     p = sub.add_parser("root_species_tree")
     for name in ["samples", "tree", "tree-qc", "anchor-qc", "output", "qc", "outgroup-file", "rooting-qc"]:
         p.add_argument("--" + name, required=True)
-    p.add_argument("--guide")
     p.add_argument("--taxonomy-db")
     args = vars(parser.parse_args())
     globals()[args.pop("action")](**args)

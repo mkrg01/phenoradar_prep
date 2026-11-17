@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
 import sys
 
@@ -11,7 +12,7 @@ import yaml
 
 from common import RANDOM_SEED, read_tsv, write_tsv
 from species_traits import read_species_traits
-from phylogeny_root import ncbi_tree, prepare_root, resolve_outgroup, root_species_tree, taxonomy_split
+from phylogeny_root import anchor_clade, ncbi_tree, prepare_root, root_species_tree
 from contrast_pairs import prepare, summarize, skim
 from plot_contrast_tree import plot
 
@@ -49,36 +50,14 @@ def test_ncbi_guide_uses_only_frozen_sqlite(tmp_path, tiny_inputs, monkeypatch):
     assert Path(tiny_inputs["taxonomy_db"]).read_bytes() == original
 
 
-def test_rooting_uses_ncbi_split_and_rejects_multi_species_side(tmp_path):
+def test_anchor_prefers_the_smallest_ncbi_lineage():
     from ete4 import Tree
-    scores = dict.fromkeys("OABCD", 90)
-    name, record = resolve_outgroup(Tree("(O,((A,B),(C,D)));", parser=9), scores,
-                                   reference=lambda *a: pytest.fail("unnecessary reference lookup"))
-    assert name == ["O"] and record["source"] == "ncbi"
-    with pytest.raises(ValueError, match="multi-species"):
-        resolve_outgroup(Tree("((A,B),(C,D));", parser=9), scores)
-
-
-def test_rooting_reference_preserves_every_basal_lineage():
-    from ete4 import Tree
-    scores = {"Out_species": 50, "A_species": 90, "A_other": 80, "B_species": 85}
-    tree = Tree("(Out_species,(A_species,A_other),B_species);", parser=9)
-    calls = []
-    def reference(names):
-        calls.append(names)
-        return Tree("(Out_species,(A_species,B_species));", parser=9), {"test": True}
-    name, record = resolve_outgroup(tree, scores, reference)
-    assert name == ["Out_species"] and record["source"] == "nwkit_apgiv"
-    assert calls == [["A_species", "B_species", "Out_species"]]
-
-
-@pytest.mark.parametrize("guide", ["(A_species,(O_species,B_species));", "(O_species,A_species);"])
-def test_rooting_never_selects_partial_or_unresolved_basal_clade(guide):
-    from ete4 import Tree
-    tree = Tree("(O_species,(A_species,A_other),B_species);", parser=9)
-    with pytest.raises(ValueError):
-        resolve_outgroup(tree, {n: 90 for n in tree.leaf_names()},
-                         reference=lambda names: (Tree(guide, parser=9), {}))
+    scores = {"O": 80, "A": 95, "B": 100, "C": 90, "D": 97}
+    taxa = {name: name for name in scores}
+    clade, record = anchor_clade(Tree("(O,(A,B),(C,D));", parser=9), scores, taxa)
+    assert clade == ["O"] and record["basal_species_counts"] == [1, 2, 2]
+    clade, _ = anchor_clade(Tree("((A,B),(C,D));", parser=9), scores, taxa)
+    assert clade == ["A", "B"]
 
 
 def contrast_inputs(tmp_path):
@@ -283,19 +262,14 @@ def test_both_workflow_branches_infer_with_automatic_root(tmp_path, command_envi
     assert not (result / "orthogroups/expression").exists() and not (result / "orthogroups/mapping").exists()
 
 
-def test_auto_outgroup_keeps_all_samples_of_basal_species():
+def test_anchor_counts_biological_species():
     from ete4 import Tree
     scores = {"O_r1": 90, "O_r2": 99, "A": 90, "B": 90, "C": 90}
     taxa = {n: "O" if n.startswith("O_") else n for n in scores}
-    tips, detail = resolve_outgroup(Tree("((O_r1,O_r2),(A,(B,C)));", parser=9), scores, taxa=taxa)
+    tips, detail = anchor_clade(Tree("((O_r1,O_r2),(A,(B,C)));", parser=9), scores, taxa)
     assert tips == ["O_r1", "O_r2"] and detail["basal_species_counts"] == [1, 3]
-    def reference(names):
-        assert names == ["A", "B", "O_r2"]
-        return Tree("(O_r2,(A,B));", parser=9), {}
-    tips, detail = resolve_outgroup(Tree("((O_r1,O_r2),A,(B,C));", parser=9), scores, reference, taxa)
-    assert tips == ["O_r1", "O_r2"] and detail["source"] == "nwkit_apgiv"
-    with pytest.raises(ValueError, match="complete single-species"):
-        resolve_outgroup(Tree("(O_r1,O_r2,(A,B,C));", parser=9), scores, taxa=taxa)
+    tips, detail = anchor_clade(Tree("((O_r1,O_r2),A,(B,C));", parser=9), scores, taxa)
+    assert tips == ["O_r1", "O_r2"] and detail["basal_species_counts"] == [1, 1, 2]
 
 
 @pytest.mark.parametrize("selector", ["Out_species", "Out species", "Out_species_run_one", "auto"])
@@ -327,18 +301,30 @@ def test_root_validator_accepts_complete_clade_and_rejects_nonmonophyly(tmp_path
             rooted_tree(path, names, invalid)
 
 
-def test_automatic_anchor_and_multispecies_root_are_independent(tmp_path):
+@pytest.mark.parametrize("source", ["ncbi", "opentree", "timetree", "failure"])
+def test_automatic_anchor_and_multispecies_root_are_independent(tmp_path, tiny_inputs, monkeypatch, source):
     from ete4 import Tree
     from itertools import combinations
     from common import write_json
     from phylogeny_outgroup import validate_root
+    from nwkit import root as nwkit_root
 
     samples, metadata, guide, anchor, anchor_qc = [
         tmp_path / name for name in ["samples.tsv", "metadata.tsv", "guide.nwk", "anchor.txt", "anchor.json"]]
     scores = {"O1": 95, "O2": 90, "A": 98, "B": 100, "C": 99}
-    write_tsv(samples, ["species", "species_id", "taxid", "cds"], [
-        {"species": name, "species_id": name, "taxid": i, "cds": "unused"}
-        for i, name in enumerate(scores, 1)])
+    taxonomy_db = tiny_inputs["taxonomy_db"]
+    with sqlite3.connect(taxonomy_db) as db:
+        for taxid, name in enumerate(("Outgroup", "Ingroup"), 3):
+            db.execute("INSERT INTO species VALUES (?,2,?,'','family',?)",
+                       (taxid, name, f"{taxid},2,1"))
+        for taxid, name in enumerate(scores, 100):
+            parent = (3 if name.startswith("O") else 4) if source == "ncbi" else 2
+            track = f"{taxid},{parent},2,1" if parent != 2 else f"{taxid},2,1"
+            db.execute("INSERT INTO species VALUES (?,?,?,'','species',?)",
+                       (taxid, parent, f"Plant {name}", track))
+    write_tsv(samples, ["species", "species_id", "scientific_name", "taxid", "cds"], [
+        {"species": name, "species_id": f"Plant_{name}", "scientific_name": f"Plant {name}",
+         "taxid": i, "cds": "unused"} for i, name in enumerate(scores, 100)])
     write_tsv(metadata, ["species", "busco_percent"], [
         {"species": name, "busco_percent": score} for name, score in scores.items()])
     guide.write_text("((O1,O2),(A,(B,C)));\n")
@@ -351,7 +337,32 @@ def test_automatic_anchor_and_multispecies_root_are_independent(tmp_path):
         ["astral.nwk", "astral.json", "species_tree.nwk", "species_tree.json", "outgroup.txt", "outgroup.json"]]
     raw.write_text("(O1:2,(O2:3,(A:4,(B:5,C:6)0.8:7)0.9:8):2);\n")
     write_json(raw_qc, {"astral_root_anchor": "O1", "outgroup": ["O1"], "branch_length_method": "CASTLES-II"})
-    root_species_tree(samples, raw, raw_qc, anchor_qc, output, qc, outgroup, rooting_qc, guide=guide)
+    attempts = []
+
+    def external_guide(reference):
+        def lookup(tree, args):
+            attempts.append(reference)
+            names, _, _ = nwkit_root._get_timetree_name_mapping(tree, args)
+            assert set(names) == {f"Plant {name}" for name in scores}
+            if source != reference:
+                raise ValueError(f"no {reference} guide")
+            return {"O1", "O2"}, set(scores), set()
+        return lookup
+
+    monkeypatch.setattr(nwkit_root, "_build_opentree_reference_tree", external_guide("opentree"))
+    monkeypatch.setattr(nwkit_root, "_build_timetree_reference_tree", external_guide("timetree"))
+    args = (samples, raw, raw_qc, anchor_qc, output, qc, outgroup, rooting_qc)
+    if source == "failure":
+        with pytest.raises(ValueError, match=r"Specify phylogeny\.outgroup.*ncbi:.*opentree:.*timetree:"):
+            root_species_tree(*args, taxonomy_db=taxonomy_db)
+        assert attempts == ["opentree", "timetree"] and not output.exists()
+        prepare_root(samples, metadata, anchor, anchor_qc, outgroup=["O1", "O2"], for_anchor=True)
+        root_species_tree(*args)
+        assert attempts == ["opentree", "timetree"]
+        assert outgroup.read_text().splitlines() == ["O1", "O2"]
+        return
+    root_species_tree(*args, taxonomy_db=taxonomy_db)
+    assert attempts == {"ncbi": [], "opentree": ["opentree"], "timetree": ["opentree", "timetree"]}[source]
     assert outgroup.read_text().splitlines() == ["O1", "O2"]
     report = json.loads(qc.read_text())
     assert report["astral_root_anchor"] == "O1" and report["outgroup"] == ["O1", "O2"]
@@ -363,5 +374,3 @@ def test_automatic_anchor_and_multispecies_root_are_independent(tmp_path):
     assert final.common_ancestor(["B", "C"]).support == pytest.approx(0.8)
     assert all(final.get_distance(a, b) == pytest.approx(initial.get_distance(a, b))
                for a, b in combinations(scores, 2))
-    with pytest.raises(ValueError, match="No root bipartition"):
-        taxonomy_split(initial, Tree("((O1,A),(O2,(B,C)));", parser=9))

@@ -21,7 +21,6 @@ rule prepare_ncbi_guide:
 rule prepare_phylogeny_anchor:
     input:
         samples=phylogeny_samples,
-        taxonomy=TAXONOMY_DB,
         metadata=f"{META}/metadata_high_busco.tsv",
         tree=phylogeny_root_guide,
         code=f"{SCRIPTS}/phylogeny_root.py",
@@ -38,7 +37,7 @@ rule prepare_phylogeny_anchor:
     shell:
         "{PYTHON:q} {input.code:q} prepare_root --samples {input.samples:q} --metadata {input.metadata:q} "
         "--output {output.anchor:q} --qc {output.qc:q} --outgroup-json {params.outgroup:q} "
-        "--for-anchor --taxonomy-db {input.taxonomy:q} "
+        "--for-anchor "
         "{params.tree_flag} {input.tree:q} > {log:q} 2>&1"
 
 

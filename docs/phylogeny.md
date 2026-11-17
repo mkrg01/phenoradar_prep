@@ -60,16 +60,15 @@ Each selector expands to all selected samples of that biological species.
 The complete group must lie on one side of a split in the molecular tree;
 a nonmonophyletic group stops inference. No extra species are added.
 
-`auto` chooses one ASTRAL anchor from a candidate basal lineage using the frozen
-NCBI guide and nwkit's APG IV order tree. BUSCO completeness ranks the samples
-within that lineage. An explicit outgroup uses the first sample in sorted order
-as the anchor. Review `rooting/anchor.json` before inference.
+`auto` chooses the smallest basal lineage in the frozen NCBI guide by species
+count and uses its most BUSCO-complete sample as the ASTRAL anchor. An explicit
+outgroup uses the first sample in sorted order. See `rooting/anchor.json`.
 
-After inference, automatic rooting uses nwkit's taxonomy root transfer with the
-NCBI guide, then the APG IV reference if needed. The final outgroup can contain
-multiple species. If neither reference defines a split present in the molecular
-tree, specify the outgroup explicitly. Explicit lists must match an entire
-side of an existing split. Review `rooting/outgroup.json` for the final choice.
+After inference, nwkit tries NCBI, OpenTree, and TimeTree in that order. The NCBI
+step uses the frozen taxonomy. The other two query their services by scientific
+name. If the references cannot resolve a split, check `rooting/outgroup.log`
+under the analysis logs and specify `phylogeny.outgroup` explicitly. Review
+`rooting/outgroup.json` for the final split.
 
 Rooting preserves the inferred topology and branch lengths. A new root splits
 its edge at the midpoint. treePL uses the rooted split for dating. The branch lengths

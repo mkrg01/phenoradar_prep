@@ -16,7 +16,7 @@ kegg:
   ambiguity: duplicate  # Multi-KO orthogroups: duplicate TPM to each KO, drop the OG, or error.
 phylogeny:
   trees: [all]  # Choose from all, phenotyped, and representatives. [] skips inference.
-  outgroup: auto  # Infer a basal group from taxonomy, or supply species/sample ID(s).
+  outgroup: auto  # Try NCBI, OpenTree, and TimeTree, or supply species/sample IDs.
   max_markers: null  # All eligible BUSCO markers; a positive integer caps by species coverage.
   min_protein_length: 100  # Minimum known amino acids per extracted/trimmed sequence.
   max_unknown_fraction: 0.05  # Maximum unknown amino-acid fraction in prepared proteins.
