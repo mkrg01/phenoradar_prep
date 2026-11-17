@@ -219,6 +219,9 @@ that manage mapping and analysis jobs. The default build controller requests
 four CPUs. Checksum verification uses up to four threads, limited to allocated
 CPUs.
 
+Each `translate_cds` job requests one CPU and 16 GB, including jobs that
+retrieve a cached translation. Use `per_job_resources.translate_cds` to override it.
+
 OG expression aggregation processes up to 50 runs per job. Set
 `per_job_resources.aggregate_tpm` for each batch (default: one CPU and 2 GB).
 Logs are named `orthogroups/expression/batch_*.log`; retries reuse completed runs.

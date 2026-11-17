@@ -14,7 +14,7 @@ rule translate_cds:
     threads: 1
     log: f"{LOG}/translate/{{species}}.log"
     conda: "../envs/seqkit.yaml"
-    resources: mem_mb=2000
+    resources: mem_mb=16000
     shell:
         "{PYTHON:q} {input.code:q} --cds {input.cds:q} --output {output.protein:q} "
         "--provenance {output.provenance:q} --seqkit {params.seqkit:q} --table {params.table} "

@@ -94,8 +94,14 @@ def test_hundred_species_chunks_and_cpu_dependent_batches(
     assert all(path.stat().st_mtime_ns == stamp for path, stamp in before.items())
 
 
-@pytest.mark.parametrize('limits', [{}, {'cpus': 9, 'mem_gb': 64}])
-def test_translation_rules_use_individual_slurm_jobs(tiny_inputs, workflow_project, seed_taxonomy, tmp_path, limits):
+@pytest.mark.parametrize('limits, memory_override, expected_memory', [
+    ({}, None, 16000),
+    ({'cpus': 9, 'mem_gb': 64}, None, 16000),
+    ({'cpus': 9, 'mem_gb': 64}, 8, 8000),
+])
+def test_translation_rules_use_individual_slurm_jobs(
+    tiny_inputs, workflow_project, seed_taxonomy, tmp_path, limits, memory_override, expected_memory,
+):
     from prepare_metadata import prepare
     snakemake = shutil.which('snakemake')
     if not snakemake:
@@ -109,6 +115,8 @@ def test_translation_rules_use_individual_slurm_jobs(tiny_inputs, workflow_proje
     from phase_config import write_profile
     slurm = yaml.safe_load((ROOT/'config/build.yaml').read_text())['execution']
     slurm['total_limits'].update(limits)
+    if memory_override is not None:
+        slurm['per_job_resources']['translate_cds'] = {'mem_gb': memory_override}
     profile = write_profile(tmp_path/'profile', slurm)
     result = subprocess.run([snakemake, '--snakefile', str(ROOT/'workflow/Snakefile'),
         '--configfile', str(override), '--profile', str(profile), '--dry-run','--',*targets],
@@ -117,6 +125,7 @@ def test_translation_rules_use_individual_slurm_jobs(tiny_inputs, workflow_proje
     assert result.returncode == 0, output
     assert 'Group job' not in output, output
     assert output.count('rule translate_cds:') == 2, output
+    assert f' mem_mb={expected_memory}' in output
     if limits:
         assert 'workflow_cpus=1' in output
-        assert 'workflow_mem_mb=2000' in output
+        assert f'workflow_mem_mb={expected_memory}' in output
