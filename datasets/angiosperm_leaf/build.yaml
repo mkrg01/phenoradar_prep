@@ -60,9 +60,9 @@ execution:
       time: 60-00:00:00
 storage:
   keep_intermediates: false
-  scratch_root: auto
+  temporary_directory: auto
   allow_shared_scratch: true
   compact_logs: true  # Archive native ODB logs on every scheduler.
   max_bytes: null  # Measure storage without imposing a project capacity budget.
   max_inodes: null
-  interval_seconds: 60
+  interval_seconds: 300  # Interval between disk usage checks during a job.

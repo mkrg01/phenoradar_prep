@@ -1,8 +1,8 @@
 """Accepted configuration keys, including optional tool-specific overrides."""
 KEYS = {
     "": "run_name selection translation odb alignment kegg phylogeny storage "
-        "trait trait_encoding exclude_species input_root build_manifest translation_cache expression_cache output_root work_root log_root taxonomy_db",
-    "storage": "keep_intermediates scratch_root compact_logs max_bytes max_inodes interval_seconds "
+        "trait exclude_species input_root build_manifest translation_cache expression_cache output_root work_root log_root taxonomy_db",
+    "storage": "keep_intermediates temporary_directory compact_logs max_bytes max_inodes interval_seconds "
                "scratch_min_free_bytes scratch_min_free_inodes scratch_max_bytes scratch_max_inodes "
                "scratch_reserve_bytes scratch_reserve_inodes allow_shared_scratch "
                "start_fraction stop_fraction series_max_bytes task_limits projection_factor",
@@ -20,14 +20,34 @@ KEYS = {
 }
 
 
+def normalize_storage_directory(storage):
+    """Read the old key, including when a legacy override is merged with new defaults."""
+    if not isinstance(storage, dict) or "scratch_root" not in storage:
+        return storage
+    normalized = dict(storage)
+    normalized["temporary_directory"] = normalized.pop("scratch_root")
+    return normalized
+
+
+def without_trait_encoding(config):
+    if not isinstance(config, dict) or "trait_encoding" not in config:
+        return config
+    if config["trait_encoding"] is not None:
+        raise ValueError("trait_encoding has been removed; use 0, 1 or a blank in the species trait table")
+    return {key: value for key, value in config.items() if key != "trait_encoding"}
+
+
 def validate_keys(config):
     """Reject unknown keys and malformed sections before building the DAG."""
+    config = without_trait_encoding(config)
     for section, keys in KEYS.items():
         values = config
         for part in section.split(".") if section else []:
             values = values.get(part, {})
         if not isinstance(values, dict):
             raise ValueError(f"{section or 'configuration'} must be a mapping")
+        if section == "storage":
+            values = normalize_storage_directory(values)
         unknown = sorted(set(values) - set(keys.split()), key=str)
         if unknown:
             paths = [f"{section}.{key}" if section else str(key) for key in unknown]
@@ -69,9 +89,11 @@ def validate_keys(config):
         if trait in {"species", "role", "group", "representative", "is_representative",
                      "n_species_in_group", "n_samples_in_group", "species_id", "contrast_pair_id"}:
             raise ValueError("trait conflicts with a reserved output column")
-    from trait_encoding import validate_mapping
-    validate_mapping(config.get("trait_encoding"))
     phylogeny = config.get("phylogeny", {})
+    if "min_taxa" in phylogeny:
+        fraction = phylogeny["min_taxa"]
+        if type(fraction) not in {int, float} or not 0 <= fraction <= 1:
+            raise ValueError("phylogeny.min_taxa must be a species fraction from 0 to 1, e.g. 0.5 for 50%")
     max_markers = phylogeny.get("max_markers")
     if max_markers is not None and (type(max_markers) is not int or max_markers <= 0):
         raise ValueError("phylogeny.max_markers must be a positive integer or null")

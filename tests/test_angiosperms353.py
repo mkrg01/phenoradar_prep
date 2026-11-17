@@ -391,7 +391,7 @@ def test_screen_batches_of_50_reuse_markers_after_failed_search(tmp_path, monkey
     samples = [dict(run=f'ERR{n}', taxid='10', cds=record(cds)) for n in range(101)]
     output = tmp_path / 'screen'
     kwargs = dict(cache=tmp_path, taxonomy=taxonomy, output=output, batch_size=50, blat=sys.executable,
-                  config={'storage': {'scratch_root': 'workspace'}})
+                  config={'storage': {'temporary_directory': 'workspace'}})
     with pytest.raises(ValueError, match='simulated search failure'):
         qc.screen(samples, **kwargs)
     assert (output / 'batches/0001/markers.json.gz').is_file()

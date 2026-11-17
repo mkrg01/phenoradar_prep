@@ -29,3 +29,24 @@ def test_confirm_matches_run_and_biosample_species(monkeypatch, bio_id):
     else:
         with pytest.raises(ValueError, match="BioSample organism"):
             ncbi.confirm("SRR1", "11", taxonomy)
+
+
+@pytest.mark.parametrize("bio_id", ["12", "22"])
+def test_confirm_matches_submitted_taxid_without_a_taxonomy_snapshot(monkeypatch, bio_id):
+    xml = {
+        "sra": """<EXPERIMENT_PACKAGE_SET><EXPERIMENT_PACKAGE>
+          <SAMPLE><IDENTIFIERS><EXTERNAL_ID>SAMN1</EXTERNAL_ID></IDENTIFIERS>
+          <SAMPLE_NAME><TAXON_ID>12</TAXON_ID></SAMPLE_NAME></SAMPLE>
+          <RUN_SET><RUN accession="SRR1"/></RUN_SET>
+        </EXPERIMENT_PACKAGE></EXPERIMENT_PACKAGE_SET>""",
+        "biosample": f"""<BioSampleSet><BioSample accession="SAMN1">
+          <Description><Organism taxonomy_id="{bio_id}"/></Description>
+        </BioSample></BioSampleSet>""",
+    }
+    ncbi = NCBISamples()
+    monkeypatch.setattr(ncbi, "fetch", lambda database, accession: ElementTree.fromstring(xml[database]))
+    if bio_id == "12":
+        assert ncbi.confirm("SRR1", "12")["taxid"] == "12"
+    else:
+        with pytest.raises(ValueError, match="BioSample organism does not match"):
+            ncbi.confirm("SRR1", "12")

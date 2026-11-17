@@ -2,60 +2,54 @@
 
 [Documentation](index.md) · [BUSCO phylogeny](phylogeny.md)
 
-Dating currently supports angiosperms only. It applies [AngioCal v1.0](https://doi.org/10.5281/zenodo.3828071)
-fossil minima to the existing rooted tree with [treePL](https://doi.org/10.1093/bioinformatics/bts492).
-Each selected tree produces one dated tree in millions of years (Ma). treePL uses
-smoothing 10 and a root maximum of 154 Ma, following the young-tree settings in
-[Zuntini et al. (2024)](https://doi.org/10.1038/s41586-024-07324-0).
+The dating branch fits divergence ages to a rooted, bifurcating angiosperm
+tree using [AngioCal v1.0](https://zenodo.org/records/3828071) fossil minima
+and [treePL](https://academic.oup.com/bioinformatics/article/28/20/2689/203074).
+The input tree has branch lengths in substitutions per site. The dated tree
+reports branch lengths in millions of years (Ma).
 
-Enable dating with `phylogeny.dating.enabled: true` in `analysis.yaml` and select
-`phylogeny.trees: [phenotyped]` or `[all]`. Both are supported if requested together.
-The input requires the selected tips' NCBI TaxIDs and the frozen taxonomy database.
+## Configuration and execution
+
+The supplied analysis config enables dating for the `all` tree. Dating
+supports `all`, `phenotyped`, or both under `phylogeny.trees` and uses the
+frozen NCBI TaxIDs and taxonomy. Set `phylogeny.dating.enabled: false` before
+preparing an analysis with non-angiosperms or `representatives`.
 
 ```bash
 ./run_analysis.sh submit --analysis results/leaf/downstream/c4 --target phylogeny_calibrations
 ./run_analysis.sh submit --analysis results/leaf/downstream/c4 --target timetree
 ```
 
-The first target prepares the fossil report for review. The second also prepares
-missing placements, fits the dated tree, and plots it. Enabled dating runs with
-`all` too.
+Run the first target to review fossil placements before fitting ages. The
+`timetree` target includes missing prerequisites. Dating also runs with
+`all` when enabled.
 
-NWKIT places stem fossils where the sampled clade and adjacent lineages agree
-with the frozen NCBI taxonomy. When the closest sister is absent, the minimum
-can apply to an older sampled ancestor. Crown fossils require reviewed anchors.
-To include them or override a stem placement, set `inputs.fossil_calibration_map`
-to a TSV with columns `fossil_id`, `left_species`, and `right_species`. The
-anchors identify the calibrated MRCA in each requested tree. Use distinct species
-representing the two sides of the intended divergence. The workflow freezes this
-file when preparing the analysis.
+## Review fossil placements
 
-In `phylogeny/<set>/angiocal/`, inspect `fossils.tsv` for placements, exclusions
-and references, and `calibrations.tsv` for accepted minima. When multiple fossils
-map to a node, its strongest minimum is used and all records remain in the report.
-Dating requires at least one applicable fossil minimum.
+NWKIT maps stem fossils where the sampled clade and adjacent lineages agree
+with the frozen NCBI taxonomy. An unsampled sister lineage can move the
+minimum to an older sampled ancestor. Crown fossils require reviewed anchors.
+To add a crown placement or override a stem placement, set
+`inputs.fossil_calibration_map` to a TSV with `fossil_id`, `left_species`,
+and `right_species`. Use two species spanning the intended divergence on each
+selected tree. The file is frozen when the analysis is prepared.
 
-In `phylogeny/<set>/dating/`, `species_tree.dated.nwk` and `node_ages.tsv`
-contain the result. `treepl.conf`, `treepl.log` and `provenance.json` record the
-fit, checks, root age and whether it reached the upper bound. An estimate at 154
-Ma is constrained by that upper bound. The dates are conditional on the input
-topology, fossil placements, branch lengths, and smoothing.
+Check `phylogeny/<set>/angiocal/fossils.tsv` for placements, exclusions, and
+sources. The dating fit requires at least one applicable fossil minimum.
+When several fossils calibrate the same node, the oldest minimum is used and
+the full evidence is kept in the report.
 
-The workflow then writes `species_tree.dated.pdf` and `species_tree.dated.svg`
-as vector figures and `species_tree.dated.png` at 600 dpi in the same directory.
-The plot is 178 mm wide and shows the time axis, the configured trait, and
-NCBI families. Each family bar spans consecutive tips assigned to that family.
-The plot labels family bars containing at least one tip with trait state `1`.
-Leader lines connect the labels to their bars. If space is limited, the plot
-prioritizes longer bars.
-`species_tree.dated.tips.tsv` lists tips from top to bottom with species names,
-families, and original trait labels. The plot uses the estimated node ages and
-requests one CPU and 1 GB of memory.
+## Interpret the dated tree
 
-Placement and dating each use one CPU and request 4 GB by default. The dating
-environment installs checksum-verified copies of treePL, NWKIT, and the AngioCal
-workbook once. Jobs reuse the frozen taxonomy snapshot and the environment's copy
-of the workbook, so neither step requires external requests.
+treePL fits one tree with a fixed smoothing value of 10 and a maximum age of
+154 Ma at the root of the **sampled** tree. Zuntini et al. tested multiple
+smoothing values and used 154 Ma as an upper bound on crown angiosperms in
+their young-tree scenario. Check which clade your sampled root represents
+before interpreting its age. [Zuntini et al. (2024)](https://doi.org/10.1038/s41586-024-07324-0)
 
-Use the original release for an existing frozen analysis. Prepare a new
-analysis with this configuration to use AngioCal and treePL.
+In `phylogeny/<set>/dating/`, use `species_tree.dated.nwk` and
+`node_ages.tsv` for ages. Check `provenance.json` and `treepl.log` for the fit
+and whether the root reached its bound. Ages are conditional on the input
+tree, calibrations, and smoothing. Figures (`PDF`, `SVG`, and `PNG`) show the
+time axis, configured trait, and families. The adjacent `*.tips.tsv` lists tips
+in figure order.

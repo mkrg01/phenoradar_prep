@@ -18,7 +18,7 @@ onstart:
     from slurm_submit import configure_scheduler
     configure_scheduler(workflow)
 
-from common import RANDOM_SEED
+from common import RANDOM_SEED, existing_product
 from configuration import validate_keys, validate_analysis
 from layout import input_layout, run_layout
 INPUTS, BUSCO_FULL, SPECIES_LIST, FOSSIL_MAP = input_layout(config.get("input_root", "input"))
@@ -55,15 +55,12 @@ if config["kegg"]["ambiguity"] not in {"duplicate", "drop", "error"}:
     raise WorkflowError("kegg.ambiguity must be duplicate, drop, or error")
 PHY = dict(config["phylogeny"], busco_full_dir=BUSCO_FULL,
            translation_table=config["translation"]["table"], trait=config["trait"])
-for key in ["min_protein_length", "min_taxa"]:
-    if type(PHY[key]) is not int or PHY[key] <= 0:
-        raise WorkflowError(f"phylogeny.{key} must be a positive integer")
+if type(PHY["min_protein_length"]) is not int or PHY["min_protein_length"] <= 0:
+    raise WorkflowError("phylogeny.min_protein_length must be a positive integer")
 if type(PHY["max_unknown_fraction"]) not in {int, float} or not 0 <= PHY["max_unknown_fraction"] <= 1:
     raise WorkflowError("phylogeny.max_unknown_fraction must be between 0 and 1")
 if PHY["trimal_mode"] not in {"gappyout", "automated1"}:
     raise WorkflowError("phylogeny.trimal_mode must be gappyout or automated1")
-if PHY["min_taxa"] < 4:
-    raise WorkflowError("phylogeny requires min_taxa >= 4")
 if not isinstance(PHY["lineage"], str) or not PHY["lineage"].strip():
     raise WorkflowError("phylogeny.lineage must be a nonempty string")
 if type(PHY["dating"]["enabled"]) is not bool:
@@ -217,9 +214,19 @@ def odb_manifests(wildcards):
     return checkpoints.plan_incremental_odb.get().output[0] if INCREMENTAL_ODB else MANIFESTS
 
 
+def odb_chunk_file(label, suffix):
+    root = f"{CHUNKS}/{label}"
+    if suffix == "provenance.json":
+        return f"{root}/{suffix}"
+    path = f"{root}/{label}.{suffix}"
+    if suffix in {"og.annotations", "og.hits"}:
+        return str(existing_product(path, default_gzip=True))
+    return path
+
+
 def odb_source_files(wildcards, suffix):
     if not INCREMENTAL_ODB:
-        return [f'{CHUNKS}/{r["chunk"]}/' + ("provenance.json" if suffix == "provenance.json" else f'{r["chunk"]}.{suffix}') for r in chunk_rows(wildcards)]
+        return [odb_chunk_file(row["chunk"], suffix) for row in chunk_rows(wildcards)]
     paths = []
     for source in odb_plan(wildcards)["sources"]:
         if source["kind"] == "existing":
@@ -230,8 +237,7 @@ def odb_source_files(wildcards, suffix):
                 elif snapshot["schema_version"] == 1: paths.append(str(root / "annotations.tsv"))
                 else: paths.extend(str(root / snapshot["tables"][name]["table"]["path"]) for name in source["species"])
         else:
-            label = source["chunk"]
-            paths.append(f"{CHUNKS}/{label}/" + ("provenance.json" if suffix == "provenance.json" else f"{label}.{suffix}"))
+            paths.append(odb_chunk_file(source["chunk"], suffix))
     return paths
 
 
@@ -246,10 +252,6 @@ def chunk_row(wildcards):
     if len(rows) != 1:
         raise WorkflowError(f"chunk not selected: {wildcards.chunk}")
     return rows[0]
-
-
-def chunk_outputs(wildcards, suffix):
-    return [f'{CHUNKS}/{r["chunk"]}/{r["chunk"]}.{suffix}' for r in chunk_rows(wildcards)]
 
 
 def run_outputs(wildcards, suffix):

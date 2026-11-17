@@ -5,7 +5,6 @@ inputs:
   species_list: null  # Species/sample IDs, one per line; a path enables filtering, null disables it.
   fossil_calibration_map: null  # Optional reviewed AngioCal fossil ID to tree-tip mapping.
 trait: C4  # Trait-table column; use C4 when a C4 column is provided.
-trait_encoding: null  # For text states, e.g. {absent: 0, present: 1}; numeric 0/1 needs none.
 selection:
   busco_threshold: 0.5  # Minimum complete BUSCO fraction (single + duplicated); 0.5 = 50%.
 alignment:
@@ -16,31 +15,24 @@ kegg:
   enabled: true  # Include KO annotation and expression in the all target.
   ambiguity: duplicate  # Multi-KO orthogroups: duplicate TPM to each KO, drop the OG, or error.
 phylogeny:
-  trees:  # Any of all, phenotyped, representatives; [] disables tree inference.
-  - representatives
+  trees: [all]  # Choose from all, phenotyped, and representatives. [] skips inference.
   outgroup: auto  # Infer a basal group from taxonomy, or supply species/sample ID(s).
   max_markers: null  # All eligible BUSCO markers; a positive integer caps by species coverage.
   min_protein_length: 100  # Minimum known amino acids per extracted/trimmed sequence.
   max_unknown_fraction: 0.05  # Maximum unknown amino-acid fraction in prepared proteins.
-  min_taxa: 4  # Minimum distinct biological species per marker; must be at least 4.
+  min_taxa: 0.5  # Minimum fraction of selected species represented per marker.
   trimal_mode: gappyout  # Alignment trimming: gappyout or automated1.
   dating:
     # Angiosperms only: AngioCal v1.0 and treePL, with a 154 Ma root maximum.
-    enabled: false  # Date selected trees; supports all/phenotyped only.
+    enabled: true  # Date selected angiosperm trees; supports all/phenotyped only.
   contrast_pairs:
     enabled: true  # Select trait contrast pairs on the chosen trees.
   taxonomy_check:
-    enabled: false  # Review taxonomic monophyly; supports all/phenotyped only.
-    ranks:  # NCBI taxonomic ranks assessed independently.
-    - family
-    - subfamily
-    - tribe
-    - subtribe
-    - genus
+    enabled: true  # Review monophyly for all and phenotyped trees.
+    ranks: [family, subfamily, tribe, subtribe, genus]  # Check each NCBI rank separately.
     outlierlevel: 0.5  # Required focal-group fraction in a candidate core clade; (0, 1].
     collapse_monophyletic: true  # Collapse monophyletic groups in figures only.
-exclude_species:  # Species IDs (all samples) or exact sample IDs to omit before analysis.
-  - Paspalum_notatum_SRR13069628
+exclude_species: []  # Species IDs or exact sample IDs to omit before analysis.
 execution:
   scheduler: auto  # Detect the allocated job or available scheduler clients.
   partition: null  # null: cluster default; multiple: "epyc,rome,medium".
@@ -133,8 +125,8 @@ execution:
       time: "1-00:00:00"
 storage:
   keep_intermediates: false  # Remove verified successful job scratch; true retains it for debugging.
-  scratch_root: auto  # Prefer node-local temporary storage; workspace is the fallback.
+  temporary_directory: auto  # Store job temporary files on the node if possible, then use work/scratch/.
   compact_logs: true  # Archive native ODB logs on every scheduler.
   max_bytes: null  # Optional project-wide allocated-byte budget.
   max_inodes: null  # Optional unique inode budget, including directories.
-  interval_seconds: 60
+  interval_seconds: 300  # Interval between disk usage checks during a job.

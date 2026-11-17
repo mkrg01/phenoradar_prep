@@ -25,6 +25,24 @@ def test_config_and_optional_tool_defaults_cover_supported_keys():
     validate_keys({"run_name": "c4_run1"})
 
 
+@pytest.mark.parametrize("base_key,override_key", [
+    ("temporary_directory", "scratch_root"),
+    ("scratch_root", "temporary_directory"),
+])
+def test_temporary_directory_override_takes_priority_across_config_versions(tmp_path, base_key, override_key):
+    from phase_config import deep_merge, read_yaml
+
+    base = tmp_path / "base.yaml"
+    override = tmp_path / "override.yaml"
+    base.write_text(yaml.safe_dump({"storage": {base_key: "auto", "keep_intermediates": False}}))
+    override.write_text(yaml.safe_dump({"storage": {override_key: "workspace"}}))
+    config = deep_merge(read_yaml(base), read_yaml(override))
+
+    validate_keys(config)
+    validate_keys({"storage": {"scratch_root": "workspace"}})
+    assert config["storage"] == {"temporary_directory": "workspace", "keep_intermediates": False}
+
+
 @pytest.mark.parametrize("value", [3193, 33090])
 def test_odb_ncbi_tax_id_accepts_integer_taxonomy_ids(value):
     validate_keys({"odb": {"ncbi_tax_id": value}})
@@ -40,6 +58,17 @@ def test_alignment_occupancy_accepts_fractions(value):
 def test_alignment_occupancy_rejects_invalid_fractions(value):
     with pytest.raises(ValueError, match='alignment.min_sample_fraction'):
         validate_keys({'alignment': {'min_sample_fraction': value}})
+
+
+@pytest.mark.parametrize("value", [0, 0.5, 1, 0.07])
+def test_phylogeny_min_taxa_accepts_fractions(value):
+    validate_keys({"phylogeny": {"min_taxa": value}})
+
+
+@pytest.mark.parametrize("value", [None, True, False, -0.1, 1.01, 4, "0.5", float("nan")])
+def test_phylogeny_min_taxa_rejects_invalid_fractions(value):
+    with pytest.raises(ValueError, match="phylogeny.min_taxa must be a species fraction"):
+        validate_keys({"phylogeny": {"min_taxa": value}})
 
 
 @pytest.mark.parametrize("value", [None, True, False, 0, -1, 3193.0, "3193"])

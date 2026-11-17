@@ -67,7 +67,7 @@ def test_plan_uses_cds_paths_from_samples_and_tracks_discovered_tables(tmp_path)
     samples = tmp_path / "samples.tsv"
     write_tsv(samples, ["species", "cds"], rows)
     settings = {"busco_full_dir": str(tmp_path), "outgroup": "Plant_alpha",
-                "lineage": LINEAGE, "min_taxa": 4, "max_markers": 1}
+                "lineage": LINEAGE, "min_taxa": 0.5, "max_markers": 1}
     out = tmp_path / "plan"
     plan(samples, out, settings)
     expected = {row["species"]: row["cds"] for row in rows}

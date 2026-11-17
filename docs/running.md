@@ -16,9 +16,6 @@ conda env create -n phenoradar_prep -f environment.yaml
 conda activate phenoradar_prep
 ```
 
-For an existing installation, run `conda env update -n phenoradar_prep -f
-environment.yaml` to add the AGE executor dependency.
-
 The launchers use the active environment and do not activate it automatically.
 Analysis tools run inside the workflow container. Use a published release and
 prepare the image matching [VERSION](../VERSION):
@@ -40,7 +37,8 @@ Job-specific limits require an unprivileged runtime installation; a setuid
 installation must already have sufficiently strict administrator
 `mksquashfs procs` and `mksquashfs mem` limits. System settings are never edited.
 
-Continue with [building a database and running analyses](datasets.md).
+Continue with [building a database and running analyses](datasets.md). For a saved
+run, use its original release and [resume from the saved path](datasets.md#failure-and-recovery-behavior).
 
 The same launchers and configs work with both schedulers. `execution.scheduler:
 auto` first checks the current allocation, then the available client commands
@@ -74,69 +72,6 @@ available and retain finished jobs. Temporary explicit rejections are retried up
 ambiguous timeout, the launcher looks for its unique submission token in Slurm
 before proceeding. If acceptance cannot be established, it stops and keeps the
 receipt in `.snakemake/slurm_submissions/`; reconcile that receipt before retrying.
-
-New downstream analyses create a compact, verified `build_inputs/` index.
-Workers read only the selected product receipts rather than the full database.
-
-## Resuming an unfinished v0.5.3 or v0.5.4 analysis with v0.5.5
-
-After its controller and workers have ended, use the existing upgrade command:
-
-```bash
-python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/carnivory
-python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/carnivory --apply
-./run_analysis.sh submit --analysis results/leaf/downstream/carnivory
-```
-
-This narrowly audited migration backs up the saved code records and updates only
-controller execution. It retains the saved tool image, all scientific settings,
-outputs and output metadata; completed analyses cannot be migrated.
-Read-only pending-work inspection uses the existing Conda/container cache paths
-to recognize reusable outputs without installing or pulling environments.
-
-## Resuming v0.5.7 after a completion-validation failure
-
-Final native-output validation runs in the host environment, including `ete4`
-for tree checks. With v0.5.8, update that environment first:
-
-```bash
-conda env update -n phenoradar_prep -f environment.yaml
-conda activate phenoradar_prep
-python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/carnivory
-python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/carnivory --apply
-./run_analysis.sh submit --analysis results/leaf/downstream/carnivory --dry-run
-./run_analysis.sh submit --analysis results/leaf/downstream/carnivory
-```
-
-Wait for the previous controller and workers to end before migrating. The
-upgrade saves the old code records and retains scientific settings, the saved
-tool image, outputs and output metadata. Check that the preview reuses completed
-workflow steps; whole-analysis completion still requires successful validation
-and a new `completed.json`.
-
-## Upgrading an unfinished v0.4.14 through v0.4.18 analysis
-
-With a clean v0.4.19 checkout, audit compatible reuse before applying it.
-For an existing analysis, explicitly opt in to the new 50% OG occupancy condition:
-
-```bash
-python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/carnivory --min-sample-fraction 0.5
-python workflow/scripts/upgrade_analysis.py --analysis results/leaf/downstream/carnivory --min-sample-fraction 0.5 --apply
-```
-
-Run this verification with an allocated controller-sized CPU/memory budget.
-It requires an idle repository, checks the pinned predecessor and unchanged
-scientific code/environments, verifies imported artifacts (including decoded
-content when legacy plain products were compressed), and backs up the old
-records under the next `jobs/code_migration_*/` directory. Omitting
-`--min-sample-fraction` preserves the saved condition; legacy analyses retain all
-OGs with an explicit `0`. Condition changes update the frozen settings and are
-recorded with before/after values. Only verified import-job metadata is reset.
-A pinned compatibility launcher retains input/mtime/parameter/code rerun
-checks while allowing the verified unchanged tool environments to be reused.
-Use the normal submission command afterward; retain four FAMSA threads
-per OG to reuse existing alignments. New batch resource overrides use
-`per_job_resources.align_orthogroup_batch` (12 CPUs/32 GB by default).
 
 ## Targets
 

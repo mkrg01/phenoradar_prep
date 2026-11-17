@@ -17,6 +17,7 @@ from common import atomic_writer, file_record, now, read_tsv, write_json, write_
 SAFE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 COORDINATES = re.compile(r":\d+-\d+(?:\|[+-])?\Z")
 AMINO = set("ACDEFGHIKLMNPQRSTVWY")
+QUARTET_SIZE = 4
 CDSKIT_COMMIT = "218f6ed61abcac7f11dd81b17c087cb16119c39e"
 CDSKIT_MODULES = {
     "pad": "66352003e366f54caa90ac2facb41366c889a87ea54c950fa309a77b8a4e7f30",
@@ -168,6 +169,14 @@ def busco_table(path, expected_lineage):
     return complete, set(hits)
 
 
+def marker_taxon_status(species_count, occupancy, minimum_occupancy):
+    if occupancy < minimum_occupancy:
+        return "low_occupancy"
+    if species_count < QUARTET_SIZE:
+        return "too_few_taxa"
+    return "retained"
+
+
 def unique_species(samples):
     result = {}
     for row in read_tsv(samples):
@@ -177,7 +186,7 @@ def unique_species(samples):
         if species in result and row["cds"] != result[species]["cds"]:
             raise ValueError(f"conflicting CDS inputs for {species}")
         result[species] = row
-    if len({species_id(r) for r in result.values()}) < 4:
+    if len({species_id(r) for r in result.values()}) < QUARTET_SIZE:
         raise ValueError("phylogeny requires at least four selected species")
     return dict(sorted(result.items()))
 
@@ -210,10 +219,11 @@ def plan(samples, outdir, settings, outgroup_file=None):
                          "single_copy_hits": len(complete), "busco_sha256": file_record(table)["sha256"]})
     stats = []
     for marker in sorted(universe):
-        occupancy = len(represented[marker]) / len(taxa)
+        species_count = len(represented[marker])
+        occupancy = species_count / len(taxa)
         mean_length = lengths[marker] / counts[marker] if counts[marker] else 0
-        eligible = len(represented[marker]) >= settings["min_taxa"]
-        stats.append({"marker": marker, "species": len(represented[marker]), "samples": counts[marker], "occupancy": occupancy,
+        eligible = marker_taxon_status(species_count, occupancy, settings["min_taxa"]) == "retained"
+        stats.append({"marker": marker, "species": species_count, "samples": counts[marker], "occupancy": occupancy,
                       "mean_busco_length": mean_length,
                       "eligible": eligible, "selection_rank": "", "selected": False})
     # Coverage is the only biological ranking criterion. Break ties by ID for
@@ -225,7 +235,7 @@ def plan(samples, outdir, settings, outgroup_file=None):
     # YAML null becomes None, so this slice keeps every eligible marker.
     chosen = ranked[:settings["max_markers"]]
     if not chosen:
-        raise ValueError("no BUSCO markers pass selection; inspect per-marker species counts, min_taxa and input lineage")
+        raise ValueError("no BUSCO markers pass selection; check species coverage, min_taxa and input lineage")
     for row in chosen:
         row["selected"] = True
     out = Path(outdir)
@@ -233,7 +243,7 @@ def plan(samples, outdir, settings, outgroup_file=None):
     write_tsv(out / "markers.tsv", list(stats[0]), chosen)
     write_tsv(out / "marker_stats.tsv", list(stats[0]), stats)
     write_json(out / "provenance.json", {"created_at": now(), "settings": settings,
-               "samples": file_record(samples), "species": len(species),
+               "samples": file_record(samples), "species": len(species), "biological_species": len(taxa),
                "markers": len(chosen), "eligible_markers": len(ranked),
                "occupancy_definition": "species with an admissible single-copy Complete hit / all selected unique species",
                "ranking": ["occupancy descending", "BUSCO marker ID ascending (lexicographic)"],

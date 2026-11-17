@@ -12,18 +12,17 @@ from infer_phylogeny import read_tree
 from sample_identity import species_id
 from species_traits import read_species_traits
 from taxonomy_check import Taxonomy, load_samples
-from trait_encoding import read_labels
 
 
 TRAIT_COLORS = {"0": "#888888", "1": "#006C4D", "": "#EAEAEA"}
+TRAIT_LABELS = {"0": "0", "1": "1", "": "Missing"}
 TIP_FIELDS = ["plot_row", "species", "scientific_name", "taxid", "order", "family",
               "trait", "trait_state", "trait_label"]
 
 
-def tip_annotations(tips, samples, taxonomy, traits, encoding, trait):
+def tip_annotations(tips, samples, taxonomy, traits, trait):
     _, manifest = load_samples(samples)
     values = read_species_traits(traits, trait)
-    labels = {**read_labels(encoding, trait), "": "Missing"}
     db = Taxonomy(taxonomy)
     rows = []
     try:
@@ -38,10 +37,10 @@ def tip_annotations(tips, samples, taxonomy, traits, encoding, trait):
             rows.append(dict(plot_row=i, species=tip.name, scientific_name=sample["scientific_name"],
                              taxid=sample["taxid"], order=lineage.get("order", (None, ""))[1],
                              family=lineage.get("family", (None, ""))[1], trait=trait,
-                             trait_state=state, trait_label=labels[state]))
+                             trait_state=state, trait_label=TRAIT_LABELS[state]))
     finally:
         db.db.close()
-    return rows, labels
+    return rows
 
 
 def tree_segments(tree, tips, ages):
@@ -104,7 +103,7 @@ def family_labels(rows, runs, spacing):
         lower = position + spacing
 
 
-def draw(internal, terminal, root_age, rows, trait, labels, outdir):
+def draw(internal, terminal, root_age, rows, trait, outdir):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -173,7 +172,7 @@ def draw(internal, terminal, root_age, rows, trait, labels, outdir):
                                       style="italic", va="center")
 
             counts = Counter(row["trait_state"] for row in rows)
-            handles = [Patch(facecolor=color, edgecolor="#A5A5A5", linewidth=0.35, label=labels[state])
+            handles = [Patch(facecolor=color, edgecolor="#A5A5A5", linewidth=0.35, label=TRAIT_LABELS[state])
                        for state, color in TRAIT_COLORS.items() if counts[state]]
             fig.legend(handles=handles, ncol=len(handles), frameon=False,
                        loc="lower right", bbox_to_anchor=(0.976, 0.12 / height), borderaxespad=0,
@@ -185,19 +184,19 @@ def draw(internal, terminal, root_age, rows, trait, labels, outdir):
             plt.close(fig)
 
 
-def plot(tree, ages, samples, taxonomy, traits, encoding, trait, outdir):
+def plot(tree, ages, samples, taxonomy, traits, trait, outdir):
     phy = read_tree(tree)
     tips = list(phy.leaves())
-    rows, labels = tip_annotations(tips, samples, taxonomy, traits, encoding, trait)
+    rows = tip_annotations(tips, samples, taxonomy, traits, trait)
     internal, terminal, root_age = tree_segments(phy, tips, ages)
     outdir = Path(outdir)
-    draw(internal, terminal, root_age, rows, trait, labels, outdir)
+    draw(internal, terminal, root_age, rows, trait, outdir)
     write_tsv(outdir / "species_tree.dated.tips.tsv", TIP_FIELDS, rows)
     print(f"Plotted {len(rows):,} tips with {trait} and NCBI taxonomy")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ["tree", "ages", "samples", "taxonomy", "traits", "encoding", "trait", "outdir"]:
+    for name in ["tree", "ages", "samples", "taxonomy", "traits", "trait", "outdir"]:
         parser.add_argument("--" + name, required=True)
     plot(**vars(parser.parse_args()))

@@ -10,16 +10,6 @@ A **build** produces a reusable sample database: assembly, BUSCO, quantification
 OrthoDB mapping, and OG expression. An **analysis** uses that database with its
 own sample selection, traits, and optional analyses.
 
-A completed public run can be reused after a name change or TaxID update if
-both TaxIDs resolve to the same species in the configured taxonomy snapshot
-and input metadata and processing conditions agree. The new build copies and
-relabels CDS, BUSCO, abundance, and protein records as needed, retaining the
-source and taxonomy provenance. OrthoDB mapping and expression are planned
-again for these records. If both current SRA and BioSample records confirm a
-different species, the selected run starts again from assembly and the build
-records the evidence in `reuse.json`. Unresolved or inconsistent assignments,
-private inputs, and explicitly pinned references require review.
-
 ## Build a reusable database
 
 Complete [installation](running.md#installation-and-normal-execution), prepare
@@ -34,9 +24,9 @@ Use the build directory name printed by `submit` for `{build_name}` below.
 ./run_build.sh status --build results/{build_name}
 ```
 
-`submit` saves inputs and settings, verifies reusable products on Slurm, then
-submits the required jobs. Add `--prepare-locally` to import already verified
-inputs on the submit host.
+`submit` saves inputs and settings, verifies reusable products, then
+submits the required jobs through Slurm or AGE. Add `--prepare-locally` to
+import already verified inputs on the submit host.
 
 New builds first check every candidate TaxID against one frozen taxonomy snapshot,
 including builds that reuse all sample products. `taxonomy.missing_taxid: exclude`
@@ -72,8 +62,9 @@ It checks compatibility and checksums, reusing checks only for unchanged files.
 ## Run an analysis
 
 Edit [config/analysis.yaml](../config/analysis.yaml) to choose samples, the trait
-column, and optional analyses. For expression only, set `phylogeny.trees: []`,
-disable `phylogeny.contrast_pairs.enabled`, and set `inputs.species_trait: null`
+column, and optional analyses. For OG expression only, set `alignment.enabled`
+and `kegg.enabled` to `false`, use `phylogeny.trees: []`, and disable its
+dating, taxonomy check, and contrast pair flags. Set `inputs.species_trait: null`
 if traits are unused.
 Replace `{analysis_name}` with a name for your analysis.
 
@@ -90,26 +81,10 @@ Reports are overwritten on each run; `--json` prints detailed JSON instead of
 the summary while still saving TSVs. Selected counts precede tree-specific
 trait filtering and representative selection.
 
-Use the existing commands for these three tasks:
-
-| Command | Purpose |
-| --- | --- |
-| `status --analysis PATH` | Lightweight execution state, phase progress, scheduler waiting reason, and log paths |
-| `status --analysis PATH --verify` | Also verify frozen inputs and recorded completed outputs; this can read large files |
-| `submit --analysis PATH --dry-run` | Check resources and duplicate jobs, then preview pending/reusable work and rerun reasons |
-
-Normal `status` does not checksum artifacts or scan scratch storage. It reports
-unknown when Slurm observations are unavailable; a disappeared job or 100% of
-workflow steps alone does not prove whole-analysis completion. Native output
-validation and the completion record must finish too. Terminal output is a
-summary; redirected output remains JSON, and `--json` requests JSON explicitly.
-
-Analysis dry-run creates no saved run, submission files, or workflow metadata.
-For a new name it previews sample selection; exact job counts become available
-after `prepare`. For a saved run it uses the same checks as actual submission
-and distinguishes workflow steps from grouped Slurm worker jobs. Counts beyond
-unfinished checkpoints remain partial. Real submission checks again and uses
-the saved conditions; no separate resume command is needed.
+Use `status` to check the controller, workers, and logs. Use `status --verify`
+to check frozen inputs and completed outputs, including large files. Use
+`submit --analysis PATH --dry-run` to preview pending work from a saved analysis.
+A run is complete after output validation and publication of `completed.json`.
 
 Analyses inherit the database's BUSCO lineage, genetic code, and OrthoDB reference.
 The default target `all` runs enabled analyses and validates native outputs.
@@ -200,6 +175,11 @@ scientific settings. Assembly, BUSCO, and quantification form one sample unit:
 | Incomplete, same software | Resume verified checkpoints |
 | Incomplete, updated software | Restart from assembly |
 
+Completed samples and checkpoints are matched by run accession, scientific
+name, TaxID, and sample IDs. A run selected under an updated name or TaxID
+starts from assembly unless a compatible result already exists for that
+identity. See the [metadata selection policy](../datasets/README.md#selection-policy).
+
 Keep sources available until preparation finishes importing products; the new
 build then uses its own cache. Complete products can be reused without FASTQs.
 Published products may share hard links: **do not edit them in place**.
@@ -285,7 +265,7 @@ traits, software, and reference resources.
 
 ## Pinned GeneGalleon source and SIF
 
-Slurm preparation fetches GeneGalleon when sample processing needs it. To download
+Build preparation fetches GeneGalleon when sample processing needs it. To download
 in advance:
 
 ```bash

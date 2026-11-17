@@ -33,7 +33,7 @@ def dataset_project(tmp_path, tiny_inputs, monkeypatch):
     build_config = root / "config/build.yaml"
     cfg = yaml.safe_load(build_config.read_text())
     cfg['slurm'] = cfg.pop('execution')
-    cfg['storage']['scratch_root'] = 'workspace'
+    cfg['storage']['temporary_directory'] = 'workspace'
     cfg["reuse_from"] = None
     cfg["metadata"] = "input/metadata.tsv"
     cfg['busco']['cache_dir'] = None  # Synthetic GeneGalleon tests need no external reference download.
@@ -46,6 +46,8 @@ def dataset_project(tmp_path, tiny_inputs, monkeypatch):
     analysis_cfg['exclude_species'] = []  # Ignore exclusions in the user's active analysis config.
     for branch in ('alignment', 'kegg'):
         analysis_cfg[branch]['enabled'] = False  # Dedicated branch tests opt in with their own tools/references.
+    for branch in ('dating', 'taxonomy_check'):
+        analysis_cfg['phylogeny'][branch]['enabled'] = False  # Dedicated tests cover tree postprocessing.
     analysis_config.write_text(yaml.safe_dump(analysis_cfg))
     shutil.copytree(ROOT / "workflow", root / "workflow", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy2(ROOT / "run_pipeline.sh", root / "run_pipeline.sh")

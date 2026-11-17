@@ -8,12 +8,16 @@ import sys
 from pathlib import Path
 import yaml
 
+from configuration import normalize_storage_directory, without_trait_encoding
+
 
 def read_yaml(path):
     value = yaml.safe_load(Path(path).read_text())
     if not isinstance(value, dict):
         raise ValueError(f"configuration must be a mapping: {path}")
-    return value
+    if "storage" in value:
+        value["storage"] = normalize_storage_directory(value["storage"])
+    return without_trait_encoding(value)
 
 
 DEFAULT_REGISTERED_SUPPORT = 0.10

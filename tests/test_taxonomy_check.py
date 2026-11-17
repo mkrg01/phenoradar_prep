@@ -230,14 +230,13 @@ def test_snakemake_reuses_species_tree_without_gene_inputs(check_inputs, workflo
     wrapper.write_text("\n".join(line for line in (ROOT / "workflow/Snakefile").read_text().splitlines()
                                  if not line.startswith("include:") or '"rules/taxonomy_check.smk"' in line) + "\n")
     argv = [snakemake, "--snakefile", str(wrapper), "--configfile", str(override), "--cores", "1", "--"]
-    def run(target="taxonomy_check"):
+    def run():
         override.write_text(yaml.safe_dump(cfg))
-        process = subprocess.run(argv + [target], cwd=project, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        process = subprocess.run(argv + ["taxonomy_check"], cwd=project, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         assert process.returncode == 0, process.stdout + "\n" + "\n".join(p.read_text() for p in (project/"logs").rglob("*.log"))
         return process.stdout
     full = project / "results/test/phylogeny/all/taxonomy_check"
     phenotyped = project / "results/test/phylogeny/phenotyped/taxonomy_check"
-    assert "Nothing to be done" in run("phylogeny")
     run()
     assert json.loads((full/"summary.json").read_text())["candidate_species"] == 1
     assert not phenotyped.exists()

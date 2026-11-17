@@ -56,20 +56,20 @@ rule normalize_traits:
     input:
         samples=f"{META}/samples.tsv",
         traits=[PHENORADAR_TRAITS] if PHENORADAR_TRAITS else [],
-        code=f"{SCRIPTS}/trait_encoding.py",
+        code=f"{SCRIPTS}/normalize_traits.py",
         helpers=[f"{SCRIPTS}/{name}.py" for name in ["species_traits", "common", "sample_identity"]]
     output:
         traits=f"{META}/species_trait.tsv",
-        encoding=f"{META}/trait_encoding.json"
+        report=f"{META}/species_trait.json"
     params:
-        trait=config["trait"], mapping=json.dumps(config.get("trait_encoding")),
+        trait=config["trait"],
         traits_flag="--traits" if PHENORADAR_TRAITS else ""
-    log: f"{LOG}/trait_encoding.log"
+    log: f"{LOG}/normalize_traits.log"
     conda: "../envs/analysis.yaml"
     resources: mem_mb=1000
     shell:
         "{PYTHON:q} {input.code:q} --samples {input.samples:q} --output {output.traits:q} "
-        "--report {output.encoding:q} --trait {params.trait:q} --mapping {params.mapping:q} "
+        "--report {output.report:q} --trait {params.trait:q} "
         "{params.traits_flag} {input.traits:q} > {log:q} 2>&1"
 
 
@@ -78,7 +78,7 @@ rule prepare_phenoradar_metadata:
         samples=f"{META}/samples.tsv",
         metadata=f"{META}/metadata_high_busco.tsv",
         traits=rules.normalize_traits.output.traits,
-        encoding=rules.normalize_traits.output.encoding,
+        report=rules.normalize_traits.output.report,
         code=f"{SCRIPTS}/phenoradar_metadata.py",
         helpers=[f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
     output: f"{OUT}/{BASE_METADATA}"

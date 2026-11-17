@@ -43,8 +43,8 @@ sbatch run_metadata.sh update \
   --metadata work/datasets/angiosperm_leaf/20261002T000000Z/curate/metadata/metadata.tsv
 ```
 
-This reuses curated metadata without querying NCBI. Substitute the work path
-printed by the original job. For curation rule changes or processing retries, see
+This reuses the curated table from the original job. An updated TaxID for an
+accepted run still requires SRA and BioSample confirmation. For curation rule changes or processing retries, see
 [restart options](../README.md#choosing-where-to-restart).
 
 ## Building the database

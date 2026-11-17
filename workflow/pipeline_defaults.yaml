@@ -7,7 +7,6 @@ work_root: null
 log_root: null
 expression_cache: null
 trait: carnivory
-trait_encoding: null  # Text states require an explicit mapping to 0 and 1; numeric 0/1 needs none.
 selection:
   species_list: false
   busco_threshold: 0.5
@@ -35,7 +34,7 @@ phylogeny:
   max_markers: null  # All eligible BUSCO markers; a positive integer caps by species coverage.
   min_protein_length: 100
   max_unknown_fraction: 0.05
-  min_taxa: 4
+  min_taxa: 0.5
   trimal_mode: gappyout
   dating:
     # Angiosperms only: AngioCal v1.0 and treePL, with a 154 Ma root maximum.
@@ -57,12 +56,12 @@ build_manifest: null
 
 storage:
   keep_intermediates: false  # Remove verified successful job scratch; true retains it for debugging.
-  scratch_root: auto
+  temporary_directory: auto
   allow_shared_scratch: true
   compact_logs: true
   max_bytes: null
   max_inodes: null
-  interval_seconds: 60
+  interval_seconds: 300
   start_fraction: 0.85
   stop_fraction: 0.95
   series_max_bytes: 1048576

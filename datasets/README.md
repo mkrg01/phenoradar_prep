@@ -10,26 +10,25 @@ builds use separate commands.
 
 ## Selection policy
 
-New candidates must pass AMALGKIT curation for the configured `sample_group`.
-For each original `taxid` (or resolved species TaxID when configured):
+Select one run per submitted TaxID by default. Apply exact accession
+exclusions and reviewed overrides, then keep the representative in
+`accepted_samples.tsv` if its scientific name and TaxID still match. For each
+remaining TaxID, choose the eligible run with the largest positive
+`total_bases`, breaking ties by accession. New candidates must pass AMALGKIT
+curation for the configured `sample_group`.
 
-1. Apply exact accession exclusions. Other runs from the same taxid and
-   BioProject remain eligible.
-2. Keep the run in `accepted_samples.tsv`, even when a larger run appears.
-   Exclusions take precedence.
-3. Otherwise, choose the greatest positive `total_bases`, breaking ties by
-   ascending accession.
-4. Apply any optional `overrides.tsv` choice from the eligible candidates.
+When an accepted run has a new name or TaxID, it competes again under the
+updated identity. The old TaxID can select a replacement. Without a selection
+taxonomy snapshot, SRA and BioSample must both report the new TaxID. With a
+snapshot, a move to a different species is checked at species rank.
+`selection.tsv` shows the old and updated identities. Publishing a candidate
+removes the old acceptance. If the run is selected again, `record` registers it
+after processing and QC under the updated identity.
 
-Set `metadata_selection.taxonomy_database` in `build.yaml` to a fixed NCBI taxonomy SQLite
-snapshot to select one run per current species. Set `taxonomy.database` in the
-build configuration to the same path. Overrides use resolved species TaxIDs.
-Selection preserves the submitted name and TaxID and reports unresolved species.
-
-A confirmed change to another species releases the previous accepted identity.
-The run competes with eligible candidates in its current species, and the old
-species can select a replacement. Selection records the SRA and BioSample
-confirmation and retires the old acceptance when the candidate is published.
+Set `metadata_selection.taxonomy_database` in `build.yaml` to select one run per
+species in a fixed NCBI taxonomy SQLite snapshot. Set `taxonomy.database` to the
+same path for the build. Overrides use resolved species TaxIDs. The selection
+records submitted names and TaxIDs as provenance.
 
 For each NCBI refresh, prepare a new snapshot at a new path, then point both
 configurations to it before selecting or building:

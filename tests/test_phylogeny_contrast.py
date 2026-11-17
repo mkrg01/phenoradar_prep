@@ -146,28 +146,29 @@ def test_text_states_keep_source_order_after_exclusion(molecular_snapshot, tmp_p
     assert "woody" in (out / "summary_tree.svg").read_text()
 
 
-def test_encoded_traits_round_trip_through_contrast_subset_and_validation(molecular_snapshot):
+def test_legacy_encoded_traits_round_trip_through_contrast_subset_and_validation(molecular_snapshot):
     from analysis_validation import validate
     from phenoradar_metadata import prepare
-    from trait_encoding import normalize, read_labels
     source, traits = molecular_snapshot
-    rows = read_tsv(traits)
-    for row in rows:
-        row["carnivory"] = {"0": "absent", "1": "present", "": ""}[row["C4"]]
-    write_tsv(traits, list(rows[0]), rows)
+    trait_rows = read_tsv(traits)
+    write_tsv(traits, ["species", "carnivory"],
+              [dict(species=row["species"], carnivory={"0": "absent", "1": "present", "": ""}[row["C4"]])
+               for row in trait_rows])
     metadata = source / "metadata/metadata_high_busco.tsv"
     rows = read_tsv(metadata)
     for row in rows:
         row["family"] = "Testaceae"
     write_tsv(metadata, list(rows[0]), rows)
     normalized, encoding = source / "metadata/species_trait.tsv", source / "metadata/trait_encoding.json"
-    normalize(source / "metadata/samples.tsv", normalized, encoding, "carnivory", traits,
-              {"absent": 0, "present": 1})
+    write_tsv(normalized, ["species", "carnivory"],
+              [dict(species=row["species"], carnivory=row["C4"]) for row in trait_rows])
+    write_json(encoding, {"trait": "carnivory", "mapping": {"absent": 0, "present": 1}})
+    labels = {"0": "absent", "1": "present"}
     prepare(source / "metadata/samples.tsv", metadata, normalized,
             source / "metadata/species_metadata.tsv", trait="carnivory")
     out = source / "phylogeny/all/contrast"
-    report = from_tree(**inputs(source, normalized), outdir=out, trait="carnivory", trait_encoding=encoding)
-    assert report["trait_labels"] == {"0": "absent", "1": "present"}
+    report = from_tree(**inputs(source, normalized), outdir=out, trait="carnivory", trait_labels=labels)
+    assert report["trait_labels"] == labels
     plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out)
     assert "present" in (out / "summary_tree.svg").read_text()
     validate(source, trait="carnivory")
@@ -180,7 +181,7 @@ def test_encoded_traits_round_trip_through_contrast_subset_and_validation(molecu
     assert {name: after[name] for name in before} == before
     validate(source, exclusions=["E"], trait="carnivory")
     published = source / "filtered"
-    assert read_labels(published / "metadata/trait_encoding.json", "carnivory") == {"0": "absent", "1": "present"}
+    assert (published / "metadata/trait_encoding.json").read_bytes() == encoding.read_bytes()
     subset = json.loads((source / "filtered/phylogeny/all/contrast/summary.json").read_text())
     assert subset["trait_labels"] == report["trait_labels"]
     assert "run = R1, replicate_A" in (source / "filtered/phylogeny/all/contrast/summary_tree_id.svg").read_text()

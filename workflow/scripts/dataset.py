@@ -173,10 +173,9 @@ def inspect_items(store, items, analysis, requested=None, conditions=None, reusa
                     continue
                 product = chosen['product']
                 result.append({"species": item["species"], "run": item["row"]["run"],
-                               **{stage: "reuse" for stage in STAGES}, "reason": ("taxonomy updated; relabel verified upstream products"
-                                          if chosen.get('taxonomy_relabel') else ""),
+                               **{stage: "reuse" for stage in STAGES}, "reason": "",
                                "mapping": "pending_inputs" if chosen.get('reuse_mapping') is False else "reuse",
-                               "reference_id": "" if chosen.get('taxonomy_relabel') else product['cds']['sha256']})
+                               "reference_id": product['cds']['sha256']})
                 continue
             products = resolve(store, item, analysis["phylogeny"]["lineage"], need_full=True, verify_files=verify_files)
             check_conditions(products, conditions)
@@ -258,7 +257,6 @@ def plan(root, config, metadata=None, analysis_config=None, name=None, verify_fi
     if policy_record: verify(policy_record)
     from database_reuse import select
     rebuilds = {} if repair else None
-    reassignments = {}
     aliases = {alias: item for item in items for alias in (item['species'], item['row']['run'])}
     unknown = set(cfg['rebuild_samples']) - aliases.keys()
     if unknown:
@@ -267,23 +265,17 @@ def plan(root, config, metadata=None, analysis_config=None, name=None, verify_fi
     if any(i['species'] in forced and i['row'].get('reference_id') for i in items):
         raise ValueError('remove reference_id from metadata before rebuilding a pinned sample')
     reusable, errors, sources = select(cfg['reuse_from'], [i for i in items if i['species'] not in forced],
-                                      cfg, verify_files=verify_files, rebuilds=rebuilds, reassignments=reassignments)
+                                      cfg, verify_files=verify_files, rebuilds=rebuilds)
     if forced:
         rebuilds = {**(rebuilds or {}), **dict.fromkeys(forced, 'explicitly requested by rebuild_samples')}
-    if reassignments:
-        rebuilds = {**(rebuilds or {}), **{name: evidence['reason'] for name, evidence in reassignments.items()}}
     selection = {"source_metadata": source, "metadata_provenance": provenance_record, "exclusion_policy": policy_record, "excluded": excluded,
-                 "reusable": reusable, "reuse_sources": sources, "rebuilds": rebuilds or {},
-                 "taxonomy_reassignments": reassignments}
+                 "reusable": reusable, "reuse_sources": sources, "rebuilds": rebuilds or {}}
     if pilot_size is not None:
         selection['pilot'] = {'requested_samples': pilot_size, 'source_samples': source_samples,
                               'selection': 'read-volume rank strata including both endpoints'}
     report = inspect_items(cfg["store"], items, analysis, conditions=cfg["conditions"],
                            reusable=reusable, errors=errors, verify_files=verify_files,
                            rebuilds=rebuilds) + excluded_report(excluded)
-    for row in report:
-        if row['species'] in reassignments:
-            row['verification'] = 'not_required'
     if taxonomy_pending:
         for row in report:
             if row['mapping'] != 'excluded':
@@ -424,15 +416,8 @@ def _prepare(root, name, config, metadata=None, analysis_config=None, prepared_a
         else:
             from database_reuse import stage
             stage(staging, target, selection['reusable'], cfg)
-            for item in items:
-                chosen = selection['reusable'].get(item['species'])
-                if chosen and chosen.get('taxonomy_relabel'):
-                    reference, = (staging / 'work/cache/products' / item['species']).glob('*/reference.json')
-                    item['reference_id'] = json.loads(reference.read_text())['reference_id']
         reuse_receipt = {"sources": selection['reuse_sources'],
                          "samples": {s: entry['source'] for s, entry in selection['reusable'].items()}}
-        if selection['taxonomy_reassignments']:
-            reuse_receipt['taxonomy_reassignments'] = selection['taxonomy_reassignments']
         write_json(staging / 'reuse.json', reuse_receipt)
         auxiliary['reuse.json'] = dict(record(staging / 'reuse.json'), path=str(target / 'reuse.json'))
         busco_reference = taxonomy_reference = None

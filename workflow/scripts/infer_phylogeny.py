@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import tempfile
 
-from busco_phylogeny import AMINO, fasta_records
+from busco_phylogeny import AMINO, QUARTET_SIZE, fasta_records, marker_taxon_status
 from sample_identity import species_id
 from phylogeny_outgroup import outgroup_ids, read_outgroup, validate_outgroup, root_on_outgroup, validate_root
 from common import RANDOM_SEED, atomic_writer, file_record, now, read_tsv, sha256, write_json, write_tsv
@@ -30,7 +30,7 @@ def read_tree(path, expected=None):
         raise ValueError(f"expected exactly one Newick tree: {path}")
     tree = Tree(text, parser=1)
     leaves = list(tree.leaf_names())
-    if len(leaves) < 4 or len(leaves) != len(set(leaves)):
+    if len(leaves) < QUARTET_SIZE or len(leaves) != len(set(leaves)):
         raise ValueError(f"tree requires at least four unique species: {path}")
     if expected is not None and set(leaves) != set(expected):
         raise ValueError(f"tree leaf set mismatch: {path}")
@@ -42,15 +42,15 @@ def read_tree(path, expected=None):
     return tree
 
 
-def biological_taxa(names, settings):
-    source = settings.get("sample_manifest")
-    if not source:
-        return len(set(names))
-    identities = {r["species"]: species_id(r) for r in read_tsv(source)}
+def marker_coverage(names, manifest):
+    identities = {r["species"]: species_id(r) for r in read_tsv(manifest)}
+    if not identities:
+        raise ValueError(f"empty phylogeny sample manifest: {manifest}")
     unknown = set(names) - identities.keys()
     if unknown:
         raise ValueError(f"alignment samples absent from manifest: {sorted(unknown)}")
-    return len({identities[n] for n in names})
+    count = len({identities[n] for n in names})
+    return count, count / len(set(identities.values()))
 
 
 def alignment_qc(records, settings):
@@ -58,8 +58,9 @@ def alignment_qc(records, settings):
     import numpy as np
     names = [r[0] for r in records]
     if not records:
-        return [], {"status": "too_few_taxa", "taxa": 0, "sites": 0, "variable_sites": 0, "informative_sites": 0,
-                    "retained_columns_0based": []}
+        return [], {"status": marker_taxon_status(0, 0, settings["min_taxa"]),
+                    "taxa": 0, "biological_species": 0, "occupancy": 0,
+                    "sites": 0, "variable_sites": 0, "informative_sites": 0, "retained_columns_0based": []}
     if len(names) != len(set(names)) or len({len(r[1]) for r in records}) != 1:
         raise ValueError("alignment must have unique names and equal sequence lengths")
     matrix = np.frombuffer("".join(seq for _, seq in records).encode("ascii"),
@@ -79,13 +80,15 @@ def alignment_qc(records, settings):
     variable = int((observed_states >= 2).sum())
     informative = int((repeated_states >= 2).sum())
     n, length = matrix.shape
-    species_count = biological_taxa([names[i] for i in taxa], settings)
-    status = ("too_few_taxa" if species_count < settings["min_taxa"] else
-              "no_variable_sites" if variable == 0 else "retained")
+    species_count, occupancy = marker_coverage([names[i] for i in taxa], settings["sample_manifest"])
+    status = marker_taxon_status(species_count, occupancy, settings["min_taxa"])
+    if status == "retained" and variable == 0:
+        status = "no_variable_sites"
     output = [(names[i], row.tobytes().decode("ascii")) for i, row in zip(taxa, matrix)]
     retained_taxa = set(taxa.tolist())
     return output, {"status": status, "taxa_before": original_taxa, "sites_before": original_sites,
-                    "taxa": n, "biological_species": species_count, "sites": length, "variable_sites": variable, "informative_sites": informative,
+                    "taxa": n, "biological_species": species_count, "occupancy": occupancy,
+                    "sites": length, "variable_sites": variable, "informative_sites": informative,
                     "retained_columns_0based": columns.tolist(),
                     "removed_species": [name for i, name in enumerate(names) if i not in retained_taxa]}
 
@@ -96,8 +99,10 @@ def align(fasta, output, qc, command, threads, settings):
     names = [name for name, _ in inputs]
     if len(names) != len(set(names)):
         raise ValueError("duplicated species in marker FASTA")
+    species_count, occupancy = marker_coverage(names, settings["sample_manifest"])
+    status = marker_taxon_status(species_count, occupancy, settings["min_taxa"])
     argv = None
-    if biological_taxa(names, settings) >= settings["min_taxa"]:
+    if status == "retained":
         Path(output).parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix=".famsa-", dir=Path(output).parent) as tmp:
             raw = Path(tmp) / "alignment.faa"
@@ -111,15 +116,14 @@ def align(fasta, output, qc, command, threads, settings):
             original = dict(inputs)
             if any(seq.replace("-", "") != original[name] for name, seq in records):
                 raise ValueError("FAMSA changed input residues")
-            report = {"status": "retained", "taxa": len(records), "sites": len(records[0][1])}
     else:
         records = []
-        report = {"status": "too_few_taxa", "taxa": len(names), "sites": 0, "informative_sites": 0}
     with atomic_writer(output) as handle:
-        if report["status"] == "retained":
-            for name, sequence in records:
-                handle.write(f">{name}\n{sequence}\n")
-    write_json(qc, {**report, "created_at": now(), "input": file_record(fasta), "command": argv,
+        for name, sequence in records:
+            handle.write(f">{name}\n{sequence}\n")
+    write_json(qc, {"status": status, "taxa": len(names), "biological_species": species_count,
+                    "occupancy": occupancy, "sites": len(records[0][1]) if records else 0,
+                    "created_at": now(), "input": file_record(fasta), "command": argv,
                     "executable": file_record(command), "settings": settings})
 
 
@@ -185,8 +189,9 @@ def gene_tree(alignment, alignment_qc, output, qc, command, threads, seed):
 
 
 def merge(manifest, markers, tree_dir, output, coverage, qc):
-    species = read_tsv(manifest)
-    expected = {r["species"] for r in species}
+    identities = {r["species"]: species_id(r) for r in read_tsv(manifest)}
+    expected = set(identities)
+    biological_species = len(set(identities.values()))
     counts = Counter({s: 0 for s in expected})
     retained, excluded = [], []
     with atomic_writer(output) as handle:
@@ -201,7 +206,7 @@ def merge(manifest, markers, tree_dir, output, coverage, qc):
             names = set(tree.leaf_names())
             if names - expected:
                 raise ValueError(f"unexpected species in {marker}")
-            occupancy = len(names) / len(expected)
+            occupancy = len({identities[name] for name in names}) / biological_species
             counts.update(names)
             retained.append({"marker": marker, "sites": report["sites"], "tree": file_record(path),
                              "occupancy": occupancy})
@@ -213,10 +218,10 @@ def merge(manifest, markers, tree_dir, output, coverage, qc):
     report = {"created_at": now(), "retained": retained, "excluded": excluded,
               "total_gene_sites": sum(r["sites"] for r in retained),
               "mean_gene_length": sum(r["sites"] for r in retained) / len(retained) if retained else 0,
-              "species": len(expected),
+              "species": len(expected), "biological_species": biological_species,
               "gene_tree_count_distribution": [{"gene_trees": n, "species": count}
                                                for n, count in sorted(count_distribution.items())],
-              "occupancy_definition": "retained gene-tree tips / all selected unique species",
+              "occupancy_definition": "distinct biological species in each gene tree / all selected biological species",
               "status": "insufficient_coverage" if missing or not retained else "retained",
               "unrepresented_species": missing}
     write_json(qc, report)

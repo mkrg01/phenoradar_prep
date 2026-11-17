@@ -15,12 +15,13 @@ import uuid
 import yaml
 
 from common import mount_csv, now, write_json
+from configuration import normalize_storage_directory
 from storage_meter import measure, monitored
 from scratch_reservation import ScratchAdmissionError, headroom, reserve
 
 
-DEFAULTS = {'keep_intermediates': False, 'scratch_root': 'auto', 'compact_logs': True,
-            'max_bytes': None, 'max_inodes': None, 'interval_seconds': 60,
+DEFAULTS = {'keep_intermediates': False, 'temporary_directory': 'auto', 'compact_logs': True,
+            'max_bytes': None, 'max_inodes': None, 'interval_seconds': 300,
             'scratch_min_free_bytes': 0, 'scratch_min_free_inodes': 0,
             'scratch_max_bytes': None, 'scratch_max_inodes': None,
             'scratch_reserve_bytes': 0, 'scratch_reserve_inodes': 0,
@@ -31,6 +32,7 @@ TASK_KEYS = {'scratch_min_free_bytes', 'scratch_min_free_inodes', 'scratch_max_b
 
 
 def settings(storage):
+    storage = normalize_storage_directory(storage)
     unknown = set(storage) - DEFAULTS.keys()
     if unknown:
         raise ValueError(f'unknown storage settings: {sorted(unknown)}')
@@ -67,9 +69,9 @@ def settings(storage):
         settings(dict(result, task_limits={}, **values))
     if type(result['projection_factor']) not in (int, float) or not 1 <= result['projection_factor'] <= 10:
         raise ValueError('storage.projection_factor must be between 1 and 10')
-    root = result['scratch_root']
+    root = result['temporary_directory']
     if not isinstance(root, str) or (root not in {'auto', 'env', 'workspace'} and not Path(root).is_absolute()) or any(c in root for c in ':,\n\r'):
-        raise ValueError('storage.scratch_root must be auto, env, workspace or an absolute path without bind delimiters')
+        raise ValueError('storage.temporary_directory must be auto, env, workspace or an absolute path without bind delimiters')
     return result
 
 
@@ -100,7 +102,7 @@ def task_settings(storage, label, command):
 @contextmanager
 def task_scratch(root, config):
     root = Path(root).resolve()
-    requested = config['scratch_root']
+    requested = config['temporary_directory']
     if config['keep_intermediates']:
         requested = 'workspace'
     inherited = os.environ.get('PHENORADAR_TASK_SCRATCH')

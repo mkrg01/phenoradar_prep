@@ -15,7 +15,7 @@ import yaml
 
 from busco_phylogeny import busco_full_path, busco_table, extract, fasta_records, plan, prepare_cds
 from common import RANDOM_SEED, read_tsv, write_json, write_tsv
-from infer_phylogeny import alignment_qc, astral, merge, read_tree, trim
+from infer_phylogeny import align, alignment_qc, astral, merge, read_tree, trim
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -25,6 +25,12 @@ def settings(**updates):
     cfg.update(translation_table=1)
     cfg.update(updates)
     return cfg
+
+
+def alignment_settings(tmp_path, names, **updates):
+    manifest = tmp_path / "species.tsv"
+    write_tsv(manifest, ["species"], [{"species": name} for name in names])
+    return settings(sample_manifest=str(manifest), **updates)
 
 
 def table(path, rows, lineage="embryophyta_odb12"):
@@ -50,16 +56,16 @@ def test_busco_single_copy_and_lineage_validation(tmp_path):
 
 
 @pytest.mark.parametrize("limit,expected", [(2, ["4at1", "6at1"]),
-                                           (500, ["4at1", "6at1", "1at1", "3at1", "2at1", "5at1"]),
-                                           (None, ["4at1", "6at1", "1at1", "3at1", "2at1", "5at1"])])
+                                           (500, ["4at1", "6at1", "1at1", "3at1", "2at1"]),
+                                           (None, ["4at1", "6at1", "1at1", "3at1", "2at1"])])
 def test_plan_selects_highest_coverage_with_id_ties_independent_of_orders(tmp_path, limit, expected):
     # Thirty species in two orders (20 + 10): 1at1 is absent from the second
     # order. Its tied competitor 3at1 spans both orders and has longer hits.
     # Neither order representation nor match length may break the coverage tie.
     # A short BUSCO match (6at1) must remain eligible; extracted-sequence QC is separate.
-    # Low overall coverage (5at1) is eligible too, but fewer than four species is not.
+    # Exactly 50% coverage (2at1) passes, but lower coverage (5at1) does not.
     species = [f"plant_{i:02d}" for i in range(30)]
-    presence = {"1at1": set(species[:18]), "2at1": set(species[:17]),
+    presence = {"1at1": set(species[:18]), "2at1": set(species[:15]),
                 "3at1": set(species[:12] + species[20:26]), "4at1": set(species),
                 "5at1": set(species[:9]), "6at1": set(species), "7at1": set(species[:3])}
     lengths = {"1at1": 100, "2at1": 2000, "3at1": 900, "4at1": 120, "5at1": 300, "6at1": 99, "7at1": 150}
@@ -92,8 +98,10 @@ def test_plan_selects_highest_coverage_with_id_ties_independent_of_orders(tmp_pa
         assert float(stats["1at1"]["occupancy"]) == pytest.approx(0.6)
         assert stats["1at1"]["selection_rank"] == "3"
         assert stats["3at1"]["selection_rank"] == "4"
-        assert stats["5at1"]["eligible"] == "True"
-        assert stats["5at1"]["selection_rank"] == "6"
+        assert float(stats["2at1"]["occupancy"]) == 0.5
+        assert stats["2at1"]["eligible"] == "True"
+        assert stats["5at1"]["eligible"] == "False"
+        assert stats["5at1"]["selection_rank"] == ""
         assert float(stats["5at1"]["occupancy"]) == pytest.approx(0.3)
         assert stats["7at1"]["eligible"] == "False"
         assert stats["7at1"]["selection_rank"] == ""
@@ -101,7 +109,7 @@ def test_plan_selects_highest_coverage_with_id_ties_independent_of_orders(tmp_pa
         assert stats["6at1"]["selection_rank"] == "2"
         assert float(stats["6at1"]["mean_busco_length"]) == 99
         provenance = json.loads((out / "provenance.json").read_text())
-        assert provenance["eligible_markers"] == 6
+        assert provenance["eligible_markers"] == 5
         assert provenance["markers"] == len(expected)
         assert provenance["settings"]["max_markers"] == limit
         selected.append(chosen)
@@ -219,7 +227,7 @@ def test_real_trimal_column_map_and_missing_taxa(tmp_path, mode):
     write_json(raw_qc, {"status": "retained", "sites": 9, "taxa": 5})
     out, qc, columns = tmp_path / "out.fa", tmp_path / "qc.json", tmp_path / "columns.tsv"
     trim(raw, raw_qc, out, qc, columns, trimal_binary(), mode,
-         settings(min_protein_length=3))
+         alignment_settings(tmp_path, "ABCDE", min_protein_length=3))
     assert list(fasta_records(out)) == [("A", "AAGGKY"), ("B", "AAGGKY"), ("C", "CCGGKY"), ("D", "CCGGKY")]
     assert [int(r["famsa_column_1based"]) for r in read_tsv(columns)] == [1, 2, 5, 6, 8, 9]
     report = json.loads(qc.read_text())
@@ -236,7 +244,7 @@ def test_real_trimal_retains_original_unknown_residues(tmp_path):
     write_json(raw_qc, {"status": "retained", "sites": 4, "taxa": 4})
     out, qc, columns = tmp_path / "out.fa", tmp_path / "qc.json", tmp_path / "columns.tsv"
     trim(raw, raw_qc, out, qc, columns, trimal_binary(), "gappyout",
-         settings(min_protein_length=3))
+         alignment_settings(tmp_path, "ABCD", min_protein_length=3))
     assert out.read_text() == raw.read_text()
     assert len(read_tsv(columns)) == 4
 
@@ -249,18 +257,19 @@ def test_trimal_rejects_inconsistent_column_map(tmp_path):
     bad.write_text("#!/bin/sh\nprintf '#ColumnsMap\\t0, 0, 1\\n'\n")
     bad.chmod(0o755)
     with pytest.raises(ValueError, match="duplicated, unordered or out of range"):
-        trim(raw, raw_qc, tmp_path / "out", tmp_path / "qc", tmp_path / "cols", str(bad), "gappyout", settings())
+        trim(raw, raw_qc, tmp_path / "out", tmp_path / "qc", tmp_path / "cols", str(bad), "gappyout", alignment_settings(tmp_path, "ABCD"))
 
 
-def test_alignment_qc_drops_unusable_taxa_without_fabricating_signal():
+def test_alignment_qc_drops_unusable_taxa_without_fabricating_signal(tmp_path):
     records = [("A", "AA--GG"), ("B", "AA--GG"), ("C", "CC--GG"),
                ("D", "CC--GG"), ("E", "------")]
-    retained, report = alignment_qc(records, settings(min_protein_length=2))
+    cfg = alignment_settings(tmp_path, "ABCDE", min_protein_length=2)
+    retained, report = alignment_qc(records, cfg)
     assert retained == [("A", "AAGG"), ("B", "AAGG"), ("C", "CCGG"), ("D", "CCGG")]
     assert report["informative_sites"] == 2
     assert report["removed_species"] == ["E"]
     assert report["status"] == "retained"
-    _, report = alignment_qc([(n, "AAAA") for n in "ABCD"], settings(min_protein_length=2))
+    _, report = alignment_qc([(n, "AAAA") for n in "ABCD"], cfg)
     assert report["status"] == "no_variable_sites"
     assert report["variable_sites"] == report["informative_sites"] == 0
 
@@ -269,14 +278,29 @@ def test_alignment_qc_drops_unusable_taxa_without_fabricating_signal():
     (["A" * 100] * 2 + ["C" * 8 + "A" * 92] * 2, 8, 8),
     (["A" * 100] * 3 + ["C" + "A" * 99], 1, 0),
 ])
-def test_alignment_qc_reports_low_information_without_a_count_cutoff(sequences, variable, informative):
+def test_alignment_qc_reports_low_information_without_a_count_cutoff(tmp_path, sequences, variable, informative):
     records = list(zip("ABCD", sequences))
-    retained, report = alignment_qc(records, settings())
+    retained, report = alignment_qc(records, alignment_settings(tmp_path, "ABCD"))
     assert retained == records
     assert report["status"] == "retained"
     assert report["sites"] == 100
     assert report["variable_sites"] == variable
     assert report["informative_sites"] == informative
+
+
+@pytest.mark.parametrize("cohort,represented,status", [
+    ("ABCDEFGHI", "ABCD", "low_occupancy"),
+    ("ABCDE", "ABC", "too_few_taxa"),
+])
+def test_alignment_skips_loci_without_coverage_or_a_quartet(tmp_path, cohort, represented, status):
+    cfg = alignment_settings(tmp_path, cohort)
+    fasta, output, qc = (tmp_path / name for name in ("marker.faa", "raw.faa", "raw.json"))
+    fasta.write_text("".join(f">{name}\nMPEPTIDE\n" for name in represented))
+    align(fasta, output, qc, sys.executable, 1, cfg)
+    report = json.loads(qc.read_text())
+    assert report["occupancy"] == pytest.approx(len(represented) / len(cohort))
+    assert report["status"] == status
+    assert report["command"] is None and output.read_text() == ""
 
 
 def test_astral_rejects_non_int128_for_large_species_sets(tmp_path):
@@ -305,16 +329,14 @@ def test_missing_species_diagnostics_survive_before_inference(tmp_path):
 
 
 @pytest.mark.parametrize("present", [14, 4])
-def test_post_alignment_coverage_is_diagnostic_without_overall_or_order_filter(tmp_path, present):
+def test_merge_reports_biological_occupancy_for_retained_gene_trees(tmp_path, present):
     manifest, markers = tmp_path / "species.tsv", tmp_path / "markers.tsv"
     species = [f"plant_{i:02d}" for i in range(24)]
-    # Even if a legacy manifest has clade labels, absence of the ten-species
-    # order from one gene must not exclude that gene. Four of 24 species is also
-    # sufficient for retention. A second gene covers all selected species.
-    write_tsv(manifest, ["species", "clade"],
-              [{"species": n, "clade": "X" if i < 14 else "Y"} for i, n in enumerate(species)])
+    rows = [{"species": name, "species_id": name} for name in species]
+    rows.append({"species": "replicate", "species_id": species[0]})
+    write_tsv(manifest, ["species", "species_id"], rows)
     write_tsv(markers, ["marker"], [{"marker": "1at1"}, {"marker": "2at1"}])
-    for marker, names in [("1at1", species[:present]), ("2at1", species)]:
+    for marker, names in [("1at1", species[:present] + ["replicate"]), ("2at1", species + ["replicate"])]:
         (tmp_path / f"{marker}.nwk").write_text("(" + ",".join(f"{n}:1" for n in names) + ");\n")
         write_json(tmp_path / f"{marker}.json", {"status": "retained", "sites": 250})
     merge(manifest, markers, tmp_path, tmp_path / "trees", tmp_path / "coverage", tmp_path / "qc")
@@ -324,7 +346,7 @@ def test_post_alignment_coverage_is_diagnostic_without_overall_or_order_filter(t
     assert report["unrepresented_species"] == []
     assert all(r["represented"] == "True" for r in read_tsv(tmp_path / "coverage"))
     assert report["gene_tree_count_distribution"] == [
-        {"gene_trees": 1, "species": 24 - present}, {"gene_trees": 2, "species": present}]
+        {"gene_trees": 1, "species": 24 - present}, {"gene_trees": 2, "species": present + 1}]
     assert report["excluded"] == []
     assert report["retained"][0]["occupancy"] == pytest.approx(present / 24)
     assert report["retained"][1]["occupancy"] == 1

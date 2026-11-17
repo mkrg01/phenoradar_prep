@@ -1,54 +1,39 @@
 # phenoradar_prep
 
-[![Snakemake](https://img.shields.io/badge/snakemake-≥9.0.0-brightgreen.svg)](https://snakemake.github.io)
-
-Prepare [PhenoRadar](https://github.com/mkrg01/phenoradar) inputs from
-[AMALGKIT](https://github.com/kfuku52/amalgkit) RNA-seq metadata using
-[GeneGalleon](https://github.com/kfuku52/genegalleon). Build reusable sample
-databases, then run OG expression and optional alignments, KO annotation,
-and phylogenetic analyses.
-
-## Requirements
-
-Linux x86-64 with Conda, Apptainer/Singularity, and Slurm or HGC AGE. See
-[installation](docs/running.md#installation-and-normal-execution) for host setup.
+Build cross-species RNA-seq datasets for [PhenoRadar](https://github.com/mkrg01/phenoradar).
+The workflow assembles transcriptomes, quantifies gene expression, and stores
+orthogroup expression in a reusable database. It can then use that database
+to generate protein alignments, KEGG annotations, species trees, and trait
+contrast pairs.
 
 ## Quick start
 
-Prepare [input/metadata.tsv](docs/inputs.md), then edit
-[build.yaml](config/build.yaml) and [analysis.yaml](config/analysis.yaml).
-For a first build, set `reuse_from: null`; review the trait and optional analyses.
+Use Linux x86-64 with Conda, Apptainer or Singularity, and Slurm or AGE. Follow the
+[installation guide](docs/running.md#installation-and-normal-execution) to set
+up the environment and container. Run the commands below from the repository root.
 
-Run from the repository root. Replace `{build_name}` with the build directory
-name reported by `submit`, and choose `{analysis_name}`:
+1. Prepare [sample metadata](docs/inputs.md) and edit [config/build.yaml](config/build.yaml).
+   Set `reuse_from: null` for a first build.
+2. Preview and submit the build. Review `reports/plan/plan.tsv` after `plan`.
 
-```bash
-conda env create -n phenoradar_prep -f environment.yaml
-conda activate phenoradar_prep
-./run_pipeline.sh --prepare-container --cores 1 --resources mem_gb=4
+   ```bash
+   ./run_build.sh plan
+   ./run_build.sh submit
+   ```
 
-./run_build.sh plan
-# Review reports/plan/plan.tsv before submitting.
-./run_build.sh submit
-./run_build.sh status --build results/{build_name}
+3. After the build completes, edit [config/analysis.yaml](config/analysis.yaml)
+   for your cohort, trait, and optional analyses. Use the exact build name
+   printed by `submit` and choose an analysis name.
 
-# After the build completes:
-./run_analysis.sh plan --build results/{build_name}
-# Review reports/analysis/plan/plan.tsv before submitting.
-./run_analysis.sh submit --build results/{build_name} --name {analysis_name}
-```
+   ```bash
+   ./run_analysis.sh plan --build results/BUILD
+   ./run_analysis.sh submit --build results/BUILD --name ANALYSIS
+   ```
 
-`plan` verifies reusable products and shows reuse and processing counts.
-`submit` submits the build to Slurm, and `status` shows progress.
-Build names include UTC timestamps by default. Retry with the
-[saved run path](docs/datasets.md#failure-and-recovery-behavior) via `--build`
-or `--analysis`.
+The reusable database is in `results/BUILD/database/`. The
+[PhenoRadar inputs](docs/phenoradar_inputs.md) are in
+`results/BUILD/downstream/ANALYSIS/`. See [status and retries](docs/datasets.md#failure-and-recovery-behavior)
+for saved runs.
 
-Reusable products are in `results/{build_name}/database/`. Analysis results are in
-`results/{build_name}/downstream/{analysis_name}/`.
-
-For curated datasets and metadata updates, see the [dataset catalog](datasets/README.md)
-and [angiosperm leaf guide](datasets/angiosperm_leaf/README.md).
-
-[Documentation](docs/index.md) · [Build and analysis guide](docs/datasets.md) ·
-[Resources and retries](docs/running.md) · [Outputs](docs/outputs.md)
+[Documentation](docs/index.md) · [Curated datasets](datasets/README.md) ·
+[Angiosperm leaf dataset](datasets/angiosperm_leaf/README.md)

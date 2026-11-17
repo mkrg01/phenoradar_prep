@@ -60,8 +60,8 @@ execution:
       time: "60-00:00:00"
 storage:
   keep_intermediates: false  # Remove scratch and completed sample work; true retains it for debugging.
-  scratch_root: auto  # Prefer node-local temporary storage; workspace is the fallback.
+  temporary_directory: auto  # Store job temporary files on the node if possible, then use work/scratch/.
   compact_logs: true  # Archive native ODB logs on every scheduler.
   max_bytes: null  # Optional project-wide allocated-byte budget.
   max_inodes: null  # Optional unique inode budget, including directories.
-  interval_seconds: 60
+  interval_seconds: 300  # Interval between disk usage checks during a job.

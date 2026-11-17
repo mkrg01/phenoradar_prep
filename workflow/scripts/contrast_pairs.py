@@ -13,7 +13,6 @@ from common import RANDOM_SEED, atomic_writer, file_record, now, read_tsv, write
 from phylogeny_root import nwkit_backend, species_rows
 from species_traits import read_species_traits
 from sample_identity import species_id, traits_for_samples
-from trait_encoding import read_labels
 from expanded_pair_clades import COLUMN, TABLE_FIELDS, annotate
 
 
@@ -53,7 +52,7 @@ def skim(tree, rows, prefix, seed, contrastive=False, topology_only=False):
     return frame.to_dict("records"), sampled.to_dict("records")
 
 
-def prepare(samples, metadata, traits, tree, outdir, trait="C4", seed=RANDOM_SEED, trait_encoding=None):
+def prepare(samples, metadata, traits, tree, outdir, trait="C4", seed=RANDOM_SEED):
     from ete4 import Tree
     rows = species_rows(samples)
     annotation = traits_for_samples(rows.values(), read_species_traits(traits, trait))
@@ -81,7 +80,7 @@ def prepare(samples, metadata, traits, tree, outdir, trait="C4", seed=RANDOM_SEE
                 "role": "observed" if n in eligible else "missing_trait"}
                for n in rows])
     write_json(out / "selection.json", {"created_at": now(), "species_trait": file_record(traits),
-               "trait": trait, "states": states, "trait_labels": read_labels(trait_encoding, trait),
+               "trait": trait, "states": states,
                "dataset_species": len({species_id(r) for r in rows.values()}), "dataset_samples": len(rows),
                "observed_species": len({species_id(rows[n]) for n in eligible}), "observed_samples": len(eligible),
                "inference_species": len({species_id(rows[n]) for n in representatives}),
@@ -209,7 +208,7 @@ def summarize_tree(inferred, rows, all_traits, tip_for_species, outdir, trait, s
 
 
 def from_tree(tree, tree_qc, samples, metadata, traits, outdir, trait="C4", seed=RANDOM_SEED, exclude_species=(),
-              trait_encoding=None):
+              trait_labels=None):
     """Assign pairs directly on a completed species tree, optionally pruning species."""
     if not isinstance(exclude_species, (list, tuple)) or any(not isinstance(n, str) for n in exclude_species):
         raise ValueError("exclude_species must be a list of species IDs")
@@ -266,7 +265,7 @@ def from_tree(tree, tree_qc, samples, metadata, traits, outdir, trait="C4", seed
                            "retained_species": len({taxa[n] for n in retained}), "retained_samples": len(retained),
                            "observed_species": len({taxa[n] for n in eligible}), "observed_samples": len(eligible),
                            "states": states,
-                           "trait_labels": read_labels(trait_encoding, trait),
+                           "trait_labels": trait_labels or {},
                            "state_order": source_states if len(source_states) <= 2 else states,
                            "excluded_species": sorted(names - retained),
                            "missing_trait_species": sorted(retained - eligible),
@@ -284,7 +283,6 @@ if __name__ == "__main__":
     for name in ["samples", "metadata", "traits", "tree", "outdir"]:
         p.add_argument("--" + name, required=True)
     p.add_argument("--trait", default="C4")
-    p.add_argument("--trait-encoding")
     p.add_argument("--seed", type=int, default=RANDOM_SEED)
     p = sub.add_parser("summarize")
     for name in ["tree", "selection-dir", "outgroup-file", "outdir"]:
@@ -294,7 +292,6 @@ if __name__ == "__main__":
     for name in ["tree", "tree-qc", "samples", "metadata", "traits", "outdir"]:
         p.add_argument("--" + name, required=True)
     p.add_argument("--trait", default="C4")
-    p.add_argument("--trait-encoding")
     p.add_argument("--seed", type=int, default=RANDOM_SEED)
     p.add_argument("--exclude-species", type=json.loads, default=[], help="JSON list of species IDs to prune")
     args = vars(parser.parse_args())

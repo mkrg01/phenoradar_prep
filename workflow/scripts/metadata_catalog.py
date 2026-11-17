@@ -36,7 +36,8 @@ EXCLUSION_FIELDS = ['accession', 'taxid', 'bioproject', 'reason', 'source_build'
 REPORT_FIELDS = ['taxid', 'scientific_name', 'previous_run', 'selected_run', 'bioproject',
                  'previous_bioproject', 'previous_total_bases', 'selected_total_bases',
                  'source_taxid', 'source_bioproject', 'source_scientific_name',
-                 'decision', 'review', 'reason', 'eligible_candidates']
+                 'decision', 'review', 'reason', 'eligible_candidates', 'previous_scientific_name',
+                 'updated_taxid', 'updated_scientific_name', 'identity_change']
 csv.field_size_limit(32 * 1024 * 1024)
 
 
@@ -246,19 +247,8 @@ def retained_row(source, accepted):
 
 def retained_source_changes(source, accepted, cfg):
     changes = []
-    try:
-        if taxid(source['taxid']) != taxid(accepted['taxid']):
-            changes.append('taxid_changed')
-    except ValueError:
-        changes.append('invalid_taxid')
     if source['bioproject'] != accepted['bioproject']:
         changes.append('bioproject_changed')
-    try:
-        source_name = normalized_row(source)['scientific_name']
-    except ValueError:
-        source_name = None
-    if source_name != accepted['scientific_name']:
-        changes.append('scientific_name_changed')
     if source['sample_group'] != cfg['sample_group']:
         changes.append('sample_group')
     if source['exclusion'] != 'no':
@@ -405,6 +395,21 @@ def canonical_row(row, taxon):
     return normalized_row(row)
 
 
+def selection_identity(row, taxonomy):
+    """Resolve the identity used for selection, or leave an unresolvable row for review."""
+    try:
+        tid = taxid(row['taxid'])
+    except ValueError:
+        return None
+    resolved = taxonomy.resolve(tid) if taxonomy else None
+    if taxonomy and (not resolved or 'species' not in resolved[1]):
+        return None
+    try:
+        return canonical_row(dict(row), resolved) if resolved else normalized_row(row)
+    except ValueError:
+        return None
+
+
 def select_with_taxonomy(root, cfg, source, output, taxonomy):
     source, output = path_at(root, source), path_at(root, output)
     if output.exists():
@@ -424,17 +429,17 @@ def select_with_taxonomy(root, cfg, source, output, taxonomy):
     active_accepted = {tid: row for tid, row in accepted.items() if row['run'] not in exclusions}
     accepted_by_run = {row['run']: row for row in active_accepted.values()}
     previous_by_run = {row['run']: row for row in previous.values()}
-    kept = {tid: retained_row(previous_by_run[row['run']], row) for tid, row in active_accepted.items()
-            if row['run'] in previous_by_run}
-    taxonomy_reassignments = []
+    from ncbi_sample import NCBISamples
+    ncbi = NCBISamples()
+    stale = set()
     if taxonomy:
-        from ncbi_sample import NCBISamples
-        ncbi = NCBISamples()
         for tid, row in active_accepted.items():
-            taxon = taxonomy.resolve(tid)
-            if not taxon or taxon[1].get('species', ('', ''))[0] != tid or (
-                    canonical_row(dict(row), taxon)['scientific_name'] != row['scientific_name']):
-                raise ValueError(f'accepted sample {row["run"]} requires taxonomy review before reselection')
+            current = selection_identity(row, taxonomy)
+            if current is None or any(current[key] != row[key] for key in ('taxid', 'scientific_name')):
+                stale.add(tid)
+    kept = {tid: retained_row(previous_by_run[row['run']], row) for tid, row in active_accepted.items()
+            if tid not in stale and row['run'] in previous_by_run}
+    identity_updates = {}
     best, forced, observed, candidate_counts = {}, {}, {}, collections.Counter()
     source_changes = {}
     reasons, seen_runs, observed_taxids = collections.Counter(), set(), set()
@@ -456,40 +461,50 @@ def select_with_taxonomy(root, cfg, source, output, taxonomy):
             if run in seen_runs:
                 raise ValueError(f'duplicate source run: {run}')
             seen_runs.add(run)
-            if taxonomy and run in accepted_by_run:
-                evidence = accepted_by_run[run]
-                raw_taxid = values[index['taxid']]
-                taxon = taxonomy.resolve(raw_taxid) if raw_taxid.isdigit() else None
-                new_species = taxon[1].get('species') if taxon else None
-                if new_species and new_species[0] != evidence['taxid']:
-                    confirmation = ncbi.confirm(run, new_species[0], taxonomy)
-                    taxonomy_reassignments.append(dict(confirmation, old_species_taxid=evidence['taxid']))
-                    active_accepted.pop(evidence['taxid'])
-                    kept.pop(evidence['taxid'], None)
-                    accepted_by_run.pop(run)
             if run in accepted_by_run:
                 evidence = accepted_by_run[run]
                 tid = taxid(evidence['taxid'])
                 incoming = dict(zip(source_fields, values))
                 observed[tid] = incoming
                 observed_taxids.add(tid)
-                kept[tid] = retained_row(incoming, evidence)
-                source_changes[tid] = retained_source_changes(incoming, evidence, cfg)
-                if taxonomy:
-                    incoming_taxon = taxonomy.resolve(incoming['taxid']) if 'invalid_taxid' not in source_changes[tid] else None
-                    if incoming_taxon and incoming_taxon[1].get('species', ('', ''))[0] == tid:
-                        source_changes[tid] = [reason for reason in source_changes[tid]
-                                               if reason not in {'taxid_changed', 'scientific_name_changed'}]
-                rejection = next((reason for reason in source_changes[tid]
-                                  if reason in {'invalid_taxid', 'sample_group', 'amalgkit_exclusion',
-                                                'missing_bioproject', 'invalid_total_bases'}), '')
-                if rejection:
-                    reasons[rejection] += 1
+                current = selection_identity(incoming, taxonomy)
+                changed = [key for key in ('taxid', 'scientific_name')
+                           if current is not None and current[key] != evidence[key]]
+                if changed:
+                    update = {'old': {key: evidence[key] for key in ACCEPTED_FIELDS[:4]},
+                              'new': {key: current[key] for key in ACCEPTED_FIELDS[:4]},
+                              'changed_fields': changed}
+                    old_taxon = taxonomy.resolve(tid) if taxonomy else None
+                    old_species = old_taxon[1].get('species', ('', ''))[0] if old_taxon else None
+                    if 'taxid' in changed and old_species != current['taxid']:
+                        try:
+                            update['confirmation'] = ncbi.confirm(run, current['taxid'], taxonomy)
+                        except ValueError as error:
+                            raise ValueError(f'cannot confirm updated TaxID for accepted run {run}: {error}') from error
+                    identity_updates[tid] = update
+                    active_accepted.pop(tid)
+                    kept.pop(tid, None)
                 else:
-                    candidate_counts[tid] += 1
-                if tid in overrides and overrides[tid]['run'] == run:
-                    forced[tid] = kept[tid]
-                continue
+                    if tid not in stale:
+                        kept[tid] = retained_row(incoming, evidence)
+                    changes = retained_source_changes(incoming, evidence, cfg)
+                    if current is None:
+                        try:
+                            taxid(incoming['taxid'])
+                        except ValueError:
+                            changes.insert(0, 'invalid_taxid')
+                        else:
+                            changes.insert(0, 'taxonomy_unresolved' if taxonomy else 'invalid_scientific_name')
+                    source_changes[tid] = changes
+                    rejection = next((reason for reason in changes
+                                      if reason != 'bioproject_changed'), '')
+                    if rejection:
+                        reasons[rejection] += 1
+                    else:
+                        candidate_counts[tid] += 1
+                    if tid in overrides and overrides[tid]['run'] == run and tid in kept:
+                        forced[tid] = kept[tid]
+                    continue
             try:
                 tid = taxid(values[index['taxid']])
             except ValueError:
@@ -553,7 +568,9 @@ def select_with_taxonomy(root, cfg, source, output, taxonomy):
                         if tid not in kept and tid not in forced)
     reports = []
     for tid in sorted(set(previous) | set(active_accepted) | observed_taxids | set(selected), key=int):
-        old, new = active_accepted.get(tid) or previous.get(tid), selected.get(tid)
+        update = identity_updates.get(tid)
+        old = active_accepted.get(tid) or (update['old'] if update else previous.get(tid))
+        new = selected.get(tid)
         cached = previous_by_run.get(old['run'], {}) if old else {}
         incoming = observed.get(tid, {})
         review, reason = False, ''
@@ -562,7 +579,9 @@ def select_with_taxonomy(root, cfg, source, output, taxonomy):
         elif tid in active_accepted:
             decision = 'retained' if tid in kept else 'unresolved'
             reason = 'previous_completed_sample'
-            if tid not in observed:
+            if tid in stale:
+                review, reason = True, 'accepted_taxonomy_requires_review'
+            elif tid not in observed:
                 review, reason = True, 'retained_run_absent_from_source'
             elif source_changes[tid]:
                 review, reason = True, 'retained_run_source_status:' + ';'.join(source_changes[tid])
@@ -581,7 +600,11 @@ def select_with_taxonomy(root, cfg, source, output, taxonomy):
                         'source_bioproject': incoming.get('bioproject', ''),
                         'source_scientific_name': incoming.get('scientific_name', ''),
                         'review': 'yes' if review else 'no', 'reason': reason,
-                        'eligible_candidates': candidate_counts[tid]})
+                        'eligible_candidates': candidate_counts[tid],
+                        'previous_scientific_name': old['scientific_name'] if old else '',
+                        'updated_taxid': update['new']['taxid'] if update else '',
+                        'updated_scientific_name': update['new']['scientific_name'] if update else '',
+                        'identity_change': ','.join(update['changed_fields']) if update else ''})
     merged_fields = list(dict.fromkeys([*fields, *source_fields, 'scientific_name_original',
                                       'species_id', 'analysis_sample_id']))
     if taxonomy:
@@ -606,8 +629,8 @@ def select_with_taxonomy(root, cfg, source, output, taxonomy):
                       'dataset': cfg['name'], 'source_metadata': before, 'selection_config': config_record,
                       'inputs': inputs, 'generator': file_record(Path(__file__)), 'summary': summary,
                       'metadata': file_record(staging / 'metadata.tsv'), 'selection': file_record(staging / 'selection.tsv')}
-        if taxonomy_reassignments:
-            provenance['taxonomy_reassignments'] = taxonomy_reassignments
+        if identity_updates:
+            provenance['identity_updates'] = [identity_updates[tid] for tid in sorted(identity_updates, key=int)]
         stage_info = source.parent / 'provenance.json'
         if stage_info.exists():
             provenance['source_provenance'] = file_record(stage_info)
@@ -642,10 +665,8 @@ def accept_candidate(root, cfg, candidate, allow_review=False):
             raise ValueError(f'candidate {key} changed; use overrides and regenerate')
     unresolved = data.get('summary', {}).get('unresolved_accepted_runs', [])
     if unresolved:
-        raise ValueError('accepted runs lack source metadata and a local fallback: ' + ', '.join(unresolved)
+        raise ValueError('accepted runs lack a usable identity or local fallback: ' + ', '.join(unresolved)
                          + '; restore their metadata or explicitly exclude/replace them, then regenerate')
-    # Source changes remain visible in selection.tsv. An accepted representative
-    # is retained until an explicit exclusion or override changes the decision.
     target = path_at(root, cfg['previous_metadata'])
     # Keep success evidence only for unchanged representatives; additions need actual build/QC results.
     _, rows = table(candidate / 'metadata.tsv', ['taxid', 'run'])
@@ -922,7 +943,7 @@ def update_metadata(root, cfg, work=None, source=None, dry_run=False):
         if unresolved:
             result['status'] = 'review_required'
             print('metadata review required: ' + ', '.join(unresolved)
-                  + '; restore their metadata or explicitly exclude/replace them, then rerun update',
+                  + '; review the recorded identity or explicitly exclude/replace them, then rerun update',
                   file=sys.stderr, flush=True)
         elif dry_run:
             result['accept_command'] = shlex.join([str(Path(root).resolve() / 'run_metadata.sh'), 'accept',

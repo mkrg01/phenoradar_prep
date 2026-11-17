@@ -48,10 +48,9 @@ if "representatives" in PHY["trees"]:
             samples=f"{META}/samples.tsv",
             metadata=f"{META}/metadata_high_busco.tsv",
             traits=rules.normalize_traits.output.traits,
-            encoding=rules.normalize_traits.output.encoding,
             tree=f"{ROOTING}/ncbi_tree.nwk",
             code=f"{SCRIPTS}/contrast_pairs.py",
-            helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "trait_encoding", "expanded_pair_clades"]]
+            helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "expanded_pair_clades"]]
         output:
             samples=f"{REPRESENTATIVES}/selection/samples.tsv",
             traits=f"{REPRESENTATIVES}/selection/traits.tsv",
@@ -67,7 +66,7 @@ if "representatives" in PHY["trees"]:
         shell:
             "{PYTHON:q} {input.code:q} prepare --samples {input.samples:q} --metadata {input.metadata:q} "
             "--traits {input.traits:q} --tree {input.tree:q} "
-            "--trait {params.trait:q} --trait-encoding {input.encoding:q} --seed {params.seed} "
+            "--trait {params.trait:q} --seed {params.seed} "
             "--outdir {params.outdir:q} > {log:q} 2>&1"
 
 
@@ -78,7 +77,7 @@ if "representatives" in PHY["trees"]:
                 outgroup=f"{REPRESENTATIVES}/rooting/outgroup.txt",
                 selection=rules.select_contrast_representatives.output,
                 code=f"{SCRIPTS}/contrast_pairs.py",
-                helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "trait_encoding", "expanded_pair_clades"]]
+                helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "expanded_pair_clades"]]
             output:
                 tree=f"{CONTRAST}/summary_tree.nwk",
                 all=f"{CONTRAST}/summary_tree.all.tsv",
@@ -150,9 +149,8 @@ rule identify_phylogeny_contrast_pairs:
         samples=lambda wc: f"{PHENOTYPED}/selection/samples.tsv" if wc.phylo_branch == PHYLO_BRANCHES["phenotyped"] else f"{META}/samples.tsv",
         metadata=f"{META}/metadata_high_busco.tsv",
         traits=rules.normalize_traits.output.traits,
-        encoding=rules.normalize_traits.output.encoding,
         code=f"{SCRIPTS}/contrast_pairs.py",
-        helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "trait_encoding", "expanded_pair_clades"]]
+        helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "expanded_pair_clades"]]
     output:
         observed=f"{PHYLO_RUN}/contrast/observed_tree.nwk",
         tree=f"{PHYLO_RUN}/contrast/summary_tree.nwk",
@@ -172,5 +170,5 @@ rule identify_phylogeny_contrast_pairs:
     shell:
         "{PYTHON:q} {input.code:q} from_tree --tree {input.tree:q} --tree-qc {input.tree_qc:q} "
         "--samples {input.samples:q} --metadata {input.metadata:q} --traits {input.traits:q} "
-        "--trait {params.trait:q} --trait-encoding {input.encoding:q} --seed {params.seed} "
+        "--trait {params.trait:q} --seed {params.seed} "
         "--outdir {params.outdir:q} > {log:q} 2>&1"

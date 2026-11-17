@@ -14,7 +14,7 @@ separately.
 | `config/excluded_accessions.tsv` | TSV: `accession`, optional `reason` |
 | `input/species_trait.tsv` | TSV: `species` and the chosen trait column |
 | `input/species_list.txt` | One biological species ID or exact sample ID per line |
-| `input/calibrations.tsv` | TSV: `taxa`, `min_age_ma`, `max_age_ma`, `source`; see [dating](dating.md#manual-calibrations) |
+| `inputs.fossil_calibration_map` (optional config path) | TSV with `fossil_id`, `left_species`, and `right_species`. See [dating](dating.md#review-fossil-placements). |
 
 Only metadata is always required. Other files depend on your analysis;
 configured paths must exist, so set unused optional paths to `null`. The supplied
@@ -80,7 +80,7 @@ selection are errors; missing individual taxonomy ranks are allowed. Review
 
 ## Traits
 
-Traits come from `inputs.species_trait`, not sample metadata:
+`inputs.species_trait` points to a species-level table of binary traits.
 
 ```tsv
 species	carnivory
@@ -94,25 +94,12 @@ species IDs, and every sample of that species inherits its trait. Duplicate
 normalized names are errors. Blanks, `NA`, `NaN`, `nan`, and absent rows are
 unknown; extra rows do not add species.
 
-Numeric `0`/`1` values need no encoding setting. For text states, explicitly
-identify the reference (`0`) and focal (`1`) states before preparing the analysis:
+Use `0` for the reference state and `1` for the focal state. Any other
+nonmissing value for a selected species stops the analysis. The workflow
+writes the selected traits to `metadata/species_trait.tsv` and records the
+observed states, missing count, and source checksums in `metadata/species_trait.json`.
 
-```yaml
-trait: carnivory
-trait_encoding:
-  absent: 0
-  present: 1
-```
-
-The workflow normalizes selected species once to `metadata/species_trait.tsv`
-and records the mapping and source checksums in `metadata/trait_encoding.json`.
-All analysis branches and PhenoRadar metadata use the same `0`/`1` values;
-contrast legends retain the original text labels. Unknown values stay missing,
-and unmapped selected states stop before inference. Text labels are never
-assigned codes by sorting. The original input table is unchanged.
-Quote YAML labels such as `"yes"`/`"no"` to keep them as strings.
-
-Only binary traits are supported. Phenotyped trees accept a single observed
+Phenotyped trees accept a single observed
 state; representative selection requires two. On all/phenotyped trees,
 fewer than two states produces zero contrast pairs. If traits are unused, set
 `inputs.species_trait: null` and disable trait-dependent branches.

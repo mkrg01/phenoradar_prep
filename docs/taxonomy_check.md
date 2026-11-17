@@ -8,25 +8,16 @@ automatically.
 
 ## Configuration and execution
 
-Before preparing the analysis:
-
-```yaml
-phylogeny:
-  trees: [all]
-  taxonomy_check:
-    enabled: true
-    ranks: [family, subfamily, tribe, subtribe, genus]
-    outlierlevel: 0.5
-    collapse_monophyletic: true
-```
+Taxonomy checks are enabled by default in `config/analysis.yaml` and run with
+`--target all`. The default ranks are family, subfamily, tribe, subtribe, and
+genus. To run the check on its own:
 
 ```bash
 ./run_analysis.sh submit --analysis results/leaf/downstream/carnivory --target taxonomy_check
 ```
 
-The target includes missing inference and requires the enabled flag. Reports
-also run with `all`. Supported tree sets are `all` and `phenotyped`.
-Review jobs default to 1 CPU/8 GB.
+The target includes missing tree inference. Supported tree sets are `all` and
+`phenotyped`. Review jobs default to 1 CPU and 8 GB.
 
 `outlierlevel` is the required focal-group fraction inside a candidate core
 clade, in `(0, 1]`; it is not confidence. `collapse_monophyletic` affects figures only.

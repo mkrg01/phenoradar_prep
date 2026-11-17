@@ -269,105 +269,29 @@ def test_two_sources_and_one_missing_sample_only_compute_missing_work(completed_
     assert set(load_complete(build)['products']) == {item['species'] for item in items}
 
 
-def test_same_run_with_changed_name_requires_review(dataset_project):
-    """A renamed sample must not silently look like an unprocessed accession."""
-    from database_reuse import select
+@pytest.mark.parametrize('source_type', ['database', 'auto'])
+@pytest.mark.parametrize('changes', [
+    {'scientific_name': 'Renamed plant'},
+    {'taxid': '9999'},
+    {'scientific_name': 'Beta sp-X', 'taxid': '43'},
+])
+def test_reuse_requires_the_current_taxonomic_identity(dataset_project, source_type, changes):
     root = dataset_project
     source = imported(root)
-    cfg, _ = dataset.settings(root, configure(root, str(source)))
+    if source_type == 'auto':
+        dataset.prepare(root, 'baseline', root / 'config/build.yaml')
+    cfg = configure(root, 'auto' if source_type == 'auto' else str(source))
     rows = read_tsv(root / 'input/metadata.tsv')
-    rows[0]['scientific_name'] = 'Renamed plant'
+    rows[0].update(changes)
     for key in ('species_id', 'analysis_sample_id'):
         rows[0].pop(key, None)
-    metadata = root / 'renamed.tsv'
+    metadata = root / 'updated.tsv'
     write_tsv(metadata, list(rows[0]), rows)
-    _, items = identities(metadata)
-    selected, errors, _ = select(cfg['reuse_from'], items, cfg)
-    renamed = next(i for i in items if i['row']['scientific_name'] == 'Renamed plant')
-    assert renamed['species'] not in selected
-    assert 'changed sample identity requires a frozen taxonomy snapshot' in errors[renamed['species']]
-    assert renamed['row']['run'] in errors[renamed['species']]
-    report = dataset.plan(root, root / 'config/build.yaml', metadata=metadata, preview_taxonomy=False)[-1]
-    attention = next(row for row in report if row['species'] == renamed['species'])
-    assert attention['assembly'] == 'conflict'
-    assert 'changed sample identity requires a frozen taxonomy snapshot' in attention['reason']
-
-@pytest.mark.parametrize("merged", [False, True])
-@pytest.mark.parametrize("defer", [False, True])
-def test_taxonomy_change_stages_relabelled_upstream_products(dataset_project, merged, defer):
-    import gzip
-    import sqlite3
-    from build_dispatch import verify_and_stage
-
-    root = dataset_project
-    source = imported(root)
-    before = load_complete(source)['products']['Alpha_plant_A1']
-    taxonomy = root / 'input/taxa.sqlite'
-    rows = read_tsv(root / 'input/metadata.tsv')
-    old_taxid = rows[0]['taxid']
-    new_taxid = '9999' if merged else old_taxid
-    with sqlite3.connect(taxonomy) as db:
-        if merged:
-            db.execute('UPDATE species SET taxid=? WHERE taxid=?', (new_taxid, old_taxid))
-            db.execute('INSERT INTO merged VALUES (?, ?)', (old_taxid, new_taxid))
-        db.execute("UPDATE species SET spname='Renamed plant' WHERE taxid=?", (new_taxid,))
-    config = configure(root, str(source), taxonomy={'database': str(taxonomy), 'cache_dir': None,
-                                                    'missing_taxid': 'error'})
-    rows[0].update(scientific_name='Renamed plant', taxid=new_taxid)
-    metadata = root / 'renamed.tsv'
-    write_tsv(metadata, list(rows[0]), rows)
-    report = dataset.plan(root, config, metadata=metadata)[-1]
-    renamed, = [row for row in report if row['run'] == 'A1']
-    assert (renamed['assembly'], renamed['busco'], renamed['quant'], renamed['mapping']) == (
-        'reuse', 'reuse', 'reuse', 'pending_inputs')
-    build = dataset.prepare(root, 'renamed', config, metadata=metadata, defer=defer)
-    manifest = dataset.load(build)
-    if defer:
-        verify_and_stage(build, manifest)
-        manifest = dataset.load(build)
-    item, = [item for item in manifest['items'] if item['row']['run'] == 'A1']
-    products = dataset.item_products(manifest, item)
-    assert item['reference_id'] == products['reference']['reference_id']
-    assert products['reference']['taxid'] == new_taxid
-    with gzip.open(products['reference']['cds']['path'], 'rt') as current, gzip.open(before['cds']['path'], 'rt') as old:
-        assert current.read().replace('Renamed_plant_A1_g', 'Alpha_plant_A1_g') == old.read()
-    with gzip.open(products['quant']['abundance']['path'], 'rt') as current, gzip.open(before['abundance']['path'], 'rt') as old:
-        assert current.read().replace('Renamed_plant_A1_g', 'Alpha_plant_A1_g') == old.read()
-    assert products['busco']['counts'] == before['counts']
-    assert products['reference']['provenance']['taxonomy_relabel']['old']['taxid'] == old_taxid
-    assert record(before['cds']['path'])['sha256'] == before['cds']['sha256']
-
-
-@pytest.mark.parametrize('confirmed', [True, False])
-def test_taxonomy_reassignment_rebuilds_only_confirmed_run(dataset_project, monkeypatch, confirmed):
-    root = dataset_project
-    source = imported(root)
-    cfg = configure(root, str(source), taxonomy={'database': str(root / 'input/taxa.sqlite'),
-                                                  'cache_dir': None, 'missing_taxid': 'error'})
-    rows = read_tsv(root / 'input/metadata.tsv')
-    rows[0].update(scientific_name=rows[1]['scientific_name'], taxid=rows[1]['taxid'])
-
-    def confirm(self, run, species, taxonomy):
-        assert run == 'A1' and species == rows[1]['taxid']
-        if not confirmed:
-            raise ValueError('BioSample organism does not resolve to the requested species')
-        return {'run': run, 'species_taxid': species, 'biosample': 'SAMN12345'}
-
-    monkeypatch.setattr('ncbi_sample.NCBISamples.confirm', confirm)
-    metadata = root / 'reidentified.tsv'
-    write_tsv(metadata, list(rows[0]), rows)
-    report = dataset.plan(root, cfg, metadata=metadata)[-1]
-    changed, = [row for row in report if row['run'] == 'A1']
+    report = dataset.plan(root, cfg, metadata=metadata, preview_taxonomy=False)[-1]
+    updated, = [row for row in report if row['run'] == 'A1']
+    assert [updated[key] for key in ('assembly', 'busco', 'quant')] == ['pending'] * 3
     assert {row['assembly'] for row in report if row['run'] != 'A1'} == {'reuse'}
-    if not confirmed:
-        assert changed['assembly'] == 'conflict'
-        assert 'BioSample organism does not resolve' in changed['reason']
-        return
-    assert changed['assembly'] == 'pending' and changed['rebuild']
-    assert changed['verification'] == 'not_required'
-    build = dataset.prepare(root, 'reassigned', cfg, metadata=metadata, defer=True)
-    receipt = json.loads((build / 'reuse.json').read_text())
-    assert receipt['taxonomy_reassignments']['Beta_sp-X_A1']['biosample'] == 'SAMN12345'
+    build = dataset.prepare(root, 'updated', cfg, metadata=metadata, defer=True)
     candidates = json.loads((build / 'reuse_candidates.json').read_text())
-    assert set(candidates['rebuilds']) == {'Beta_sp-X_A1'}
+    assert updated['species'] not in candidates['samples']
     assert len(candidates['samples']) == 2

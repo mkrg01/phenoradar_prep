@@ -1,8 +1,6 @@
 """Select matching completed database products and freeze them in a new build."""
 import copy
 import json
-import shutil
-import tempfile
 from pathlib import Path
 
 from common import write_json, content_sha256
@@ -165,86 +163,8 @@ def compatible_identity(first, second):
     return True
 
 
-class SpeciesReassignment(ValueError):
-    def __init__(self, old_species, new_species):
-        super().__init__(f'public Run moved between species TaxIDs {old_species} -> {new_species}')
-        self.old_species = old_species
-        self.new_species = new_species
-
-
-def taxonomy_relabel(item, product, taxonomy, snapshot):
-    """Authorize a label change for a verified public run of the same species."""
-    old, new = product['row'], item['row']
-    if not any(old.get(key) != new.get(key) for key in SAMPLE_FIELDS[:4]):
-        return None
-    if (old['run'] != new['run'] or old.get('private_file', '').lower() == 'yes'
-            or new.get('private_file', '').lower() == 'yes'
-            or new.get('reference_id')
-            or any(old.get(key, '') != new.get(key, '') for key in SAMPLE_FIELDS[6:])):
-        raise ValueError('changed sample identity requires review of inputs or pinned reference')
-    if taxonomy is None:
-        raise ValueError('changed sample identity requires a frozen taxonomy snapshot')
-    old_taxon = taxonomy.resolve(old['taxid'])
-    new_taxon = taxonomy.resolve(new['taxid'])
-    old_species = old_taxon[1].get('species') if old_taxon else None
-    new_species = new_taxon[1].get('species') if new_taxon else None
-    if old_species is None or new_species is None:
-        raise ValueError('changed sample identity has an unresolved species in the frozen taxonomy')
-    if old_species != new_species:
-        raise SpeciesReassignment(old_species[0], new_species[0])
-    return {
-        'old': {key: old.get(key, '') for key in SAMPLE_FIELDS},
-        'new': {key: new.get(key, '') for key in SAMPLE_FIELDS},
-        'species_taxid': new_species[0],
-        'snapshot': snapshot,
-    }
-
-
-def select(paths, items, cfg, verify_files=True, rebuilds=None, reassignments=None):
-    """Find completed database products and processing checkpoints for the requested runs."""
-    from contextlib import ExitStack
-    from taxonomy_identity import TaxonomyIdentity
-    from taxonomy_selection import cached_database
-
-    snapshot = cached_database(cfg)
-    with ExitStack() as stack:
-        taxonomy, receipt = None, None
-
-        def relabel(item, product):
-            nonlocal taxonomy, receipt
-            changed = any(product['row'].get(key) != item['row'].get(key)
-                          for key in SAMPLE_FIELDS[:4])
-            if changed and snapshot is not None and taxonomy is None:
-                receipt = record(snapshot)
-                taxonomy = stack.enter_context(TaxonomyIdentity(verify(receipt)))
-            return taxonomy_relabel(item, product, taxonomy, receipt)
-
-        reassigned = {}
-        selected, errors, sources = select_databases(paths, items, cfg, verify_files, rebuilds, relabel, reassigned)
-        if reassigned:
-            from ncbi_sample import NCBISamples
-
-            ncbi = NCBISamples()
-            for item in items:
-                name, run = item['species'], item['row']['run']
-                if name not in reassigned or name in selected or name in errors:
-                    continue
-                old_species, new_species, source = reassigned[name]
-                reason = f'reuse_from {run}: public Run moved between species TaxIDs {old_species} -> {new_species}'
-                if reassignments is None:
-                    errors[name] = reason
-                    continue
-                try:
-                    confirmation = ncbi.confirm(run, new_species, taxonomy)
-                except ValueError as error:
-                    errors[name] = f'{reason}; {error}'
-                else:
-                    reassignments[name] = dict(confirmation, old_species_taxid=old_species,
-                                               source=source, snapshot=receipt, reason=reason)
-        return selected, errors, sources
-
-
-def select_databases(paths, items, cfg, verify_files, rebuilds, relabel, reassigned):
+def select(paths, items, cfg, verify_files=True, rebuilds=None):
+    """Find completed database products and checkpoints matching the requested samples."""
     from build_products import load_complete
     if not items:
         return {}, {}, []
@@ -253,25 +173,23 @@ def select_databases(paths, items, cfg, verify_files, rebuilds, relabel, reassig
     stage_paths = [path for path in paths if Path(path).name == 'build.json']
     database_sources = {path: record(path) for path in paths if path not in stage_paths}
     databases = {path: load_complete(path, verify_files=False) for path in database_sources}
-    wanted_runs = {item['row']['run']: name for name, item in wanted.items()}
+    wanted_runs = {item['row']['run'] for item in items}
     candidates_by_path = {}
-    exact_by_path = {}
     for path, data in databases.items():
-        matches, exact = {}, set()
-        for old_name, product in data['products'].items():
-            name = wanted_runs.get(product['row']['run'])
-            if name is None:
+        matches, seen_runs = [], set()
+        for name, product in data['products'].items():
+            run = product['row']['run']
+            if run not in wanted_runs:
                 continue
-            if name in matches:
-                raise ValueError(f'reuse_from database contains duplicate run: {product["row"]["run"]}: {path}')
-            matches[name] = old_name
-            if name == old_name and all(product['row'].get(key) == wanted[name]['row'].get(key)
-                                        for key in SAMPLE_FIELDS[:4]):
-                exact.add(name)
-        candidates_by_path[path] = matches
-        exact_by_path[path] = exact
-    exact = set().union(*exact_by_path.values())
-    relevant = {path: data for path, data in databases.items() if exact_by_path[path]}
+            if run in seen_runs:
+                raise ValueError(f'reuse_from database contains duplicate run: {run}: {path}')
+            seen_runs.add(run)
+            item = wanted.get(name)
+            if item is not None and all(product['row'].get(key) == item['row'].get(key)
+                                        for key in SAMPLE_FIELDS[:5]):
+                matches.append(name)
+        candidates_by_path[path] = sorted(matches)
+    relevant = {path: data for path, data in databases.items() if candidates_by_path[path]}
     snapshots = {path: load_tables(verify(data['mapping']), verify_files=False)
                  for path, data in relevant.items() if odb_matches(data['odb'], cfg['odb'])}
     if snapshots:
@@ -292,8 +210,7 @@ def select_databases(paths, items, cfg, verify_files, rebuilds, relabel, reassig
         json_index_kind = 'reuse-product-json-v1'
         indexed = cache.document(path, json_index_kind, source['stat'], source['sha256']) if cache else None
         json_documents = dict(indexed or {}) if cache else None
-        matches = candidates_by_path[path]
-        names = sorted(matches)
+        names = candidates_by_path[path]
         if not names:
             continue
         software_lock, source_config = None, None
@@ -312,31 +229,13 @@ def select_databases(paths, items, cfg, verify_files, rebuilds, relabel, reassig
                 continue
             try:
                 from sample_processing import completed_processing
-                old_name = matches[name]
-                product = dict(data['products'][old_name])
-                if name in exact and name not in exact_by_path[path]:
-                    continue
+                product = dict(data['products'][name])
                 product['processing'] = completed_processing(product, source_config)
-                try:
-                    change = relabel(wanted[name], product)
-                except SpeciesReassignment as change:
-                    reassigned.setdefault(name, (change.old_species, change.new_species, source))
-                    continue
-                except ValueError as error:
-                    raise ValueError(f'reuse_from {wanted[name]["row"]["run"]}: {error}: '
-                                     f'{old_name} -> {name}') from error
-                # Validate the original identifiers and the requested input/conditions.
-                item = wanted[name]
-                validation = item
-                if change:
-                    change['old_name'] = old_name
-                    validation = dict(item, species=old_name, odb_species=product['odb_species'],
-                                      row={**item['row'], **{k: product['row'][k] for k in SAMPLE_FIELDS[:4]}})
-                validate_conditions(validation, product, data, cfg)
-                mapping = tables['tables'][name] if tables is not None and not change else None
+                validate_conditions(wanted[name], product, data, cfg)
+                mapping = tables['tables'][name] if tables is not None else None
                 if mapping is not None:
                     mapping = dict(mapping, table=relative_file(mapping_root, mapping['table'], resolved_root=mapping_root))
-                candidates.append((name, product, mapping, change, validation))
+                candidates.append((name, product, mapping))
             except ProductIntegrityError as error:
                 if rebuilds is None or wanted[name]['row'].get('reference_id'):
                     errors[name] = str(error)
@@ -348,17 +247,17 @@ def select_databases(paths, items, cfg, verify_files, rebuilds, relabel, reassig
                 selected.pop(name, None)
         failures = {}
         if verify_files:
-            entries = [(name, entry) for name, product, mapping, change, validation in candidates
+            entries = [(name, entry) for name, product, mapping in candidates
                        for entry in [*(product[key] for key in (PRODUCTS if mapping is not None else UPSTREAM)),
                                      *([mapping['table']] if mapping is not None else [])]]
             for (name, _), error in zip(entries, verify_many(entry for _, entry in entries)):
                 if error is not None:
                     failures.setdefault(name, error)
-        for name, product, mapping, change, validation in candidates:
+        for name, product, mapping in candidates:
             try:
                 if name in failures:
                     raise failures[name]
-                mapping, translation = validate_product(validation, product, data, tables if mapping else None, cfg, False,
+                mapping, translation = validate_product(wanted[name], product, data, tables if mapping else None, cfg, False,
                                                         mapping_root=mapping_root, json_documents=json_documents,
                                                         check_files=False)
                 identity = {'files': {k: content_sha256(product[k]) for k in
@@ -374,7 +273,7 @@ def select_databases(paths, items, cfg, verify_files, rebuilds, relabel, reassig
                         or (mapping is not None and not previous['identity']['reference'] and identity['reference'])):
                     selected[name] = {'product': product, 'mapping': mapping, 'translation': translation,
                                       'identity': identity, 'source': source, 'software_lock': software_lock,
-                                      'reuse_mapping': mapping is not None, 'taxonomy_relabel': change}
+                                      'reuse_mapping': mapping is not None}
             except ProductIntegrityError as error:
                 if rebuilds is None or wanted[name]['row'].get('reference_id'):
                     errors[name] = str(error)
@@ -393,39 +292,6 @@ def select_databases(paths, items, cfg, verify_files, rebuilds, relabel, reassig
         for name in selected:
             rebuilds.pop(name, None)
     return selected, errors, sources
-
-
-def stage_taxonomy_relabel(base, name, chosen):
-    from relabel_sample import relabel
-    from product_storage import product_record
-
-    change = chosen['taxonomy_relabel']
-    verify(change['snapshot'])
-    original = chosen['product']
-    product = dict(original, row={**original['row'], **change['new']})
-    if name == change['old_name']:
-        return product, {}
-    receipts = {}
-    with tempfile.TemporaryDirectory(prefix='.relabel-', dir=base) as directory:
-        paths = {}
-        for key, kind, filename in (
-            ('cds', 'fasta', 'cds.fa.gz'), ('busco', 'busco', 'busco.tsv'),
-            ('abundance', 'quant', 'abundance.tsv.gz'), ('protein', 'fasta', 'protein.fa.gz'),
-        ):
-            source = verify(original[key])
-            path = Path(directory) / filename
-            evidence = relabel(source, path, change['old_name'], name, kind)
-            verify(original[key])
-            paths[key] = path
-            receipts[key] = {k: evidence[k] for k in ('old_id', 'new_id', 'kind', 'lines', 'decoded_sha256')}
-            receipts[key]['source'] = original[key]
-        refid = record(paths['cds'])['sha256']
-        for key, path in paths.items():
-            target = base / 'relabelled' / name / refid / path.name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            path.replace(target)
-            product[key] = product_record(target)
-    return product, receipts
 
 
 def stage(staging, target, selected, cfg, progress=None):
@@ -452,13 +318,7 @@ def stage(staging, target, selected, cfg, progress=None):
             if progress:
                 progress(index, len(selected))
             continue
-        change = chosen.get('taxonomy_relabel')
-        relabelled = {}
-        if change:
-            base.mkdir(parents=True, exist_ok=True)
-            product, relabelled = stage_taxonomy_relabel(base, name, chosen)
-        else:
-            product = chosen['product']
+        product = chosen['product']
         row = product['row']
         refid = product['cds']['sha256']
         prefix = Path('products') / name / refid
@@ -466,14 +326,11 @@ def stage(staging, target, selected, cfg, progress=None):
         full = saved(product['busco'], prefix / ('busco.tsv.gz' if product['busco']['path'].endswith('.gz') else 'busco.tsv'))
         abundance = saved(product['abundance'], prefix / 'abundance.tsv.gz')
         def provenance(stage):
-            result = {'source': 'database', 'database': chosen['source'],
-                      'condition': product.get('conditions', {}).get(stage),
-                      'accepted_condition': cfg['conditions'][stage],
-                      'processing': copy.deepcopy(product.get('processing')),
-                      'raw_inputs': product.get('raw_inputs', {})}
-            if change:
-                result['taxonomy_relabel'] = dict(change, products=relabelled)
-            return result
+            return {'source': 'database', 'database': chosen['source'],
+                    'condition': product.get('conditions', {}).get(stage),
+                    'accepted_condition': cfg['conditions'][stage],
+                    'processing': copy.deepcopy(product.get('processing')),
+                    'raw_inputs': product.get('raw_inputs', {})}
         write_json(base / prefix / 'reference.json', {'schema_version': 2, 'species': name,
                    'taxid': row['taxid'], 'species_id': row['species_id'], 'run': row['run'],
                    'reference_id': refid, 'cds': cds, 'provenance': provenance('assembly')})
@@ -489,8 +346,6 @@ def stage(staging, target, selected, cfg, progress=None):
         write_json(base / protein_dir / 'receipt.json', {'schema_version': 1, 'cds_sha256': refid,
                    'translation_table': cfg['translation']['table'], 'seqkit': info['seqkit'],
                    'sequences': info['sequences'], 'protein': dict(protein, path='protein.fa.gz')})
-        if relabelled:
-            shutil.rmtree(base / 'relabelled' / name)
         if chosen.get('reuse_mapping') is False:
             for relative in (prefix / 'reference.json', prefix / 'busco.json',
                              prefix / 'quant' / (row['run'] + '.json'), protein_dir / 'receipt.json'):

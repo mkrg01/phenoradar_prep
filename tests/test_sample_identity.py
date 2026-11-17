@@ -88,12 +88,19 @@ def test_two_runs_of_one_species_execute_independent_native_stages(dataset_proje
 def test_alignment_min_taxa_counts_species_not_sample_replicates(tmp_path):
     from infer_phylogeny import alignment_qc
     manifest=tmp_path/'samples.tsv'
-    rows=[dict(species=f'Plant_alpha_R{i}',species_id='Plant_alpha') for i in range(4)]
-    write_tsv(manifest,list(rows[0]),rows)
-    records=[(r['species'],'AAAAC' if i else 'AAAAD') for i,r in enumerate(rows)]
-    output,qc=alignment_qc(records,dict(min_taxa=4,min_protein_length=1,sample_manifest=str(manifest)))
-    assert qc['taxa']==4 and qc['biological_species']==1
-    assert qc['status']=='too_few_taxa'
+    rows = [dict(species=f"A_R{i}", species_id="A") for i in range(4)]
+    rows += [dict(species=name, species_id=name) for name in "BCDEFGHI"]
+    write_tsv(manifest, list(rows[0]), rows)
+    records = [(row["species"], "AAAAC") for row in rows[:6]] + [("D", "AAAAD"), ("E", "-----")]
+    settings = dict(min_taxa=0.5, min_protein_length=1, sample_manifest=str(manifest))
+    _, qc = alignment_qc(records, settings)
+    assert qc["taxa"] == 7 and qc["biological_species"] == 4
+    assert qc["occupancy"] == pytest.approx(4 / 9)
+    assert qc["status"] == "low_occupancy"
+
+    _, qc = alignment_qc(records[:-1] + [("E", "AAAAD")], settings)
+    assert qc["occupancy"] == pytest.approx(5 / 9)
+    assert qc["status"] == "retained"
 
 
 def test_ncbi_guide_expands_duplicate_taxids(tmp_path,tiny_inputs,monkeypatch):

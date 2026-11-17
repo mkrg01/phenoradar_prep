@@ -2,10 +2,6 @@
 
 [Documentation](index.md) · [PhenoRadar inputs](phenoradar_inputs.md)
 
-Enabled contrast branches also export `expanded_pair_clade_id`, per-clade counts
-in `expanded_pair_clades.tsv`, and separate `expanded_pair_tree{,_id}.{pdf,svg}`
-figures. See [expanded pair clades](contrast_pairs.md#expanded-pair-clades).
-
 ## Directory layout
 
 | Path | Contents |
@@ -47,10 +43,6 @@ follow the [sample identifier conventions](inputs.md#identifiers).
 New databases and build caches gzip protein FASTA and expression tables,
 preserving all values and source columns. Combined OG/KO analysis tables remain
 plain TSV; the larger per-sequence table is gzip-compressed.
-
-Existing uncompressed databases remain readable and reusable; no conversion is
-needed. New builds compress imported products and leave the source database
-unchanged.
 
 ## Sample processing table
 
@@ -211,17 +203,19 @@ are zero. Run IDs are recorded once in `metadata/samples.tsv`, and remain in
 QC tables and internal per-run products. Each computational sample ID must
 identify exactly one run.
 
-- **`tpm_sum`** sums original gene TPM within each OG, excluding unmapped genes.
-- **`tpm`** rescales retained OG values to one million per run. It describes
-  relative expression within the retained OG set.
+- **`tpm_sum`** sums original gene TPM within each OG. Unmapped genes are omitted.
+- **`tpm`** divides each OG sum by the total TPM of genes assigned to OGs in that
+  run, then multiplies by one million. A run's mapped TPM fraction can shift
+  all of its rescaled values. Review `mapping_qc.tsv` when comparing samples.
+
+An absent long-table coordinate has no quantified target assigned to that OG
+in the sample. A recorded zero means one or more assigned targets were
+quantified with a total TPM of zero.
 
 Duplicate gene/OG pairs count once. A quantified gene assigned to multiple OGs
 stops aggregation. Duplicate targets, negative/nonfinite TPM, and no positive
 retained TPM also cause errors.
 
-[PhenoRadar](phenoradar_inputs.md) reads the selected columns directly from the
-native tables. Samples are never averaged. Older tables with an explicit `run`
-column remain readable; verification checks it against the sample manifest.
-Post hoc subsets preserve the source table's columns.
-[KO expression](kegg.md#outputs) uses
-original TPM sums and distinguishes unquantified features from measured zeros.
+See [PhenoRadar settings](phenoradar_inputs.md#expression-settings) for selecting
+a value column and handling absent coordinates. [KO expression](kegg.md#outputs)
+uses original OG TPM sums.

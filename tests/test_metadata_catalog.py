@@ -121,9 +121,7 @@ def test_rebuilds_accepted_run_from_new_metadata_without_previous_metadata(curat
 
 @pytest.mark.parametrize('cached', [False, True])
 @pytest.mark.parametrize('change, reason', [
-    ({'taxid': '9'}, 'taxid_changed'),
     ({'bioproject': 'P9'}, 'bioproject_changed'),
-    ({'scientific_name': 'Renamed species'}, 'scientific_name_changed'),
     ({'taxid': 'invalid'}, 'invalid_taxid'),
     ({'exclusion': 'new_filter'}, 'amalgkit_exclusion'),
 ])
@@ -152,6 +150,57 @@ def test_source_changes_preserve_reviewed_identity_and_are_reported(curated_proj
     assert summary['review_required'] == 1
     catalog.accept_candidate(root, cfg, output)
     assert (dataset / 'accepted_samples.tsv').read_bytes() == evidence
+
+
+@pytest.mark.parametrize('larger', [False, True])
+def test_name_change_returns_accepted_run_to_selection(curated_project, larger):
+    root, dataset, cfg = curated_project
+    evidence = (dataset / 'accepted_samples.tsv').read_bytes()
+    incoming = {**row(1, 'OLD1'), 'scientific_name': 'Renamed species'}
+    another = row(1, 'BIGGER1', bases=200 if larger else 50)
+    _, output = select(curated_project, [incoming, another])
+    chosen, = read_tsv(output / 'metadata.tsv')
+    assert chosen['run'] == ('BIGGER1' if larger else 'OLD1')
+    if not larger:
+        assert chosen['analysis_sample_id'] == 'Renamed_species_OLD1'
+    report, = [entry for entry in read_tsv(output / 'selection.tsv') if entry['taxid'] == '1']
+    assert report['previous_scientific_name'] == 'Plant species1'
+    assert report['updated_scientific_name'] == 'Renamed species'
+    assert report['identity_change'] == 'scientific_name'
+    assert (dataset / 'accepted_samples.tsv').read_bytes() == evidence
+    assert catalog.accept_candidate(root, cfg, output)['retained_success_evidence'] == 0
+    assert not read_tsv(dataset / 'accepted_samples.tsv')
+
+
+@pytest.mark.parametrize('confirmed', [False, True])
+def test_original_taxid_change_requires_confirmation_and_releases_old_slot(curated_project, monkeypatch, confirmed):
+    root, dataset, cfg = curated_project
+    evidence = (dataset / 'accepted_samples.tsv').read_bytes()
+
+    def confirm(self, run, taxid, taxonomy):
+        assert (run, taxid, taxonomy) == ('OLD1', '9', None)
+        if not confirmed:
+            raise ValueError('BioSample disagrees')
+        return {'run': run, 'taxid': taxid, 'biosample': 'SAMN1'}
+
+    monkeypatch.setattr('ncbi_sample.NCBISamples.confirm', confirm)
+    rows = [row(1, 'REPLACEMENT'), row(9, 'OLD1', bases=100), row(9, 'BIGGER9', bases=200)]
+    if not confirmed:
+        with pytest.raises(ValueError, match='cannot confirm updated TaxID.*BioSample disagrees'):
+            select(curated_project, rows)
+        assert not (root / 'work/attempt').exists()
+        assert (dataset / 'accepted_samples.tsv').read_bytes() == evidence
+        return
+
+    _, output = select(curated_project, rows)
+    assert {row['taxid']: row['run'] for row in read_tsv(output / 'metadata.tsv')} == {
+        '1': 'REPLACEMENT', '9': 'BIGGER9'}
+    report, = [entry for entry in read_tsv(output / 'selection.tsv') if entry['taxid'] == '1']
+    assert report['updated_taxid'] == '9'
+    assert report['identity_change'] == 'taxid,scientific_name'
+    assert (dataset / 'accepted_samples.tsv').read_bytes() == evidence
+    catalog.accept_candidate(root, cfg, output)
+    assert not read_tsv(dataset / 'accepted_samples.tsv')
 
 
 def test_stale_local_identity_does_not_override_acceptance(curated_project):
@@ -198,7 +247,7 @@ def test_absent_run_without_cache_requires_resolution_before_publication(curated
     assert report['decision'] == 'unresolved'
     assert report['review'] == 'yes'
     for allow_review in (False, True):
-        with pytest.raises(ValueError, match='accepted runs lack source metadata'):
+        with pytest.raises(ValueError, match='accepted runs lack a usable identity'):
             catalog.accept_candidate(root, cfg, output, allow_review=allow_review)
     assert not (dataset / 'metadata.tsv').exists()
     assert (dataset / 'accepted_samples.tsv').read_bytes() == evidence
@@ -951,5 +1000,38 @@ def test_confirmed_reassignment_reselects_old_and_new_species(curated_project, t
     assert {r['taxid']: r['run'] for r in selected} == {
         old['taxid']: 'REPLACEMENT', new['taxid']: 'VERIFIED'}
     provenance = json.loads((output / 'provenance.json').read_text())
-    assert provenance['taxonomy_reassignments'][0]['old_species_taxid'] == old['taxid']
+    update, = provenance['identity_updates']
+    assert update['old']['taxid'] == old['taxid']
+    assert update['new']['taxid'] == new['taxid']
+    assert update['confirmation']['biosample'] == 'SAMN1'
     assert catalog.accept_candidate(root, cfg, output)['retained_success_evidence'] == 0
+
+
+@pytest.mark.parametrize('present', [False, True])
+def test_frozen_taxonomy_revisits_adopted_merged_id(curated_project, tiny_inputs, present):
+    import sqlite3
+
+    root, dataset, cfg = curated_project
+    taxonomy = root / 'taxa.sqlite'
+    shutil.copyfile(tiny_inputs['taxonomy_db'], taxonomy)
+    cfg['taxonomy_database'] = str(taxonomy)
+    adopted = {**row(42, 'OLD1'), 'scientific_name': 'Alpha plant'}
+    write_tsv(dataset / 'metadata.tsv', FIELDS, [adopted])
+    write_tsv(dataset / 'accepted_samples.tsv', catalog.ACCEPTED_FIELDS,
+              [dict({key: adopted[key] for key in catalog.ACCEPTED_FIELDS[:4]},
+                    busco_complete=80, busco_total=100, source_build='completed')])
+    with sqlite3.connect(taxonomy) as db:
+        db.execute("UPDATE species SET taxid=9998, spname='Renamed plant' WHERE taxid=42")
+        db.execute('INSERT INTO merged VALUES (42, 9998)')
+    candidates = [adopted, row(43, 'OTHER')] if present else [row(43, 'OTHER')]
+    summary, output = select(curated_project, candidates)
+    if present:
+        chosen, = [row for row in read_tsv(output / 'metadata.tsv') if row['run'] == 'OLD1']
+        assert (chosen['taxid'], chosen['taxid_original'], chosen['scientific_name']) == (
+            '9998', '42', 'Renamed plant')
+        assert catalog.accept_candidate(root, cfg, output)['retained_success_evidence'] == 0
+    else:
+        assert summary['unresolved_accepted_runs'] == ['OLD1']
+        with pytest.raises(ValueError, match='lack a usable identity'):
+            catalog.accept_candidate(root, cfg, output)
+        assert read_tsv(dataset / 'accepted_samples.tsv')[0]['taxid'] == '42'

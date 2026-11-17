@@ -13,9 +13,9 @@ Config paths are relative to the repository root. Local FASTQ paths are relative
 to the metadata file's directory. Keep imported databases inside the repository
 so the container can access them.
 
-The first submission saves inputs and settings, including with `--dry-run`.
-Use a new run for changed scientific conditions; use
-[resource overrides](running.md#resource-budgets) for job resources.
+Submission saves inputs and settings. Build `--dry-run` saves a build, while
+analysis `--dry-run` only previews it. Create a new run to change scientific
+settings. Use [resource overrides](running.md#resource-budgets) for job resources.
 
 ## Build settings
 
@@ -77,7 +77,6 @@ resuming samples; choose a new cache directory for a different snapshot.
 | --- | --- |
 | `build` | Completed build or copied database; `--build` overrides it |
 | `inputs.species_trait`, `trait` | Trait table and column; set the path to `null` when unused |
-| `trait_encoding` | Explicit text-state mapping to integers `0` and `1`; `null` for existing `0`/`1` input |
 | `inputs.species_list` | Restrict to listed species/sample IDs; `null` disables filtering |
 | `exclude_species` | Omit biological species IDs (all their samples) or exact sample IDs |
 | `selection.busco_threshold` | Minimum complete BUSCO fraction per sample; default `0.5` |
@@ -99,11 +98,11 @@ The following policies apply to both schedulers:
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `storage.scratch_root` | `auto` | Choose `/data1`, node `$TMPDIR`, or `/tmp` on a different filesystem. `env`, `workspace`, or an absolute directory can override it |
+| `storage.temporary_directory` | `auto` | Where each job creates its temporary files |
 | `storage.allow_shared_scratch` | `true` | Permit the automatic project-scratch fallback |
 | `storage.compact_logs` | `true` | Archive ODB RunLogs per chunk while retaining their checksums |
 | `storage.max_bytes`, `storage.max_inodes` | `null` | Optional project-wide allocated-byte and inode ceilings |
-| `storage.interval_seconds` | `60` | Storage inventory interval |
+| `storage.interval_seconds` | `300` | Seconds between disk usage checks during a job |
 | `storage.scratch_min_free_bytes` | `0` | Required free bytes when selecting scratch and while running |
 | `storage.scratch_min_free_inodes` | `0` | Required free inodes, checked before starting and at least once per second between inventories |
 | `storage.scratch_max_bytes` | `null` | Per-job scratch ceiling |
@@ -114,10 +113,16 @@ The following policies apply to both schedulers:
 | `storage.task_limits` | `{}` | Override scratch limits/reservations by task or rule name, e.g. `sample` and `odb_map`, on both schedulers |
 | `storage.projection_factor` | `1.3` | Safety factor for pilot extrapolation |
 
-Scratch is selected on each execution node and cleaned after the attempt.
-Restart products remain on shared storage. Keeping intermediates forces project
-scratch and retains it. Interrupted jobs killed without a cleanup opportunity can
-leave scratch directories; their `owner.json` identifies the run.
+Each job creates a temporary directory on the execution node. With `auto`,
+it tries `/data1`, `$TMPDIR`, and `/tmp` in that order, using a writable
+directory on a separate filesystem when available. The fallback is the
+project's `work/scratch/`. Set `workspace` to use that project directory,
+`env` to use `$TMPDIR`, or provide an existing absolute directory.
+
+Temporary files are normally deleted after each attempt. To keep them under
+`work/scratch/` for debugging, enable `storage.keep_intermediates`. Restart
+products are saved with the build. The older key `storage.scratch_root` is
+still accepted.
 
 Image pulls also use the supplied task scratch or temporary directory for unpacking
 and disposable OCI layers. Only the completed SIF is published to the image cache.
@@ -125,9 +130,7 @@ Explicit `APPTAINER_CACHEDIR`/`SINGULARITY_CACHEDIR` locations remain caller-own
 
 The supplied configs, including angiosperm, measure storage without reserving
 capacity or enforcing byte/inode ceilings. Normal cleanup and execution locks
-remain enabled. To use shared computation storage directly, set
-`storage.scratch_root: workspace` or an existing absolute directory; `auto`
-prefers node-local storage and permits a project-scratch fallback.
+remain enabled.
 
 Storage limits are optional. If configured, project ceilings cover the repository,
 including other builds and shared caches. New jobs refuse to start at 85% of a
@@ -142,8 +145,8 @@ a new run. Each usage receipt records the effective limits. See
 
 ## Optional analyses and exports
 
-Choose branches before the first submission. The supplied analysis config enables
-representative trees and contrast pairs; review these choices for your dataset.
+Choose branches before the first submission. The supplied analysis config uses
+the `all` tree and enables dating and contrast pairs.
 
 | Setting | Guide |
 | --- | --- |
@@ -162,8 +165,10 @@ See [targets](running.md#targets) to run branches separately.
 
 `phylogeny.trees` accepts `all`, `phenotyped`, `representatives`, or several of
 these for independent inference. Use `[]` to disable inference and disable any
-postprocessing flags as well. Dating and taxonomy checks support only `all` and
-`phenotyped`; contrast pairs support all three.
+postprocessing flags as well. Dating and taxonomy checks support `all` and
+`phenotyped`. For `representatives`, set both `phylogeny.dating.enabled` and
+`phylogeny.taxonomy_check.enabled` to `false`. For trees containing
+non-angiosperms, disable dating. Contrast pairs support all three tree sets.
 
 See [species sets](phylogeny.md#species-sets) for selection criteria. Representative
 selection, pairs, and tree inference use a fixed internal seed (`12345`).

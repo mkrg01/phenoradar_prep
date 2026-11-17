@@ -46,7 +46,7 @@ def test_pilot_rejects_invalid_sizes(count):
 def test_storage_preserves_reference_mounts_and_replaces_parent_temporary_path(tmp_path, monkeypatch):
     project, node = tmp_path / 'project', tmp_path / 'node'
     project.mkdir(); node.mkdir()
-    config = storage_runtime.settings({'scratch_root': str(node)})
+    config = storage_runtime.settings({'temporary_directory': str(node)})
     monkeypatch.setenv('PHENORADAR_TASK_SCRATCH', '/old/node/task')
     monkeypatch.setenv('APPTAINER_MOUNT', 'type=bind,src=/ref,dst=/db,ro\ntype=bind,src=/old/node/task,dst=/old/node/task')
     with storage_runtime.task_scratch(project, config) as local:
@@ -95,7 +95,7 @@ def test_common_storage_cli_measures_a_real_child_and_cleans_only_owned_scratch(
     node.mkdir()
     (node / 'unrelated').write_text('keep')
     pipeline = project / 'pipeline.yaml'
-    pipeline.write_text(yaml.safe_dump({'storage': {'scratch_root': str(node), 'interval_seconds': 1}}))
+    pipeline.write_text(yaml.safe_dump({'storage': {'temporary_directory': str(node), 'interval_seconds': 1}}))
     command = [sys.executable, str(ROOT / 'workflow/scripts/storage_runtime.py'), 'run',
                '--pipeline', str(pipeline), '--root', str(project), '--usage', str(project / 'jobs/storage'),
                '--label', 'sample', '--', sys.executable, '-c',

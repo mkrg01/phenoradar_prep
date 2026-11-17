@@ -65,13 +65,13 @@ checkpoint select_phenotyped_species:
         samples=f"{PHENOTYPED}/selection/samples.tsv",
         qc=f"{PHENOTYPED}/selection/selection.json"
     params:
-        outdir=f"{PHENOTYPED}/selection", trait=PHY["trait"], min_taxa=PHY["min_taxa"]
+        outdir=f"{PHENOTYPED}/selection", trait=PHY["trait"]
     conda: "../envs/analysis.yaml"
     resources: mem_mb=4000
     log: f"{LOG}/{PHYLO_BRANCHES['phenotyped']}/selection.log"
     shell:
         "{PYTHON:q} {input.code:q} --samples {input.samples:q} --traits {input.traits:q} "
-        "--trait {params.trait:q} --min-taxa {params.min_taxa} --outdir {params.outdir:q} > {log:q} 2>&1"
+        "--trait {params.trait:q} --outdir {params.outdir:q} > {log:q} 2>&1"
 
 
 checkpoint plan_phylogeny:
@@ -378,12 +378,11 @@ rule plot_dated_species_tree:
         samples=lambda wc: (f"{PHENOTYPED}/selection/samples.tsv"
                             if wc.phylo_branch == PHYLO_BRANCHES["phenotyped"] else f"{META}/samples.tsv"),
         traits=rules.normalize_traits.output.traits,
-        encoding=rules.normalize_traits.output.encoding,
         taxonomy=TAXONOMY_DB,
         code=f"{SCRIPTS}/plot_dated_tree.py",
         helpers=[f"{SCRIPTS}/{name}.py" for name in
                  ["common", "infer_phylogeny", "sample_identity", "species_traits", "taxonomy_check",
-                  "trait_encoding", "busco_phylogeny", "phylogeny_outgroup"]]
+                  "busco_phylogeny", "phylogeny_outgroup"]]
     output:
         pdf=f"{PHYLO_RUN}/dating/species_tree.dated.pdf",
         svg=f"{PHYLO_RUN}/dating/species_tree.dated.svg",
@@ -396,5 +395,5 @@ rule plot_dated_species_tree:
     log: f"{LOG}/{{phylo_branch}}/dating_plot.log"
     shell:
         "{PYTHON:q} {input.code:q} --tree {input.tree:q} --ages {input.ages:q} --samples {input.samples:q} "
-        "--taxonomy {input.taxonomy:q} --traits {input.traits:q} --encoding {input.encoding:q} "
+        "--taxonomy {input.taxonomy:q} --traits {input.traits:q} "
         "--trait {params.trait:q} --outdir {params.outdir:q} > {log:q} 2>&1"

@@ -20,25 +20,14 @@ alignment:
   trimal_mode: gappyout  # or automated1
 ```
 
-The default `0.5` selects OGs represented in at least 50% of the selected sample
-IDs in `metadata/samples.tsv`, after sample exclusions and BUSCO selection.
-The required count is rounded up: 5,582 samples require at least 2,791.
-Each sample counts once even with multiple gene copies; distinct sample IDs from
-the same biological species count separately. All copies of a retained OG are
-aligned. Allowed values are 0–1; `0` retains all observed OGs and `1` requires
-every selected sample. An empty qualifying set produces an empty inventory.
-This condition affects OG alignments, not TPM aggregation or BUSCO-marker trees.
+Occupancy is the fraction of selected sample IDs with at least one mapped
+protein in the OG. Separate runs of the same species count separately. A
+threshold of `0.5` keeps groups present in at least half the samples. Use `0`
+to align all observed groups or `1` to require every sample. The cutoff applies
+only to OG alignments.
 
-Weighted batches contain up to 500 selected OGs; inputs of 16 MB or more
-run individually. Each batch defaults to 12 CPUs/32 GB, running up to three
-FAMSA processes with four threads each, followed by trimAl; see
-[resource overrides](running.md#resource-budgets).
-
-OG alignments and provenance retain their original paths. A retried batch
-verifies and reuses completed OGs; missing or changed members invalidate only
-their batch receipt. `batches/*.json` records membership and reuse counts.
-Batch scheduling uses input FASTA size as a cost estimate; exceptionally large
-groups can still need a resource override.
+Batch jobs default to 12 CPUs and 32 GB, with four FAMSA threads per alignment.
+See [resource overrides](running.md#resource-budgets) for large groups.
 
 ## Inputs and outputs
 
@@ -53,36 +42,13 @@ Results are in `results/<build>/downstream/<analysis>/orthogroups/alignments/`:
 - `occupancy.tsv`: counts, fractions and selection decisions for all candidate OGs.
 - `provenance.json`: completed alignment inventory and provenance.
 
-After successful completion, the directory's `*.faa` files are exactly the
-selected OGs listed in `provenance.json`. Former outputs below the threshold are
-moved to `work/<run>/orthogroups/alignments/cache/` (under `work_root` when set).
-Re-adopted OGs are verified against their input, alignment and aligner records,
-then moved back without recomputation. Deleting this optional cache saves disk
-space but requires recomputation if those OGs are selected again.
-OGs no longer present in the current raw collection are removed from both the
-final directory and cache, as with obsolete outputs before this cache existed.
+The FASTA retains all mapped copies under their original gene IDs. trimAl
+treats noncanonical residues as gaps while selecting columns and restores the
+original characters in retained columns. Copies can become entirely gaps.
+Positions refer to the trimmed alignment. For full-length coordinates, map a
+reference protein back to that alignment.
 
-Moving excluded results shrinks the final output directory; retaining the cache
-does not reduce total stored alignment data. Files are moved rather than kept
-in both locations. Across filesystems, a temporary copy is needed during a move.
-
-Remove the final `_g{number}` to recover the sample ID, then join
-`metadata/samples.tsv` for biological species. Alignment columns identify sites;
-positions refer to the final trimmed alignment. Non-gap counts in this file do not
-recover full-length protein positions; map a full-length reference separately.
-PhenoRadar selects copies and sites.
-Missing sequences alone do not establish gene deletion.
-
-trimAl treats noncanonical residues as missing for column selection; the original
-characters are restored at retained columns. It retains every sequence, including
-copies that become all-gap. Per-OG JSON records the trimAl mode, executable hash,
-and site counts. A retry reuses only matching input, output and trimming records;
-verified legacy untrimmed outputs can be trimmed without repeating FAMSA.
-Changing the trimming mode invalidates the batch receipts.
-
-BUSCO markers use the same trimAl projection code, with their existing taxon and
-length QC. Their single-copy CDS-derived inputs and selected taxa differ from the
-all-copy OG inputs; OG alignments do not replace BUSCO alignments.
-
-Existing frozen analyses retain their saved implementation. Prepare a new analysis
-to use trimming; do not overwrite their recorded alignments in place.
+A retry verifies and reuses matching alignments. Superseded alignments can
+remain in the run's alignment cache and still occupy disk space. Use
+[per-sequence TPM](phenoradar_inputs.md#amino-acid-inputs) to join expression by
+sample and gene ID.

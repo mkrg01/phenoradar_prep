@@ -2,51 +2,80 @@
 
 [Documentation](index.md) · [Output formats](outputs.md)
 
-Use completed files directly from
-`results/<build>/downstream/<analysis>/`. No `phenoradar_inputs/` directory is
-created. Choose an expression table, metadata, and any optional tree, alignment,
-or annotation inputs explicitly.
+Point PhenoRadar at the files in `results/BUILD/downstream/ANALYSIS/`.
+Use files from the same analysis or from the same [exported subset](species_filter.md).
 
 ## Input files
 
-Paths below are relative to the analysis directory.
+Paths are relative to the analysis directory.
 
 | Input | Path |
 | --- | --- |
-| Input metadata: traits, taxonomy, and available contrast pairs | `metadata/species_metadata.tsv` |
-| Intermediate traits and taxonomy before contrast assignment | `metadata/species_metadata_base.tsv` |
+| Traits, taxonomy, and available contrast groups | `metadata/species_metadata.tsv` |
 | Sample IDs, biological species, and runs | `metadata/samples.tsv` |
-| Original trait labels and numeric encoding | `metadata/trait_encoding.json` |
-| OG expression | `orthogroups/expression/tpm.tsv` |
-| Per-sequence expression | `expression/sequence_tpm.tsv.gz` (`species`, `sequence_id`, `tpm`) |
+| Trait states, missing count, and source checksums | `metadata/species_trait.json` |
+| OG expression | `orthogroups/expression/tpm.tsv` or `orthogroups/expression/tpm_sum.tsv` |
 | KO expression | `kegg/ko_tpm_sum.tsv` |
-| Trimmed OG alignments | `orthogroups/alignments/{og}.faa` |
-| Species tree | `phylogeny/{all,phenotyped,representatives}/species_tree.nwk` |
-| Dated species tree, when enabled | `phylogeny/{all,phenotyped}/dating/species_tree.dated.nwk` |
-| Branch-specific contrast pairs | `phylogeny/{tree}/contrast/species_metadata.tsv` |
-| OG-to-KO evidence | `kegg/og_kos.tsv` (`accepted=1` rows) |
-| KO group memberships | `kegg/ko_modules.tsv`, `kegg/ko_pathways.tsv` |
+| Trimmed OG alignments | `orthogroups/alignments/*.faa` |
+| Original per-sequence TPM | `expression/sequence_tpm.tsv.gz` |
+| Species tree | `phylogeny/<tree>/species_tree.nwk` |
+| Dated tree, when enabled | `phylogeny/<tree>/dating/species_tree.dated.nwk` |
 
-`all` creates `metadata/species_metadata.tsv` after the configured contrast
-branches finish. It includes `species`, the trait, `contrast_pair_id`, and the
-available `kingdom`, `phylum`, `class`, `order`, `family`, and `genus` names.
-It also includes nullable `expanded_pair_clade_id` for the maximal clades
-anchored by those pairs; original pair IDs are preserved.
-Unrecorded ranks remain blank. `species_metadata.json` records the source files
-and checksums.
+The `all` target creates the PhenoRadar metadata after the enabled contrast
+branches finish. `species` identifies a sample in PhenoRadar inputs and in tree
+tips. Use `metadata/samples.tsv` to recover biological species and run IDs.
+Keep repeated samples of a species in the same validation group.
 
-With one configured contrast branch, its pair IDs populate `contrast_pair_id`.
-Unpaired samples remain in the table with blank IDs. With multiple contrast
-branches, IDs are kept in separate columns such as `contrast_pair_id_all` and
-`contrast_pair_id_representatives`; `contrast_pair_id` stays blank. Choose the
-desired column using PhenoRadar's `data.contrast_pair_col`. With contrasts
-disabled, pair IDs remain blank; saved files from earlier runs are ignored.
-Expanded IDs follow the same policy: `expanded_pair_clade_id_all` and
-`expanded_pair_clade_id_representatives` when multiple branches are configured,
-with the unsuffixed column blank. With contrasts disabled, expanded IDs are blank.
+## Expression settings
 
-For expanded-clade LOGO with current PhenoRadar, select the same expanded column
-for both settings so labeled samples without an assignment enter `external_test`:
+```yaml
+data:
+  metadata_path: results/leaf/downstream/c4/metadata/species_metadata.tsv
+  tpm_path: results/leaf/downstream/c4/orthogroups/expression/tpm.tsv
+  species_col: species
+  feature_col: orthogroup
+  value_col: tpm
+```
+
+OG `tpm` is rescaled over genes assigned to OGs. To use the original gene TPM
+sums, choose `tpm_sum.tsv` and set `value_col: tpm_sum`. For KO expression,
+use `kegg/ko_tpm_sum.tsv`, `feature_col: ko`, and `value_col: tpm_sum`.
+Use matching [orthogroup annotations](https://github.com/mkrg01/phenoradar/blob/main/docs/data-format.md#orthogroup-annotations)
+with OG features, or leave `data.orthogroup_annotation_path` unset.
+
+Absent sample–feature coordinates are filled with zero by default in PhenoRadar.
+With supported models, set `preprocess.expression.absent_feature_fill: nan` to
+keep them missing. Use the long tables to preserve the distinction between an
+absent coordinate and an observed zero. See [TPM interpretation](outputs.md#tpm-interpretation)
+and the [PhenoRadar data format](https://github.com/mkrg01/phenoradar/blob/main/docs/data-format.md#expression-tsv).
+
+## Amino acid inputs
+
+```yaml
+data:
+  feature_mode: amino_acid
+  metadata_path: results/leaf/downstream/c4/metadata/species_metadata.tsv
+  alignment_dir: results/leaf/downstream/c4/orthogroups/alignments
+  sequence_tpm_path: results/leaf/downstream/c4/expression/sequence_tpm.tsv.gz
+preprocess:
+  amino_acid:
+    aggregation: tpm_weighted_frequency
+```
+
+TPM weighting joins on sample ID and exact FASTA sequence ID. Every imported
+alignment record needs one matching TPM, including measured zeros. The
+[PhenoRadar amino acid guide](https://github.com/mkrg01/phenoradar/blob/main/docs/amino-acid.md)
+covers other aggregation modes and combining amino acid features with OG
+expression.
+
+## Validation groups
+
+With one contrast branch, use `contrast_pair_id` for original pairs or
+`expanded_pair_clade_id` for [expanded clades](contrast_pairs.md#expanded-pair-clades).
+With several branches, use a suffixed column such as `contrast_pair_id_all` or
+`expanded_pair_clade_id_phenotyped`. Unassigned samples have blank IDs.
+
+For leave-one-group-out validation on expanded clades:
 
 ```yaml
 data:
@@ -56,95 +85,16 @@ split:
   outer_cv_strategy: logo
 ```
 
-This also uses expanded groups for any `pair_aware` feature ranking. To retain
-original pairs for ranking while splitting by expanded clades, current
-PhenoRadar requires explicit handling of labeled samples without a split group;
-changing only `split.group_col` on the full cohort produces a missing-group
-error. The default one-sample-per-label-per-group sampling increases the choice
-of species, not the size of each sampled training set. See
-[expanded-clade definitions and saved-result exports](contrast_pairs.md#expanded-pair-clades).
+Using the same column in both settings sends labeled samples with blank groups to
+`external_test` and makes any pair-aware ranking use the expanded groups. For
+taxonomic holdouts, set `split.group_col` to `family` or `order` and review
+missing group labels before running. See [PhenoRadar's split rules](https://github.com/mkrg01/phenoradar/blob/main/docs/data-format.md#metadata-tsv).
 
-Optional files exist only after their branch has completed. QC, representative
-selection, and provenance stay beside the results; they are not extra expression
-inputs. Choose the tree and pair branch deliberately. Pair IDs are local to each
-branch. The final input metadata combines their assignments with taxonomy;
-manual joins are unnecessary. Base metadata remains available for targets run
-before contrast analysis. Use `family` or `order` as a grouping column when not
-using contrast pairs.
-
-## Expression settings
-
-For OG expression:
-
-```yaml
-data:
-  metadata_path: results/leaf/downstream/carnivory/metadata/species_metadata.tsv
-  tpm_path: results/leaf/downstream/carnivory/orthogroups/expression/tpm.tsv
-  species_col: species
-  feature_col: orthogroup
-  value_col: tpm
-split:
-  group_col: family
-```
-
-For KO expression, replace `tpm_path` with
-`results/leaf/downstream/carnivory/kegg/ko_tpm_sum.tsv`, set `feature_col: ko`,
-`value_col: tpm_sum`, and `orthogroup_annotation_path: null`.
-
-Expression tables omit the redundant `run` column; the sample-to-run mapping
-remains in `metadata/samples.tsv`. Older tables with `run` are also accepted by
-PhenoRadar, which selects the configured columns.
-`species` is a computational sample ID, not a biological-species grouping. Give
-each independently assembled run a distinct sample ID; samples are never
-averaged. Use `metadata/samples.tsv` to identify biological species.
-
-OG `tpm` is normalized over retained OGs. KO `tpm_sum` sums original OG TPM
-without renormalization. Review [TPM interpretation](outputs.md#tpm-interpretation)
-and [KO ambiguity and missing values](kegg.md#assignment-and-quantification).
-
-For future expression-weighted amino-acid features, the per-sequence table can
-be joined to OG alignments by sample and exact FASTA sequence ID. It contains
-original gene TPM, including zero values and unmapped genes; it does not contain
-precomputed site features. Current PhenoRadar does not yet implement this MSA
-feature input. See [per-sequence TPM](outputs.md#tpm-interpretation) for the contract.
-
-Trait columns contain `0`, `1`, or missing values. Text states are
-[encoded once](inputs.md#traits); their source labels remain in
-`metadata/trait_encoding.json`.
-
-Existing OrthoDB annotation TSVs can be passed separately using PhenoRadar's
-`orthogroup_annotation_path`. Use the file matching the OG reference version;
-annotation descriptions are not downloaded or combined automatically. KEGG maps
-are separate evidence tables; supplying them as generalized annotation inputs
-requires corresponding support in PhenoRadar.
-
-## Completion and verification
-
-`all` validates native outputs before recording completion. For an explicit
-integrity check, use the existing command:
+## Verify completed outputs
 
 ```bash
-./run_analysis.sh status --analysis results/leaf/downstream/carnivory --verify
+./run_analysis.sh status --analysis results/leaf/downstream/c4 --verify
 ```
 
-This checks recorded output hashes and consistency of sample IDs, expression,
-completed OG alignments, trees, and available annotations. Plain `status` remains
-a lightweight observation and does not read large output tables.
-
-Successful expression-row checks are reused from `.cache/verification.sqlite`
-when file content, sample/run mappings, requested columns, Python, and validation
-code agree. Changed file attributes require checking the content again. Missing
-or damaged cache entries fall back to full validation.
-
-For a [post hoc subset](species_filter.md), point all relevant inputs at
-`filtered/` under the same analysis. Do not mix filtered expression or metadata
-with the original tree; use the saved pruned tree or matching contrast branch.
-
-The former `phenoradar_inputs` target and collection directory generation have
-been removed. Existing directories and completion records are retained and are
-not automatically migrated or deleted. Existing collections are not refreshed.
-When rerunning or extending an analysis, update PhenoRadar configurations to
-native paths.
-
-See PhenoRadar's [quick start](https://github.com/mkrg01/phenoradar/blob/main/docs/quickstart.md)
-and [data formats](https://github.com/mkrg01/phenoradar/blob/main/docs/data-format.md).
+Verification checks the recorded files and consistency of the completed
+analysis. It can read large tables. Use plain `status` for job progress.

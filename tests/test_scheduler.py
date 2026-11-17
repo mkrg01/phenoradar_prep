@@ -184,7 +184,7 @@ def test_existing_pipeline_launcher_auto_detects_age_and_runs_a_real_dag(tmp_pat
     (root / 'config/analysis.yaml').write_text(yaml.safe_dump({'execution': {
         'scheduler': 'auto', 'partition': None, 'total_limits': {'jobs': 2, 'cpus': 4, 'mem_gb': 16},
         'per_job_resources': {'controller': {'cpus': 1, 'mem_gb': 1, 'time': '01:00:00'}}}}))
-    (root / 'pipeline.yaml').write_text('storage:\n  scratch_root: workspace\n')
+    (root / 'pipeline.yaml').write_text('storage:\n  temporary_directory: workspace\n')
     (root / 'workflow/Snakefile').write_text('''
 rule all:
     input: 'result.txt'

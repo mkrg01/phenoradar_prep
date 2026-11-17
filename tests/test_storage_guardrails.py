@@ -74,7 +74,7 @@ def test_full_scratch_filesystem_blocks_before_creating_work(tmp_path, monkeypat
         raise OSError(28, 'No space left on device')
     monkeypatch.setattr(storage_runtime.tempfile, 'mkdtemp', full)
     with pytest.raises(admission.ScratchAdmissionError, match='No space left'):
-        with storage_runtime.task_scratch(root, settings({'scratch_root':str(node)})):
+        with storage_runtime.task_scratch(root, settings({'temporary_directory':str(node)})):
             pytest.fail('child could start on full scratch')
 
 
@@ -87,11 +87,12 @@ def test_both_scheduler_command_styles_select_the_same_task_policy():
 
 
 @pytest.mark.parametrize('label', ['sample', 'odb_map'])
-def test_saved_storage_settings_control_runtime(tmp_path, label):
+@pytest.mark.parametrize('directory_key', ['temporary_directory', 'scratch_root'])
+def test_saved_storage_settings_control_runtime(tmp_path, label, directory_key):
     root, node = tmp_path / 'project', tmp_path / 'node'
     root.mkdir(); node.mkdir()
     pipeline = root / 'pipeline.yaml'
-    saved = yaml.safe_dump({'storage': {'scratch_root': str(node),
+    saved = yaml.safe_dump({'storage': {directory_key: str(node),
                            'task_limits': {label: {'scratch_max_bytes': 10000000}}}}).encode()
     pipeline.write_bytes(saved)
     repo = Path(__file__).parents[1]
@@ -134,7 +135,7 @@ def test_cli_capacity_denial_never_starts_the_child(tmp_path):
     root, node = tmp_path / 'project', tmp_path / 'node'
     root.mkdir(); node.mkdir()
     config = root / 'pipeline.yaml'
-    config.write_text(yaml.safe_dump({'storage': {'scratch_root': str(node), 'scratch_reserve_bytes': 10**30}}))
+    config.write_text(yaml.safe_dump({'storage': {'temporary_directory': str(node), 'scratch_reserve_bytes': 10**30}}))
     marker = root / 'child-started'
     script = Path(__file__).parents[1] / 'workflow/scripts/storage_runtime.py'
     result = subprocess.run([sys.executable, str(script), 'run', '--pipeline', str(config), '--root', str(root),

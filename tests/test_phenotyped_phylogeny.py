@@ -43,8 +43,9 @@ def test_selection_has_no_two_state_constraint_and_counts_species_not_runs(tmp_p
     write_tsv(traits, ["species", trait], [{"species": n, trait: v} for n, v in zip("ABCD", values)])
     select_phenotyped(samples, traits, tmp_path / "out", trait=trait)
     assert len(read_tsv(tmp_path / "out/samples.tsv")) == 8
-    with pytest.raises(ValueError, match="at least 5 phenotyped species; found 4"):
-        select_phenotyped(samples, traits, tmp_path / "too_small", trait=trait, min_taxa=5)
+    write_tsv(traits, ["species", trait], [{"species": n, trait: v} for n, v in zip("ABC", values)])
+    with pytest.raises(ValueError, match="at least four phenotyped species; found 3"):
+        select_phenotyped(samples, traits, tmp_path / "too_small", trait=trait)
     with pytest.raises(ValueError, match="requires species and absent"):
         select_phenotyped(samples, traits, tmp_path / "invalid", trait="absent")
 

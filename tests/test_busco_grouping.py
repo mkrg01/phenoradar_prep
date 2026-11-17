@@ -29,7 +29,7 @@ OUT = "results/test"
 LOG = "logs/test"
 SCRIPTS = {str(ROOT / "workflow/scripts")!r}
 PHYLO_RUN = OUT + "/{{phylo_branch}}"
-PHY = {{"min_taxa": 4, "min_protein_length": 100, "trimal_mode": "gappyout"}}
+PHY = {{"min_taxa": 0.5, "min_protein_length": 100, "trimal_mode": "gappyout"}}
 PYTHON = "python"
 RANDOM_SEED = 12345
 

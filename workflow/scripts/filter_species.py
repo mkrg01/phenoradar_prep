@@ -24,7 +24,7 @@ EXPORT_CODE = (
     "filter_species.py", "filter_species_phylogeny.py", "contrast_pairs.py", "expanded_pair_clades.py",
     "plot_contrast_tree.py", "species_traits.py", "sample_identity.py",
     "phylogeny_root.py", "phylogeny_outgroup.py", "phenoradar_metadata.py",
-    "consumer_metadata.py", "trait_encoding.py", "analysis_validation.py",
+    "consumer_metadata.py", "analysis_validation.py",
     "alignment_selection.py", "mapping_tables.py", "og_kegg.py",
     "select_kegg_representatives.py", "aggregate_ko_tpm.py", "layout.py", "common.py",
 )
@@ -105,18 +105,41 @@ def manifest(path):
     return fields, rows, species, runs
 
 
+def legacy_trait_encoding(source):
+    record = source / "metadata/trait_encoding.json"
+    if record.is_file() and not (source / "metadata/species_trait.json").is_file():
+        return record
+    return None
+
+
+def read_legacy_trait_labels(path, trait):
+    report = json.loads(path.read_text())
+    mapping = report.get("mapping")
+    if (report.get("trait") != trait or not isinstance(mapping, dict) or len(mapping) != 2
+            or any(label != label.strip() or label in {"", "NA", "NaN", "nan"} for label in mapping)
+            or any(type(value) is not int for value in mapping.values())
+            or set(mapping.values()) != {0, 1}):
+        raise ValueError("invalid legacy trait encoding record for " + trait)
+    return {str(value): label for label, value in mapping.items()}
+
+
 def discover(source, traits=None):
     """List external snapshot inputs; never request missing inference jobs."""
     source = Path(source).resolve()
     normalized = source / "metadata/species_trait.tsv"
-    encoding = source / "metadata/trait_encoding.json"
-    if normalized.is_file() and encoding.is_file():
+    report = source / "metadata/species_trait.json"
+    encoding = legacy_trait_encoding(source)
+    if normalized.is_file() and (report.is_file() or encoding):
         traits = normalized
     previous = source / "manifest.json"
     if previous.is_file() and json.loads(previous.read_text()).get("report_type") == "species_filter":
         raise ValueError("use the original analysis as source, not a previous filtered export")
     fields, rows, species, runs = manifest(source / "metadata/samples.tsv")
     files = {source / "metadata/samples.tsv"}
+    if report.is_file():
+        files.add(report)
+    if encoding:
+        files.add(encoding)
     sections = {}
     for name, names in BUNDLES.items():
         if name == "kegg" and any((source / p).exists() for p in KEGG_OG_BUNDLE[:3]):
@@ -140,7 +163,6 @@ def discover(source, traits=None):
             sections["alignments"]["status"] = "incomplete"
             files.update(unfinished)
     for relative in ["run.json", "metadata/metadata_all.tsv", "metadata/metadata_high_busco.tsv", "metadata/selection.json",
-                     "metadata/trait_encoding.json",
                      "kegg/ko_modules.tsv", "kegg/ko_pathways.tsv", "kegg/reference_qc.json",
                      "kegg/provenance.json", "kegg/representatives/representatives.tsv",
                      "kegg/representatives/provenance.json"]:
@@ -296,9 +318,9 @@ class Export:
         retained = [r for r in self.rows if r["species"] in self.keep]
         retained_taxa = {species_id(r) for r in retained}
         write_tsv(self.stage / "metadata/samples.tsv", self.fields, retained)
-        encoding = self.source / "metadata/trait_encoding.json"
-        if encoding.is_file():
-            self.copy(encoding, self.stage / "metadata/trait_encoding.json")
+        encoding = legacy_trait_encoding(self.source)
+        if encoding:
+            self.copy(encoding, self.stage / "metadata" / encoding.name)
         write_tsv(self.stage / "excluded_samples.tsv", ["species", "run", "scientific_name", "taxid"],
                   [{k: r[k] for k in ["species", "run", "scientific_name", "taxid"]}
                    for r in self.rows if r["species"] in self.excluded])
@@ -510,13 +532,14 @@ def export_contrast(job, branch, trait, seed):
     if {r["species"] for r in list(table(samples))[1:]} - job.species:
         raise ValueError("contrast species manifest contains species outside the source dataset")
     out = job.stage / branch / "contrast"
-    encoding = job.source / "metadata/trait_encoding.json"
+    encoding = legacy_trait_encoding(job.source)
+    labels = read_legacy_trait_labels(job.input(encoding), trait) if encoding else None
     report = from_tree(job.input(job.source / branch / "species_tree.nwk"),
                        job.input(job.source / branch / "species_tree.json"), samples,
                        job.input(job.source / "metadata/metadata_high_busco.tsv"),
                        job.input(job.inventory["sections"]["traits"]["path"]),
                        out, trait=trait, seed=seed, exclude_species=sorted(job.excluded),
-                       trait_encoding=job.input(encoding) if encoding.is_file() else None)
+                       trait_labels=labels)
     plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out, samples=samples)
     plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out, samples=samples, expanded=True)
     job.counts[f"{branch}_contrast"] = {k: report[k] for k in

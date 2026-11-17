@@ -1,38 +1,27 @@
 # Documentation
 
-Prepare a reusable RNA-seq database, select samples for an analysis, and export
-results to PhenoRadar.
+## Prepare a dataset
 
-## Getting started
-
-1. [Install the workflow](running.md#installation-and-normal-execution).
+1. [Install phenoradar_prep](running.md#installation-and-normal-execution).
 2. Prepare [input files](inputs.md) and edit the [configuration](configuration.md).
 3. [Build a database and run an analysis](datasets.md).
-4. Review [outputs and QC](outputs.md), then use the [PhenoRadar inputs](phenoradar_inputs.md).
+4. Review [outputs and QC](outputs.md) and configure [PhenoRadar](phenoradar_inputs.md).
 
 ## Choose an analysis
 
 | Task | Guide |
 | --- | --- |
-| Align all gene copies in each mapped OG | [OG alignments](alignments.md) |
-| Annotate OGs and quantify KO expression | [KEGG](kegg.md) |
-| Infer trees from BUSCO markers | [Phylogeny](phylogeny.md) |
+| Align mapped proteins by orthogroup | [OG alignments](alignments.md) |
+| Annotate orthogroups and summarize KO expression | [KEGG](kegg.md) |
+| Infer a species tree from BUSCO markers | [Phylogeny](phylogeny.md) |
 | Estimate divergence ages | [Dating](dating.md) |
 | Review tree placements against NCBI taxonomy | [Taxonomy check](taxonomy_check.md) |
-| Select trait contrast pairs | [Contrast pairs](contrast_pairs.md) |
+| Select trait contrasts and define groups | [Contrast pairs](contrast_pairs.md) |
 
-## Managing runs
+## Manage data and runs
 
-- [Plans and progress](datasets.md#plans-and-progress)
-- [Slurm resources, targets, and retries](running.md)
-- [Reuse a database](datasets.md#reusing-completed-databases) · [Copy to another project](datasets.md#copying-a-completed-build-to-another-project)
-- [Reprocess selected samples](datasets.md#reprocess-selected-samples)
-- [Update OrthoDB for all samples](datasets.md#update-orthodb-for-all-samples)
-- [Supplementary sample table](outputs.md#sample-processing-table)
-- [Export a subset of completed results](species_filter.md)
-- [Reference data and updates](references.md)
-- [Curated metadata datasets and updates](../datasets/README.md)
-
-For contributors: [development and tests](development.md) · [releases](releases.md).
-
-[Project README](../README.md)
+- [Plans, status and retries](datasets.md#plans-and-progress) · [Targets and resources](running.md#targets)
+- [Reuse a database](datasets.md#reusing-completed-databases) · [Copy a database](datasets.md#copying-a-completed-build-to-another-project)
+- [Export a sample subset](species_filter.md) · [Reference data](references.md)
+- [Curated datasets and metadata updates](../datasets/README.md)
+- [Development and tests](development.md) · [Releases](releases.md)

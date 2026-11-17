@@ -8,9 +8,8 @@ Infer rooted trees from BUSCO markers, with one tip per analysis sample:
 BUSCO CDS → cdskit → FAMSA → trimAl → VeryFastTree → ASTRAL-IV/CASTLES-II
 ```
 
-Branch lengths are substitutions/site; absolute ages require [dating](dating.md).
-Multiple samples of one biological species remain separate tips and do not
-represent additional evolutionary origins. Inference does not use OG/KO assignments.
+Branch lengths are in substitutions per site. For ages, see [dating](dating.md).
+Multiple samples of a biological species remain separate tips.
 
 ## Species sets
 
@@ -87,43 +86,28 @@ Coverage counts distinct biological species, so extra samples do not inflate it.
 | Setting under `phylogeny` | Default | Meaning |
 | --- | --- | --- |
 | `max_markers` | `null` | All eligible markers; a positive integer caps by species coverage, then BUSCO ID |
-| `min_taxa` | `4` | Minimum species per marker before and after QC; at least four |
+| `min_taxa` | `0.5` | Minimum fraction (0 to 1) of the tree's selected species represented per marker |
 | `min_protein_length` | `100` | Minimum known amino acids per extracted/trimmed sequence |
 | `max_unknown_fraction` | `0.05` | Maximum unknown fraction in prepared proteins |
 | `trimal_mode` | `gappyout` | `gappyout` or `automated1` |
-
-New analyses use every eligible marker by default. To limit computation, set a
-positive cap, for example:
-
-```yaml
-phylogeny:
-  max_markers: 500
-```
-
-`min_taxa` and sequence/alignment QC still apply with no cap. Prepared analyses
-retain their recorded settings; this default does not expand an existing
-500-marker analysis. `0` and negative values are invalid.
 
 cdskit pads, masks, and translates CDS using the build's genetic code. Stops and
 unresolved codons become X. Review `species/*.json`: padding may affect reading
 frames, and QC cannot verify ORFs or exclude paralogy.
 
-FAMSA aligns proteins; trimAl selects columns with X treated as gaps. Retained
-loci must pass sequence-length/species-coverage checks and contain a variable
-amino-acid site. Markers lost during QC are not replaced.
+FAMSA aligns proteins and trimAl selects columns with X treated as gaps. The
+same species coverage threshold applies at marker selection, before alignment,
+and after trimming and sequence filtering. Each check uses all species selected
+for that tree as the denominator. A marker needs enough species to form a quartet
+and at least one variable amino-acid site after trimming. The marker list is
+fixed at selection.
 
-## Alignment reuse
+## BUSCO alignments
 
-Tree inference reuses the raw and trimmed BUSCO alignments saved under
-`phylogeny/<set>/alignments/`; use these files directly for downstream work.
-BUSCO alignments are also available when `alignment.enabled: false`; that
-setting controls the separate OG output.
-
-Enabling [OG alignments](alignments.md) adds a separate calculation: OGs use
-OrthoDB assignments and retain all gene copies across selected samples, whereas
-BUSCO alignments use single-copy hits and prepared CDS from the chosen tree's
-samples. Subsetting an OG alignment does not reproduce aligning the BUSCO inputs,
-so OG alignments are not substituted for BUSCO alignments.
+Raw and trimmed marker alignments are in `phylogeny/<set>/alignments/`.
+BUSCO uses single-copy hits from the samples in the chosen tree.
+[OG alignments](alignments.md) are a separate output based on OrthoDB and
+include all mapped copies from the analysis cohort.
 
 ## Inference and outputs
 
@@ -150,22 +134,12 @@ gene-tree error, paralogy, and model assumptions affect the estimates.
 
 ## Resources
 
-On Slurm, each marker's alignment, trimming, and gene-tree inference share one
-`busco_marker` group job. Different markers and tree sets remain separate jobs.
-Stages already complete before submission are reused on resume. Local execution
-keeps the normal scheduler.
-
-Alignment, trimming and gene-tree inference each default to one CPU. The group
-requests the largest CPU/memory requirement among its pending stages and sums
-their time limits. A full group defaults to 1 CPU and 4 GB for `representatives`,
-or 1 CPU and 8 GB for `phenotyped` and `all`. Trimming alone requires 4 GB.
-Different markers run in parallel within the analysis CPU/memory budgets. The default
-`total_limits.jobs: null` adds no job-count cap. Prepared analyses retain their
-saved allocations.
-Per-rule resource overrides still apply; increasing VeryFastTree threads can
-affect reproducibility. Species-tree inference remains separate at 32 CPUs/64 GB.
-See [resource overrides](running.md#resource-budgets).
-Logs are under `results/<build>/logs/downstream/<analysis>/phylogeny/`.
+On Slurm, each BUSCO marker's alignment, trimming, and gene-tree inference
+share one worker job. A full group defaults to 1 CPU and 4 GB for
+`representatives`, or 1 CPU and 8 GB for `all` and `phenotyped`. Species-tree
+inference is a separate job with a default of 32 CPUs and 64 GB. See
+[resource overrides](running.md#resource-budgets). Logs are under
+`results/<build>/logs/downstream/<analysis>/phylogeny/`.
 
 ## Methods
 

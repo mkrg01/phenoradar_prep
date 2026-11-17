@@ -34,7 +34,7 @@ class NCBISamples:
                     raise ValueError(f'could not verify {database} metadata for {accession}: {error}') from error
                 self.next_request = time.monotonic() + 1
 
-    def confirm(self, run, expected_species, taxonomy):
+    def confirm(self, run, expected_taxid, taxonomy=None):
         if not re.fullmatch(r'[SED]RR[0-9]+', run):
             raise ValueError('reassignment requires a public SRA Run accession')
         sra = self.fetch('sra', run)
@@ -56,10 +56,15 @@ class NCBISamples:
         sra_id = sample.findtext('./SAMPLE_NAME/TAXON_ID')
         bio_id = organism.get('taxonomy_id') if organism is not None else None
         for source, taxid in (('SRA', sra_id), ('BioSample', bio_id)):
-            resolved = taxonomy.resolve(taxid) if taxid and taxid.isdigit() else None
-            if not resolved or resolved[1].get('species', ('', ''))[0] != expected_species:
-                raise ValueError(f'{source} organism does not resolve to the requested species')
-        return {'run': run, 'biosample': accession, 'sra_taxid': sra_id,
-                'biosample_taxid': bio_id, 'species_taxid': expected_species, 'checked_at': now(),
+            if taxonomy is None:
+                if taxid != expected_taxid:
+                    raise ValueError(f'{source} organism does not match the updated TaxID')
+            else:
+                resolved = taxonomy.resolve(taxid) if taxid and taxid.isdigit() else None
+                if not resolved or resolved[1].get('species', ('', ''))[0] != expected_taxid:
+                    raise ValueError(f'{source} organism does not resolve to the requested species')
+        confirmed_field = 'species_taxid' if taxonomy is not None else 'taxid'
+        return {'run': run, 'biosample': accession, 'sra_taxid': sra_id, 'biosample_taxid': bio_id,
+                confirmed_field: expected_taxid, 'checked_at': now(),
                 'sra_url': f'https://www.ncbi.nlm.nih.gov/sra/{run}',
                 'biosample_url': f'https://www.ncbi.nlm.nih.gov/biosample/{accession}'}

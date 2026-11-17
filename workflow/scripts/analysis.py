@@ -29,7 +29,7 @@ from phase_config import deep_merge, execution_config, execution_settings, merge
 
 TARGETS = ('all','alignments','kegg','phylogeny','phylogeny_prepare','taxonomy_check',
            'contrast_pairs','phylogeny_calibrations','timetree')
-ANALYSIS_KEYS = {'build','inputs','trait','trait_encoding','selection','alignment','kegg','phylogeny','exclude_species','slurm','execution','storage'}
+ANALYSIS_KEYS = {'build','inputs','trait','selection','alignment','kegg','phylogeny','exclude_species','slurm','execution','storage'}
 
 
 def settings(root, config, build=None):
