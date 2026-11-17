@@ -31,3 +31,22 @@ def test_redundant_ancestor_minimum_does_not_block_treepl(tmp_path):
     write_tsv(table, fields, minima)
     with pytest.raises(ValueError, match="incompatible AngioCal minimum"):
         tree_constraints(tree, table)
+
+
+def test_timetree_bounds_replace_angiosperm_root_cap_and_detect_conflict(tmp_path):
+    tree_file = tmp_path / "tree.nwk"
+    tree_file.write_text("((A:90,B:90)Child:95,(C:80,D:80):105)Root;")
+    tree = read_tree(tree_file)
+    table = tmp_path / "bounds.tsv"
+    rows = [dict(left_species="A", right_species="C", min_age_ma=180, max_age_ma=190),
+            dict(left_species="A", right_species="B", min_age_ma=85, max_age_ma=95)]
+    write_tsv(table, list(rows[0]), rows)
+
+    constraints, config, _ = tree_constraints(tree, table, "timetree")
+    assert "max = Root 190" in config and "min = Child 85" in config and "max = Child 95" in config
+    assert validate_dated(tree_file, tree, constraints)[2] == 185
+
+    rows[1].update(min_age_ma=191, max_age_ma=200)
+    write_tsv(table, list(rows[0]), rows)
+    with pytest.raises(ValueError, match="ancestor A / C has maximum 190 Ma, but descendant A / B has minimum 191 Ma"):
+        tree_constraints(tree, table, "timetree")

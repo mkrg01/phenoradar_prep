@@ -81,6 +81,7 @@ resuming samples; choose a new cache directory for a different snapshot.
 | `exclude_species` | Omit biological species IDs (all their samples) or exact sample IDs |
 | `selection.busco_threshold` | Minimum complete BUSCO fraction per sample; default `0.5` |
 | `inputs.fossil_calibration_map` | Optional reviewed AngioCal fossil-to-tip mapping |
+| `phylogeny.dating.calibration_source` | `angiocal` (default) or `timetree` for [tree dating](dating.md) |
 | `execution` | Job resources and total limits for this analysis |
 
 BUSCO lineage, genetic code, and OrthoDB reference are inherited from the build.

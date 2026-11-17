@@ -312,12 +312,17 @@ rule root_busco_species_tree:
         "--rooting-qc {output.rooting_qc:q} > {log:q} 2>&1"
 
 
+def dating_samples(wc):
+    if wc.phylo_branch == PHYLO_BRANCHES["phenotyped"]:
+        return f"{PHENOTYPED}/selection/samples.tsv"
+    return f"{META}/samples.tsv"
+
+
 rule prepare_angiocal_calibrations:
     wildcard_constraints: phylo_branch=DATING_BRANCH_PATTERN
     input:
         tree=f"{PHYLO_RUN}/species_tree.nwk",
-        samples=lambda wc: (f"{PHENOTYPED}/selection/samples.tsv"
-                            if wc.phylo_branch == PHYLO_BRANCHES["phenotyped"] else f"{META}/samples.tsv"),
+        samples=dating_samples,
         taxonomy=TAXONOMY_DB,
         mapping=[FOSSIL_MAP] if Path(FOSSIL_MAP).is_file() else [],
         code=f"{SCRIPTS}/angiocal_calibrations.py",
@@ -340,14 +345,37 @@ rule prepare_angiocal_calibrations:
         "{params.map_flag} {input.mapping:q} > {log:q} 2>&1"
 
 
+rule prepare_timetree_calibrations:
+    wildcard_constraints: phylo_branch=DATING_BRANCH_PATTERN
+    input:
+        tree=f"{PHYLO_RUN}/species_tree.nwk",
+        samples=dating_samples,
+        taxonomy=TAXONOMY_DB,
+        code=f"{SCRIPTS}/timetree_calibrations.py",
+        helpers=[f"{SCRIPTS}/{name}.py" for name in
+                 ["infer_phylogeny", "taxonomy_check", "busco_phylogeny",
+                  "common", "sample_identity", "phylogeny_outgroup"]]
+    output:
+        calibrations=f"{PHYLO_RUN}/timetree/calibrations.tsv",
+        provenance=f"{PHYLO_RUN}/timetree/provenance.json"
+    params: outdir=f"{PHYLO_RUN}/timetree"
+    threads: 1
+    conda: "../envs/dating.yaml"
+    resources: mem_mb=4000
+    log: f"{LOG}/{{phylo_branch}}/timetree_calibrations.log"
+    benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/timetree_calibrations.tsv"
+    shell:
+        "{PYTHON:q} {input.code:q} --tree {input.tree:q} --samples {input.samples:q} "
+        "--taxonomy {input.taxonomy:q} --outdir {params.outdir:q} > {log:q} 2>&1"
+
+
 rule date_busco_species_tree:
     wildcard_constraints: phylo_branch=DATING_BRANCH_PATTERN
     input:
         tree=f"{PHYLO_RUN}/species_tree.nwk",
         provenance=f"{PHYLO_RUN}/species_tree.json",
-        calibrations=f"{PHYLO_RUN}/angiocal/calibrations.tsv",
-        calibration_qc=f"{PHYLO_RUN}/angiocal/provenance.json",
-        fossils=f"{PHYLO_RUN}/angiocal/fossils.tsv",
+        calibrations=f"{PHYLO_RUN}/{CALIBRATION_SOURCE}/calibrations.tsv",
+        calibration_reports=[f"{PHYLO_RUN}/{name}" for name in CALIBRATION_PATHS[1:]],
         code=f"{SCRIPTS}/date_phylogeny.py",
         helpers=[f"{SCRIPTS}/{name}.py" for name in
                  ["infer_phylogeny", "busco_phylogeny", "common", "sample_identity", "phylogeny_outgroup"]]
@@ -357,7 +385,7 @@ rule date_busco_species_tree:
         ages=f"{PHYLO_RUN}/dating/node_ages.tsv",
         config=f"{PHYLO_RUN}/dating/treepl.conf",
         native_log=f"{PHYLO_RUN}/dating/treepl.log"
-    params: outdir=f"{PHYLO_RUN}/dating"
+    params: outdir=f"{PHYLO_RUN}/dating", source=CALIBRATION_SOURCE
     conda: "../envs/dating.yaml"
     threads: 1
     resources: mem_mb=4000
@@ -365,7 +393,8 @@ rule date_busco_species_tree:
     benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/dating.tsv"
     shell:
         "{PYTHON:q} {input.code:q} --tree {input.tree:q} --provenance {input.provenance:q} "
-        "--calibrations {input.calibrations:q} --outdir {params.outdir:q} > {log:q} 2>&1"
+        "--calibrations {input.calibrations:q} --calibration-source {params.source:q} "
+        "--outdir {params.outdir:q} > {log:q} 2>&1"
 
 
 rule plot_dated_species_tree:
@@ -373,8 +402,7 @@ rule plot_dated_species_tree:
     input:
         tree=rules.date_busco_species_tree.output.tree,
         ages=rules.date_busco_species_tree.output.ages,
-        samples=lambda wc: (f"{PHENOTYPED}/selection/samples.tsv"
-                            if wc.phylo_branch == PHYLO_BRANCHES["phenotyped"] else f"{META}/samples.tsv"),
+        samples=dating_samples,
         traits=rules.normalize_traits.output.traits,
         taxonomy=TAXONOMY_DB,
         code=f"{SCRIPTS}/plot_dated_tree.py",

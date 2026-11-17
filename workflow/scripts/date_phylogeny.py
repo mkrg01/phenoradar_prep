@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Date the rooted CASTLES-II angiosperm tree with treePL."""
+"""Date a rooted CASTLES-II species tree with treePL."""
 import argparse
 import json
 import math
@@ -84,48 +84,68 @@ def treepl_build(command):
     return build, binary
 
 
-def tree_constraints(tree, path):
+def tree_constraints(tree, path, source="angiocal"):
     rows = read_tsv(path)
     if not rows:
-        raise ValueError("no applicable AngioCal fossil minimum; inspect angiocal/fossils.tsv")
+        if source == "angiocal":
+            raise ValueError("no applicable AngioCal fossil minimum; inspect angiocal/fossils.tsv")
+        raise ValueError("no applicable TimeTree interval; inspect timetree/provenance.json and the calibration log")
     constraints = {}
+    label = "AngioCal" if source == "angiocal" else "TimeTree"
     for row in rows:
         tips = [row["left_species"], row["right_species"]]
         if tips[0] == tips[1] or any(tip not in tree for tip in tips):
-            raise ValueError(f"invalid AngioCal anchors: {tips}")
+            raise ValueError(f"invalid {label} anchors: {tips}")
         node = tree.common_ancestor(tips)
-        age = float(row["min_age_ma"])
-        if node in constraints or not math.isfinite(age) or not 0 < age < ROOT_MAX_MA:
-            raise ValueError(f"duplicate or incompatible AngioCal minimum: {tips}, {age} Ma")
-        constraints[node] = dict(row, node=node.name, min_age_ma=age)
+        minimum = float(row["min_age_ma"])
+        if source == "angiocal":
+            if node in constraints or not 0 < minimum < ROOT_MAX_MA:
+                raise ValueError(f"duplicate or incompatible AngioCal minimum: {tips}, {minimum} Ma")
+            constraints[node] = dict(row, node=node.name, min_age_ma=minimum)
+        else:
+            maximum = float(row["max_age_ma"])
+            if node in constraints or not (0 <= minimum <= maximum and 0 < maximum < math.inf):
+                raise ValueError(f"duplicate or invalid TimeTree interval: {tips}, {minimum}–{maximum} Ma")
+            constraints[node] = dict(row, node=node.name, min_age_ma=minimum, max_age_ma=maximum)
+
+    if source == "angiocal":
+        if tree not in constraints:
+            left, right = sorted(min(child.leaf_names()) for child in tree.children)
+            constraints[tree] = dict(node=tree.name, left_species=left, right_species=right)
+        constraints[tree]["max_age_ma"] = ROOT_MAX_MA
 
     # Native treePL rejects a stated ancestral minimum below a descendant minimum.
     # Omit only those redundant ancestral minima from the optimizer. Still check
     # every original fossil bound in the returned tree and retain all provenance.
     inherited, native_min = {}, {}
     for node in tree.traverse("postorder"):
-        child_min = max((inherited[child] for child in node.children), default=0.0)
-        minimum = constraints.get(node, {}).get("min_age_ma", 0.0)
-        inherited[node] = max(child_min, minimum)
+        child_min, child_bound = max((inherited[child] for child in node.children),
+                                     key=lambda bound: bound[0], default=(0.0, None))
+        row = constraints.get(node, {})
+        minimum = row.get("min_age_ma", 0.0)
+        maximum = row.get("max_age_ma", math.inf)
+        if child_min > maximum:
+            ancestor = f"{row['left_species']} / {row['right_species']}"
+            descendant = f"{child_bound['left_species']} / {child_bound['right_species']}"
+            raise ValueError(f"incompatible {label} bounds: ancestor {ancestor} has maximum {maximum:g} Ma, "
+                             f"but descendant {descendant} has minimum {child_min:g} Ma")
+        inherited[node] = (minimum, row) if minimum >= child_min else (child_min, child_bound)
         if minimum and minimum >= child_min:
             native_min[node] = minimum
 
-    if tree not in constraints:
-        sides = sorted(min(child.leaf_names()) for child in tree.children)
-        constraints[tree] = dict(node=tree.name, left_species=sides[0], right_species=sides[1])
-    constraints[tree]["max_age_ma"] = ROOT_MAX_MA
     lines = []
     for node, row in constraints.items():
-        if node in native_min or node.is_root:
+        if node in native_min or "max_age_ma" in row:
             lines.append(f"mrca = {node.name} {row['left_species']} {row['right_species']}")
         if node in native_min:
             lines.append(f"min = {node.name} {native_min[node]:.17g}")
-        if node.is_root:
-            lines.append(f"max = {node.name} {ROOT_MAX_MA}")
-    return list(constraints.values()), lines, len(rows) - len(native_min)
+        if "max_age_ma" in row:
+            lines.append(f"max = {node.name} {row['max_age_ma']:.17g}")
+    redundant = sum(bool(row.get("min_age_ma")) for row in constraints.values()) - len(native_min)
+    return list(constraints.values()), lines, redundant
 
 
-def date(tree, provenance, calibrations, outdir, command="treePL"):
+def date(tree, provenance, calibrations, outdir, command="treePL", calibration_source="angiocal"):
     source, tree = tree, read_tree(tree)
     qc = json.loads(Path(provenance).read_text())
     if qc.get("branch_length_unit") != "substitutions_per_site" or not qc.get("outgroup"):
@@ -147,7 +167,16 @@ def date(tree, provenance, calibrations, outdir, command="treePL"):
         raise ValueError("treePL requires total_gene_sites as a positive 32-bit integer")
     if not any(node.dist > 0 for node in tree.traverse() if not node.is_root):
         raise ValueError("treePL requires positive substitution lengths")
-    constraints, native_bounds, redundant = tree_constraints(tree, calibrations)
+    constraints, native_bounds, redundant = tree_constraints(tree, calibrations, calibration_source)
+    root_max = next((row.get("max_age_ma") for row in constraints if row["node"] == tree.name), None)
+    if calibration_source == "angiocal":
+        calibration_details = {
+            "calibration_source": "AngioCal v1.0", "redundant_fossil_minima": redundant,
+            "root_max_source": "Zuntini et al. (2024) young-tree crown-angiosperm upper bound; https://doi.org/10.1038/s41586-024-07324-0",
+        }
+    else:
+        calibration_details = {"calibration_source": "TimeTree", "redundant_timetree_minima": redundant,
+                               "root_max_source": "TimeTree" if root_max is not None else None}
     command = executable(command)
     build, binary = treepl_build(command)
     config = "\n".join([
@@ -189,12 +218,11 @@ def date(tree, provenance, calibrations, outdir, command="treePL"):
         "created_at": now(), "tree": file_record(source), "source_provenance": file_record(provenance),
         "calibrations": file_record(calibrations), "build": build, "executable": binary,
         "method": "treePL penalized likelihood", "branch_length_unit": "million_years",
-        "calibration_source": "AngioCal v1.0", "root_max_age_ma": ROOT_MAX_MA,
-        "root_max_source": "Zuntini et al. (2024) young-tree crown-angiosperm upper bound; https://doi.org/10.1038/s41586-024-07324-0",
-        "root_age_ma": height, "root_at_upper_bound": math.isclose(height, ROOT_MAX_MA, abs_tol=1e-4, rel_tol=0),
+        **calibration_details, "root_max_age_ma": root_max, "root_age_ma": height,
+        "root_at_upper_bound": root_max is not None and math.isclose(height, root_max, abs_tol=1e-4, rel_tol=0),
         "smoothing": SMOOTHING, "seed": SEED, "numsites": sites, "objective": objective,
         "tip_count": len(tips), "elapsed_seconds": time.monotonic() - start,
-        "topology_preserved": True, "outgroup": outgroup, "redundant_fossil_minima": redundant,
+        "topology_preserved": True, "outgroup": outgroup,
         "zero_internal_edges": sum(node.dist == 0 for node in dated.traverse()
                                    if not node.is_root and not node.is_leaf),
         "optimizer_line_search_failures": report.count("Linear search failed"),
@@ -207,4 +235,5 @@ if __name__ == "__main__":
     for name in ["tree", "provenance", "calibrations", "outdir"]:
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--command", default="treePL")
+    parser.add_argument("--calibration-source", choices=["angiocal", "timetree"], default="angiocal")
     date(**vars(parser.parse_args()))

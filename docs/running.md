@@ -91,7 +91,7 @@ settings and never rebuild upstream sample products.
 | `kegg` | [KO annotation and expression](kegg.md) |
 | `phylogeny_prepare` | BUSCO input audit, outgroup, and marker plan |
 | `phylogeny` | Infer trees selected by `phylogeny.trees` |
-| `phylogeny_calibrations` | Trees and [AngioCal fossil placements](dating.md), without dating |
+| `phylogeny_calibrations` | Trees and [AngioCal or TimeTree calibrations](dating.md), without dating |
 | `timetree` | [treePL dating](dating.md) |
 | `taxonomy_check` | [MonoPhy review](taxonomy_check.md) |
 | `contrast_pairs` | [Trait pairs](contrast_pairs.md) on selected trees |

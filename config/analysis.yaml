@@ -23,8 +23,8 @@ phylogeny:
   min_taxa: 0.5  # Minimum fraction of selected species represented per marker.
   trimal_mode: gappyout  # Alignment trimming: gappyout or automated1.
   dating:
-    # Angiosperms only: AngioCal v1.0 and treePL, with a 154 Ma root maximum.
-    enabled: true  # Date selected angiosperm trees; supports all/phenotyped only.
+    enabled: true  # Date all or phenotyped trees with treePL.
+    calibration_source: angiocal  # Use AngioCal for angiosperms, or timetree for secondary calibration.
   contrast_pairs:
     enabled: true  # Select trait contrast pairs on the chosen trees.
   taxonomy_check:
@@ -104,6 +104,10 @@ execution:
       mem_gb: 64
       time: "14-00:00:00"
     prepare_angiocal_calibrations:  # Place fossils from AngioCal v1.0.
+      cpus: 1
+      mem_gb: 4
+      time: "1-00:00:00"
+    prepare_timetree_calibrations:  # Retrieve TimeTree age bounds.
       cpus: 1
       mem_gb: 4
       time: "1-00:00:00"

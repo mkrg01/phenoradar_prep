@@ -17,10 +17,13 @@ MANIFEST = Path("/opt/phenoradar/container.json")
 
 
 def dating(work):
+    from unittest.mock import patch
+
     from angiocal_calibrations import prepare
     from common import read_tsv, write_json, write_tsv
     from date_phylogeny import date
     from infer_phylogeny import read_tree
+    from timetree_calibrations import prepare as prepare_timetree
 
     names = ("Nuphar_lutea", "Nymphaea_colorata", "Brasenia_schreberi", "Cabomba_caroliniana")
     tree = work / "tree.nwk"
@@ -59,6 +62,28 @@ def dating(work):
     report = json.loads((output / "provenance.json").read_text())
     assert report["topology_preserved"] and report["build"]["source_patch_applied"] is False
     assert report["smoothing"] == 10 and report["root_max_age_ma"] == 154
+
+    responses = {"42+43+44+45": (3398, 185, 170, 195), "42+43": (0, 90, 70, 105),
+                 "44+45": (0, 100, 80, 120)}
+    responses.update({str(i): (i, 0, 0, 0) for i in range(42, 46)})
+
+    def fetch(url):
+        row = responses.get(url.rsplit("/", 1)[-1])
+        text = ("taxon_id,precomputed_age,precomputed_ci_low,precomputed_ci_high\r\n"
+                + ",".join(map(str, row))) if row else "MRCA node not found"
+        return {"error": None, "status_code": 200, "text": text, "elapsed": 0}
+
+    secondary = work / "timetree"
+    with patch("nwkit.mcmctree._fetch_timetree_url", side_effect=fetch):
+        prepare_timetree(tree, samples, taxonomy, secondary)
+        assert len(read_tsv(secondary / "calibrations.tsv")) == 3
+        date(tree, qc, secondary / "calibrations.tsv", work / "dating-timetree", calibration_source="timetree")
+        report = json.loads((work / "dating-timetree/provenance.json").read_text())
+        assert report["calibration_source"] == "TimeTree" and 170 <= report["root_age_ma"] <= 195
+
+        responses["42+43+44+45"] = responses["42+43"]
+        prepare_timetree(tree, samples, taxonomy, secondary)
+        assert len(read_tsv(secondary / "calibrations.tsv")) == 2
 
 
 def monophy(work):

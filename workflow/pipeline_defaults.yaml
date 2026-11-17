@@ -37,8 +37,8 @@ phylogeny:
   min_taxa: 0.5
   trimal_mode: gappyout
   dating:
-    # Angiosperms only: AngioCal v1.0 and treePL, with a 154 Ma root maximum.
     enabled: false
+    calibration_source: angiocal
   contrast_pairs:
     enabled: true
   taxonomy_check:

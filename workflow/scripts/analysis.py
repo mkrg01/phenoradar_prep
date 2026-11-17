@@ -59,6 +59,8 @@ def settings(root, config, build=None):
     requested = names
     sample_rows = [dict(p['row'], species=name) for name, p in completed['products'].items()]
     inputs = cfg['inputs']
+    if inputs.get('fossil_calibration_map') and resolved['phylogeny']['dating']['calibration_source'] == 'timetree':
+        raise ValueError('inputs.fossil_calibration_map requires phylogeny.dating.calibration_source: angiocal')
     resolved['selection']['species_list'] = bool(inputs.get('species_list'))
     if resolved['selection']['species_list']:
         values = absolute(root, inputs['species_list']).read_text().splitlines()

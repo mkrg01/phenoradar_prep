@@ -14,7 +14,7 @@ KEYS = {
     "phylogeny": "trees lineage "
         "outgroup max_markers min_protein_length max_unknown_fraction "
         "min_taxa trimal_mode dating contrast_pairs taxonomy_check",
-    "phylogeny.dating": "enabled",
+    "phylogeny.dating": "enabled calibration_source",
     "phylogeny.contrast_pairs": "enabled",
     "phylogeny.taxonomy_check": "enabled ranks outlierlevel collapse_monophyletic",
 }
@@ -112,6 +112,8 @@ def validate_keys(config):
     for name in ["contrast_pairs", "dating", "taxonomy_check"]:
         if "enabled" in phylogeny.get(name, {}) and type(phylogeny[name]["enabled"]) is not bool:
             raise ValueError(f"phylogeny.{name}.enabled must be true or false")
+    if phylogeny.get("dating", {}).get("calibration_source", "angiocal") not in ("angiocal", "timetree"):
+        raise ValueError("phylogeny.dating.calibration_source must be angiocal or timetree")
 
 
 def validate_analysis(config, targets=()):

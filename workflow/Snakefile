@@ -113,6 +113,10 @@ PHYLO_BRANCH_PATTERN = "|".join(re.escape(branch) for branch in ACTIVE_TREE_BRAN
 MOLECULAR_BRANCH_PATTERN = "|".join(re.escape(TREE_BRANCHES[name]) for name in PHY["trees"]
                                       if name != "representatives") or r"(?!)"
 DATING_BRANCH_PATTERN = MOLECULAR_BRANCH_PATTERN if PHY["dating"]["enabled"] else r"(?!)"
+CALIBRATION_SOURCE = PHY["dating"].get("calibration_source", "angiocal")
+CALIBRATION_PATHS = [f"{CALIBRATION_SOURCE}/calibrations.tsv", f"{CALIBRATION_SOURCE}/provenance.json"]
+if CALIBRATION_SOURCE == "angiocal":
+    CALIBRATION_PATHS.append("angiocal/fossils.tsv")
 TAXONOMY_BRANCH_PATTERN = MOLECULAR_BRANCH_PATTERN if PHY["taxonomy_check"]["enabled"] else r"(?!)"
 PAIR_BRANCH_PATTERN = MOLECULAR_BRANCH_PATTERN if PHY["contrast_pairs"]["enabled"] else r"(?!)"
 CONTRAST_BRANCH_PATTERN = ("|".join(re.escape(f"{branch}/contrast") for branch in ACTIVE_TREE_BRANCHES)
@@ -360,8 +364,7 @@ rule contrast_pairs:
 
 rule phylogeny_calibrations:
     input:
-        lambda wc: requested_phylogeny("phylogeny_calibrations", phylogeny_targets(
-            ["angiocal/calibrations.tsv", "angiocal/fossils.tsv", "angiocal/provenance.json"]))
+        lambda wc: requested_phylogeny("phylogeny_calibrations", phylogeny_targets(CALIBRATION_PATHS))
 
 
 rule timetree:

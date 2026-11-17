@@ -1,26 +1,27 @@
-# Dating angiosperm species trees
+# Dating species trees
 
 [Documentation](index.md) · [BUSCO phylogeny](phylogeny.md)
 
-The dating branch fits divergence ages to a rooted, bifurcating angiosperm
-tree using [AngioCal v1.0](https://zenodo.org/records/3828071) fossil minima
-and [treePL](https://academic.oup.com/bioinformatics/article/28/20/2689/203074).
-The input tree has branch lengths in substitutions per site. The dated tree
-reports branch lengths in millions of years (Ma).
+[treePL](https://academic.oup.com/bioinformatics/article/28/20/2689/203074)
+fits divergence ages to a rooted, bifurcating species tree with branch lengths
+in substitutions per site. The dated tree reports branch lengths in millions
+of years (Ma).
 
 ## Configuration and execution
 
 The supplied analysis config enables dating for the `all` tree. Dating
 supports `all`, `phenotyped`, or both under `phylogeny.trees` and uses the
-frozen NCBI TaxIDs and taxonomy. Set `phylogeny.dating.enabled: false` before
-preparing an analysis with non-angiosperms or `representatives`.
+frozen NCBI TaxIDs and taxonomy. Set `phylogeny.dating.calibration_source` to
+`angiocal` (default) for [AngioCal v1.0](https://zenodo.org/records/3828071)
+fossil minima, or `timetree` for [TimeTree](https://doi.org/10.1093/molbev/msac174)
+secondary calibrations. Set `phylogeny.dating.enabled: false` to skip dating.
 
 ```bash
 ./run_analysis.sh submit --analysis results/leaf/downstream/c4 --target phylogeny_calibrations
 ./run_analysis.sh submit --analysis results/leaf/downstream/c4 --target timetree
 ```
 
-Run the first target to review fossil placements before fitting ages. The
+Run the first target to review calibrations before fitting ages. The
 `timetree` target includes missing prerequisites. Dating also runs with
 `all` when enabled.
 
@@ -39,10 +40,21 @@ sources. The dating fit requires at least one applicable fossil minimum.
 When several fossils calibrate the same node, the oldest minimum is used and
 the full evidence is kept in the report.
 
+## Review TimeTree calibrations
+
+NWKIT queries TimeTree using NCBI TaxIDs for the root and for clades containing
+at least 20% of the tree's tips. The combined query must resolve a different
+TimeTree ancestor from any found for the two sides queried separately.
+Review `phylogeny/<set>/timetree/calibrations.tsv`
+for the anchor tips, age bounds, and source queries. This option needs network
+access and uses TimeTree's reported ranges as hard age bounds in treePL.
+Dating stops if no ranges are available or if a descendant's minimum exceeds
+an ancestor's maximum.
+
 ## Interpret the dated tree
 
-treePL fits one tree with a fixed smoothing value of 10 and a maximum age of
-154 Ma at the root of the **sampled** tree. Zuntini et al. tested multiple
+treePL fits one tree with a fixed smoothing value of 10. With AngioCal, the
+root of the **sampled** tree has a maximum age of 154 Ma. Zuntini et al. tested multiple
 smoothing values and used 154 Ma as an upper bound on crown angiosperms in
 their young-tree scenario. Check which clade your sampled root represents
 before interpreting its age. [Zuntini et al. (2024)](https://doi.org/10.1038/s41586-024-07324-0)

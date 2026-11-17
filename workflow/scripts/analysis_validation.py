@@ -174,7 +174,7 @@ def discover(source, exclusions=()):
                               else "outgroup.json")
             for directory, marker in [("selection", "selection.json"), ("plan", "provenance.json"),
                                       ("rooting", rooting_marker), ("angiocal", "provenance.json"),
-                                      ("timetree", "provenance.json"),  # Legacy result imports.
+                                      ("timetree", "provenance.json"),
                                       ("dating", "provenance.json"), ("taxonomy_check", "summary.json")]:
                 required = [f"{relative}/{directory}/{marker}"]
                 if directory == "dating":
