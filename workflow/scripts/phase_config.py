@@ -26,16 +26,20 @@ TAXONOMY_SCREEN_METHOD = 'angiosperms353'
 
 
 def taxonomy_screen_settings(value):
-    defaults = {'enabled': False, 'method': TAXONOMY_SCREEN_METHOD,
+    defaults = {'enabled': True, 'method': TAXONOMY_SCREEN_METHOD,
                 'max_registered_support': DEFAULT_REGISTERED_SUPPORT,
-                'batch_size': DEFAULT_TAXONOMY_BATCH_SIZE}
+                'batch_size': DEFAULT_TAXONOMY_BATCH_SIZE, 'busco_lineage': None}
     if not isinstance(value, dict) or set(value) - defaults.keys():
-        raise ValueError('taxonomy_screen accepts enabled, method, max_registered_support and batch_size')
+        raise ValueError('taxonomy_screen accepts enabled, method, max_registered_support, batch_size and busco_lineage')
     result = {**defaults, **value}
     if type(result['enabled']) is not bool:
         raise ValueError('taxonomy_screen.enabled must be true or false')
-    if result['method'] != TAXONOMY_SCREEN_METHOD:
-        raise ValueError(f'taxonomy_screen.method must be {TAXONOMY_SCREEN_METHOD}')
+    if result['method'] not in ('angiosperms353', 'orthodb'):
+        raise ValueError('taxonomy_screen.method must be angiosperms353 or orthodb')
+    lineage = result['busco_lineage']
+    if lineage is not None and (result['method'] != 'orthodb' or not isinstance(lineage, str)
+                                or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', lineage)):
+        raise ValueError('taxonomy_screen.busco_lineage must be a BUSCO dataset name for the orthodb method')
     cutoff = result['max_registered_support']
     if type(cutoff) not in (int, float) or not 0 <= cutoff <= 1:
         raise ValueError('taxonomy_screen.max_registered_support must be between zero and one')

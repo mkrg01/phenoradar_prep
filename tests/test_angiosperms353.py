@@ -204,12 +204,14 @@ def test_mask_same_source_before_picking_best_hit(tmp_path):
 
 def test_screen_config_skips_work_and_replots_exact_cutoff(sample_project):
     root, cfg, _ = sample_project
-    assert cfg['taxonomy_screen'] == {'enabled': False, 'method': 'angiosperms353', 'max_registered_support': 0.1, 'batch_size': 24}
+    assert cfg['taxonomy_screen'] == {'enabled': True, 'method': 'angiosperms353',
+                                      'max_registered_support': 0.1, 'batch_size': 24, 'busco_lineage': None}
     src = root / 'source_screen'
     src.mkdir()
     args = SimpleNamespace(command='report-taxonomy', screen=str(src / 'screen.json'),
                            output=str(root / 'report'))
-    assert catalog.taxonomy_screen_command(root, cfg, args) == {'status': 'disabled'}
+    disabled = dict(cfg, taxonomy_screen=dict(cfg['taxonomy_screen'], enabled=False))
+    assert catalog.taxonomy_screen_command(root, disabled, args) == {'status': 'disabled'}
     assert not (root / 'report').exists()
 
     build_path = cfg['_path']

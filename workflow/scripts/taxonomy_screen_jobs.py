@@ -35,9 +35,10 @@ def batches(plan):
         yield offset // size + 1, samples[offset:offset + size]
 
 
-def tool_versions():
+def tool_versions(method='angiosperms353'):
+    executable = 'busco' if method == 'orthodb' else 'captus'
     return {name: subprocess.check_output(command, text=True).strip() for name, command in
-            [('captus', ['captus', '--version']), ('mmseqs', ['mmseqs', 'version'])]}
+            [(executable, [executable, '--version']), ('mmseqs', ['mmseqs', 'version'])]}
 
 
 def recover(samples, path, plan, work, log_dir, threads, ram, blat):
@@ -49,9 +50,16 @@ def recover(samples, path, plan, work, log_dir, threads, ram, blat):
             raise ValueError(f'recovered markers belong to a different batch: {path}')
         return saved['markers']
     only_loci = set(plan['only_loci']) if plan['only_loci'] is not None else None
-    files = qc.extract(samples, work, threads=threads, ram=ram, blat=blat, log_dir=log_dir)
-    recovered = [{locus: sequence for locus, sequence in qc.markers(file).items()
-                  if only_loci is None or locus in only_loci} for file, _ in zip(files, samples, strict=True)]
+    settings = plan['settings']
+    if settings.get('method') == 'orthodb':
+        from orthodb_taxonomy import recover as recover_proteins
+        recovered = [recover_proteins(sample, plan['reference'], settings['busco_lineage'],
+                                      settings['translation_table'], work, log_dir, threads, only_loci)
+                     for sample in samples]
+    else:
+        files = qc.extract(samples, work, threads=threads, ram=ram, blat=blat, log_dir=log_dir)
+        recovered = [{locus: sequence for locus, sequence in qc.markers(file).items()
+                      if only_loci is None or locus in only_loci} for file, _ in zip(files, samples, strict=True)]
     with atomic_writer(path) as handle:
         json.dump(dict(plan=plan['id'], runs=runs, markers=recovered), handle, separators=(',', ':'))
     return recovered
@@ -80,12 +88,18 @@ def run_batch(output, plan, index, samples, threads, ram, storage):
             verify(entry)
         for row in samples:
             verify(row['cds'])
-        blat = str(verify(plan['tools']['blat']))
-        if tool_versions() != {name: version for name, version in plan['tools'].items() if name != 'blat'}:
+            if row.get('busco'):
+                verify(row['busco'])
+        settings = plan['settings']
+        protein = settings.get('method') == 'orthodb'
+        blat = None if protein else str(verify(plan['tools']['blat']))
+        versions = tool_versions('orthodb') if protein else tool_versions()
+        if versions != {name: version for name, version in plan['tools'].items() if name != 'blat'}:
             raise ValueError('screen tool versions differ from the prepared plan')
+        for source in plan['reference'].get('busco_files', []):
+            verify(source)
         assignments = json.loads(verify(plan['reference']['taxonomy_assignments']).read_text())
         taxonomy = ReferenceTaxonomy(verify(plan['taxonomy']))
-        settings = plan['settings']
         with closing(taxonomy.db), task_scratch(Path(plan['root']), task_settings(storage, 'taxonomy_screen', [])) as scratch:
             marker_file = work / 'markers.json.gz'
             reused_markers = marker_file.is_file()
@@ -93,7 +107,7 @@ def run_batch(output, plan, index, samples, threads, ram, storage):
             try:
                 recovered = recover(samples, marker_file, plan, scratch, work, threads, ram, blat)
             except ValueError as error:
-                with (work / 'captus.log').open('a') as log:
+                with (work / ('busco.log' if protein else 'captus.log')).open('a') as log:
                     print(error, file=log)
                 raise
             recovery_seconds = time.monotonic() - started
@@ -104,14 +118,21 @@ def run_batch(output, plan, index, samples, threads, ram, storage):
             paths = {locus: verify(plan['reference']['loci'][locus]) for locus in sorted(by_locus)}
             taxids = [int(row['taxid']) for row in samples]
             lineages = [taxonomy.lineage(taxid) for taxid in taxids]
-            ancestry = [{rank: value[0] for rank, value in lineage.items() if rank in RANKS} for lineage in lineages]
+            if protein:
+                ancestry = [{rank: lineage[rank][0] for rank in ('genus', 'family', 'order') if rank in lineage}
+                            for lineage in lineages]
+                for sample, lineage in zip(samples, lineages, strict=True):
+                    sample['species_taxid'] = lineage.get('species', (None,))[0]
+            else:
+                ancestry = [{rank: value[0] for rank, value in lineage.items() if rank in RANKS} for lineage in lineages]
             started = time.monotonic()
             with atomic_writer(work / 'loci.tsv.gz') as handle:
-                evidence = csv.DictWriter(handle, qc.LOCUS_FIELDS, delimiter='\t', lineterminator='\n')
+                evidence = csv.DictWriter(handle, qc.locus_fields(protein), delimiter='\t', lineterminator='\n')
                 evidence.writeheader()
                 summaries = qc.score_batch(samples, ancestry, by_locus, paths, assignments, scratch, work,
                                            threads, ram, settings['omit_same_species'], settings['min_loci'],
-                                           Decimal(settings['max_registered_support']), evidence)
+                                           Decimal(settings['max_registered_support']), evidence,
+                                           **({'protein': True} if protein else {}))
             for row, taxid, lineage in zip(summaries, taxids, lineages, strict=True):
                 node = taxonomy.node(taxid)
                 species_id, species_name = lineage.get('species', (None, ''))
@@ -147,34 +168,40 @@ def finalize(output, plan):
             for entry in [saved['loci'], saved['summary'], saved['exclusion_candidates'], *saved['plots'].values()]:
                 verify(entry)
         else:
+            method = plan['settings'].get('method', 'angiosperms353')
             reference = [plan['reference']['taxonomy_assignments'], *plan['reference']['manifests'], *(plan['reference']['loci'][locus] for locus in loci)]
-            for entry in [plan['taxonomy'], *reference, *[row['cds'] for row in plan['samples']],
+            for entry in [plan['taxonomy'], *reference, *plan['reference'].get('busco_files', []),
+                          *[row[key] for row in plan['samples'] for key in ('cds', 'busco') if key in row],
                           plan['build_manifest'], plan['database_manifest']]:
                 if entry:
                     verify(entry)
             with atomic_writer(output / 'loci.tsv') as handle:
-                csv.writer(handle, delimiter='\t', lineterminator='\n').writerow(qc.LOCUS_FIELDS)
+                csv.writer(handle, delimiter='\t', lineterminator='\n').writerow(qc.locus_fields(method == 'orthodb'))
                 for result in results:
                     with text_open(result['loci']['path']) as source:
                         next(source)
                         shutil.copyfileobj(source, handle)
-            files = qc.write_report(output, summaries, Decimal(plan['settings']['max_registered_support']))
+            files = qc.write_report(output, summaries, Decimal(plan['settings']['max_registered_support']), method)
             settings = dict(plan['settings'], batch_resources=[
                 dict(batch=index, threads=result['threads'], ram_gb=result['ram_gb'])
                 for index, result in enumerate(results, start=1)])
-            write_json(manifest, dict(schema_version=3, kind='angiosperms353_qc', created_at=now(), plan_id=plan['id'],
+            write_json(manifest, dict(schema_version=3, kind=f'{method}_qc', created_at=now(), plan_id=plan['id'],
                        build_manifest=plan['build_manifest'], database_manifest=plan['database_manifest'],
                        selection_config=plan['selection_config'], taxonomy=plan['taxonomy'], tools=plan['tools'],
-                       reference=dict(release=RELEASE, url=BASE_URL, files=reference), settings=settings,
+                       reference=dict(release=plan['reference'].get('release', RELEASE),
+                                      url=plan['reference'].get('url', BASE_URL),
+                                      files=reference + plan['reference'].get('busco_files', [])), settings=settings,
                        samples={row['run']: dict(taxid=str(row['taxid']), cds=row['cds'],
-                                excluded_accessions=row['exclude_accessions'], source_runs=row['source_runs'])
+                                excluded_accessions=row['exclude_accessions'], source_runs=row['source_runs'],
+                                **{key: row[key] for key in ('busco', 'busco_lineage') if key in row})
                                 for row in plan['samples']}, loci=record(output / 'loci.tsv'), **files))
         return dict(output=str(output), samples=len(summaries), loci=len(loci), batches=len(results),
                     statuses=dict(Counter(row['status'] for row in summaries)))
 
 
 def prepare_plan(output, samples, cache, taxonomy, build, database, selection_config,
-                 root, settings, only_loci, blat):
+                 root, settings, only_loci, blat, busco_dataset=None):
+    protein = settings.get('method') == 'orthodb'
     sample_rows, seen = [], set()
     for row in samples:
         run = row['run']
@@ -182,21 +209,39 @@ def prepare_plan(output, samples, cache, taxonomy, build, database, selection_co
             raise ValueError(f'unsafe or repeated run, or invalid taxid: {run}')
         seen.add(run)
         species_name = row.get('scientific_name', '').replace('_', ' ').casefold()
-        if settings['omit_same_species'] and not species_name:
+        if settings['omit_same_species'] and not protein and not species_name:
             raise ValueError('--omit-same-species requires scientific_name for every sample')
         sample_rows.append(dict(run=run, taxid=str(row['taxid']), cds=row['cds'], species_name=species_name,
                                 source_runs=sorted(accessions(run) | accessions(row.get('source_runs', ''))),
                                 exclude_accessions=sorted({entry.upper() for entry in
                                                           re.split(r'[,;\s]+', row.get('exclude_accessions', '')) if entry})))
-    executable = shutil.which(blat or 'blat')
-    if executable is None:
-        raise ValueError(f'BLAT executable not found: {blat or "blat"}')
+        if protein and row.get('busco') and row.get('busco_lineage') == settings['busco_lineage']:
+            sample_rows[-1].update(busco=row['busco'], busco_lineage=row['busco_lineage'])
+    implementation = ['angiosperms353.py', 'angiosperms353_reference.py', 'taxonomy_screen_jobs.py']
+    if protein:
+        from orthodb_taxonomy import prepare as prepare_orthodb
+        reference = prepare_orthodb(cache, settings['busco_lineage'], taxonomy, busco_dataset)
+        if only_loci is not None and (not only_loci or only_loci - reference['loci'].keys()):
+            raise ValueError('validation loci must be a nonempty subset of the OrthoDB reference')
+        directory = Path(reference['busco_dataset'])
+        reference['busco_files'] = [record(p) for p in sorted((directory / 'hmms').glob('*.hmm'))]
+        lengths = directory / 'lengths_cutoff'
+        if lengths.is_file():
+            reference['busco_files'].append(record(lengths))
+        implementation.extend(['orthodb_taxonomy.py', 'busco_phylogeny.py'])
+        tools = tool_versions('orthodb')
+    else:
+        executable = shutil.which(blat or 'blat')
+        if executable is None:
+            raise ValueError(f'BLAT executable not found: {blat or "blat"}')
+        tools = dict(tool_versions(), blat=record(executable))
     inputs = dict(root=str(root), cache=str(Path(cache).resolve()), samples=sample_rows,
                   build_manifest=build, database_manifest=database, taxonomy=record(taxonomy),
                   only_loci=sorted(only_loci) if only_loci is not None else None, settings=settings,
-                  tools=dict(tool_versions(), blat=record(executable)),
-                  implementation=[record(Path(__file__).with_name(name)) for name in
-                                  ('angiosperms353.py', 'angiosperms353_reference.py', 'taxonomy_screen_jobs.py')])
+                  tools=tools, implementation=[record(Path(__file__).with_name(name)) for name in implementation])
+    if protein:
+        inputs['orthodb_reference'] = [*reference['manifests'], *reference['busco_files'],
+                                       reference['taxonomy_assignments']]
     identity = digest(inputs)
     path = output / 'plan.json'
     if path.is_file():
@@ -206,16 +251,17 @@ def prepare_plan(output, samples, cache, taxonomy, build, database, selection_co
         return saved
     if any(p.name not in {'.screen.lock', 'reference_taxonomy.json'} for p in output.iterdir()):
         raise ValueError(f'output contains files from another run: {output}')
-    reference = KewReference(cache)
-    manifests = reference.manifests()
-    if only_loci is not None and not only_loci:
-        raise ValueError('validation loci must be a nonempty subset of Kew Angiosperms353')
-    paths = reference.loci(only_loci)
-    assignments = output / 'reference_taxonomy.json'
-    prepare_reference_taxonomy(paths, taxonomy, manifests[-1], assignments)
-    plan = dict(inputs, id=identity, selection_config=selection_config,
-                reference=dict(taxonomy_assignments=record(assignments), manifests=[record(path) for path in manifests],
-                               loci={locus: record(path) for locus, path in paths.items()}))
+    if not protein:
+        kew = KewReference(cache)
+        manifests = kew.manifests()
+        if only_loci is not None and not only_loci:
+            raise ValueError('validation loci must be a nonempty subset of Kew Angiosperms353')
+        paths = kew.loci(only_loci)
+        assignments = output / 'reference_taxonomy.json'
+        prepare_reference_taxonomy(paths, taxonomy, manifests[-1], assignments)
+        reference = dict(taxonomy_assignments=record(assignments), manifests=[record(path) for path in manifests],
+                         loci={locus: record(path) for locus, path in paths.items()})
+    plan = dict(inputs, id=identity, selection_config=selection_config, reference=reference)
     write_json(path, plan, compact=True)
     return plan
 
@@ -304,11 +350,12 @@ def submit(output, plan, missing, execution, job, ram, storage):
 
 def screen(samples, *, cache, taxonomy, output, build=None, database=None, selection_config=None, min_loci=50,
            registered_support=None, support=None, threads=None, ram=None, omit_same_species=False, only_loci=None,
-           blat=None, batch_size=DEFAULT_TAXONOMY_BATCH_SIZE, root=None, config=None, cluster=False):
+           blat=None, batch_size=DEFAULT_TAXONOMY_BATCH_SIZE, root=None, config=None, cluster=False,
+           busco_lineage=None, busco_dataset=None, translation_table=1):
     try:
         import matplotlib  # noqa: F401
     except ImportError as error:
-        raise ValueError('the Angiosperms353 environment must include matplotlib') from error
+        raise ValueError('the taxonomy screen environment must include matplotlib') from error
     cutoff = qc.registered_threshold(min_loci, registered_support, support)
     if type(batch_size) is not int or batch_size < 1 or not samples:
         raise ValueError('screen requires samples and a positive batch size')
@@ -323,9 +370,17 @@ def screen(samples, *, cache, taxonomy, output, build=None, database=None, selec
                     voting='common_identity_split_all_winners', min_bases=qc.MIN_BASES, coverage=qc.COVERAGE,
                     evalue=qc.EVALUE, captus_scipio_passes=1, mmseqs_kmer=10,
                     omit_same_species=omit_same_species, restricted_loci=only_loci is not None)
+    if busco_lineage is not None:
+        from orthodb_taxonomy import MIN_RESIDUES
+        settings = dict(method='orthodb', busco_lineage=busco_lineage, translation_table=translation_table,
+                        min_loci=min_loci, max_registered_support=str(cutoff), batch_size=batch_size,
+                        reference_taxonomy='ncbi_species_taxid', rank_selection='closest_rank_with_enough_votes',
+                        vote_denominator='untied_loci', voting='common_amino_acid_identity',
+                        min_residues=MIN_RESIDUES, coverage=qc.COVERAGE, evalue=qc.EVALUE,
+                        omit_same_species=omit_same_species, restricted_loci=only_loci is not None)
     with locked(output / '.screen.lock'):
         plan = prepare_plan(output, samples, cache, taxonomy, build, database, selection_config,
-                            root, settings, only_loci, blat)
+                            root, settings, only_loci, blat, **({'busco_dataset': busco_dataset} if busco_lineage else {}))
         pending = [(index, rows) for index, rows in batches(plan) if batch_result(output, index, rows, plan) is None]
         if (output / 'screen.json').is_file():
             return finalize(output, plan)

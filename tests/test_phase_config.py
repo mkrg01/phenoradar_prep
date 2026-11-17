@@ -30,7 +30,10 @@ def test_default_analysis_profile_parallelizes_single_cpu_busco_within_budgets(t
     assert profile['resources'] == {'workflow_cpus': 63, 'workflow_mem_mb': 248000}
     for rule in ('align_busco_marker', 'trim_busco_marker', 'infer_busco_gene_tree'):
         assert profile['set-threads'][rule] == 1
-    assert profile['set-threads']['align_orthogroup_batch'] == 12
+    assert profile['set-threads']['align_orthogroup_batch'] == 4
+    assert profile['set-resources']['align_orthogroup_batch'] == {'mem_mb': 16000, 'runtime': 1440}
+    assert profile['set-threads']['align_large_orthogroup'] == 4
+    assert profile['set-resources']['align_large_orthogroup'] == {'mem_mb': 32000, 'runtime': 1440}
 
 
 @pytest.mark.parametrize('duration,minutes', [

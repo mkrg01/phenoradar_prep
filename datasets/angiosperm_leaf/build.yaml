@@ -12,7 +12,7 @@ metadata_selection:
   overrides: datasets/angiosperm_leaf/overrides.tsv
   busco_threshold: 0.5  # Below-threshold new runs are excluded by record; adopted runs are retained.
 taxonomy_screen:
-  enabled: false
+  enabled: true
   method: angiosperms353
   batch_size: 24  # Maximum samples per taxonomy screen job.
   max_registered_support: 0.10

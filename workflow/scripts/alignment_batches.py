@@ -15,6 +15,8 @@ from align_orthogroups import align, trim_existing, SAFE_OG
 from common import atomic_writer, file_record, write_json
 from dataset_assets import digest, record, stat_identity
 
+DEFAULT_BATCH_SIZE = 100
+DEFAULT_BATCH_CPUS = 4
 _INSPECTION = ContextVar('alignment_batch_inspection', default=None)
 
 
@@ -29,7 +31,7 @@ def inspect_batches():
         _INSPECTION.reset(token)
 
 
-def plan(inputs, outdir, batch_size=500, heavy_bytes=16000000, trimal_mode=None):
+def plan(inputs, outdir, batch_size=DEFAULT_BATCH_SIZE, heavy_bytes=16000000, trimal_mode=None):
     if type(batch_size) is not int or batch_size < 1:
         raise ValueError('batch size must be positive')
     inputs, outdir = Path(inputs), Path(outdir)
@@ -49,8 +51,12 @@ def plan(inputs, outdir, batch_size=500, heavy_bytes=16000000, trimal_mode=None)
             heapq.heappush(heap, (total + item[1], i))
     outdir.mkdir(parents=True, exist_ok=True)
     batches = []
-    for i, members in enumerate(heavy + bins):
-        name = f'batch_{i:06d}'
+    named_batches = (
+        (f'{prefix}_{i:06d}', members)
+        for prefix, groups in (('large_og', heavy), ('batch', bins))
+        for i, members in enumerate(groups)
+    )
+    for name, members in named_batches:
         payload = {'batch': name, 'collection_sha256': collection['sha256'],
                    'orthogroups': sorted(og for og, _ in members),
                    'input_bytes': sum(size for _, size in members)}
@@ -160,7 +166,8 @@ def validate_groups(groups):
         raise ValueError('batch OG IDs must be unique, safe filename components')
 
 
-def run_batch(batch, inputs, outdir, reports, receipt, cpus=12, threads_per_og=4, command='famsa', cache=None, trimal_mode=None, trimal_command='trimal'):
+def run_batch(batch, inputs, outdir, reports, receipt, cpus=DEFAULT_BATCH_CPUS, threads_per_og=4,
+              command='famsa', cache=None, trimal_mode=None, trimal_command='trimal'):
     if any(type(value) is not int or value < 1 for value in (cpus, threads_per_og)):
         raise ValueError('CPU counts must be positive')
     payload = json.loads(Path(batch).read_text())
@@ -230,12 +237,12 @@ if __name__ == '__main__':
     sub = parser.add_subparsers(dest='action', required=True)
     p = sub.add_parser('plan')
     p.add_argument('--inputs', required=True); p.add_argument('--outdir', required=True)
-    p.add_argument('--batch-size', type=int, default=500)
+    p.add_argument('--batch-size', type=int, default=DEFAULT_BATCH_SIZE)
     p.add_argument('--trimal-mode', choices=['gappyout', 'automated1'], default='gappyout')
     p = sub.add_parser('batch')
     for flag in ('batch', 'inputs', 'outdir', 'reports', 'receipt'):
         p.add_argument('--' + flag, required=True)
-    p.add_argument('--cpus', type=int, default=12)
+    p.add_argument('--cpus', type=int, default=DEFAULT_BATCH_CPUS)
     p.add_argument('--threads-per-og', type=int, default=4)
     p.add_argument('--cache')
     p.add_argument('--trimal-mode', choices=['gappyout', 'automated1'], default='gappyout')

@@ -25,7 +25,7 @@ settings. Use [resource overrides](running.md#resource-budgets) for job resource
 | `name_mode` | `timestamp` (supplied config) creates dated builds; `fixed` resumes the named build |
 | `metadata`, `excluded_accessions` | Sample metadata and optional run exclusions |
 | `metadata_provenance` | Optional metadata history JSON, matched by checksum and copied into the database |
-| `metadata_selection`, `taxonomy_screen` | Optional [metadata and QC settings](../datasets/README.md#sample-taxonomy-screening) used by `run_metadata.sh` |
+| `metadata_selection`, `taxonomy_screen` | [Metadata and QC settings](../datasets/README.md#sample-taxonomy-screening) used by `run_metadata.sh`. The screen is enabled by default with `method: angiosperms353`. |
 | `reuse_from` | Previous build/database path, list of paths, `auto`, or `null`; see [reuse](datasets.md#reusing-completed-databases) |
 | `rebuild_samples` | Sample IDs or run accessions to restart from assembly in a new build; default `[]` |
 | `genegalleon` | [Pinned software](datasets.md#pinned-genegalleon-source-and-sif) and assembly/quantification settings |

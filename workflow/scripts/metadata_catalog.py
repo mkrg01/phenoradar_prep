@@ -976,7 +976,12 @@ def taxonomy_screen_command(root, cfg, args):
     from angiosperms353_reference import KewReference
     from prepare_taxonomy import prepare
 
-    cache = path_at(root, args.cache)
+    orthodb = qc['method'] == 'orthodb'
+    cache = path_at(root, args.cache or ('resources/orthodb_screen' if orthodb else 'resources/angiosperms353'))
+    busco_dataset = getattr(args, 'busco_dataset', None)
+    if busco_dataset and not orthodb:
+        raise ValueError('--busco-dataset requires taxonomy_screen.method: orthodb')
+    build_config = read_yaml(path_at(root, cfg.get('build_config', cfg['_path'])))
     build_path = path_at(root, args.build) if getattr(args, 'build', None) else None
     if build_path and build_path.name == 'build.json':
         build_path = build_path.parent
@@ -990,6 +995,12 @@ def taxonomy_screen_command(root, cfg, args):
         taxonomy = cache / 'taxonomy.sqlite'
         prepare(taxonomy)
     if args.command == 'prepare-taxonomy':
+        if orthodb:
+            from orthodb_taxonomy import prepare as prepare_orthodb
+            options = orthodb_screen_settings(root, qc, build_config, supplied=busco_dataset)
+            panel = prepare_orthodb(cache, options['busco_lineage'], taxonomy, options['busco_dataset'])
+            return dict(method='orthodb', cache=str(cache), taxonomy=str(taxonomy),
+                        loci=len(panel['loci']), species=panel['species'], release=panel['release'])
         reference = KewReference(cache)
         reference.manifests()
         loci = reference.loci(workers=args.workers)
@@ -997,25 +1008,62 @@ def taxonomy_screen_command(root, cfg, args):
     if build_path or args.database:
         if args.omit_same_species or args.loci:
             raise ValueError('validation-only options require --samples')
+        options = {'include_busco': True} if orthodb else {}
         if build_path:
-            samples, build = build_panel(build_path, args.runs)
+            samples, build = build_panel(build_path, args.runs, **options)
             database = None
         else:
-            samples, database = database_panel(path_at(root, args.database), args.runs)
+            samples, database = database_panel(path_at(root, args.database), args.runs, **options)
             build = None
     else:
         if args.runs:
             raise ValueError('--runs requires --build or --database')
         samples, build, database = load_panel(path_at(root, args.samples)), None, None
     only_loci = set(path_at(root, args.loci).read_text().split()) if args.loci else None
+    options = {}
+    if orthodb:
+        if args.blat:
+            raise ValueError('--blat applies to the angiosperms353 method')
+        options = orthodb_screen_settings(root, qc, build_config, build=build, database=database,
+                                          supplied=busco_dataset)
     return screen(samples, cache=cache, taxonomy=taxonomy, build=build, output=path_at(root, args.output),
                   database=database, selection_config=config, min_loci=args.min_loci,
                   registered_support=cutoff, support=legacy_cutoff,
                   threads=args.threads, ram=args.ram,
                   omit_same_species=args.omit_same_species, only_loci=only_loci, blat=args.blat,
                   batch_size=qc['batch_size'], root=root,
-                  config=read_yaml(path_at(root, cfg.get('build_config', cfg['_path']))),
-                  cluster=getattr(args, 'cluster', False))
+                  config=build_config, cluster=getattr(args, 'cluster', False), **options)
+
+
+def orthodb_screen_settings(root, qc, config, *, build=None, database=None, supplied=None):
+    lineage = config.get('busco', {}).get('lineage')
+    translation = config.get('translation', {})
+    busco = config.get('busco', {})
+    frozen = None
+    if build:
+        source = json.loads(verify(build).read_text())
+        busco = source['config']['busco']
+        lineage = busco['lineage']
+        translation = source['config']['translation']
+        frozen = source.get('busco_reference')
+    elif database:
+        source = json.loads(verify(database).read_text())
+        lineage, translation = source['lineage'], source['translation']
+    lineage = qc.get('busco_lineage') or lineage
+    if not lineage:
+        raise ValueError('set busco.lineage or taxonomy_screen.busco_lineage for the OrthoDB screen')
+    if supplied:
+        directory = path_at(root, supplied)
+    else:
+        candidates = []
+        if frozen and frozen['lineage'] == lineage:
+            candidates.append(Path(frozen['dataset']) / 'lineages' / lineage)
+        cache = busco.get('cache_dir', 'resources/busco')
+        if cache:
+            candidates.append(path_at(root, cache) / lineage / 'dataset/lineages' / lineage)
+        directory = next((path for path in candidates if path.is_dir()), None)
+    return dict(busco_lineage=lineage, busco_dataset=directory,
+                translation_table=translation.get('table', 1))
 
 
 def main():
@@ -1035,8 +1083,9 @@ def main():
             p.add_argument('--output', required=True, help='New report directory')
             p.add_argument('--max-registered-support', help='Override the configured vote threshold')
         elif name in TAXONOMY_COMMANDS:
-            p.add_argument('--cache', default='resources/angiosperms353')
+            p.add_argument('--cache', help='Taxonomy and method-specific reference cache')
             p.add_argument('--taxonomy', help='Frozen ETE taxonomy SQLite database')
+            p.add_argument('--busco-dataset', help='Local BUSCO lineage directory for the OrthoDB method')
             if name == 'prepare-taxonomy':
                 p.add_argument('--workers', type=int, default=4)
             else:
@@ -1052,7 +1101,7 @@ def main():
                 cutoff.add_argument('--max-registered-support', help='Override the configured vote threshold')
                 cutoff.add_argument('--support', help=argparse.SUPPRESS)
                 p.add_argument('--threads', type=int, help='Override the per-batch CPU count')
-                p.add_argument('--ram', type=int, help='Override the Captus and MMseqs2 memory budget in GB')
+                p.add_argument('--ram', type=int, help='Override the sequence search memory budget in GB')
                 p.add_argument('--blat', help='Path to a compatible BLAT binary')
                 p.add_argument('--omit-same-species', action='store_true', help='Validation only')
                 p.add_argument('--loci', help='Validation only: file of marker IDs, one per line')

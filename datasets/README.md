@@ -105,7 +105,7 @@ one, explicitly choose `exclude` in a plan. Use a new plan filename for each rev
 
 ## Sample taxonomy screening
 
-Enable the optional check in the dataset's `build.yaml`:
+Taxonomy screening is enabled by default in `build.yaml`:
 
 ```yaml
 taxonomy_screen:
@@ -115,11 +115,9 @@ taxonomy_screen:
   batch_size: 24
 ```
 
-The default is `enabled: false`. Normal metadata updates and builds run
-independently of the screen. The `angiosperms353` method uses registered CDS
-assemblies and the build's frozen NCBI taxonomy if available. Install its
-[environment](angiosperms353.environment.yaml). Preparation downloads Kew
-v4.0 and a reusable taxonomy snapshot. Screening can also fetch missing markers.
+Run the screen explicitly after assembly. The default method,
+`angiosperms353`, uses Kew v4.0 and the build's frozen NCBI taxonomy when
+available. Install its [environment](angiosperms353.environment.yaml).
 
 ```bash
 conda env create -n phenoradar-taxonomy -f datasets/angiosperms353.environment.yaml
@@ -132,6 +130,21 @@ conda activate phenoradar-taxonomy
   --exclude-taxonomy --plan work/<build>-taxonomy-review.tsv
 ./run_metadata.sh record --apply work/<build>-taxonomy-review.tsv
 ```
+
+For other eukaryotes, set `taxonomy_screen.method: orthodb` and activate the
+[OrthoDB screen environment](orthodb.environment.yaml). The same commands apply.
+The screen uses the build's `busco.lineage` by default. Set
+`taxonomy_screen.busco_lineage` to use a different dataset, such as
+`vertebrata_odb12.2` for vertebrates. Use `--busco-dataset` to supply a local
+BUSCO lineage directory. Otherwise the screen uses a cached copy or downloads it.
+
+The OrthoDB method uses the marker proteins supplied with that BUSCO dataset.
+For each species, it keeps the assembly with the most single-copy markers and
+uses only those markers. It reuses compatible BUSCO tables or runs
+BUSCO on proteins translated from the saved CDS. Each marker compares
+amino-acid identity over at least 50 shared residues and 70% of the query.
+Ties cast no vote. The screen selects the closest of genus, family, and order
+with at least 50 votes and flags registered support strictly below 10%.
 
 Use `--cluster` to run one Slurm or AGE array task per batch. The task recovers
 markers, searches references, and counts votes. Concurrency follows

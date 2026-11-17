@@ -7,6 +7,7 @@ import shutil
 import tempfile
 
 from accession_exclusions import read_exclusions
+from angiosperms353 import SCREEN_KINDS
 from build_products import load_complete
 from common import now, read_tsv, write_json, write_tsv
 from dataset_assets import digest, locked, record, stage_file, verify
@@ -19,7 +20,7 @@ def filter_database(database, screen, output):
     data = load_complete(source['path'], verify_files=False)
     evidence = record(screen)
     qc = json.loads(verify(evidence).read_text())
-    if (qc.get('kind') != 'angiosperms353_qc' or qc.get('schema_version') != 3
+    if (qc.get('kind') not in SCREEN_KINDS or qc.get('schema_version') != 3
             or not qc.get('database_manifest') or qc['database_manifest']['sha256'] != source['sha256']
             or qc['settings']['restricted_loci'] or qc['settings']['omit_same_species']):
         raise ValueError('filtering requires a completed production screen of the same portable database')

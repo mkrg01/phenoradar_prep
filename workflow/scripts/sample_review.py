@@ -242,7 +242,7 @@ def review(root, cfg, build_path, runs=None, exclude_failed=False, *,
             sample = screened[run]
             if (sample['taxid'] != tid or sample['cds']['sha256'] != products['reference']['cds']['sha256']
                     or any(rank['taxid'] != tid for rank in summaries[run].values())):
-                raise ValueError(f'{run}: Angiosperms353 screen used different CDS or taxonomy')
+                raise ValueError(f'{run}: taxonomy screen used different CDS or taxonomy')
             entry['taxonomy_screen'] = summaries[run]
             candidate = (next(iter(summaries[run].values())) if exclude_taxonomy == 'auto'
                          else summaries[run].get(exclude_taxonomy))

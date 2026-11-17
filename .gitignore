@@ -15,6 +15,7 @@
 !/datasets/README.md
 !/datasets/environment.yaml
 !/datasets/angiosperms353.environment.yaml
+!/datasets/orthodb.environment.yaml
 !/datasets/*/README.md
 !/datasets/*/build.yaml
 !/datasets/*/select_rules.tsv

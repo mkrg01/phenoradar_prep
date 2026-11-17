@@ -73,8 +73,12 @@ execution:
       cpus: 1
       mem_gb: 8
       time: "1-00:00:00"
-    align_orthogroup_batch:  # Align and trim weighted OG batches, internally parallel.
-      cpus: 12
+    align_orthogroup_batch:  # Align and trim up to 100 OGs.
+      cpus: 4
+      mem_gb: 16
+      time: "1-00:00:00"
+    align_large_orthogroup:  # Align and trim one OG with an input FASTA of at least 16 MB.
+      cpus: 4
       mem_gb: 32
       time: "1-00:00:00"
     annotate_kofam:  # Annotate batches of median-length OG representatives.

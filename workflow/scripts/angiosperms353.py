@@ -1,4 +1,4 @@
-"""Screen database samples for discordance with Kew Angiosperms353 references."""
+"""Compare sample taxonomy using single-locus sequence alignments."""
 from collections import Counter, defaultdict
 from contextlib import contextmanager
 import csv
@@ -31,6 +31,11 @@ LOCUS_FIELDS = ['run', 'rank', 'locus', 'vote', 'winner', 'registered_reference'
                 'alternative_reference', 'shared_bases', 'registered_matches', 'alternative_matches',
                 'alternative_winners', 'alternative_candidates']
 PLOT_NAMES = ('registered_support.svg', 'registered_support_by_rank.svg')
+SCREEN_KINDS = {'angiosperms353_qc', 'orthodb_qc'}
+
+
+def locus_fields(protein):
+    return ['shared_residues' if protein and name == 'shared_bases' else name for name in LOCUS_FIELDS]
 
 
 def registered_threshold(min_loci, registered_support=None, support=None):
@@ -60,7 +65,7 @@ def load_panel(path):
     return [dict(row, cds=record(path.parent / row['cds'])) for row in rows]
 
 
-def build_panel(path, runs=None):
+def build_panel(path, runs=None, *, include_busco=False):
     from dataset import item_products, load
     from sample_review import sample_guard
 
@@ -76,14 +81,19 @@ def build_panel(path, runs=None):
     for run in sorted(requested):
         item = items[run]
         with sample_guard(path, build, item):
-            reference = item_products(build, item).get('reference')
+            products = item_products(build, item)
+        reference = products.get('reference')
         if reference is None:
             raise ValueError(f'{run}: no completed CDS assembly; select runs with --runs')
-        samples.append(dict(item['row'], cds=reference['cds']))
+        row = dict(item['row'], cds=reference['cds'])
+        if include_busco:
+            row.update(busco=(products.get('busco') or {}).get('full'),
+                       busco_lineage=build['config']['busco']['lineage'])
+        samples.append(row)
     return samples, record(path / 'build.json')
 
 
-def database_panel(path, runs=None):
+def database_panel(path, runs=None, *, include_busco=False):
     from build_products import load_complete
     from portable_build import completion_path
 
@@ -96,7 +106,14 @@ def database_panel(path, runs=None):
     if not requested or requested - products.keys():
         raise ValueError(f'no samples selected or runs absent from database: {sorted(requested - products.keys())}')
     verify(manifest)
-    return [dict(products[run]['row'], cds=products[run]['cds']) for run in sorted(requested)], manifest
+    rows = []
+    for run in sorted(requested):
+        product = products[run]
+        row = dict(product['row'], cds=product['cds'])
+        if include_busco:
+            row.update(busco=product.get('busco'), busco_lineage=database['lineage'])
+        rows.append(row)
+    return rows, manifest
 
 
 def extract(samples, work, *, threads, ram, blat, log_dir):
@@ -160,13 +177,13 @@ class Hit:
     query: str
     reference: str
 
-    def bases(self):
+    def bases(self, alphabet='ACGT'):
         position = self.start - 1
         step = 1 if self.start <= self.end else -1
         bases = {}
         for query, reference in zip(self.query, self.reference, strict=True):
             if query != '-':
-                if query in 'ACGT' and reference in 'ACGT':
+                if query in alphabet and reference in alphabet:
                     bases[position] = query == reference
                 position += step
         if position != self.end - 1 + step:
@@ -178,7 +195,7 @@ def source_label(ref):
     return f'{ref[0]}|{ref[1]}|{ref[2]}'
 
 
-def vote(run, rank, locus, length, registered, hits, refs):
+def vote(run, rank, locus, length, registered, hits, refs, *, protein=False):
     original = hits.get(registered)
     row = dict(run=run, rank=rank, locus=locus, vote='no_registered_hit')
     if original is None:
@@ -190,12 +207,17 @@ def vote(run, rank, locus, length, registered, hits, refs):
     best_score = max(hit.score for _, hit in other_hits)
     alternatives = [(group, hit) for group, hit in other_hits if hit.score == best_score]
     alternatives.sort()
-    original_bases = original.bases()
-    alternative_bases = {group: hit.bases() for group, hit in alternatives}
+    if protein:
+        from orthodb_taxonomy import MIN_RESIDUES, PROTEIN_ALPHABET
+        alphabet, minimum = PROTEIN_ALPHABET, MIN_RESIDUES
+    else:
+        alphabet, minimum = 'ACGT', MIN_BASES
+    original_bases = original.bases(alphabet)
+    alternative_bases = {group: hit.bases(alphabet) for group, hit in alternatives}
     shared = set(original_bases)
     for bases in alternative_bases.values():
         shared.intersection_update(bases)
-    if len(shared) < max(MIN_BASES, (7 * length + 9) // 10):
+    if len(shared) < max(minimum, (7 * length + 9) // 10):
         return dict(row, vote='insufficient_overlap')
 
     old = sum(original_bases[i] for i in shared)
@@ -204,11 +226,14 @@ def vote(run, rank, locus, length, registered, hits, refs):
                   for group, hit in alternatives}
     new = max(candidate['matches'] for candidate in candidates.values())
     best = [group for group, candidate in candidates.items() if candidate['matches'] == new]
-    row.update(alternative_reference=candidates[best[0]]['reference'], shared_bases=len(shared),
+    row.update(alternative_reference=candidates[best[0]]['reference'],
                registered_matches=old, alternative_matches=new,
                alternative_candidates=json.dumps(candidates, sort_keys=True))
+    row['shared_residues' if protein else 'shared_bases'] = len(shared)
     if old > new:
         return dict(row, vote='registered', winner=registered)
+    if protein and (old == new or len(best) > 1):
+        return dict(row, vote='uninformative_tie', alternative_winners=best)
     if old < new:
         return dict(row, vote='alternative', winner=best[0] if len(best) == 1 else None,
                     alternative_winners=best)
@@ -216,26 +241,32 @@ def vote(run, rank, locus, length, registered, hits, refs):
 
 
 @contextmanager
-def search_locus(locus, queries, reference_path, assignments, work, threads, ram, log_dir):
+def search_locus(locus, queries, reference_path, assignments, work, threads, ram, log_dir, *, protein=False):
     """Search the complete same-locus database without a fixed top-k cap."""
     with tempfile.TemporaryDirectory(prefix=f'{locus}-', dir=work) as temp:
         path = Path(temp)
         refs = []
-        with (path / 'target.fna').open('w') as handle:
-            for species, repository, accession, ranks, sequence in reference_rows(reference_path, locus, assignments):
+        extension = 'faa' if protein else 'fna'
+        query_path, target_path = (path / f'query.{extension}', path / f'target.{extension}')
+        source = reference_rows
+        if protein:
+            from orthodb_taxonomy import reference_rows as source
+        with target_path.open('w') as handle:
+            for species, repository, accession, ranks, sequence, *taxids in source(reference_path, locus, assignments):
                 handle.write(f'>{len(refs)}\n{sequence}\n')
-                refs.append((species, repository, accession, ranks, accessions(accession), sequence))
+                refs.append((species, repository, accession, ranks, accessions(accession), sequence, *taxids))
         if not refs:
-            raise ValueError(f'Kew locus {locus} has no taxonomically resolved reference sequences')
-        with (path / 'query.fna').open('w') as handle:
+            raise ValueError(f'locus {locus} has no taxonomically resolved reference sequences')
+        with query_path.open('w') as handle:
             for i, sequence in queries.items():
                 handle.write(f'>{i}\n{sequence}\n')
         with (log_dir / 'mmseqs.log').open('ab') as log:
-            log.write(f'\nAngiosperms353 locus {locus}: {len(queries)} queries, {len(refs)} references\n'.encode())
+            method = 'OrthoDB' if protein else 'Angiosperms353'
+            log.write(f'\n{method} locus {locus}: {len(queries)} queries, {len(refs)} references\n'.encode())
             log.flush()
-            subprocess.run(['mmseqs', 'easy-search', str(path / 'query.fna'), str(path / 'target.fna'),
-                            str(path / 'hits.tsv'), str(path / 'tmp'), '--search-type', '3',
-                            '-k', '10', '--max-seqs', str(len(refs)), '--strand', '2',
+            search = ['--search-type', '1'] if protein else ['--search-type', '3', '-k', '10', '--strand', '2']
+            subprocess.run(['mmseqs', 'easy-search', str(query_path), str(target_path),
+                            str(path / 'hits.tsv'), str(path / 'tmp'), *search, '--max-seqs', str(len(refs)),
                             '--format-output', 'query,target,raw,qstart,qend,tstart,tend,cigar',
                             '-e', EVALUE, '-c', COVERAGE, '--cov-mode', '2', '--threads', str(threads),
                             '--shuffle', '0', '--split-memory-limit', f'{ram}G', '-v', '2'],
@@ -243,10 +274,12 @@ def search_locus(locus, queries, reference_path, assignments, work, threads, ram
         yield refs, path / 'hits.tsv'
 
 
-def alignment_from_cigar(query, target, qstart, qend, tstart, tend, cigar):
-    """Decode the nucleotide traceback against the original FASTA records."""
+def alignment_from_cigar(query, target, qstart, qend, tstart, tend, cigar, *, protein=False):
+    """Decode the traceback against the original FASTA records."""
     qstep = 1 if qstart <= qend else -1
     tstep = 1 if tstart <= tend else -1
+    if protein and (qstep < 0 or tstep < 0):
+        raise ValueError('MMseqs2 protein alignment has reversed coordinates')
     query = query[min(qstart, qend) - 1:max(qstart, qend)]
     target = target[min(tstart, tend) - 1:max(tstart, tend)]
     if qstep < 0:
@@ -255,7 +288,7 @@ def alignment_from_cigar(query, target, qstart, qend, tstart, tend, cigar):
         target = target.translate(COMPLEMENT)[::-1]
     operations = CIGAR.findall(cigar)
     if not operations or ''.join(count + op for count, op in operations) != cigar:
-        raise ValueError(f'invalid MMseqs2 nucleotide CIGAR: {cigar!r}')
+        raise ValueError(f'invalid MMseqs2 CIGAR: {cigar!r}')
     qpos = tpos = 0
     qaln, taln = [], []
     for count, op in operations:
@@ -272,14 +305,20 @@ def alignment_from_cigar(query, target, qstart, qend, tstart, tend, cigar):
             tpos += size
     if (qpos != abs(qend - qstart) + 1 or tpos != abs(tend - tstart) + 1
             or qpos != len(query) or tpos != len(target)):
-        raise ValueError('MMseqs2 nucleotide CIGAR disagrees with alignment coordinates')
+        raise ValueError('MMseqs2 CIGAR disagrees with alignment coordinates')
     return ''.join(qaln), ''.join(taln)
 
 
 def reference_allowed(sample, reference, omit_same_species):
-    species, _, accession, _, source_runs, _ = reference
+    species, _, accession, _, source_runs, _, *taxids = reference
+    if taxids:
+        same_species = sample.get('species_taxid') == taxids[0]
+        if taxids[1].upper() in sample['exclude_accessions']:
+            return False
+    else:
+        same_species = species.replace('_', ' ').casefold() == sample.get('species_name')
     return not (source_runs & sample['source_runs'] or accession.upper() in sample['exclude_accessions']
-                or (omit_same_species and species.replace('_', ' ').casefold() == sample['species_name']))
+                or (omit_same_species and same_species))
 
 
 def closest_reference_rank(lineage, refs, sample, omit_same_species):
@@ -297,7 +336,7 @@ def closest_reference_rank(lineage, refs, sample, omit_same_species):
     return next((rank for rank, taxid in lineage.items() if taxid in present), None)
 
 
-def read_hits(path, queries, refs, samples, *, omit_same_species, ranks_by_query=None):
+def read_hits(path, queries, refs, samples, *, omit_same_species, ranks_by_query=None, protein=False):
     # Keep only the best alignment per taxon for each query. This bounds memory
     # independently of the number of specimens in well-sampled taxa.
     kept = defaultdict(lambda: {rank: {} for rank in RANKS})
@@ -324,7 +363,7 @@ def read_hits(path, queries, refs, samples, *, omit_same_species, ranks_by_query
                 if previous is None or (score, -target_id) > (previous.score, -previous.target):
                     if hit is None:
                         qaln, taln = alignment_from_cigar(queries[index], ref[5], start, end,
-                                                           int(tstart), int(tend), cigar)
+                                                           int(tstart), int(tend), cigar, protein=protein)
                         hit = Hit(target_id, score, start, end, qaln, taln)
                     groups[group] = hit
     return kept
@@ -338,6 +377,8 @@ def summarize(sample, rank, registered, rows, extracted, min_loci, support):
         if row['vote'] == 'registered':
             registered_votes += 1
             voted += 1
+        elif row['vote'] == 'uninformative_tie':
+            ties += 1
         elif row['vote'] in {'alternative', 'tie'}:
             winners = row['alternative_winners']
             registered_tied = row['vote'] == 'tie'
@@ -380,9 +421,10 @@ def decision_status(rank, registered_votes, voted, min_loci, cutoff):
     return 'no_discordance'
 
 
-def exclusion_reason(row):
+def exclusion_reason(row, method=None):
     rank = row['rank']
-    return f"angiosperms353_{rank}_discordant_{row['registered']}_outside_registered_{rank}"
+    method = method or row.get('method', 'angiosperms353')
+    return f"{method}_{rank}_discordant_{row['registered']}_outside_registered_{rank}"
 
 
 def plot_support(output, summaries, cutoff):
@@ -422,11 +464,11 @@ def plot_support(output, summaries, cutoff):
     plt.close(fig)
 
 
-def write_report(output, summaries, cutoff):
+def write_report(output, summaries, cutoff, method='angiosperms353'):
     plot_support(output, summaries, cutoff)
     write_tsv(output / 'summary.tsv', SUMMARY_FIELDS, summaries)
     write_tsv(output / 'exclusion_candidates.tsv', ['accession', 'taxid', 'reason'],
-              [dict(accession=row['run'], taxid=row['taxid'], reason=exclusion_reason(row))
+              [dict(accession=row['run'], taxid=row['taxid'], reason=exclusion_reason(row, method))
                for row in summaries if row['status'] == 'discordant'])
     return dict(summary=record(output / 'summary.tsv'), plots={name: record(output / name) for name in PLOT_NAMES},
                 exclusion_candidates=record(output / 'exclusion_candidates.tsv'))
@@ -436,13 +478,13 @@ def report(screen_path, output, *, registered_support, selection_config=None):
     """Reapply a threshold to frozen votes without running sequence searches."""
     source = record(screen_path)
     data = json.loads(verify(source).read_text())
-    if data.get('kind') != 'angiosperms353_qc' or data.get('schema_version') != 3:
-        raise ValueError('replotting requires a version 3 Angiosperms353 screen')
+    if data.get('kind') not in SCREEN_KINDS or data.get('schema_version') != 3:
+        raise ValueError('replotting requires a version 3 taxonomy screen')
     min_loci = data['settings']['min_loci']
     cutoff = registered_threshold(min_loci, registered_support)
     summaries = read_tsv(verify(data['summary']))
     if not summaries:
-        raise ValueError('Angiosperms353 screen contains no sample summaries')
+        raise ValueError('taxonomy screen contains no sample summaries')
     votes = Counter()
     with verify(data['loci']).open() as handle:
         for row in csv.DictReader(handle, delimiter='\t'):
@@ -454,7 +496,7 @@ def report(screen_path, output, *, registered_support, selection_config=None):
         row['status'] = decision_status(row['rank'], votes[row['run']], int(row['comparable_loci']), min_loci, cutoff)
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
-    files = write_report(output, summaries, cutoff)
+    files = write_report(output, summaries, cutoff, data['kind'].removesuffix('_qc'))
     verify(source)
     if selection_config:
         verify(selection_config)
@@ -465,16 +507,23 @@ def report(screen_path, output, *, registered_support, selection_config=None):
 
 
 def score_batch(batch, ancestry, by_locus, paths, assignments, work, log_dir, threads, ram,
-                omit_same_species, min_loci, support, evidence):
+                omit_same_species, min_loci, support, evidence, *, protein=False):
     rows, extracted, selected = defaultdict(list), Counter(), {}
+    protein_ranks = [set() for _ in batch]
     ranks = [tuple(lineage) for lineage in ancestry]
     for locus, path in paths.items():
         queries = by_locus[locus]
-        with search_locus(locus, queries, path, assignments, work, threads, ram, log_dir) as (refs, hits_path):
+        options = {'protein': True} if protein else {}
+        with search_locus(locus, queries, path, assignments, work, threads, ram, log_dir, **options) as (refs, hits_path):
             ranks_by_query = {}
             for index in queries:
                 current = ranks[index]
-                if current and selected.get(index) != current[0]:
+                if protein:
+                    refs_ranks = {taxid for reference in refs
+                                  if reference_allowed(batch[index], reference, omit_same_species)
+                                  for taxid in reference[3]}
+                    protein_ranks[index].update(rank for rank in current if ancestry[index][rank] in refs_ranks)
+                elif current and selected.get(index) != current[0]:
                     rank = closest_reference_rank(ancestry[index], refs, batch[index], omit_same_species)
                     if rank in current:
                         selected[index] = rank
@@ -482,16 +531,20 @@ def score_batch(batch, ancestry, by_locus, paths, assignments, work, log_dir, th
                 # Keep lower-rank evidence until the closest available rank is known.
                 ranks_by_query[index] = ranks[index]
             hits = read_hits(hits_path, queries, refs, batch, omit_same_species=omit_same_species,
-                             ranks_by_query=ranks_by_query)
+                             ranks_by_query=ranks_by_query, **options)
             for index, sequence in queries.items():
                 extracted[index] += 1
                 for rank in ranks_by_query[index]:
                     result = vote(batch[index]['run'], rank, locus, len(sequence), ancestry[index][rank],
-                                  hits.get(index, {}).get(rank, {}), refs)
+                                  hits.get(index, {}).get(rank, {}), refs, **options)
                     rows[index, rank].append(result)
     summaries = []
     for index, sample in enumerate(batch):
         rank = selected.get(index)
+        if protein:
+            available = [rank for rank in ranks[index] if rank in protein_ranks[index]]
+            rank = next((rank for rank in available if sum(row['vote'] in ('registered', 'alternative')
+                        for row in rows[index, rank]) >= min_loci), available[0] if available else None)
         results = rows[index, rank]
         evidence.writerows(results)
         summaries.append(summarize(sample, rank, ancestry[index].get(rank), results,
@@ -508,19 +561,22 @@ def load_screen(path, build_path):
     path = Path(path).resolve()
     data = json.loads(path.read_text())
     version = data.get('schema_version')
-    if data.get('kind') != 'angiosperms353_qc' or version not in (1, 2, 3) or not data.get('build_manifest'):
-        raise ValueError('review requires a completed Angiosperms353 screen of a frozen build')
+    if (data.get('kind') not in SCREEN_KINDS or version not in (1, 2, 3) or not data.get('build_manifest')
+            or (data['kind'] == 'orthodb_qc' and version != 3)):
+        raise ValueError('review requires a completed taxonomy screen of a frozen build')
     if Path(verify(data['build_manifest'])).resolve() != (Path(build_path) / 'build.json').resolve():
-        raise ValueError('Angiosperms353 screen belongs to a different build')
+        raise ValueError('taxonomy screen belongs to a different build')
     if data['settings']['restricted_loci'] or data['settings']['omit_same_species']:
-        raise ValueError('validation-only Angiosperms353 screens cannot be used for sample review')
+        raise ValueError('validation-only taxonomy screens cannot be used for sample review')
     expected_ranks = {1: set(LEGACY_RANKS), 2: set(INTERMEDIATE_RANKS), 3: {'', *RANKS}}[version]
     summaries = defaultdict(dict)
     for row in read_tsv(verify(data['summary'])):
         if row['rank'] not in expected_ranks or row['rank'] in summaries[row['run']]:
-            raise ValueError('duplicate or invalid rank in Angiosperms353 screen')
+            raise ValueError('duplicate or invalid rank in taxonomy screen')
+        if data['kind'] == 'orthodb_qc':
+            row['method'] = 'orthodb'
         summaries[row['run']][row['rank']] = row
     if set(summaries) != set(data['samples']) or any(
             (len(ranks) != 1 if version == 3 else set(ranks) != expected_ranks) for ranks in summaries.values()):
-        raise ValueError('incomplete Angiosperms353 screen summary')
+        raise ValueError('incomplete taxonomy screen summary')
     return record(path), data['samples'], summaries

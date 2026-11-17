@@ -44,6 +44,19 @@ def test_weighted_plan_bounds_and_singleton_recovery(tmp_path):
     assert all(Path(p).exists() for p in batch_targets(plans, out, reports))
 
 
+def test_default_plan_caps_batches_and_isolates_large_ogs(tmp_path):
+    inputs, plans, _, _ = fixture(tmp_path, count=102)
+    with (inputs / 'OG0.faa').open('r+b') as large:
+        large.truncate(16_000_000)
+    plan(inputs, plans)
+    index = json.loads((plans / 'index.json').read_text())
+    batches = {name: json.loads((plans / f'{name}.json').read_text())['orthogroups']
+               for name in index['batches']}
+    assert batches.pop('large_og_000000') == ['OG0']
+    assert len(batches) == 2 and all(len(groups) <= 100 for groups in batches.values())
+    assert {og for groups in batches.values() for og in groups} == {f'OG{i}' for i in range(1, 102)}
+
+
 def test_interrupted_batch_keeps_completed_og_and_reuses_legacy_report(tmp_path):
     inputs, plans, out, reports = fixture(tmp_path, 2)
     (inputs / 'OG1.faa').write_text('>Plant_g1\nMAA\n>Plant_g2\nMA\n')
@@ -68,7 +81,11 @@ def test_interrupted_batch_keeps_completed_og_and_reuses_legacy_report(tmp_path)
     assert 'MGA' not in (out / 'OG1.faa').read_text()
 
 
-def test_restricted_batch_worker_does_not_open_database(workflow_project, tmp_path):
+@pytest.mark.parametrize('rule,batch,mem_mb', [
+    ('align_orthogroup_batch', 'batch_000000', 16000),
+    ('align_large_orthogroup', 'large_og_000000', 32000),
+])
+def test_restricted_batch_worker_does_not_open_database(workflow_project, tmp_path, rule, batch, mem_mb):
     snakemake = os.environ.get('SNAKEMAKE_BIN') or shutil.which('snakemake')
     if not snakemake:
         pytest.skip('Snakemake required')
@@ -77,6 +94,9 @@ def test_restricted_batch_worker_does_not_open_database(workflow_project, tmp_pa
     (inputs / 'OG1.faa').write_text('>Plant_g1\nMAA\n')
     write_json(inputs / 'provenance.json', {'orthogroups': ['OG1']})
     (inputs.parent / 'selected').symlink_to(inputs, target_is_directory=True)
+    if rule == 'align_large_orthogroup':
+        with (inputs / 'OG1.faa').open('r+b') as large:
+            large.truncate(16_000_000)
     plan(inputs, inputs.parent / 'batches')
     database = tmp_path / 'unreadable-database.json'
     database.write_text('not database JSON; unrelated workers must never parse this')
@@ -85,11 +105,11 @@ def test_restricted_batch_worker_does_not_open_database(workflow_project, tmp_pa
     root = Path(__file__).resolve().parents[1]
     result = subprocess.run([snakemake, '--snakefile', str(root / 'workflow/Snakefile'),
                              '--configfile', str(config), '--cores', '12', '--dry-run',
-                             '--allowed-rules', 'align_orthogroup_batch', '--target-jobs',
-                             'align_orthogroup_batch:batch=batch_000000'],
+                             '--allowed-rules', rule, '--target-jobs', f'{rule}:batch={batch}'],
                             cwd=workflow_project, text=True, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert 'align_orthogroup_batch' in result.stdout
+    assert f'rule {rule}:' in result.stdout
+    assert 'threads: 4' in result.stdout and f'mem_mb={mem_mb}' in result.stdout
 
 
 @pytest.mark.parametrize('fail_copy', [False, True])
