@@ -13,9 +13,9 @@ import sys
 import pytest
 import yaml
 
-from busco_phylogeny import busco_full_path, busco_table, extract, fasta_records, plan, prepare_cds
+from busco_phylogeny import busco_full_path, busco_table, extract, fasta_records, marker_taxon_status, plan, prepare_cds
 from common import RANDOM_SEED, read_tsv, write_json, write_tsv
-from infer_phylogeny import align, alignment_qc, astral, merge, read_tree, trim
+from infer_phylogeny import align, alignment_qc, astral, gene_tree, merge, read_tree, trim
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -138,10 +138,10 @@ def test_default_marker_plan_keeps_more_than_500_eligible_markers(tmp_path, conf
     output = tmp_path / "plan"
     plan(samples, output, cfg)
     selected = read_tsv(output / "markers.tsv")
-    assert len(selected) == 501
-    assert markers[-1] not in {row["marker"] for row in selected}
+    assert len(selected) == 502
+    assert markers[-1] in {row["marker"] for row in selected}
     provenance = json.loads((output / "provenance.json").read_text())
-    assert provenance["eligible_markers"] == 501
+    assert provenance["eligible_markers"] == 502
     assert provenance["settings"]["max_markers"] is None
 
     plan(samples, tmp_path / "capped", dict(cfg, max_markers=500))
@@ -260,18 +260,103 @@ def test_trimal_rejects_inconsistent_column_map(tmp_path):
         trim(raw, raw_qc, tmp_path / "out", tmp_path / "qc", tmp_path / "cols", str(bad), "gappyout", alignment_settings(tmp_path, "ABCD"))
 
 
-def test_alignment_qc_drops_unusable_taxa_without_fabricating_signal(tmp_path):
-    records = [("A", "AA--GG"), ("B", "AA--GG"), ("C", "CC--GG"),
-               ("D", "CC--GG"), ("E", "------")]
-    cfg = alignment_settings(tmp_path, "ABCDE", min_protein_length=2)
+def test_alignment_qc_filters_sequences_without_removing_columns(tmp_path):
+    records = [("A", "AA-X--GG"), ("B", "AA-X--GG"), ("C", "CC-X--GG"),
+               ("D", "CC-X--GG"), ("E", "--QXR---")]
+    cfg = alignment_settings(tmp_path, "ABCDE", min_protein_length=3)
     retained, report = alignment_qc(records, cfg)
-    assert retained == [("A", "AAGG"), ("B", "AAGG"), ("C", "CCGG"), ("D", "CCGG")]
+    assert retained == records[:4]
+    assert report["sites"] == report["sites_before"] == 8
     assert report["informative_sites"] == 2
     assert report["removed_species"] == ["E"]
     assert report["status"] == "retained"
     _, report = alignment_qc([(n, "AAAA") for n in "ABCD"], cfg)
-    assert report["status"] == "no_variable_sites"
+    assert report["status"] == "retained"
     assert report["variable_sites"] == report["informative_sites"] == 0
+
+
+def test_trim_preserves_column_mapping_after_sequence_filtering(tmp_path, monkeypatch):
+    records = [("A", "AA-X--GG"), ("B", "AA-X--GG"), ("C", "CC-X--GG"),
+               ("D", "CC-X--GG"), ("E", "--QXR---")]
+    selected = [0, 2, 3, 4, 6, 7, 8, 9]
+    raw, raw_qc = tmp_path / "raw.fa", tmp_path / "raw.json"
+    raw.write_text("".join(f">{name}\n{seq[0]}X{seq[1:4]}X{seq[4:]}\n" for name, seq in records))
+    write_json(raw_qc, {"status": "retained", "sites": 10, "taxa": 5})
+
+    def select_columns(inputs, command, mode, directory):
+        return [(name, "".join(seq[i] for i in selected)) for name, seq in inputs], selected, ["test-trimal"], None
+
+    monkeypatch.setattr("alignment_trimming.trim_records", select_columns)
+    out, qc, columns = tmp_path / "out.fa", tmp_path / "qc.json", tmp_path / "columns.tsv"
+    trim(raw, raw_qc, out, qc, columns, sys.executable, "gappyout",
+         alignment_settings(tmp_path, "ABCDE", min_protein_length=3))
+    assert list(fasta_records(out)) == records[:4]
+    assert [int(r["famsa_column_1based"]) for r in read_tsv(columns)] == [i + 1 for i in selected]
+    report = json.loads(qc.read_text())
+    assert report["sites"] == report["trimal_sites"] == 8
+    assert report["removed_species"] == ["E"]
+
+
+@pytest.mark.parametrize("count", [2, 3])
+def test_small_constant_markers_pass_the_species_coverage_threshold(tmp_path, count):
+    records = [(name, "A" * 100) for name in "ABCD"[:count]]
+    assert marker_taxon_status(count, count / 4, 0.5) == "retained"
+    retained, report = alignment_qc(records, alignment_settings(tmp_path, "ABCD"))
+    assert retained == records
+    assert report["status"] == "retained"
+    assert report["variable_sites"] == report["informative_sites"] == 0
+
+
+def test_gene_tree_validation_accepts_two_tips_but_rejects_one(tmp_path):
+    tree = tmp_path / "gene.nwk"
+    tree.write_text("(A:0,B:0);\n")
+    read_tree(tree, {"A", "B"}, minimum_tips=2)
+    with pytest.raises(ValueError, match="at least four"):
+        read_tree(tree)
+    tree.write_text("(A:0);\n")
+    with pytest.raises(ValueError, match="at least 2"):
+        read_tree(tree, {"A"}, minimum_tips=2)
+
+
+@pytest.mark.parametrize("count", [2, 3])
+@pytest.mark.parametrize("outgroup_present", [False, True])
+def test_real_inference_accepts_small_and_constant_gene_trees(tmp_path, count, outgroup_present):
+    vft = os.environ.get("VERYFASTTREE_BIN") or shutil.which("VeryFastTree")
+    aster = os.environ.get("ASTRAL_BIN") or str(ROOT / "resources/phylogeny_tools/bin/astral4_int128")
+    if not vft or not Path(aster).is_file():
+        pytest.skip("real VeryFastTree and ASTRAL-IV required")
+    cfg = alignment_settings(tmp_path, "ABCD")
+    amino = "ACDEFGHIKLMNPQRSTVWY"
+    base = amino * 6
+    variable = []
+    for i, name in enumerate("ABCD"):
+        seq = list(base)
+        for pos in range(0, len(seq), 11):
+            seq[pos] = amino[(amino.index(seq[pos]) + i // 2 + 1) % 20]
+        for pos in range(i + 1, len(seq), 19):
+            seq[pos] = amino[(amino.index(seq[pos]) + i + 1) % 20]
+        variable.append((name, "".join(seq)))
+    small_names = "ABCD"[:count] if outgroup_present else "ABCD"[-count:]
+    loci = [variable] * 4 + [[(name, base) for name in small_names],
+                           [(name, base) for name in "ABCD"]]
+    markers = tmp_path / "markers.tsv"
+    write_tsv(markers, ["marker"], [{"marker": str(i)} for i in range(len(loci))])
+    for i, records in enumerate(loci):
+        retained, report = alignment_qc(records, cfg)
+        assert report["status"] == "retained"
+        fasta, qc = tmp_path / f"{i}.faa", tmp_path / f"{i}.alignment.json"
+        fasta.write_text("".join(f">{name}\n{seq}\n" for name, seq in retained))
+        write_json(qc, report)
+        gene_tree(fasta, qc, tmp_path / f"{i}.nwk", tmp_path / f"{i}.json", vft, 1, RANDOM_SEED)
+    trees, qc = tmp_path / "trees.nwk", tmp_path / "trees.json"
+    manifest = Path(cfg["sample_manifest"])
+    merge(manifest, markers, tmp_path, trees, tmp_path / "coverage.tsv", qc)
+    report = json.loads(qc.read_text())
+    assert len(report["retained"]) == 6
+    assert report["mean_gene_length"] == 120
+    assert report["total_gene_sites"] == 720
+    astral(trees, qc, manifest, tmp_path / "species.nwk", tmp_path / "species.json", aster, "A", 1, RANDOM_SEED)
+    read_tree(tmp_path / "species.nwk", set("ABCD"))
 
 
 @pytest.mark.parametrize("sequences,variable,informative", [
@@ -290,9 +375,9 @@ def test_alignment_qc_reports_low_information_without_a_count_cutoff(tmp_path, s
 
 @pytest.mark.parametrize("cohort,represented,status", [
     ("ABCDEFGHI", "ABCD", "low_occupancy"),
-    ("ABCDE", "ABC", "too_few_taxa"),
+    ("ABCDE", "AB", "low_occupancy"),
 ])
-def test_alignment_skips_loci_without_coverage_or_a_quartet(tmp_path, cohort, represented, status):
+def test_alignment_skips_loci_without_species_coverage(tmp_path, cohort, represented, status):
     cfg = alignment_settings(tmp_path, cohort)
     fasta, output, qc = (tmp_path / name for name in ("marker.faa", "raw.faa", "raw.json"))
     fasta.write_text("".join(f">{name}\nMPEPTIDE\n" for name in represented))
@@ -328,7 +413,7 @@ def test_missing_species_diagnostics_survive_before_inference(tmp_path):
     assert read_tsv(coverage)[-1]["represented"] == "False"
 
 
-@pytest.mark.parametrize("present", [14, 4])
+@pytest.mark.parametrize("present", [14, 4, 3, 2])
 def test_merge_reports_biological_occupancy_for_retained_gene_trees(tmp_path, present):
     manifest, markers = tmp_path / "species.tsv", tmp_path / "markers.tsv"
     species = [f"plant_{i:02d}" for i in range(24)]

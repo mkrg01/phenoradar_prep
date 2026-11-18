@@ -23,15 +23,16 @@ def executable(command):
     return str(Path(resolved).resolve())
 
 
-def read_tree(path, expected=None):
+def read_tree(path, expected=None, *, minimum_tips=QUARTET_SIZE):
     from ete4 import Tree
     text = Path(path).read_text().strip()
     if not text or text.count(";") != 1:
         raise ValueError(f"expected exactly one Newick tree: {path}")
     tree = Tree(text, parser=1)
     leaves = list(tree.leaf_names())
-    if len(leaves) < QUARTET_SIZE or len(leaves) != len(set(leaves)):
-        raise ValueError(f"tree requires at least four unique species: {path}")
+    if len(leaves) < minimum_tips or len(leaves) != len(set(leaves)):
+        minimum = "four" if minimum_tips == QUARTET_SIZE else str(minimum_tips)
+        raise ValueError(f"tree requires at least {minimum} unique species: {path}")
     if expected is not None and set(leaves) != set(expected):
         raise ValueError(f"tree leaf set mismatch: {path}")
     for node in tree.traverse():
@@ -54,13 +55,13 @@ def marker_coverage(names, manifest):
 
 
 def alignment_qc(records, settings):
-    """After trimAl, drop short taxa and all-missing columns, without gap cutoffs."""
+    """After trimAl, filter short sequences while preserving its selected columns."""
     import numpy as np
     names = [r[0] for r in records]
     if not records:
         return [], {"status": marker_taxon_status(0, 0, settings["min_taxa"]),
                     "taxa": 0, "biological_species": 0, "occupancy": 0,
-                    "sites": 0, "variable_sites": 0, "informative_sites": 0, "retained_columns_0based": []}
+                    "sites": 0, "variable_sites": 0, "informative_sites": 0}
     if len(names) != len(set(names)) or len({len(r[1]) for r in records}) != 1:
         raise ValueError("alignment must have unique names and equal sequence lengths")
     matrix = np.frombuffer("".join(seq for _, seq in records).encode("ascii"),
@@ -69,10 +70,9 @@ def alignment_qc(records, settings):
     known = np.isin(matrix, [ord(c) for c in AMINO])
     keep = known.sum(axis=1) >= settings["min_protein_length"]
     taxa = np.flatnonzero(keep)
-    columns = np.flatnonzero(known[keep].any(axis=0))
-    matrix = matrix[keep][:, columns]
-    observed_states = np.zeros(len(columns), dtype=np.uint8)
-    repeated_states = np.zeros(len(columns), dtype=np.uint8)
+    matrix = matrix[keep]
+    observed_states = np.zeros(original_sites, dtype=np.uint8)
+    repeated_states = np.zeros(original_sites, dtype=np.uint8)
     for aa in AMINO:
         counts = (matrix == ord(aa)).sum(axis=0)
         observed_states += counts > 0
@@ -82,14 +82,11 @@ def alignment_qc(records, settings):
     n, length = matrix.shape
     species_count, occupancy = marker_coverage([names[i] for i in taxa], settings["sample_manifest"])
     status = marker_taxon_status(species_count, occupancy, settings["min_taxa"])
-    if status == "retained" and variable == 0:
-        status = "no_variable_sites"
     output = [(names[i], row.tobytes().decode("ascii")) for i, row in zip(taxa, matrix)]
     retained_taxa = set(taxa.tolist())
     return output, {"status": status, "taxa_before": original_taxa, "sites_before": original_sites,
                     "taxa": n, "biological_species": species_count, "occupancy": occupancy,
                     "sites": length, "variable_sites": variable, "informative_sites": informative,
-                    "retained_columns_0based": columns.tolist(),
                     "removed_species": [name for i, name in enumerate(names) if i not in retained_taxa]}
 
 
@@ -151,7 +148,7 @@ def trim(alignment, raw_qc, output, qc, columns, command, mode, settings):
             from alignment_trimming import trim_records
             projected, selected, argv, _ = trim_records(records, command, mode, Path(output).parent)
             retained, report = alignment_qc(projected, settings)
-            final_columns = [selected[i] for i in report.pop("retained_columns_0based")]
+            final_columns = selected
     with atomic_writer(output) as handle:
         if report["status"] == "retained":
             for name, seq in retained:
@@ -181,7 +178,8 @@ def gene_tree(alignment, alignment_qc, output, qc, command, threads, seed):
             subprocess.run(argv, stdout=handle, check=True)
             tool_record = file_record(command)
     if report["status"] == "retained":
-        read_tree(output, [name for name, _ in fasta_records(alignment)])
+        # A one-tip gene tree can produce non-finite CASTLES-II branch lengths.
+        read_tree(output, [name for name, _ in fasta_records(alignment)], minimum_tips=2)
     write_json(qc, {"created_at": now(), "status": report["status"], "sites": report["sites"],
                    "taxa": report["taxa"], "alignment": file_record(alignment),
                    "command": argv, "executable": tool_record,
@@ -202,7 +200,7 @@ def merge(manifest, markers, tree_dir, output, coverage, qc):
             if report["status"] != "retained":
                 excluded.append({"marker": marker, "reason": report["status"]})
                 continue
-            tree = read_tree(path)
+            tree = read_tree(path, minimum_tips=2)
             names = set(tree.leaf_names())
             if names - expected:
                 raise ValueError(f"unexpected species in {marker}")

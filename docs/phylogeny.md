@@ -95,11 +95,15 @@ unresolved codons become X. Review `species/*.json`: padding may affect reading
 frames, and QC cannot verify ORFs or exclude paralogy.
 
 FAMSA aligns proteins and trimAl selects columns with X treated as gaps. The
+columns selected by trimAl are preserved when short sequences are removed;
+columns left entirely as gaps or X are not removed afterward. The
 same species coverage threshold applies at marker selection, before alignment,
 and after trimming and sequence filtering. Each check uses all species selected
-for that tree as the denominator. A marker needs enough species to form a quartet
-and at least one variable amino-acid site after trimming. The marker list is
-fixed at selection.
+for that tree as the denominator. No separate four-species or variable-site
+filter is applied to markers. Variable and parsimony-informative site counts
+are recorded for diagnosis. Gene trees require at least two tips for CASTLES-II
+branch-length estimation; the complete analysis still requires at least four
+species. The marker list is fixed at selection.
 
 ## BUSCO alignments
 

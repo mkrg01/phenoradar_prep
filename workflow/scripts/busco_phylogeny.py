@@ -172,8 +172,8 @@ def busco_table(path, expected_lineage):
 def marker_taxon_status(species_count, occupancy, minimum_occupancy):
     if occupancy < minimum_occupancy:
         return "low_occupancy"
-    if species_count < QUARTET_SIZE:
-        return "too_few_taxa"
+    if species_count == 0:
+        return "no_sequences"
     return "retained"
 
 
