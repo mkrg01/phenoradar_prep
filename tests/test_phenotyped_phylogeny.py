@@ -67,8 +67,7 @@ def test_invalid_trees_fail_at_configuration(tmp_path, workflow_project, sets):
 def test_species_set_switching_preserves_inference(tmp_path, workflow_project, command_environment, seed_taxonomy):
     from test_phylogeny import phylogeny_inputs, trimal_binary
     nwkit = pytest.importorskip("nwkit")
-    if nwkit.__version__ != "0.27.0":
-        pytest.skip("requires workflow/envs/timetree.yaml")
+    assert nwkit.__version__ == "0.46.11", "requires workflow/envs/dating.yaml"
     snakemake = os.environ.get("SNAKEMAKE_BIN") or shutil.which("snakemake")
     famsa = os.environ.get("FAMSA_BIN") or shutil.which("famsa")
     vft = os.environ.get("VERYFASTTREE_BIN") or shutil.which("VeryFastTree")

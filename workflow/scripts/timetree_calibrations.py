@@ -9,10 +9,10 @@ from pathlib import Path
 from common import file_record, now, read_tsv, write_json, write_tsv
 from infer_phylogeny import read_tree
 from taxonomy_check import Taxonomy
+from nwkit_runtime import nwkit_backend
 
 ENDPOINT = "https://timetree.org/api"
 MIN_CLADE_PROP = 0.2
-NWKIT_VERSION = "0.46.11"
 FIELDS = ["left_species", "right_species", "min_age_ma", "max_age_ma", "clade_tips", "query_url"]
 
 
@@ -112,10 +112,7 @@ def collect_bounds(tree, tip_ranks):
 
 
 def prepare(tree, samples, taxonomy, outdir):
-    import nwkit
-
-    if nwkit.__version__ != NWKIT_VERSION:
-        raise ValueError(f"TimeTree calibrations require pinned NWKIT {NWKIT_VERSION}")
+    nwkit = nwkit_backend()
     source, tree = tree, read_tree(tree)
     if any(len(node.children) != 2 for node in tree.traverse() if not node.is_leaf):
         raise ValueError("TimeTree calibration requires a rooted bifurcating tree")

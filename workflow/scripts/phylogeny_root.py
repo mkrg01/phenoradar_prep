@@ -4,20 +4,13 @@ import argparse
 import json
 import sqlite3
 import tempfile
-from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
 from common import atomic_writer, file_record, now, read_tsv, write_json, write_tsv
 from sample_identity import species_id
 from phylogeny_outgroup import outgroup_ids, root_on_outgroup, validate_outgroup, validate_root
-
-
-def nwkit_backend():
-    import nwkit
-    if nwkit.__version__ != "0.27.0":
-        raise ValueError("use the pinned nwkit 0.27.0 in workflow/envs/timetree.yaml")
-    return nwkit
+from nwkit_runtime import nwkit_backend
 
 
 def species_rows(samples):
@@ -32,51 +25,51 @@ def species_rows(samples):
     return dict(sorted(result.items()))
 
 
-@contextmanager
-def nwkit_taxonomy_cache(taxonomy_db, directory):
-    """Supply the frozen SQLite snapshot to nwkit's NCBI backend."""
+def ncbi_guide(rows, taxonomy_db):
+    """Build an NWKIT guide directly from the frozen database, without cache discovery."""
+    nwkit_backend()
+    import pandas as pd
+    from ete4 import NCBITaxa
     from ete4.ncbi_taxonomy.ncbiquery import DB_VERSION
+    from nwkit.constrain import get_lineages_from_taxid, get_taxid_counts, taxid2tree
+    from nwkit.rooting_state import set_rooting_info
+    from nwkit.util import remove_singleton
+
     database = Path(taxonomy_db).resolve()
     with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
         if db.execute("SELECT version FROM stats").fetchone()[0] != DB_VERSION:
             raise ValueError("taxonomy snapshot schema differs from ETE; prepare a compatible snapshot")
-    Path(directory).mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".ncbi-", dir=directory) as tmp:
-        cache = Path(tmp) / "ete4"
-        cache.mkdir()
-        (cache / "taxa.sqlite").symlink_to(database)
-        yield tmp
+    groups = {}
+    for name, row in rows.items():
+        groups.setdefault(row["taxid"], []).append(name)
+    unique = pd.DataFrame([{"leaf_name": names[0], "taxid": tid} for tid, names in groups.items()])
+    ncbi = NCBITaxa(dbfile=str(database), update=False)
+    try:
+        lineages = get_lineages_from_taxid(unique, rank="no", ncbi=ncbi)
+        tree = taxid2tree(lineages, get_taxid_counts(lineages), ncbi=ncbi)
+    finally:
+        ncbi.db.close()
+    tree = remove_singleton(tree, verbose=False, preserve_branch_length=False)
+    for leaf in list(tree.leaves()):
+        names = groups[rows[leaf.name]["taxid"]]
+        if len(names) > 1:
+            leaf.name = ""
+            for name in names:
+                leaf.add_child(name=name)
+    if set(tree.leaf_names()) != set(rows):
+        raise ValueError("NCBI guide tree lost or added species; check taxids")
+    set_rooting_info(tree, True, source="taxonomy")
+    return tree
 
 
 def ncbi_tree(samples, taxonomy_db, output, taxids):
     """Build the guide for ASTRAL's anchor from frozen NCBI lineages."""
-    nwkit_backend()
-    from nwkit.constrain import constrain_main
     rows = species_rows(samples)
-    groups = {}
-    for name, row in rows.items():
-        groups.setdefault(row["taxid"], []).append(name)
+    tree = ncbi_guide(rows, taxonomy_db)
     write_tsv(taxids, ["leaf_name", "taxid"],
               [{"leaf_name": name, "taxid": row["taxid"]} for name, row in rows.items()])
-    with nwkit_taxonomy_cache(taxonomy_db, Path(output).parent) as tmp:
-        unique = Path(tmp) / "unique_taxids.tsv"
-        write_tsv(unique, ["leaf_name", "taxid"], [{"leaf_name": names[0], "taxid": tid} for tid, names in groups.items()])
-        args = SimpleNamespace(taxid_tsv=str(unique), species_list=None, backbone="ncbi", rank="no",
-                               download_dir=tmp, outfile=str(Path(tmp) / "tree.nwk"), collapse=False,
-                               outformat=9, quoted_node_names=False)
-        constrain_main(args)
-        from ete4 import Tree
-        tree = Tree(Path(args.outfile).read_text(), parser=9)
-        for leaf in list(tree.leaves()):
-            names = groups[rows[leaf.name]["taxid"]]
-            if len(names) > 1:
-                leaf.name = ""
-                for name in names:
-                    leaf.add_child(name=name)
-        if set(tree.leaf_names()) != set(rows):
-            raise ValueError("NCBI guide tree lost or added species; check taxids")
-        with atomic_writer(output) as handle:
-            handle.write(tree.write(parser=9) + "\n")
+    with atomic_writer(output) as handle:
+        handle.write(tree.write(parser=9) + "\n")
 
 
 def anchor_clade(tree, scores, taxa):
@@ -139,26 +132,35 @@ def prepare_root(samples, metadata, output, qc, outgroup="auto", tree=None, for_
 def taxonomy_split(tree, rows, taxonomy_db, directory):
     """Use nwkit's default taxonomy sources to find the root split."""
     nwkit = nwkit_backend()
-    from nwkit.root import DEFAULT_TAXONOMY_SOURCE_CHAIN, taxonomy_rooting
+    from nwkit.root import DEFAULT_TAXONOMY_SOURCE_CHAIN, taxonomy_rooting, transfer_root
 
-    with nwkit_taxonomy_cache(taxonomy_db, directory) as tmp:
-        taxids = Path(tmp) / "taxids.tsv"
+    Path(directory).mkdir(parents=True, exist_ok=True)
+    sources = DEFAULT_TAXONOMY_SOURCE_CHAIN.split(",")
+    with tempfile.TemporaryDirectory(prefix=".rooting-", dir=directory) as tmp:
         names = Path(tmp) / "species_map.tsv"
-        write_tsv(taxids, ["leaf_name", "taxid"],
-                  [{"leaf_name": name, "taxid": row["taxid"]} for name, row in rows.items()])
         write_tsv(names, ["leaf_name", "species_label", "taxonomy_query"],
                   [{"leaf_name": name, "species_label": species_id(row),
                     "taxonomy_query": row.get("scientific_name") or species_id(row).replace("_", " ")}
                    for name, row in rows.items()])
-        try:
-            rooted = taxonomy_rooting(tree.copy(), taxid_tsv=str(taxids), verbose=True,
-                                      args=SimpleNamespace(download_dir=tmp, species_map_tsv=str(names)))
-        except ValueError as exc:
-            raise ValueError(f"Automatic rooting failed. Specify phylogeny.outgroup explicitly. {exc}") from exc
+        errors = []
+        for source in sources:
+            try:
+                if source == "ncbi":
+                    rooted = transfer_root(tree.copy(), ncbi_guide(rows, taxonomy_db), verbose=True,
+                                           redistribute_root_length=False)
+                else:
+                    rooted = taxonomy_rooting(tree.copy(), taxonomy_source=source, verbose=True,
+                                              args=SimpleNamespace(download_dir=tmp, species_map_tsv=str(names)))
+                break
+            except ValueError as exc:
+                errors.append(f"{source}: {exc}")
+        else:
+            raise ValueError("Automatic rooting failed. Specify phylogeny.outgroup explicitly. "
+                             + " | ".join(errors))
 
     outgroup = min((sorted(child.leaf_names()) for child in rooted.children), key=len)
     detail = {"source": "nwkit", "method": "nwkit_taxonomy", "nwkit_version": nwkit.__version__,
-              "taxonomy_sources": DEFAULT_TAXONOMY_SOURCE_CHAIN.split(","),
+              "taxonomy_sources": sources, "taxonomy_source": source,
               "taxonomy_db": file_record(taxonomy_db)}
     return outgroup, detail
 

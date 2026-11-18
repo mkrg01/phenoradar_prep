@@ -296,13 +296,13 @@ rule root_busco_species_tree:
         tree_qc=f"{PHYLO_RUN}/rooting/astral.json",
         code=f"{SCRIPTS}/phylogeny_root.py",
         helpers=[f"{SCRIPTS}/{name}.py" for name in
-                 ["common", "phylogeny_outgroup", "sample_identity", "infer_phylogeny", "busco_phylogeny"]]
+                 ["common", "phylogeny_outgroup", "sample_identity", "infer_phylogeny", "busco_phylogeny", "nwkit_runtime"]]
     output:
         tree=f"{PHYLO_RUN}/species_tree.nwk",
         qc=f"{PHYLO_RUN}/species_tree.json",
         outgroup=f"{PHYLO_RUN}/rooting/outgroup.txt",
         rooting_qc=f"{PHYLO_RUN}/rooting/outgroup.json"
-    conda: "../envs/timetree.yaml"
+    conda: "../envs/dating.yaml"
     resources: mem_mb=4000
     log: f"{LOG}/{{phylo_branch}}/rooting/outgroup.log"
     shell:
@@ -328,7 +328,7 @@ rule prepare_angiocal_calibrations:
         code=f"{SCRIPTS}/angiocal_calibrations.py",
         helpers=[f"{SCRIPTS}/{name}.py" for name in
                  ["infer_phylogeny", "taxonomy_check", "busco_phylogeny",
-                  "common", "sample_identity", "phylogeny_outgroup"]]
+                  "common", "sample_identity", "phylogeny_outgroup", "nwkit_runtime"]]
     output:
         calibrations=f"{PHYLO_RUN}/angiocal/calibrations.tsv",
         fossils=f"{PHYLO_RUN}/angiocal/fossils.tsv",
@@ -354,7 +354,7 @@ rule prepare_timetree_calibrations:
         code=f"{SCRIPTS}/timetree_calibrations.py",
         helpers=[f"{SCRIPTS}/{name}.py" for name in
                  ["infer_phylogeny", "taxonomy_check", "busco_phylogeny",
-                  "common", "sample_identity", "phylogeny_outgroup"]]
+                  "common", "sample_identity", "phylogeny_outgroup", "nwkit_runtime"]]
     output:
         calibrations=f"{PHYLO_RUN}/timetree/calibrations.tsv",
         provenance=f"{PHYLO_RUN}/timetree/provenance.json"
@@ -378,7 +378,7 @@ rule date_busco_species_tree:
         calibration_reports=[f"{PHYLO_RUN}/{name}" for name in CALIBRATION_PATHS[1:]],
         code=f"{SCRIPTS}/date_phylogeny.py",
         helpers=[f"{SCRIPTS}/{name}.py" for name in
-                 ["infer_phylogeny", "busco_phylogeny", "common", "sample_identity", "phylogeny_outgroup"]]
+                 ["infer_phylogeny", "busco_phylogeny", "common", "sample_identity", "phylogeny_outgroup", "nwkit_runtime"]]
     output:
         tree=f"{PHYLO_RUN}/dating/species_tree.dated.nwk",
         provenance=f"{PHYLO_RUN}/dating/provenance.json",

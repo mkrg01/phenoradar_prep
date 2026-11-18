@@ -16,6 +16,56 @@ sys.path.insert(0, str(ROOT / "workflow/scripts"))
 MANIFEST = Path("/opt/phenoradar/container.json")
 
 
+def rooting(work):
+    from ete4.ncbi_taxonomy.ncbiquery import DB_VERSION
+    from common import read_tsv, write_json, write_tsv
+    from contrast_pairs import skim
+    from infer_phylogeny import read_tree
+    from nwkit_runtime import nwkit_backend
+    from phylogeny_root import ncbi_tree, prepare_root, root_species_tree
+
+    work.mkdir()
+    names = ["O1", "O2", "A", "B", "C"]
+    scores = dict(zip(names, [95, 90, 98, 100, 99]))
+    taxonomy = work / "taxa.sqlite"
+    with sqlite3.connect(taxonomy) as db:
+        db.executescript("""
+            CREATE TABLE species(taxid INTEGER PRIMARY KEY, parent INTEGER, spname TEXT, common TEXT, rank TEXT, track TEXT);
+            CREATE TABLE merged(taxid_old INTEGER, taxid_new INTEGER);
+            CREATE TABLE stats(version INTEGER);
+            INSERT INTO species VALUES (1,1,'root','','no rank','1');
+            INSERT INTO species VALUES (2,1,'Plants','','kingdom','2,1');
+            INSERT INTO species VALUES (3,2,'Outgroup','','family','3,2,1');
+            INSERT INTO species VALUES (4,2,'Ingroup','','family','4,2,1');
+        """)
+        db.execute("INSERT INTO stats VALUES (?)", (DB_VERSION,))
+        for taxid, name in enumerate(names, 100):
+            parent = 3 if name.startswith("O") else 4
+            db.execute("INSERT INTO species VALUES (?,?,?,'','species',?)",
+                       (taxid, parent, f"Plant {name}", f"{taxid},{parent},2,1"))
+    samples, metadata = work / "samples.tsv", work / "metadata.tsv"
+    write_tsv(samples, ["species", "species_id", "scientific_name", "taxid", "cds"], [
+        dict(species=n, species_id=f"Plant_{n}", scientific_name=f"Plant {n}", taxid=i, cds="unused")
+        for i, n in enumerate(names, 100)])
+    write_tsv(metadata, ["species", "busco_percent"],
+              [dict(species=n, busco_percent=scores[n]) for n in names])
+    guide, anchor, anchor_qc = work / "guide.nwk", work / "anchor.txt", work / "anchor.json"
+    ncbi_tree(samples, taxonomy, guide, work / "taxids.tsv")
+    prepare_root(samples, metadata, anchor, anchor_qc, tree=guide, for_anchor=True)
+    assert anchor.read_text() == "O1\n"
+    raw, raw_qc = work / "astral.nwk", work / "astral.json"
+    raw.write_text("(O1:2,(O2:3,(A:4,(B:5,C:6)0.8:7)0.9:8):2);\n")
+    write_json(raw_qc, {"astral_root_anchor": "O1", "outgroup": ["O1"], "branch_length_method": "CASTLES-II"})
+    output, qc, outgroup, rooting_qc = [work / n for n in ["tree.nwk", "tree.json", "outgroup.txt", "rooting.json"]]
+    root_species_tree(samples, raw, raw_qc, anchor_qc, output, qc, outgroup, rooting_qc, taxonomy_db=taxonomy)
+    assert outgroup.read_text().splitlines() == ["O1", "O2"]
+    assert json.loads(rooting_qc.read_text())["nwkit_version"] == nwkit_backend().__version__
+    tree = read_tree(output, names)
+    rows = [dict(leaf_name=n, trait="0" if n.startswith("O") else "1", busco_percent=scores[n]) for n in names]
+    skim(tree, rows, work / "skim", 12345)
+    assert {r["leaf_name"] for r in read_tsv(work / "skim.sampled.tsv")} == {"O1", "B"}
+
+
 def dating(work):
     from unittest.mock import patch
 
@@ -24,6 +74,8 @@ def dating(work):
     from date_phylogeny import date
     from infer_phylogeny import read_tree
     from timetree_calibrations import prepare as prepare_timetree
+
+    rooting(work / "rooting")
 
     names = ("Nuphar_lutea", "Nymphaea_colorata", "Brasenia_schreberi", "Cabomba_caroliniana")
     tree = work / "tree.nwk"
@@ -146,8 +198,7 @@ def check_environment(name):
     assert Path(sys.prefix) == Path(manifest["environments"][name]), sys.prefix
     imports = {"alignment": ["alignment_selection"],
                "analysis": ["pandas", "ete4", "matplotlib"], "dating": ["nwkit", "ete4"],
-               "monophy": ["ete4"], "phylogeny": ["Bio", "ete4", "numpy", "cdskit"],
-               "timetree": ["Bio", "nwkit"]}
+               "monophy": ["ete4"], "phylogeny": ["Bio", "ete4", "numpy", "cdskit"]}
     commands = {"alignment": ["famsa", "trimal"], "kofam": ["exec_annotation", "hmmsearch"],
                 "odb": ["ODB-mapper"], "seqkit": ["seqkit"],
                 "phylogeny": ["famsa", "trimal", "VeryFastTree"],

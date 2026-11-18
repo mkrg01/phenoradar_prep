@@ -444,7 +444,8 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     plan = execute(["--dry-run"])
     assert "rule prepare_taxonomy:" not in plan
     assert plan.count("rule odb_map:") == (0 if reuse else 1)
-    assert "rule prepare_odb_reference:" not in plan
+    # Imported references still need a per-run validation receipt before mapping.
+    assert plan.count("rule prepare_odb_reference:") == (0 if reuse else 1)
     assert plan.count("mem_mb=3000") == (0 if reuse else 1)
     if reuse:
         # Nested checkpoints can retain display placeholders during dry-run.

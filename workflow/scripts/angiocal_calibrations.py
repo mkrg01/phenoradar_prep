@@ -10,9 +10,9 @@ from types import SimpleNamespace
 from common import file_record, read_tsv, write_json, write_tsv
 from infer_phylogeny import read_tree
 from taxonomy_check import Taxonomy
+from nwkit_runtime import nwkit_backend
 
 ANGIOSPERMS = 3398
-NWKIT_VERSION = "0.46.11"
 CALIBRATION_FIELDS = ["left_species", "right_species", "min_age_ma", "fossil_ids"]
 
 
@@ -50,15 +50,13 @@ def tip_lineages(tree, samples, taxonomy):
 
 
 def prepare(tree, samples, taxonomy, outdir, mapping=None, workbook=None):
-    import nwkit
+    nwkit = nwkit_backend()
     from nwkit.angiocal import read_angiocal
     from nwkit.angiocal_constraints import (
         _taxonomy_stem_target, _taxonomy_tip_clades, read_calibration_map,
     )
     from nwkit.util import get_subtree_leaf_name_sets
 
-    if nwkit.__version__ != NWKIT_VERSION:
-        raise ValueError(f"AngioCal dating requires pinned NWKIT {NWKIT_VERSION}")
     workbook = workbook or Path(sys.prefix) / "share/angiocal/v1.0.xls"
     dataset = read_angiocal(workbook, official=True)
     source, tree = tree, read_tree(tree)

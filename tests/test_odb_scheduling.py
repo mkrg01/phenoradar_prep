@@ -96,8 +96,8 @@ def test_hundred_species_chunks_and_cpu_dependent_batches(
 
 @pytest.mark.parametrize('limits, memory_override, expected_memory', [
     ({}, None, 16000),
-    ({'cpus': 9, 'mem_gb': 64}, None, 16000),
-    ({'cpus': 9, 'mem_gb': 64}, 8, 8000),
+    ({'cpus': 9, 'mem_gb': 128}, None, 16000),
+    ({'cpus': 9, 'mem_gb': 128}, 8, 8000),
 ])
 def test_translation_rules_use_individual_slurm_jobs(
     tiny_inputs, workflow_project, seed_taxonomy, tmp_path, limits, memory_override, expected_memory,

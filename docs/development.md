@@ -28,6 +28,9 @@ Tool-dependent tests skip when executables are unavailable; `-ra` lists the reas
 | Taxonomy check | R/MonoPhy from `workflow/envs/monophy.yaml` |
 | Fossil placement | Pinned NWKIT and AngioCal from `workflow/envs/dating.yaml` |
 
+Rooting, representative/pair selection, fossil placement, and TimeTree calibration
+share the pinned NWKIT 0.46.11 installation in `workflow/envs/dating.yaml`.
+
 `PHYLOGENY_CONDA_PREFIX` enables tests with actual stage environments. Scheduler
 tests simulate Slurm/AGE services; AGE tests also run a real Snakemake DAG through
 the shared launcher. Use a dataset pilot to assess biological outputs and resources.

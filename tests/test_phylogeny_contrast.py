@@ -23,8 +23,7 @@ TREE = "(O:1,(((A:1,A2:1)0.9:1,B:1)0.9:1,(C:1,(D:1,E:1)0.9:1)0.9:1,U:1)0.9:1);"
 @pytest.fixture(autouse=True)
 def pinned_nwkit():
     nwkit = pytest.importorskip("nwkit")
-    if nwkit.__version__ != "0.27.0":
-        pytest.skip("requires workflow/envs/timetree.yaml")
+    assert nwkit.__version__ == "0.46.11", "requires workflow/envs/dating.yaml"
 
 
 @pytest.fixture

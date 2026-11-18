@@ -6,11 +6,11 @@ rule prepare_ncbi_guide:
                             else checkpoints.select_metadata.get().output.samples),
         taxonomy=TAXONOMY_DB,
         code=f"{SCRIPTS}/phylogeny_root.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/phylogeny_outgroup.py", f"{SCRIPTS}/sample_identity.py"]
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/phylogeny_outgroup.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/nwkit_runtime.py"]
     output:
         tree=f"{OUT}/{{guide_branch}}/ncbi_tree.nwk",
         taxids=f"{OUT}/{{guide_branch}}/taxids.tsv"
-    conda: "../envs/timetree.yaml"
+    conda: "../envs/dating.yaml"
     resources: mem_mb=4000
     log: f"{LOG}/{{guide_branch}}/ncbi.log"
     shell:
@@ -24,14 +24,14 @@ rule prepare_phylogeny_anchor:
         metadata=f"{META}/metadata_high_busco.tsv",
         tree=phylogeny_root_guide,
         code=f"{SCRIPTS}/phylogeny_root.py",
-        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/phylogeny_outgroup.py", f"{SCRIPTS}/sample_identity.py"]
+        helpers=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/phylogeny_outgroup.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/nwkit_runtime.py"]
     output:
         anchor=f"{PHYLO_RUN}/rooting/anchor.txt",
         qc=f"{PHYLO_RUN}/rooting/anchor.json"
     params:
         outgroup=json.dumps(PHY["outgroup"]),
         tree_flag="--tree" if PHY["outgroup"] == "auto" else ""
-    conda: "../envs/timetree.yaml"
+    conda: "../envs/dating.yaml"
     resources: mem_mb=4000
     log: f"{LOG}/{{phylo_branch}}/rooting/anchor.log"
     shell:
@@ -49,7 +49,7 @@ if "representatives" in PHY["trees"]:
             traits=rules.normalize_traits.output.traits,
             tree=f"{ROOTING}/ncbi_tree.nwk",
             code=f"{SCRIPTS}/contrast_pairs.py",
-            helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "expanded_pair_clades"]]
+            helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "nwkit_runtime", "sample_identity", "expanded_pair_clades"]]
         output:
             samples=f"{REPRESENTATIVES}/selection/samples.tsv",
             traits=f"{REPRESENTATIVES}/selection/traits.tsv",
@@ -59,7 +59,7 @@ if "representatives" in PHY["trees"]:
             qc=f"{REPRESENTATIVES}/selection/selection.json"
         params:
             outdir=f"{REPRESENTATIVES}/selection", trait=config["trait"], seed=RANDOM_SEED
-        conda: "../envs/timetree.yaml"
+        conda: "../envs/dating.yaml"
         resources: mem_mb=4000
         log: f"{LOG}/{REPRESENTATIVES_REL}/selection.log"
         shell:
@@ -76,7 +76,7 @@ if "representatives" in PHY["trees"]:
                 outgroup=f"{REPRESENTATIVES}/rooting/outgroup.txt",
                 selection=rules.select_contrast_representatives.output,
                 code=f"{SCRIPTS}/contrast_pairs.py",
-                helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "expanded_pair_clades"]]
+                helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "nwkit_runtime", "sample_identity", "expanded_pair_clades"]]
             output:
                 tree=f"{CONTRAST}/summary_tree.nwk",
                 all=f"{CONTRAST}/summary_tree.all.tsv",
@@ -90,7 +90,7 @@ if "representatives" in PHY["trees"]:
                 qc=f"{CONTRAST}/summary.json"
             params:
                 selection=f"{REPRESENTATIVES}/selection", outdir=CONTRAST, seed=RANDOM_SEED
-            conda: "../envs/timetree.yaml"
+            conda: "../envs/dating.yaml"
             resources: mem_mb=4000
             log: f"{LOG}/{REPRESENTATIVES_REL}/contrast/pairs.log"
             shell:
@@ -111,7 +111,7 @@ rule plot_contrast_tree:
         pdf=f"{OUT}/{{contrast_branch}}/summary_tree.pdf", svg=f"{OUT}/{{contrast_branch}}/summary_tree.svg",
         id_pdf=f"{OUT}/{{contrast_branch}}/summary_tree_id.pdf", id_svg=f"{OUT}/{{contrast_branch}}/summary_tree_id.svg"
     params: outdir=f"{OUT}/{{contrast_branch}}"
-    conda: "../envs/timetree.yaml"
+    conda: "../envs/dating.yaml"
     resources: mem_mb=4000
     log: f"{LOG}/{{contrast_branch}}/plot.log"
     shell:
@@ -132,7 +132,7 @@ rule plot_expanded_pair_tree:
         pdf=f"{OUT}/{{contrast_branch}}/expanded_pair_tree.pdf", svg=f"{OUT}/{{contrast_branch}}/expanded_pair_tree.svg",
         id_pdf=f"{OUT}/{{contrast_branch}}/expanded_pair_tree_id.pdf", id_svg=f"{OUT}/{{contrast_branch}}/expanded_pair_tree_id.svg"
     params: outdir=f"{OUT}/{{contrast_branch}}"
-    conda: "../envs/timetree.yaml"
+    conda: "../envs/dating.yaml"
     resources: mem_mb=4000
     log: f"{LOG}/{{contrast_branch}}/expanded_plot.log"
     shell:
@@ -149,7 +149,7 @@ rule identify_phylogeny_contrast_pairs:
         metadata=f"{META}/metadata_high_busco.tsv",
         traits=rules.normalize_traits.output.traits,
         code=f"{SCRIPTS}/contrast_pairs.py",
-        helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "sample_identity", "expanded_pair_clades"]]
+        helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "nwkit_runtime", "sample_identity", "expanded_pair_clades"]]
     output:
         observed=f"{PHYLO_RUN}/contrast/observed_tree.nwk",
         tree=f"{PHYLO_RUN}/contrast/summary_tree.nwk",
@@ -163,7 +163,7 @@ rule identify_phylogeny_contrast_pairs:
         metadata=f"{PHYLO_RUN}/contrast/species_metadata.tsv",
         qc=f"{PHYLO_RUN}/contrast/summary.json"
     params: outdir=f"{PHYLO_RUN}/contrast", trait=config["trait"], seed=RANDOM_SEED
-    conda: "../envs/timetree.yaml"
+    conda: "../envs/dating.yaml"
     resources: mem_mb=4000
     log: f"{LOG}/{{phylo_branch}}/contrast/pairs.log"
     shell:

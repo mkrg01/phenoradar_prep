@@ -86,7 +86,7 @@ def prepare(samples, metadata, traits, tree, outdir, trait="C4", seed=RANDOM_SEE
                "inference_species": len({species_id(rows[n]) for n in representatives}),
                "inference_samples": len(representatives),
                "missing_trait_rows": sorted(set(rows) - set(annotation)), "seed": seed,
-               "nwkit": "0.27.0", "ncbi_tree": file_record(tree)})
+               "nwkit": nwkit_backend().__version__, "ncbi_tree": file_record(tree)})
 
 
 def rooted_tree(path, names, outgroup):
@@ -199,7 +199,7 @@ def summarize_tree(inferred, rows, all_traits, tip_for_species, outdir, trait, s
     write_tsv(out / "expanded_pair_clades.tsv", TABLE_FIELDS, expanded_clades)
     report = {"created_at": now(), "trait": trait,
                "state_order": sorted({r["trait"] for r in all_traits if r["trait"] != ""}),
-               "nwkit": "0.27.0", "outgroup": outgroup,
+               "nwkit": nwkit_backend().__version__, "outgroup": outgroup,
                "summary_species": len({taxa[r["leaf_name"]] for r in second_reps}),
                "summary_samples": len(second_reps), "contrast_pairs": len(pairs), "seed": seed,
                "unresolved_contrastive_clades": unresolved, **provenance, **expanded_report}

@@ -15,7 +15,10 @@ dependencies:
   - brotli-python
   - matplotlib-base=3.10.6
   - numpy
-  - nwkit=0.27.0
   - pandas=2.2.3
   - pyyaml
   - requests
+  - pip
+  - setuptools>=77.0.3
+  - pip:
+      - "nwkit @ https://codeload.github.com/kfuku52/nwkit/tar.gz/1ca72a8fd8618ef25e6a9d2eb1eb47f481385689#sha256=3bb042825662ceff63c391cd1849b397ab1b9fd2198bae294712dba95e505a04"

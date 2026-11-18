@@ -15,6 +15,7 @@ from species_traits import read_species_traits
 from phylogeny_root import anchor_clade, ncbi_tree, prepare_root, root_species_tree
 from contrast_pairs import prepare, summarize, skim
 from plot_contrast_tree import plot
+from nwkit_runtime import nwkit_backend
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -22,8 +23,14 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture(autouse=True)
 def pinned_nwkit():
     nwkit = pytest.importorskip("nwkit")
-    if nwkit.__version__ != "0.27.0":
-        pytest.skip("requires workflow/envs/timetree.yaml")
+    assert nwkit.__version__ == "0.46.11", "requires workflow/envs/dating.yaml"
+
+
+def test_nwkit_backend_rejects_a_different_installed_version(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setitem(sys.modules, "nwkit", SimpleNamespace(__version__="0.27.0"))
+    with pytest.raises(ValueError, match=r"nwkit 0\.46\.11.*envs/dating.yaml"):
+        nwkit_backend()
 
 
 def test_traits_normalize_names_and_reject_collisions(tmp_path):
@@ -40,6 +47,8 @@ def test_traits_normalize_names_and_reject_collisions(tmp_path):
 def test_ncbi_guide_uses_only_frozen_sqlite(tmp_path, tiny_inputs, monkeypatch):
     import nwkit.util
     monkeypatch.setattr(nwkit.util, "_download_ete_taxdump", lambda *a: pytest.fail("unexpected download"))
+    monkeypatch.setattr(nwkit.util, "_find_existing_ete_taxonomy_assets",
+                        lambda *a, **k: pytest.fail("unexpected taxonomy cache discovery"))
     samples = tmp_path / "samples.tsv"
     write_tsv(samples, ["species", "taxid", "cds"],
               [{"species": n, "taxid": t, "cds": "unused"} for n, t in [("Alpha_plant", 42), ("Beta_sp-X", 43), ("Gamma_plant", 44)]])
@@ -75,6 +84,7 @@ def contrast_inputs(tmp_path):
     (source / "outgroup.txt").write_text("O\n")
     prepare(source / "samples.tsv", source / "metadata.tsv", source / "traits.tsv", source / "ncbi.nwk",
             tmp_path / "selection")
+    assert json.loads((tmp_path / "selection/selection.json").read_text())["nwkit"] == nwkit_backend().__version__
     return source
 
 
@@ -109,6 +119,7 @@ def test_two_skims_compose_all_species_membership_and_plot(tmp_path):
     out = tmp_path / "out"
     summarize(tree, tmp_path / "selection", source / "outgroup.txt", out)
     assert json.loads((out / "summary.json").read_text())["state_order"] == ["0", "1"]
+    assert json.loads((out / "summary.json").read_text())["nwkit"] == nwkit_backend().__version__
     pairs = read_tsv(out / "contrast_pairs.tsv")
     assert len(pairs) == 2
     meta = {r["species"]: r for r in read_tsv(out / "species_metadata.tsv")}
@@ -368,6 +379,8 @@ def test_automatic_anchor_and_multispecies_root_are_independent(tmp_path, tiny_i
     assert report["astral_root_anchor"] == "O1" and report["outgroup"] == ["O1", "O2"]
     assert report["branch_length_method"] == "CASTLES-II"
     assert json.loads(rooting_qc.read_text())["method"] == "nwkit_taxonomy"
+    assert json.loads(rooting_qc.read_text())["nwkit_version"] == nwkit_backend().__version__
+    assert json.loads(rooting_qc.read_text())["taxonomy_source"] == source
     initial = Tree(raw.read_text(), parser=0)
     final = Tree(output.read_text(), parser=0)
     validate_root(final, ["O1", "O2"])

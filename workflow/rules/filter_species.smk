@@ -20,7 +20,7 @@ rule filter_species:
         traits=INPUTS["species_trait"],
         trait=config["trait"], seed=RANDOM_SEED,
         inventory=lambda wc: json.dumps(filter_snapshot()["sections"], sort_keys=True)
-    conda: "../envs/timetree.yaml"
+    conda: "../envs/dating.yaml"
     resources: mem_mb=8000
     log: f"{LOG}/filter_species.log"
     shell:
