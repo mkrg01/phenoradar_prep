@@ -51,16 +51,19 @@ for launcher_option in "$@"; do
     esac
 done
 allocation_args=()
+local_core_limit=
 if [[ -n "${SLURM_JOB_ID:-}" ]]; then
     # Slurm spools the script elsewhere; use the submission directory or --chdir.
     root=$PWD
     [[ -f "$root/workflow/Snakefile" ]] || die 'Submit from the repository root, or set sbatch --chdir to that directory.'
     [[ "${SLURM_JOB_NUM_NODES:-${SLURM_NNODES:-1}}" == 1 && "${SLURM_NTASKS:-1}" == 1 ]] ||
         die 'Use one node and one task; set parallelism with sbatch --cpus-per-task.'
-    if ! "$cluster_mode"; then
-    executor=local
     batch_cores=${SLURM_CPUS_PER_TASK:-1}
     [[ "$batch_cores" =~ ^[1-9][0-9]*$ ]] || die 'SLURM_CPUS_PER_TASK must be a positive integer.'
+    if "$cluster_mode"; then
+        local_core_limit=$batch_cores
+    else
+    executor=local
     if [[ -n "${SLURM_MEM_PER_NODE:-}" ]]; then
         batch_memory_mib=$SLURM_MEM_PER_NODE
     elif [[ "${SLURM_MEM_PER_CPU:-}" =~ ^[1-9][0-9]*$ ]]; then
@@ -80,7 +83,10 @@ if [[ -n "${SLURM_JOB_ID:-}" ]]; then
 elif [[ "${JOB_ID:-}" =~ ^[0-9]+$ && -n "${NSLOTS:-}" ]]; then
     root=$PWD
     [[ -f "$root/workflow/Snakefile" ]] || die 'Submit from the repository root with qsub -cwd.'
-    if ! "$cluster_mode"; then
+    if "$cluster_mode"; then
+        [[ "$NSLOTS" =~ ^[1-9][0-9]*$ ]] || die 'NSLOTS must be a positive integer.'
+        local_core_limit=$NSLOTS
+    else
         executor=local
         allocation=$("$workflow_python" "$root/workflow/scripts/scheduler.py" allocation)
         read -r batch_cores workflow_memory_mb <<< "$allocation"
@@ -155,6 +161,21 @@ while (($#)); do
     fi
     workflow_args+=("$arg")
 done
+
+# Cluster workers have separate allocations. Bound only local rules to the
+# controller allocation, preserving an explicitly requested smaller limit.
+if [[ -n "$local_core_limit" ]]; then
+    for ((i=0; i<${#workflow_args[@]}; i++)); do
+        case "${workflow_args[i]}" in
+            --local-cores) requested_local_cores=${workflow_args[i+1]:-} ;;
+            --local-cores=*) requested_local_cores=${workflow_args[i]#*=} ;;
+            *) continue ;;
+        esac
+        [[ "$requested_local_cores" =~ ^[1-9][0-9]*$ ]] || die '--local-cores must be a positive integer.'
+        if ((requested_local_cores < local_core_limit)); then local_core_limit=$requested_local_cores; fi
+    done
+    allocation_args+=(--local-cores "$local_core_limit")
+fi
 
 # Bootstrap without Conda environment declarations: Snakemake 9.8 can query
 # Conda inside the image before its normal image-pull step.

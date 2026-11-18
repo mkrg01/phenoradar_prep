@@ -283,6 +283,7 @@ def write_profile(destination, slurm, *, root=None, pipeline=None, usage=None, i
     defaults = _snakemake_resources(slurm.get('default_resources', WORKER_DEFAULTS))
     if slurm.get('partition'): defaults['slurm_partition'] = slurm['partition']
     profile = {'executor':'slurm', 'jobs':workflow_jobs(slurm), 'latency-wait':90,
+               'local-cores':slurm.get('stages', {}).get('controller', {}).get('cpus', 1),
                'rerun-incomplete':True, 'printshellcmds':True, 'default-resources':defaults,
                'slurm-no-account':True,
                'slurm-status-command':'sacct', 'slurm-init-seconds-before-status-checks':10,

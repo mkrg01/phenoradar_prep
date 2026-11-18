@@ -10,6 +10,18 @@ from phase_config import array_concurrency, execution_settings, merge_slurm, res
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize('phase', ['build', 'analysis'])
+@pytest.mark.parametrize('backend', ['slurm', 'age'])
+def test_profile_limits_local_rules_to_controller_cpus(tmp_path, phase, backend):
+    public = yaml.safe_load((ROOT / f'config/{phase}.yaml').read_text())['execution']
+    public['per_job_resources']['controller']['cpus'] = 3
+    settings = execution_settings(public, build=phase == 'build')
+    settings['scheduler'] = backend
+    profile = write_profile(tmp_path / 'profile', settings)
+    actual = yaml.safe_load((profile / 'config.yaml').read_text())
+    assert actual['local-cores'] == 3
+
+
 def test_analysis_profile_requests_32gb_for_tpm_merge(tmp_path):
     slurm = yaml.safe_load((ROOT / 'config/analysis.yaml').read_text())['execution']
     settings = execution_settings(slurm, None, build=False)

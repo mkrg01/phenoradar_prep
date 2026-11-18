@@ -56,7 +56,7 @@ execution:
       time: "1-00:00:00"
     controller:  # Verifies uncached products (up to 4 threads) and manages worker jobs.
       cpus: 4
-      mem_gb: 32  # Includes concurrent local publication processes.
+      mem_gb: 64  # Includes large mapping DAGs and concurrent local publication processes.
       time: "60-00:00:00"
 storage:
   keep_intermediates: false  # Remove scratch and completed sample work; true retains it for debugging.

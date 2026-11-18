@@ -151,8 +151,10 @@ waits for all of them to succeed.
 
 `per_job_resources.controller` sizes preparation and the controllers
 that manage mapping and analysis jobs. The default build controller requests
-four CPUs. Checksum verification uses up to four threads, limited to allocated
-CPUs.
+four CPUs and 64 GB. Checksum verification uses up to four threads, limited to allocated
+CPUs. Local rules also share this CPU limit. Inside Slurm or AGE allocations,
+`run_pipeline.sh` caps `--local-cores` at the allocated CPU count; worker job
+requests and concurrency remain controlled by their own resources and limits.
 
 Each `translate_cds` job requests one CPU and 16 GB, including jobs that
 retrieve a cached translation. Use `per_job_resources.translate_cds` to override it.

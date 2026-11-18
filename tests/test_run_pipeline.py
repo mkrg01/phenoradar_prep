@@ -167,6 +167,7 @@ def test_launcher_runs_dag_locally_without_submitting_jobs(batch_workspace, tmp_
     if mode.endswith("_path"):
         # A PATH-based install must work without activation or host Conda calls.
         (fake_bin / "snakemake").symlink_to(Path(snakemake).resolve())
+        (fake_bin / "bash").symlink_to(shutil.which('bash'))
         env = {key: value for key, value in env.items()
                if not key.startswith(("CONDA_", "_CONDA_", "_CE_", "BASH_FUNC_"))
                and key not in ("SNAKEMAKE_BIN", "BASH_ENV")}
@@ -373,7 +374,10 @@ def test_container_bootstrap_rejects_analysis_targets(batch_workspace):
     assert "does not accept analysis targets" in result.stderr
 
 
-def test_distributed_launcher_does_not_apply_controller_budget(batch_workspace, tmp_path):
+@pytest.mark.parametrize('backend', ['slurm', 'age'])
+@pytest.mark.parametrize('local_args,expected', [([], '2'), (['--local-cores', '999'], '2'),
+                                              (['--local-cores=1'], '1')])
+def test_distributed_launcher_limits_only_local_rules(batch_workspace, tmp_path, backend, local_args, expected):
     checkout, script, env = batch_workspace
     capture = tmp_path / "slurm_args.json"
     fake = tmp_path / "snakemake"
@@ -382,16 +386,77 @@ def test_distributed_launcher_does_not_apply_controller_budget(batch_workspace, 
     fake.chmod(0o755)
     env["SNAKEMAKE_BIN"] = str(fake)
     env["SLURM_MEM_PER_NODE"] = "2048"  # The controller does not allocate worker memory.
-    result = subprocess.run([str(script), "--slurm", "--profile", "jobs/test/profile", "--jobs", "7", "--", "mapping"],
+    if backend == 'age':
+        env = {key: value for key, value in env.items() if not key.startswith('SLURM_')}
+        env.update(JOB_ID='123', NSLOTS='2')
+    result = subprocess.run([str(script), '--' + backend, "--profile", "jobs/test/profile", "--jobs", "7",
+                             *local_args, "--", "mapping"],
                             cwd=checkout, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     args = json.loads(capture.read_text())
-    assert args[args.index("--executor") + 1] == "slurm"
+    assert args[args.index("--executor") + 1] == ('slurm' if backend == 'slurm' else 'cluster-generic')
+    assert args[-4:-2] == ['--local-cores', expected]
     assert args[args.index("--profile") + 1] == "jobs/test/profile"
     assert "--cores" not in args
     assert not any(a.startswith("mem_mb=") for a in args)
     assert args[args.index("--jobs") + 1] == "7"
     assert args[-2:] == ["--", "mapping"]
+
+
+@pytest.mark.parametrize('threads,peak', [(1, 2), (2, 1)])
+def test_cluster_local_rules_respect_actual_cpu_allocation(batch_workspace, tmp_path, threads, peak):
+    checkout, script, env = batch_workspace
+    snakemake = os.environ.get('SNAKEMAKE_BIN') or shutil.which('snakemake')
+    if not snakemake:
+        pytest.skip('Snakemake required')
+    pytest.importorskip('snakemake_executor_plugin_cluster_generic')
+    env = {key: value for key, value in env.items() if not key.startswith('SLURM_')}
+    env.update(JOB_ID='123', NSLOTS='2', SNAKEMAKE_BIN=snakemake)
+    profile = checkout / 'profile'
+    profile.mkdir()
+    (profile / 'config.yaml').write_text(yaml.safe_dump({
+        'executor': 'cluster-generic', 'jobs': 7, 'local-cores': 8,
+        'cluster-generic-submit-cmd': 'false',
+    }))
+    (checkout / 'probe.py').write_text('''
+import fcntl, json, time
+from pathlib import Path
+
+def update(delta):
+    with open('concurrency.json', 'a+') as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        handle.seek(0)
+        state = json.loads(handle.read() or '{"active": 0, "peak": 0}')
+        state['active'] += delta
+        state['peak'] = max(state['peak'], state['active'])
+        handle.seek(0)
+        handle.truncate()
+        json.dump(state, handle)
+
+update(1)
+try:
+    time.sleep(0.5)
+finally:
+    update(-1)
+''')
+    (checkout / 'workflow/Snakefile').write_text(f'''
+localrules: all, publish
+rule all:
+    input: expand("{{sample}}.txt", sample=range(6))
+rule publish:
+    output: "{{sample}}.txt"
+    threads: {threads}
+    shell: "{sys.executable} probe.py && touch {{output}}"
+
+import sys
+sys.path.insert(0, {str(ROOT / 'workflow/scripts')!r})
+from resource_limits import apply_workflow_limits
+apply_workflow_limits(workflow)
+''')
+    result = subprocess.run([str(script), '--age', '--profile', str(profile)], cwd=checkout,
+                            env=env, capture_output=True, text=True, timeout=90)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads((checkout / 'concurrency.json').read_text()) == {'active': 0, 'peak': peak}
 
 
 def test_slurm_profile_parses_without_submitting_jobs(batch_workspace, tmp_path):

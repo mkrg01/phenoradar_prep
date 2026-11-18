@@ -15,6 +15,16 @@ def apply_workflow_limits(workflow):
     Resolve memory through a copy of the rule so dynamic resources keep Snakemake's
     normal input/wildcard/attempt semantics without recursive budget evaluation.
     """
+    # Snakemake 9.8 accepts --local-cores without using it to schedule local
+    # rules. An independent accounting resource enforces that limit without
+    # capping the CPU requests or concurrency of remote workers.
+    local_limit = workflow.resource_settings.local_cores
+    if local_limit is not None:
+        workflow.global_resources['controller_cpus'] = local_limit
+        workflow.resource_scopes.update({'controller_cpus': 'global'})
+        for rule in workflow.rules:
+            if not rule.norun:
+                rule.resources['controller_cpus'] = _local_charge(workflow, rule, local_limit)
     limits = {name: workflow.global_resources.get(name) for name in BUDGETS}
     limits = {name: value for name, value in limits.items() if value is not None}
     if not limits: return
@@ -27,6 +37,17 @@ def apply_workflow_limits(workflow):
                            if key in {'_cores', 'mem_mb', 'mem'}}
         for name, limit in limits.items():
             rule.resources[name] = _charge(probe, name, limit)
+
+
+def _local_charge(workflow, rule, limit):
+    def charge(wildcards, threads):
+        # The executor is selected after the Snakefile is parsed.
+        if workflow.local_exec or not workflow.is_local(rule):
+            return 0
+        if threads > limit:
+            raise ValueError(f'{rule.name} requires {threads} CPUs, exceeding the controller CPU limit of {limit}')
+        return threads
+    return charge
 
 
 def _charge(probe, name, limit):
