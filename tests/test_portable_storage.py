@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 import pytest
 import yaml
@@ -16,6 +17,30 @@ from common import read_tsv, write_json, write_tsv
 from test_datasets import dataset_project
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_generated_scratch_names_are_safe_for_captus_and_remain_private(tmp_path, monkeypatch):
+    project, node = tmp_path / 'project', tmp_path / 'node'
+    project.mkdir(); node.mkdir()
+    config = storage_runtime.settings({'temporary_directory': str(node)})
+
+    def problematic_name(*, prefix, dir):
+        path = Path(dir) / (prefix + '_dcf__0y')
+        path.mkdir(mode=0o700)
+        return str(path)
+
+    # Reproduce the legal tempfile name that caused Captus to reject every
+    # assembly in HGC batch 153, without relying on a rare random draw.
+    monkeypatch.setattr(tempfile, 'mkdtemp', problematic_name)
+    with storage_runtime.task_scratch(project, config) as first:
+        assert '__' not in str(first)
+        with storage_runtime.task_scratch(project, config) as second:
+            assert first != second
+            for local in (first, second):
+                assert '__' not in str(local)
+                assert local.stat().st_mode & 0o777 == 0o700
+    assert not first.exists() and not second.exists()
+    assert not list(node.iterdir())
 
 
 @pytest.mark.parametrize('count', [10, 20, 30, 40])

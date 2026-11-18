@@ -9,7 +9,6 @@ from pathlib import Path
 import shutil
 import shlex
 import sys
-import tempfile
 import uuid
 
 import yaml
@@ -128,7 +127,10 @@ def task_scratch(root, config):
     for parent in dict.fromkeys(failures):
         try:
             headroom(parent, config)
-            local = Path(tempfile.mkdtemp(prefix='phenoradar-task-', dir=parent))
+            # Captus 1.5.1 checks '__' in the entire assembly path. tempfile's
+            # random alphabet includes underscores; a UUID avoids that delimiter.
+            local = parent / ('phenoradar-task-' + uuid.uuid4().hex)
+            local.mkdir(mode=0o700)
         except (OSError, ScratchAdmissionError) as error:
             errors.append(f'{parent}: {error}')
             continue

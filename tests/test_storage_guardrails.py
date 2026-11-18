@@ -70,9 +70,12 @@ def test_full_scratch_filesystem_blocks_before_creating_work(tmp_path, monkeypat
     import storage_runtime
     root, node = tmp_path / 'project', tmp_path / 'node'
     root.mkdir(); node.mkdir()
-    def full(*args, **kwargs):
-        raise OSError(28, 'No space left on device')
-    monkeypatch.setattr(storage_runtime.tempfile, 'mkdtemp', full)
+    original_mkdir = Path.mkdir
+    def full(path, *args, **kwargs):
+        if path.parent == node:
+            raise OSError(28, 'No space left on device')
+        return original_mkdir(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'mkdir', full)
     with pytest.raises(admission.ScratchAdmissionError, match='No space left'):
         with storage_runtime.task_scratch(root, settings({'temporary_directory':str(node)})):
             pytest.fail('child could start on full scratch')

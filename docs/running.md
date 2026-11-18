@@ -192,6 +192,11 @@ GeneGalleon derives its tool limits from the actual allocation. Worker logs
 show the allocation and tool budgets; retry resource overrides also change the
 assembler's limits.
 
+Captus taxonomy screening requires a temporary directory whose resolved path
+contains no `__`, including parent directories. Generated task names use UUIDs
+to avoid this delimiter; use `storage.temporary_directory` to select a compatible
+parent if needed.
+
 ## Re-running and recovery
 
 Use the run's `status` command, `squeue`/`qstat`, and `jobs/logs/` to inspect progress.

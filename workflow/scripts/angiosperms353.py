@@ -117,6 +117,9 @@ def database_panel(path, runs=None, *, include_busco=False):
 
 
 def extract(samples, work, *, threads, ram, blat, log_dir):
+    if '__' in str(work.resolve()):
+        raise ValueError("Captus rejects '__' in assembly paths, including parent directories; "
+                         "choose storage.temporary_directory without '__'")
     inputs = work / 'cds'
     inputs.mkdir()
     by_source, names = {}, []

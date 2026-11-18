@@ -20,6 +20,23 @@ from test_sample_curation import finish, sample_project
 from test_datasets import dataset_project
 
 
+@pytest.mark.parametrize('via_symlink', [False, True])
+def test_captus_rejects_unsafe_parent_path_before_extracting_inputs(tmp_path, monkeypatch, via_symlink):
+    work = tmp_path / 'parent__with_separator' / 'task'
+    work.mkdir(parents=True)
+    if via_symlink:
+        alias = tmp_path / 'safe_alias'
+        alias.symlink_to(work.parent, target_is_directory=True)
+        work = alias / 'task'
+    source = tmp_path / 'cds.fna'
+    source.write_text('>gene\nATGAAATAA\n')
+    monkeypatch.setattr(qc.subprocess, 'run', lambda *a, **k: pytest.fail('Captus launched with an unsafe path'))
+    with pytest.raises(ValueError, match=r'Captus.*__.*storage\.temporary_directory'):
+        qc.extract([{'run': 'A', 'cds': record(source)}], work,
+                   threads=1, ram=8, blat='blat', log_dir=tmp_path)
+    assert not (work / 'cds').exists()
+
+
 def test_kew_download_and_names(tmp_path, monkeypatch):
     class Response(io.BytesIO):
         headers = {'Content-Length': '3'}
