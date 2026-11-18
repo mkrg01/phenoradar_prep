@@ -95,7 +95,7 @@ def inspect_groups(project, overrides=None):
 
 def test_one_group_per_marker_and_tree_set_with_serial_resource_limits(marker_workflow):
     # Exactly one default group fits: series must take max(CPU/memory), not sum.
-    groups = inspect_groups(marker_workflow, {"total_limits": {"cpus": 2, "mem_gb": 16}})
+    groups = inspect_groups(marker_workflow, {"total_limits": {"cpus": 2, "mem_gb": 24}})
     assert len(groups) == len(BRANCHES) * len(MARKERS)
     assert {next(iter(group["members"])) for group in groups} == {
         (branch, marker) for branch in BRANCHES for marker in MARKERS}
@@ -104,9 +104,7 @@ def test_one_group_per_marker_and_tree_set_with_serial_resource_limits(marker_wo
         assert group["rules"] == set(STAGES)
         resources = group["resources"]
         assert resources["_cores"] == resources["workflow_cpus"] == 1
-        branch, _ = next(iter(group["members"]))
-        expected_mem = 4000 if branch == "phylogeny/representatives" else 8000
-        assert resources["mem_mb"] == resources["workflow_mem_mb"] == expected_mem
+        assert resources["mem_mb"] == resources["workflow_mem_mb"] == 16000
         assert resources["runtime"] == 3 * 24 * 60
 
 

@@ -134,9 +134,9 @@ gene-tree error, paralogy, and model assumptions affect the estimates.
 ## Resources
 
 On Slurm, each BUSCO marker's alignment, trimming, and gene-tree inference
-share one worker job. A full group defaults to 1 CPU and 4 GB for
-`representatives`, or 1 CPU and 8 GB for `all` and `phenotyped`. Species-tree
-inference is a separate job with a default of 32 CPUs and 64 GB. See
+share one worker job. FAMSA alignment requests 1 CPU and 16 GB for each tree
+set, so a full group defaults to 1 CPU and 16 GB. Species-tree inference is
+a separate job with a default of 32 CPUs and 128 GB. See
 [resource overrides](running.md#resource-budgets). Logs are under
 `results/<build>/logs/downstream/<analysis>/phylogeny/`.
 

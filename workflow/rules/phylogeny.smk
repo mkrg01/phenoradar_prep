@@ -159,7 +159,7 @@ rule align_busco_marker:
         command="famsa",
         settings=lambda wc: json.dumps({"min_taxa": PHY["min_taxa"], "sample_manifest": f"{OUT}/{wc.phylo_branch}/plan/species.tsv"}, sort_keys=True)
     threads: 1
-    resources: mem_mb=busco_marker_mem_mb
+    resources: mem_mb=16000
     conda: "../envs/phylogeny.yaml"
     log: f"{LOG}/{{phylo_branch}}/align/{{marker}}.log"
     benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/align.{{marker}}.tsv"
@@ -276,7 +276,7 @@ rule infer_busco_species_tree:
         qc=f"{PHYLO_RUN}/rooting/astral.json"
     params: command=ASTRAL, seed=RANDOM_SEED
     threads: 32
-    resources: mem_mb=64000
+    resources: mem_mb=128000
     conda: "../envs/phylogeny.yaml"
     log: f"{LOG}/{{phylo_branch}}/astral.log"
     benchmark: f"{LOG}/{{phylo_branch}}/benchmarks/astral.tsv"
