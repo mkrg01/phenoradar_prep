@@ -206,8 +206,13 @@ fi
 
 # Mount the repository, including dataset snapshots. In local mode the allocation
 # limits win; Slurm mode uses per-rule resources and an independent controller.
+controller_prefix=()
+if [[ "$executor" == cluster-generic && -f "$root/workflow/scripts/age_logs.py" ]]; then
+    controller_prefix=("$workflow_python" "$root/workflow/scripts/age_logs.py" run
+                       --usage "$PHENORADAR_USAGE_ROOT" --state "$root/.snakemake/cluster_submissions" --)
+fi
 printf -v container_root '%q' "$root"
-exec "$snakemake_bin" --printshellcmds --rerun-incomplete \
+exec "${controller_prefix[@]}" "$snakemake_bin" --printshellcmds --rerun-incomplete \
     --snakefile workflow/Snakefile \
     --software-deployment-method conda apptainer \
     --apptainer-args "--cleanenv --bind $container_root" "${workflow_args[@]}" \

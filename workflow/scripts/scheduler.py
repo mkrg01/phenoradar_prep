@@ -328,6 +328,11 @@ def main():
             return
         if saved.get('missing_since'):
             write_json(status_file, dict(saved, missing_since=None))
+        from age_logs import ARCHIVE_ERRORS, archive_worker
+        try:
+            archive_worker(status_file, value)
+        except ARCHIVE_ERRORS as error:
+            print(f'AGE log archival incomplete; raw logs retained: {error}', file=sys.stderr)
         print('success' if value['state'] == 'COMPLETED' else 'failed' if value['state'] == 'FAILED' else 'running')
     else:
         from snakemake.utils import read_job_properties
@@ -353,14 +358,20 @@ def main():
             prefix = storage_prefix(config['pipeline'], config['root'], config['usage'], properties.get('rule', 'group'))
             wrapper.write_text('#!/usr/bin/env bash\nset -euo pipefail\nexec ' + shlex.join([*prefix, 'bash', str(script)]) + '\n')
             wrapper.chmod(0o755)
+            from age_logs import archive_path, spool_paths
+            archive = os.environ.get('PHENORADAR_AGE_LOG_ARCHIVE') or config.get('log_archive') or str(archive_path(config['usage']))
+            stdout, stderr = spool_paths(archive, signature)
             cmd = batch_command(config['execution'], job, config['root'], 'pr_' + token,
-                                str(script) + '.%j.out', str(script) + '.%j.err', script=wrapper)
+                                stdout, stderr, script=wrapper)
             saved = {'state': 'unknown', 'created_at': now(), 'command': cmd, 'script': record(script),
                      'analysis': os.environ.get('PHENORADAR_ANALYSIS_PATH')}
             write_json(receipt, saved)
             identifier = parse_id(subprocess.check_output(cmd, cwd=config['root'], text=True, timeout=60), 'age')
             saved.update(state='accepted', job_id=identifier)
-            write_json(state / (identifier + '.status.json'), {'job_id': identifier, 'missing_since': None})
+            write_json(state / (identifier + '.status.json'), {
+                'job_id': identifier, 'missing_since': None, 'log_archive': str(archive),
+                'controller_id': current_id(), 'rule': properties.get('rule', 'group'),
+                'stdout': str(stdout).replace('%j', identifier), 'stderr': str(stderr).replace('%j', identifier)})
             write_json(receipt, saved)
             print(identifier)
 

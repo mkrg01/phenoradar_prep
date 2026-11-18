@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tarfile
 
 import pytest
 import yaml
@@ -171,8 +172,8 @@ def test_slurm_stdin_submission_uses_the_same_storage_wrapper(tmp_path, monkeypa
     assert 'storage_runtime.py run' in script and 'bash -c' in script and 'echo result' in script
 
 
-@pytest.mark.parametrize('allocated', [False, True])
-def test_existing_pipeline_launcher_auto_detects_age_and_runs_a_real_dag(tmp_path, allocated):
+@pytest.mark.parametrize('allocated,failing', [(False, False), (True, False), (False, True)])
+def test_existing_pipeline_launcher_auto_detects_age_and_runs_a_real_dag(tmp_path, allocated, failing):
     """Real Snakemake and common storage; only AGE's external service is doubled."""
     snakemake = Path(sys.executable).parent / 'snakemake'
     if not snakemake.exists():
@@ -199,6 +200,9 @@ rule second:
     resources: mem_mb=1000, runtime=1
     shell: 'cat {input} > {output}'
 ''')
+    if failing:
+        path = root / 'workflow/Snakefile'
+        path.write_text(path.read_text().replace("printf 'portable' > {output}", 'echo worker_failed >&2; exit 7'))
     binary = tmp_path / 'age-bin'
     binary.mkdir()
     source = f'#!{sys.executable}\n' + '''import json,os,subprocess,sys
@@ -241,15 +245,25 @@ elif name=='qsub':
     result = subprocess.run(['bash', str(root / 'run_pipeline.sh'), '--configfile', 'pipeline.yaml',
                              '--seconds-between-status-checks', '1', '--', 'all'],
                             cwd=root, env=env, capture_output=True, text=True, timeout=120)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert (root / 'result.txt').read_text() == 'portable'
+    assert (result.returncode != 0) if failing else (result.returncode == 0), result.stdout + result.stderr
+    if not failing:
+        assert (root / 'result.txt').read_text() == 'portable'
     submissions = [json.loads(path.read_text()) for path in (tmp_path / 'state').glob('*.json')]
     if allocated:
         assert not submissions and 'localrule first' in result.stderr
     else:
-        assert len(submissions) == 2 and all(entry['exit_status'] == 0 for entry in submissions)
+        assert len(submissions) == (1 if failing else 2)
+        assert all((entry['exit_status'] != 0) if failing else (entry['exit_status'] == 0) for entry in submissions)
         assert any('s_vmem=1500M,h_rt=180' in entry['arguments'] for entry in submissions)
-    assert len(list((root / '.snakemake/storage').glob('*.json'))) == (1 if allocated else 2)
+        archives = list((root / '.snakemake/logs').glob('age-workers-*.tar.gz'))
+        assert len(archives) == 1
+        with tarfile.open(archives[0], 'r:gz') as packed:
+            assert len(packed.getnames()) == 3 * len(submissions)
+            if failing:
+                assert b'worker_failed' in packed.extractfile('100/stderr.txt').read()
+                assert json.load(packed.extractfile('100/job.json'))['outcome']['state'] == 'FAILED'
+        assert not list((root / '.snakemake/logs').glob('*.pending'))
+    assert len(list((root / '.snakemake/storage').glob('*.json'))) == (1 if allocated or failing else 2)
     assert not list((root / 'work/scratch').iterdir())
 
 

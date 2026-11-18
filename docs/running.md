@@ -197,3 +197,24 @@ assembler's limits.
 Use the run's `status` command, `squeue`/`qstat`, and `jobs/logs/` to inspect progress.
 See [failure recovery](datasets.md#failure-and-recovery-behavior) for retry commands
 and [database reuse](datasets.md#reusing-completed-databases) for new builds.
+
+AGE workers submitted by Snakemake retain stdout and stderr in
+`jobs/logs/age-workers-<controller-id>.tar.gz`, with entries grouped by worker job
+ID and a `job.json` recording its rule and accounting outcome. Completed workers,
+including failed workers, are archived after `qacct` confirms their termination.
+Each verified append retires its individual log files. One archive, one small
+recovery journal and one lock remain per controller; running or unconfirmed jobs
+keep their individual logs outside Snakemake's temporary directory.
+
+Normal controller exit finalizes the archive on success or failure. After a hard
+kill, the next run collects confirmed workers and recovers interrupted appends.
+To recover logs without restarting computation, run from the repository root:
+
+```bash
+python workflow/scripts/age_logs.py recover --usage results/leaf/jobs/storage --state .snakemake/cluster_submissions
+tar -tzf results/leaf/jobs/logs/age-workers-<controller-id>.tar.gz
+```
+
+Replace `results/leaf` with the build or analysis directory. Low-level runs use
+`.snakemake/storage` and `.snakemake/logs` instead. Archival errors retain raw logs
+and print a diagnostic; they do not change the worker's accounting result.

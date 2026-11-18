@@ -308,6 +308,8 @@ def write_profile(destination, slurm, *, root=None, pipeline=None, usage=None, i
         context = {'execution': slurm, 'root': str(root),
                    'pipeline': str(pipeline or root / 'workflow/pipeline_defaults.yaml'),
                    'usage': str(usage or root / '.snakemake/storage')}
+        from age_logs import archive_path
+        context['log_archive'] = str(archive_path(context['usage']))
         settings = destination / 'execution.json'
         write_json(settings, context)
         script = Path(__file__).with_name('scheduler.py')
