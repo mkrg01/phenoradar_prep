@@ -156,6 +156,11 @@ scientific settings to reuse completed batches and recovered markers after
 a failure. Batch receipts record recovery and search/voting times. The final job
 writes the combined report once all batches succeed.
 
+Taxonomy commands, batch workers, and report jobs limit implicit NumPy/BLAS
+library pools to one thread, including inside Captus. This prevents library
+initialization from exceeding scheduler memory limits on large nodes. Captus,
+BUSCO, and MMseqs still receive the configured CPU count for their own workers.
+
 Use `--taxonomy` to supply a frozen snapshot and `--runs` to screen and review
 the same subset. On Apple Silicon, specify a working native `--blat` if the
 packaged executable cannot find its system libraries. A completed

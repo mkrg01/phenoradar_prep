@@ -17,7 +17,7 @@ import time
 import angiosperms353 as qc
 from angiosperms353_reference import (BASE_URL, RELEASE, RANKS, LAND_PLANTS_TAXID, KewReference, ReferenceTaxonomy, accessions,
                                       prepare_reference_taxonomy)
-from common import atomic_writer, now, read_tsv, text_open, write_json, write_tsv
+from common import atomic_writer, now, numerical_environment, read_tsv, text_open, write_json, write_tsv
 from dataset_assets import SAFE, digest, locked, record, verify
 from phase_config import DEFAULT_TAXONOMY_BATCH_SIZE, array_concurrency, execution_config, normalize_slurm, time_minutes
 import scheduler
@@ -37,7 +37,7 @@ def batches(plan):
 
 def tool_versions(method='angiosperms353'):
     executable = 'busco' if method == 'orthodb' else 'captus'
-    return {name: subprocess.check_output(command, text=True).strip() for name, command in
+    return {name: subprocess.check_output(command, text=True, env=numerical_environment()).strip() for name, command in
             [(executable, [executable, '--version']), ('mmseqs', ['mmseqs', 'version'])]}
 
 
@@ -369,6 +369,7 @@ def screen(samples, *, cache, taxonomy, output, build=None, database=None, selec
            registered_support=None, support=None, threads=None, ram=None, omit_same_species=False, only_loci=None,
            blat=None, batch_size=DEFAULT_TAXONOMY_BATCH_SIZE, root=None, config=None, cluster=False,
            busco_lineage=None, busco_dataset=None, translation_table=1):
+    os.environ.update(numerical_environment())
     try:
         import matplotlib  # noqa: F401
     except ImportError as error:
@@ -415,6 +416,9 @@ def screen(samples, *, cache, taxonomy, output, build=None, database=None, selec
 
 
 def main():
+    # Workers/finalizers also need this when a saved job script is resubmitted
+    # from a shell that did not run the original metadata command.
+    os.environ.update(numerical_environment())
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
     commands = parser.add_subparsers(dest='command', required=True)

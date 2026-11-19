@@ -19,7 +19,7 @@ import yaml
 
 from accession_exclusions import read_exclusions
 from build_versioning import metadata_history
-from common import file_record, now, read_tsv, sha256, write_json, write_tsv
+from common import file_record, now, numerical_environment, read_tsv, sha256, write_json, write_tsv
 from dataset_assets import SAFE, counts, locked, record, verify
 from phase_config import read_yaml, taxonomy_screen_settings
 from sample_identity import annotate
@@ -960,6 +960,8 @@ def taxonomy_screen_command(root, cfg, args):
     qc = cfg['taxonomy_screen']
     if not qc['enabled']:
         return {'status': 'disabled'}
+    # Set defaults before loading ETE/NumPy/Matplotlib or spawning tool processes.
+    os.environ.update(numerical_environment())
     if args.command == 'filter-taxonomy':
         from taxonomy_screen_filter import filter_database
         return filter_database(path_at(root, args.database), path_at(root, args.screen), path_at(root, args.output))

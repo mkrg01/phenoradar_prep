@@ -16,6 +16,19 @@ from pathlib import Path
 RANDOM_SEED = 12345
 
 
+def numerical_environment(**overrides):
+    """Bound implicit library pools; tools keep their explicit CPU requests.
+
+    NumPy imports can otherwise reserve many thread stacks based on the whole
+    node, exceeding scheduler virtual-memory limits before any analysis runs.
+    OMP_NUM_THREADS is a default, unlike OMP_THREAD_LIMIT: tools such as MMseqs
+    can still select their requested thread count explicitly.
+    """
+    return {**os.environ, **overrides, **dict.fromkeys((
+        'OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS',
+        'BLIS_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS', 'NUMEXPR_NUM_THREADS'), '1')}
+
+
 def species_from_gene_id(gene_id):
     """Recover the computational sample key from a {sample}_g{number} ID.
 

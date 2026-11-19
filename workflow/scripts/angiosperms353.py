@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 
 from angiosperms353_reference import INTERMEDIATE_RANKS, LEGACY_RANKS, LOCUS, RANKS, accessions, fasta, reference_rows
-from common import atomic_writer, now, read_tsv, write_json, write_tsv
+from common import atomic_writer, now, numerical_environment, read_tsv, write_json, write_tsv
 from dataset_assets import record, verify
 from phase_config import DEFAULT_REGISTERED_SUPPORT
 
@@ -146,7 +146,7 @@ def extract(samples, work, *, threads, ram, blat, log_dir):
     with (log_dir / 'captus.log').open('wb') as log:
         try:
             subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True,
-                           env=dict(os.environ, TMPDIR=str(work)))
+                           env=numerical_environment(TMPDIR=str(work)))
         except subprocess.CalledProcessError as error:
             raise ValueError(f'Captus failed (exit {error.returncode}); see {log.name}') from error
     paths = [output / f'{name}__captus-ext/01_coding_NUC/NUC_coding_NT.fna' for name in names]
