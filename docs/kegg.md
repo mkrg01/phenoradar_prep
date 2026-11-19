@@ -3,7 +3,7 @@
 [Documentation](index.md) · [Reference data](references.md#kofam-and-kegg-reference)
 
 The KEGG branch annotates one median-length protein per observed OG with
-KofamScan, then sums original OG TPM by KO. Representatives come from samples
+KofamScan, then sums renormalized OG TPM by KO. Representatives come from samples
 selected for the analysis. Searches use KOfam's `eukaryote.hal`; KOs outside
 that selection are not assessed.
 
@@ -41,9 +41,16 @@ controls OGs with several accepted KOs:
 | `drop` | Exclude multi-KO OGs |
 | `error` | Reject quantified multi-KO OGs, including observed zeros |
 
-Values sum **original OG `tpm_sum`, without renormalization**. With `duplicate`,
-an OG with TPM 10 assigned to two KOs contributes 10 to each, so total KO TPM
-can exceed input TPM. Repeated hits to the same KO count once.
+Values sum **OG `tpm`, rescaled to one million across all OG-assigned sequences
+in each sample**, including OGs without an accepted KO. No further normalization
+is applied after summing by KO. With `duplicate`, an OG with normalized TPM 10
+assigned to two KOs contributes 10 to each, so total KO TPM can exceed one million.
+Repeated hits to the same KO count once.
+
+From v0.8.11, the existing `tpm_sum` output columns contain sums of renormalized
+OG TPM. Earlier versions summed original OG TPM. Prepare a new analysis from
+the completed build to obtain the updated values; translation, OG mapping, and
+kallisto quantification do not need to be repeated.
 
 ## Outputs
 
@@ -53,7 +60,7 @@ Under `results/<build>/downstream/<analysis>/kegg/`:
 | --- | --- |
 | `ko_tpm_sum.tsv`, `ko_tpm_sum_wide.tsv` | Long/wide expression; long columns: `species`, `ko`, `tpm_sum` |
 | `ko_support.tsv` | Observed contributing OG counts and TPM per KO/run |
-| `mapping_qc.tsv` | Per-run counts and original, ODB-mapped, and KO-retained TPM |
+| `mapping_qc.tsv` | Per-run counts, original TPM coverage, and normalized KO contributions |
 | `orthogroups.tsv` | OG annotation status and representative metadata |
 | `og_kos.tsv` | OG/KO hits and donor IDs; use `accepted=1` rows |
 | `representatives/representatives.tsv` | Selection details, lengths, and membership counts |
@@ -66,10 +73,12 @@ support tables and no numeric long-table row; partially quantified KOs sum only
 observed OGs. All-zero runs are valid. Duplicate OG rows and negative/nonfinite
 TPM are errors.
 
-Coverage QC counts each retained OG once. `total_tpm` includes all quantified
-transcripts, `odb_mapped_tpm` counts mapped OGs, and `retained_tpm` counts OGs
-retained by KO assignment and the ambiguity policy. Contribution totals across
-KOs can count an OG more than once.
+Coverage QC uses original TPM and counts each retained OG once. `total_tpm`
+includes all quantified transcripts, `odb_mapped_tpm` counts mapped OGs, and
+`retained_tpm` counts OGs retained by KO assignment and the ambiguity policy.
+`retained_normalized_tpm` sums those OGs' renormalized TPM once each;
+`ko_tpm_sum` sums their contributions across KOs and can count an OG more than once.
+The expression provenance records the normalization basis and input column.
 
 Pass the [native KO table](phenoradar_inputs.md#expression-settings) directly
 to PhenoRadar. A [post hoc subset](species_filter.md) keeps the original

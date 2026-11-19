@@ -40,6 +40,8 @@ data:
 OG `tpm` is rescaled over genes assigned to OGs. To use the original gene TPM
 sums, choose `tpm_sum.tsv` and set `value_col: tpm_sum`. For KO expression,
 use `kegg/ko_tpm_sum.tsv`, `feature_col: ko`, and `value_col: tpm_sum`.
+From v0.8.11, these KO values sum renormalized OG `tpm`, using all OG-assigned
+sequences as the normalization basis. They are not renormalized again by KO.
 Use matching [orthogroup annotations](https://github.com/mkrg01/phenoradar/blob/main/docs/data-format.md#orthogroup-annotations)
 with OG features, or leave `data.orthogroup_annotation_path` unset.
 

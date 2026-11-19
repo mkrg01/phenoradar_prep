@@ -218,4 +218,4 @@ retained TPM also cause errors.
 
 See [PhenoRadar settings](phenoradar_inputs.md#expression-settings) for selecting
 a value column and handling absent coordinates. [KO expression](kegg.md#outputs)
-uses original OG TPM sums.
+sums renormalized OG TPM, with no further normalization by KO.

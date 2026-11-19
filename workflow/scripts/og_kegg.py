@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assign representative KOs to OGs and aggregate original OG TPM without expansion."""
+"""Assign representative KOs to OGs and sum renormalized OG TPM by KO."""
 import argparse
 from collections import Counter, defaultdict
 from contextlib import ExitStack
@@ -23,7 +23,7 @@ QC_FIELDS = ["species", "run", "annotation_scope", "ambiguity", "reference_ortho
              "observed_orthogroups", "retained_orthogroups", "ambiguous_orthogroups",
              "unannotated_orthogroups", "no_valid_representative_orthogroups",
              "total_tpm", "odb_mapped_tpm", "retained_tpm", "retained_tpm_fraction",
-             "quantified_assignments", "ko_tpm_sum"]
+             "retained_normalized_tpm", "quantified_assignments", "ko_tpm_sum"]
 ANNOTATION_FILES = ["orthogroups.tsv", "og_kos.tsv"]
 EXPRESSION_FILES = ["ko_tpm_sum.tsv", "ko_tpm_sum_wide.tsv", "ko_support.tsv", "mapping_qc.tsv"]
 
@@ -169,24 +169,29 @@ def aggregate(samples, annotation_dir, og_run_dir, outdir, ambiguity="duplicate"
             if qc.get("species") != species or qc.get("run") != run:
                 raise ValueError(f"OG expression QC differs from sample: {run}")
             verify_file(path, qc.get("expression", {}))
-            values = {}
-            for row in table(path, ["species", "run", "orthogroup", "tpm_sum"]):
+            values, normalized = {}, {}
+            for row in table(path, ["species", "run", "orthogroup", "tpm_sum", "tpm"]):
                 og = row["orthogroup"]
                 if row["species"] != species or row["run"] != run or og not in groups or og in values:
                     raise ValueError(f"invalid or duplicate OG expression row: {run}/{og}")
                 values[og] = number(row["tpm_sum"], f"OG TPM: {run}/{og}")
+                normalized[og] = number(row["tpm"], f"normalized OG TPM: {run}/{og}")
             mapped = summed(values.values())
             total = number(qc["total_tpm"], "total input TPM")
             if not math.isclose(mapped, number(qc["retained_tpm"], "ODB retained TPM"), abs_tol=1e-8):
                 raise ValueError(f"OG TPM differs from original-TPM QC: {run}")
             if mapped > total and not math.isclose(mapped, total, abs_tol=1e-8):
                 raise ValueError(f"ODB TPM exceeds total input TPM: {run}")
+            for og, value in values.items():
+                expected = value / mapped * 1e6 if mapped else 0
+                if not math.isclose(normalized[og], expected, abs_tol=1e-8):
+                    raise ValueError(f"normalized OG TPM differs from all-OG normalization: {run}/{og}")
             ambiguous = {og for og in values if len(assignments.get(og, ())) > 1}
             if ambiguity == "error" and ambiguous:
                 raise ValueError(f"{run}: quantified orthogroups have multiple accepted KOs")
             contributions = defaultdict(list)
             retained = set()
-            for og, value in values.items():
+            for og, value in normalized.items():
                 for ko in eligible.get(og, ()):
                     contributions[ko].append(value)
                     retained.add(og)
@@ -204,16 +209,20 @@ def aggregate(samples, annotation_dir, og_run_dir, outdir, ambiguity="duplicate"
                 species, run, "orthogroup", ambiguity, len(groups), len(values), len(retained),
                 len(ambiguous), sum(not assignments.get(og) for og in values),
                 statuses["no_valid_representative"], total, mapped, retained_tpm,
-                retained_tpm / total if total else "", sum(map(len, contributions.values())),
+                retained_tpm / total if total else "", summed(normalized[og] for og in retained),
+                sum(map(len, contributions.values())),
                 summed(summed_kos.values()),
             ])))
             sources.append({"run": run, "expression": file_record(path), "qc": file_record(qc_path)})
     write_tsv(out / "mapping_qc.tsv", QC_FIELDS, reports)
     write_json(out / "provenance.json", {
-        "schema_version": 1, "annotation_scope": "orthogroup", "created_at": now(),
+        "schema_version": 2, "annotation_scope": "orthogroup", "created_at": now(),
         "method": "median_length_one_representative", "ambiguity": ambiguity,
         "samples": file_record(samples), "annotation": annotation, "og_expression": sources,
-        "quantification": "sum_original_OG_tpm_sum_without_renormalization",
+        "quantification": "sum_renormalized_OG_tpm",
+        "normalization": {"input_column": "tpm", "basis": "all_OG_assigned_sequences",
+                          "target_sum": 1000000, "ko_renormalized": False},
+        "qc_original_tpm_fields": ["total_tpm", "odb_mapped_tpm", "retained_tpm"],
         "unmapped_proteins": "not_annotated", "additional_representatives": False,
         "results": [file_record(out / name) for name in EXPRESSION_FILES],
     })

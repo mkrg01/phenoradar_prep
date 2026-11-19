@@ -1,4 +1,4 @@
-"""Median representatives, OG-level labels, and original-TPM aggregation."""
+"""Median representatives, OG-level labels, and renormalized-TPM aggregation."""
 import json
 from pathlib import Path
 
@@ -121,7 +121,9 @@ def write_expression(root, species, values, total=None):
     run = "R" + species
     path = root / f"{run}.tsv"
     fields = ["species", "run", "orthogroup", "tpm_sum", "tpm"]
-    write_tsv(path, fields, [dict(species=species, run=run, orthogroup=og, tpm_sum=value, tpm=999999)
+    mapped = sum(values.values())
+    write_tsv(path, fields, [dict(species=species, run=run, orthogroup=og, tpm_sum=value,
+                                 tpm=value / mapped * 1e6 if mapped else 0)
                              for og, value in values.items()])
     write_json(root / f"{run}.qc.json", dict(species=species, run=run, expression=file_record(path),
                retained_tpm=sum(values.values()), total_tpm=sum(values.values()) if total is None else total))
@@ -149,17 +151,18 @@ def test_og_labels_keep_real_donors_and_all_statuses(og_annotations):
 
 
 @pytest.mark.parametrize("policy", ["duplicate", "drop"])
-def test_aggregates_original_og_tpm_preserving_zero_and_missing(og_inputs, og_annotations, og_expression, policy):
+def test_aggregates_renormalized_og_tpm_preserving_zero_and_missing(og_inputs, og_annotations, og_expression, policy):
     aggregate(og_inputs["samples"], og_annotations, og_expression, og_annotations, ambiguity=policy)
     rows = read_tsv(og_annotations / "ko_tpm_sum.tsv")
     assert list(rows[0]) == ["species", "ko", "tpm_sum"]
     assert all("run" not in row for row in read_tsv(og_annotations / "ko_tpm_sum_wide.tsv"))
     values = {(r["species"], r["ko"]): float(r["tpm_sum"]) for r in rows}
-    assert values["A", "K00001"] == 5  # never the normalized value 999999
+    # The denominator includes every OG, even those without an accepted KO.
+    assert values["A", "K00001"] == pytest.approx(5 / 14 * 1e6)
     assert values["C", "K00001"] == 0
     if policy == "duplicate":
         assert values["A", "K00002"] == 0
-        assert values["B", "K00002"] == values["B", "K00003"] == 11
+        assert values["B", "K00002"] == values["B", "K00003"] == pytest.approx(11 / 18 * 1e6)
         assert ("D", "K00002") not in values
         support = {(r["run"], r["ko"]): r for r in read_tsv(og_annotations / "ko_support.tsv")}
         assert support["RD", "K00002"]["tpm_sum"] == ""
@@ -169,8 +172,46 @@ def test_aggregates_original_og_tpm_preserving_zero_and_missing(og_inputs, og_an
     qc = {r["run"]: r for r in read_tsv(og_annotations / "mapping_qc.tsv")}
     assert float(qc["RA"]["odb_mapped_tpm"]) == 14
     assert float(qc["RA"]["retained_tpm_fraction"]) == pytest.approx(5 / 24)
+    assert float(qc["RA"]["retained_normalized_tpm"]) == pytest.approx(5 / 14 * 1e6)
+    assert float(qc["RA"]["ko_tpm_sum"]) == pytest.approx(5 / 14 * 1e6)
+    if policy == "duplicate":
+        assert float(qc["RB"]["retained_normalized_tpm"]) == pytest.approx(1e6)
+        assert float(qc["RB"]["ko_tpm_sum"]) == pytest.approx((7 + 2 * 11) / 18 * 1e6)
     assert qc["RA"]["no_valid_representative_orthogroups"] == "1"
-    assert json.loads((og_annotations / "provenance.json").read_text())["additional_representatives"] is False
+    provenance = json.loads((og_annotations / "provenance.json").read_text())
+    assert provenance["additional_representatives"] is False
+    assert provenance["schema_version"] == 2
+    assert provenance["quantification"] == "sum_renormalized_OG_tpm"
+    assert provenance["normalization"] == dict(input_column="tpm", basis="all_OG_assigned_sequences",
+                                              target_sum=1000000, ko_renormalized=False)
+
+
+def test_unassigned_tpm_does_not_change_ko_expression(og_inputs, og_annotations, og_expression):
+    aggregate(og_inputs["samples"], og_annotations, og_expression, og_annotations)
+    original = {(row["species"], row["ko"]): float(row["tpm_sum"])
+                for row in read_tsv(og_annotations / "ko_tpm_sum.tsv")}
+    # More unassigned expression dilutes every assigned sequence's original TPM.
+    write_expression(og_expression, "A", {"OG1": 0.5, "OG2": 0, "OG3": 0.4, "OG4": 0.2, "OG5": 0.3}, total=24)
+    aggregate(og_inputs["samples"], og_annotations, og_expression, og_annotations)
+    updated = {(row["species"], row["ko"]): float(row["tpm_sum"])
+               for row in read_tsv(og_annotations / "ko_tpm_sum.tsv")}
+    assert updated == pytest.approx(original)
+    qc = read_tsv(og_annotations / "mapping_qc.tsv")[0]
+    assert float(qc["retained_tpm_fraction"]) == pytest.approx(5 / 240)
+
+
+@pytest.mark.parametrize("value", ["999999", "-1", "nan"])
+def test_invalid_normalized_og_tpm_is_rejected(og_inputs, og_annotations, og_expression, value):
+    path = og_expression / "RA.tsv"
+    rows = read_tsv(path)
+    rows[0]["tpm"] = value
+    write_tsv(path, list(rows[0]), rows)
+    qc_path = og_expression / "RA.qc.json"
+    qc = json.loads(qc_path.read_text())
+    qc["expression"] = file_record(path)
+    write_json(qc_path, qc)
+    with pytest.raises(ValueError, match="normalized OG TPM"):
+        aggregate(og_inputs["samples"], og_annotations, og_expression, og_annotations)
 
 
 def test_error_policy_rejects_multi_ko_og_even_with_zero_tpm(og_inputs, og_annotations, og_expression):
@@ -191,6 +232,7 @@ def test_all_zero_run_is_valid(og_inputs, og_annotations, og_expression):
     aggregate(og_inputs["samples"], og_annotations, og_expression, og_annotations)
     qc = read_tsv(og_annotations / "mapping_qc.tsv")[0]
     assert qc["retained_tpm_fraction"] == ""
+    assert float(qc["retained_normalized_tpm"]) == float(qc["ko_tpm_sum"]) == 0
 
 
 def test_expression_corruption_is_rejected(og_inputs, og_annotations, og_expression):
