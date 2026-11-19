@@ -459,7 +459,10 @@ def plot_support(output, summaries, cutoff):
     for row in summaries:
         by_rank[row['rank'] or 'Unassigned'].append(row)
     fig, axes = plt.subplots(len(by_rank), 1, sharex=True, squeeze=False, figsize=(7, 3 * len(by_rank)))
-    for ax, (rank, rows) in zip(axes[:, 0], sorted(by_rank.items()), strict=True):
+    rank_order = {rank: index for index, rank in enumerate(
+        (*reversed(INTERMEDIATE_RANKS), *RANKS[len(INTERMEDIATE_RANKS):]))}
+    ordered = sorted(by_rank.items(), key=lambda item: (rank_order.get(item[0], len(rank_order)), item[0]))
+    for ax, (rank, rows) in zip(axes[:, 0], ordered, strict=True):
         histogram(ax, rows, rank)
     axes[-1, 0].set_xlabel('Registered taxon support (%)')
     fig.tight_layout()

@@ -257,11 +257,12 @@ def test_screen_config_skips_work_and_replots_exact_cutoff(sample_project):
     receipt = qc.json.loads((root / 'report/screen.json').read_text())
     assert receipt['settings']['max_registered_support'] == '0.2'
     assert receipt['source_screen']['path'] == str(src / 'screen.json')
-    for name, titles in zip(qc.PLOT_NAMES, [('All ranks',), ('family', 'genus')], strict=True):
+    for name, titles in zip(qc.PLOT_NAMES, [('All ranks',), ('genus', 'family')], strict=True):
         plot = (root / 'report' / name).read_text()
         ET.fromstring(plot)
         assert 'Threshold: 20%' in plot
-        assert all(title + ' · ' in plot for title in titles)
+        positions = [plot.index(title + ' · ') for title in titles]
+        assert positions == sorted(positions)
     assert read_tsv(src / 'summary.tsv')[0]['status'] == 'discordant'
 
 
