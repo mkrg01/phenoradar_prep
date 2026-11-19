@@ -160,7 +160,19 @@ Use `--taxonomy` to supply a frozen snapshot and `--runs` to screen and review
 the same subset. On Apple Silicon, specify a working native `--blat` if the
 packaged executable cannot find its system libraries. A completed
 screen has `summary.tsv`, per-marker `loci.tsv`, and `screen.json` with inputs,
-versions and settings. `registered_support.svg` pools all assessed samples.
+versions and settings. All screened runs remain in `summary.tsv`, including runs
+with fewer than 50 recovered loci: their sequences are still searched and their
+available vote shares are retained, but they cannot receive a discordance call.
+`rank_summary.tsv` retains results at every evaluated rank with exact vote totals.
+`taxonomy_by_rank.tsv` presents those results as one row per run and rank, with
+readable names, locus counts, reported/leading-alternative vote percentages,
+and the assessment. `Used for overall assessment` identifies the selected rank;
+only that rank governs exclusion candidates. Ranks follow the sample's NCBI
+lineage from genus upward; OrthoDB evaluates genus, family, and order.
+`taxonomy_table_notes.txt` defines the columns and thresholds. These files
+include inconclusive runs; missing values are `NA` and percentages have two
+decimal places. `loci.tsv` contains marker evidence at the selected rank,
+not every evaluated rank. `registered_support.svg` pools all assessed samples.
 `registered_support_by_rank.svg` separates them by the rank used for each
 decision. Both show the cutoff and counts of assessed, flagged and unassessed
 samples. `exclusion_candidates.tsv` lists the flagged accessions for review.
@@ -170,7 +182,11 @@ the existing editable plan. Applying the plan persists those decisions for the n
 build. Check the plan before applying, including the existing read/scratch cleanup.
 
 After changing the threshold in `build.yaml`, regenerate the calls and both
-plots from saved votes without searching the sequences again:
+plots from saved votes without searching the sequences again. All-rank screens
+also regenerate `rank_summary.tsv`, `taxonomy_by_rank.tsv`, and their notes.
+Older screens saved only the selected rank: they export `taxonomy_summary.tsv`
+instead. Recovering unsaved rank results requires a new screen; they cannot be
+reconstructed from the old summary or selected-rank marker evidence.
 
 ```bash
 ./run_metadata.sh report-taxonomy --screen work/<build>-taxonomy/screen.json \
@@ -194,32 +210,37 @@ To look for
 replacement runs, apply the exclusions during metadata selection before the new
 build. Turning the screen off leaves previously approved exclusions in effect.
 
-Kew reference species names are matched to scientific names and synonyms in the
-frozen NCBI Taxonomy. A unique species TaxID supplies the reference lineage.
-Unmatched names use the genus and family. When multiple species TaxIDs match,
-the Kew family annotation, when available, limits the candidates to that
-family. A single remaining candidate supplies its lineage. For multiple
-remaining candidates, the reference uses their shared lineage down to the
-most specific shared rank. The screen
+Kew reference names are matched case-insensitively to scientific names and
+synonyms in the same NCBI Taxonomy used for samples. Merged TaxIDs are resolved,
+and candidates must have the queried rank and belong to Embryophyta (TaxID 3193).
+Species names are tried first, followed by genus names and then Kew family
+annotations only when the preceding rank has no eligible matches. A single
+candidate supplies its NCBI lineage. Multiple candidates are assigned to their
+lowest common ancestor, without further name matching or Kew family filtering.
+References are used only at the assigned node and above; unmatched references
+are excluded. Assignments above family remain available for higher-rank comparisons.
+The screen
 records the reference assignments once and shares them across all batches.
 To refresh NCBI Taxonomy, prepare a snapshot at a new path and pass it with
 `--taxonomy`. The original sample TaxID and accession remain in the source
 database.
 
 Captus runs one Scipio pass to recover Angiosperms353 CDS from single contigs. Loci with distinct
-retained copies are skipped. Same-run reference sequences are removed, including
-merged Kew run IDs. MMseqs2 aligns the same locus only. For each rank, the
-highest-scoring eligible alignment for the registered taxon and all co-leading
-alternative taxa are compared at the same A/C/G/T positions, requiring at least
+retained copies are skipped. MMseqs2 aligns the same locus only. For each locus
+and rank, the alignment with the highest raw score is retained within each taxon.
+Alternative taxa with the highest raw score are compared with the registered
+taxon at the same A/C/G/T positions, requiring at least
 150 positions and 70% of the query CDS. The highest identity wins. If several
 taxa share the highest identity, they split one vote equally, including the
 registered taxon when it ties for first.
 
-The screen follows the sample’s frozen NCBI lineage from genus toward the
-root and evaluates the first named rank with an unmasked reference in any
-recovered marker. It emits one result per run. If the selected rank has
-fewer than 50 comparable loci, the result is inconclusive. When no rank has
-a reference, the result is unassessed. At every evaluated rank, a registered
+Both methods follow the sample’s NCBI lineage from genus toward the root and
+select the first supported rank with at least 50 voting loci. The Kew method
+counts comparable loci, including split votes for ties; the OrthoDB method
+counts only untied loci and considers genus, family, and order. Each method
+emits one result per run. If no rank has enough voting loci, the closest rank
+with an eligible reference is reported as inconclusive. When no rank has a
+reference, the result is unassessed. At the selected rank, a registered
 vote share strictly below `taxonomy_screen.max_registered_support` (default 10%) flags the run for review.
 `--max-registered-support` overrides the config for a single run. `registered_support`
 and `discordance_support` are the registered and combined alternative vote
@@ -227,7 +248,8 @@ shares and add up to 100% of the votes cast. Loci without a valid comparison
 cast no vote. `support` reports the leading alternative’s share.
 
 For validation, `--samples` accepts a TSV with `run`, `taxid` and `cds` columns.
-`source_runs` and `exclude_accessions` can mask additional known sources.
+`source_runs` records the query's source accessions. `exclude_accessions`
+explicitly masks reference accessions.
 `--omit-same-species` uses the TSV's `scientific_name` column to mask exact
 species-name matches. `--loci` limits the validation to a marker list.
 

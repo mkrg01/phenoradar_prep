@@ -67,6 +67,9 @@ def test_orthodb_screen_reuses_busco_and_selects_rank_with_enough_votes(tmp_path
     assert result['statuses'] == {'discordant': 1}
     [summary] = read_tsv(output / 'summary.tsv')
     assert (summary['rank'], summary['alternative'], summary['voted_loci']) == ('family', '21', '2')
+    rank_rows = read_tsv(output / 'taxonomy_by_rank.tsv')
+    assert [row['Taxonomic rank'] for row in rank_rows] == ['genus', 'family', 'order']
+    assert [row['Taxonomic rank'] for row in rank_rows if row['Used for overall assessment'] == 'Yes'] == ['family']
     assert read_tsv(output / 'loci.tsv')[0]['shared_residues'] == '80'
     manifest = json.loads((output / 'screen.json').read_text())
     assert manifest['kind'] == 'orthodb_qc' and manifest['reference']['release'] == '12.2'

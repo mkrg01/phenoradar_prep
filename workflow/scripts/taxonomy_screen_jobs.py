@@ -15,9 +15,9 @@ import sys
 import time
 
 import angiosperms353 as qc
-from angiosperms353_reference import (BASE_URL, RELEASE, RANKS, KewReference, ReferenceTaxonomy, accessions,
+from angiosperms353_reference import (BASE_URL, RELEASE, RANKS, LAND_PLANTS_TAXID, KewReference, ReferenceTaxonomy, accessions,
                                       prepare_reference_taxonomy)
-from common import atomic_writer, now, text_open, write_json
+from common import atomic_writer, now, read_tsv, text_open, write_json, write_tsv
 from dataset_assets import SAFE, digest, locked, record, verify
 from phase_config import DEFAULT_TAXONOMY_BATCH_SIZE, array_concurrency, execution_config, normalize_slurm, time_minutes
 import scheduler
@@ -74,6 +74,8 @@ def batch_result(output, index, samples, plan):
             or [row['run'] for row in result['summaries']] != [row['run'] for row in samples]):
         raise ValueError(f'incompatible batch result: {path}')
     verify(result['loci'])
+    if result.get('rank_summary'):
+        verify(result['rank_summary'])
     return result
 
 
@@ -126,23 +128,30 @@ def run_batch(output, plan, index, samples, threads, ram, storage):
             else:
                 ancestry = [{rank: value[0] for rank, value in lineage.items() if rank in RANKS} for lineage in lineages]
             started = time.monotonic()
+            rank_summaries = []
             with atomic_writer(work / 'loci.tsv.gz') as handle:
                 evidence = csv.DictWriter(handle, qc.locus_fields(protein), delimiter='\t', lineterminator='\n')
                 evidence.writeheader()
                 summaries = qc.score_batch(samples, ancestry, by_locus, paths, assignments, scratch, work,
                                            threads, ram, settings['omit_same_species'], settings['min_loci'],
                                            Decimal(settings['max_registered_support']), evidence,
+                                           rank_summaries=rank_summaries,
                                            **({'protein': True} if protein else {}))
-            for row, taxid, lineage in zip(summaries, taxids, lineages, strict=True):
+            by_run = {sample['run']: (taxid, lineage) for sample, taxid, lineage
+                      in zip(samples, taxids, lineages, strict=True)}
+            for row in summaries + rank_summaries:
+                taxid, lineage = by_run[row['run']]
                 node = taxonomy.node(taxid)
                 species_id, species_name = lineage.get('species', (None, ''))
                 row.update(resolved_taxid=node[0] if node else None, resolved_species_taxid=species_id,
                            resolved_species_name=species_name)
                 for field in ('registered', 'alternative'):
                     row[f'{field}_name'] = taxonomy.node(row[field])[1] if row[field] is not None else ''
+            write_tsv(work / 'rank_summary.tsv.gz', qc.RANK_SUMMARY_FIELDS, rank_summaries)
             search_and_vote_seconds = time.monotonic() - started
         write_json(work / 'completed.json', dict(plan=plan['id'], summaries=summaries, reference=list(paths),
                    loci=record(work / 'loci.tsv.gz'), threads=threads, ram_gb=ram, reused_markers=reused_markers,
+                   rank_summary=record(work / 'rank_summary.tsv.gz'),
                    recovery_seconds=round(recovery_seconds, 3),
                    search_and_vote_seconds=round(search_and_vote_seconds, 3)), compact=True)
 
@@ -160,12 +169,19 @@ def finalize(output, plan):
             raise ValueError(f'incomplete taxonomy screen batches: {missing}; rerun screen-taxonomy with the same output')
         loci = sorted({locus for result in results for locus in result['reference']})
         summaries = [row for result in results for row in result['summaries']]
+        rank_files = [result['rank_summary'] for result in results if result.get('rank_summary')]
+        if rank_files and len(rank_files) != len(results):
+            raise ValueError('taxonomy batches contain incomplete rank summaries; use a new output')
+        rank_summaries = ([row for entry in rank_files for row in read_tsv(verify(entry))]
+                          if rank_files else None)
         manifest = output / 'screen.json'
         if manifest.is_file():
             saved = json.loads(manifest.read_text())
             if saved.get('plan_id') != plan['id']:
                 raise ValueError(f'incompatible taxonomy screen: {manifest}')
-            for entry in [saved['loci'], saved['summary'], saved['exclusion_candidates'], *saved['plots'].values()]:
+            for entry in [saved['loci'], saved['summary'], saved['exclusion_candidates'], *saved['plots'].values(),
+                          *(saved[key] for key in ('rank_summary', 'taxonomy_by_rank', 'taxonomy_summary', 'table_notes')
+                            if key in saved)]:
                 verify(entry)
         else:
             method = plan['settings'].get('method', 'angiosperms353')
@@ -181,7 +197,8 @@ def finalize(output, plan):
                     with text_open(result['loci']['path']) as source:
                         next(source)
                         shutil.copyfileobj(source, handle)
-            files = qc.write_report(output, summaries, Decimal(plan['settings']['max_registered_support']), method)
+            files = qc.write_report(output, summaries, Decimal(plan['settings']['max_registered_support']), method,
+                                    min_loci=plan['settings']['min_loci'], rank_summaries=rank_summaries)
             settings = dict(plan['settings'], batch_resources=[
                 dict(batch=index, threads=result['threads'], ram_gb=result['ram_gb'])
                 for index, result in enumerate(results, start=1)])
@@ -366,10 +383,12 @@ def screen(samples, *, cache, taxonomy, output, build=None, database=None, selec
     storage = config.get('storage', {})
     task_settings(storage, 'taxonomy_screen', [])
     settings = dict(min_loci=min_loci, max_registered_support=str(cutoff), batch_size=batch_size,
-                    reference_taxonomy='ncbi_species_first', rank_selection='closest_ancestor_with_reference', vote_denominator='comparable_loci',
+                    reference_taxonomy='ncbi_species_genus_family_lca', reference_scope_taxid=LAND_PLANTS_TAXID,
+                    rank_selection='closest_rank_with_enough_votes', vote_denominator='comparable_loci',
                     voting='common_identity_split_all_winners', min_bases=qc.MIN_BASES, coverage=qc.COVERAGE,
                     evalue=qc.EVALUE, captus_scipio_passes=1, mmseqs_kmer=10,
-                    omit_same_species=omit_same_species, restricted_loci=only_loci is not None)
+                    exclude_same_run=False, omit_same_species=omit_same_species,
+                    restricted_loci=only_loci is not None)
     if busco_lineage is not None:
         from orthodb_taxonomy import MIN_RESIDUES
         settings = dict(method='orthodb', busco_lineage=busco_lineage, translation_table=translation_table,
@@ -377,7 +396,8 @@ def screen(samples, *, cache, taxonomy, output, build=None, database=None, selec
                         reference_taxonomy='ncbi_species_taxid', rank_selection='closest_rank_with_enough_votes',
                         vote_denominator='untied_loci', voting='common_amino_acid_identity',
                         min_residues=MIN_RESIDUES, coverage=qc.COVERAGE, evalue=qc.EVALUE,
-                        omit_same_species=omit_same_species, restricted_loci=only_loci is not None)
+                        exclude_same_run=False, omit_same_species=omit_same_species,
+                        restricted_loci=only_loci is not None)
     with locked(output / '.screen.lock'):
         plan = prepare_plan(output, samples, cache, taxonomy, build, database, selection_config,
                             root, settings, only_loci, blat, **({'busco_dataset': busco_dataset} if busco_lineage else {}))

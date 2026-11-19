@@ -56,53 +56,152 @@ def test_kew_download_and_names(tmp_path, monkeypatch):
     assert reference.accessions('ERR1_ERR2 SRR3 unrelated') == {'ERR1', 'ERR2', 'SRR3'}
 
 
-def test_taxonomy_reconciles_synonyms_and_rejects_family_conflict(tmp_path):
+@pytest.fixture
+def reference_taxonomy(tmp_path):
     db = tmp_path / 'tax.sqlite'
     with sqlite3.connect(db) as connection:
         connection.executescript('''
             CREATE TABLE species(taxid INT, spname TEXT COLLATE NOCASE, rank TEXT, track TEXT);
             CREATE TABLE synonym(taxid INT, spname TEXT COLLATE NOCASE);
             CREATE TABLE merged(taxid_old INT, taxid_new INT);
-            INSERT INTO species VALUES (1,'root','no rank','1'), (2,'Family','family','2,7,1'),
-              (3,'Otheraceae','family','3,1'), (4,'Genus','genus','4,6,5,2,7,1'),
-              (5,'Subfamily','subfamily','5,2,7,1'), (6,'Tribe','tribe','6,5,2,7,1'),
-              (7,'Order','order','7,1'), (8,'Genus species','species','8,4,6,5,2,7,1'),
-              (9,'Genus second','species','9,4,6,5,2,7,1'), (10,'Othergenus','genus','10,2,7,1'),
-              (12,'Othergenus third','species','12,10,2,7,1'),
-              (13,'Animalgenus','genus','13,3,1'), (14,'Animalgenus species','species','14,13,3,1');
+            INSERT INTO species VALUES (1,'root','no rank','1'),
+              (3193,'Embryophyta','clade','3193,1'),
+              (2,'Family','family','2,7,3193,1'), (3,'Otheraceae','family','3,7,3193,1'),
+              (4,'Genus','genus','4,6,5,2,7,3193,1'),
+              (5,'Subfamily','subfamily','5,2,7,3193,1'), (6,'Tribe','tribe','6,5,2,7,3193,1'),
+              (7,'Order','order','7,3193,1'), (8,'Genus species','species','8,4,6,5,2,7,3193,1'),
+              (9,'Genus second','species','9,4,6,5,2,7,3193,1'),
+              (10,'Othergenus','genus','10,2,7,3193,1'),
+              (12,'Othergenus third','species','12,10,2,7,3193,1'),
+              (13,'Animalgenus','genus','13,30,1'), (14,'Animalgenus species','species','14,13,30,1'),
+              (15,'Thirdgenus','genus','15,3,7,3193,1'),
+              (16,'Thirdgenus fourth','species','16,15,3,7,3193,1'),
+              (18,'Animalgenus other','species','18,13,30,1'),
+              (23,'Outsideorder','order','23,3193,1'), (24,'Outsidefamily','family','24,23,3193,1'),
+              (25,'Outside','genus','25,24,23,3193,1'),
+              (26,'Outside species','species','26,25,24,23,3193,1'),
+              (30,'Animalaceae','family','30,1');
             INSERT INTO synonym VALUES (4,'Synonymus'), (2,'Oldaceae'), (11,'Othergenus species'),
+              (17,'Othergenus species'), (8,'Animalgenus species'), (8,'Genus'),
               (8,'Ambiguous species'), (9,'Ambiguous species'), (14,'Ambiguous species'),
               (8,'Genus species'), (14,'Genus species'),
-              (8,'Crossgenus species'), (12,'Crossgenus species');
-            INSERT INTO merged VALUES (11,8);
+              (8,'Crossgenus species'), (12,'Crossgenus species'),
+              (8,'Crossfamily species'), (16,'Crossfamily species'),
+              (4,'Sharedgenus'), (10,'Sharedgenus'), (2,'Sharedaceae'), (3,'Sharedaceae');
+            INSERT INTO merged VALUES (11,8), (17,11);
         ''')
     tax = reference.ReferenceTaxonomy(db)
     try:
-        assert tax.reconcile('synonymus', 'Oldaceae') == (2, 4)
-        assert tax.reconcile('Genus', 'Otheraceae') == (None, None)
-        assert tax.reconcile('Unknown', 'Family') == (2, None)
-        assert dict(zip(qc.RANKS, tax.reference_ranks('Synonymus', 'Oldaceae')))['tribe'] == 6
-        unknown = dict(zip(qc.RANKS, tax.reference_ranks('Unknown', 'Family')))
-        assert unknown['family'] == 2 and unknown['order'] == 7 and unknown['genus'] is None
-        assignment = tax.resolve_reference('Othergenus_species', 'Family')
-        assert assignment['method'] == 'species' and assignment['taxid'] == 8
-        assert assignment['ranks'][qc.RANKS.index('genus')] == 4
-        assert tax.resolve_reference('Othergenus_species', 'Otheraceae')['family_conflict']
-        disambiguated = tax.resolve_reference('Genus_species', 'Oldaceae')
-        assert disambiguated['method'] == 'species' and disambiguated['taxid'] == 8
-        assert disambiguated['candidates'] == (8, 14)
-        assert disambiguated['ranks'] == assignment['ranks']
-        ambiguous = tax.resolve_reference('Ambiguous_species', 'Family')
-        assert ambiguous['method'] == 'ambiguous_species' and 'taxid' not in ambiguous
-        assert ambiguous['candidates'] == (8, 9, 14)
-        assert ambiguous['ranks'] == assignment['ranks']
-        crossgenus = tax.resolve_reference('Crossgenus_species', 'Family')
-        assert crossgenus['ranks'][0] == 2 and crossgenus['ranks'][qc.RANKS.index('genus')] is None
-        assert all(rank is None for rank in tax.resolve_reference('Crossgenus_species', 'Otheraceae')['ranks'])
-        assert tax.resolve_reference('Crossgenus_species', None)['ranks'] == crossgenus['ranks']
-        assert tax.resolve_reference('Othergenus_unlisted', 'Family')['method'] == 'genus'
+        yield tax, db
     finally:
         tax.db.close()
+
+
+def test_reference_names_resolve_mergers_and_filter_nonplant_homonyms(reference_taxonomy):
+    tax, _ = reference_taxonomy
+    assert tax.name_ids('  OTHERGENUS_species  ', 'species') == (8,)
+    assert tax.name_ids('Genus', 'genus') == (4,)
+    assert tax.name_ids('Animalgenus', 'genus') == ()
+    for name in ['Genus_species', 'Othergenus_species', 'Animalgenus_species']:
+        assignment = tax.resolve_reference(name, 'Otheraceae')
+        assert assignment['method'] == 'species' and assignment['taxid'] == 8
+        assert assignment['ranks'][qc.RANKS.index('genus')] == 4
+        assert assignment['candidates'] == (8,)
+
+
+@pytest.mark.parametrize('species,family,method,taxid', [
+    ('Genus_species', 'Unknownaceae', 'species', 8),
+    ('Genus_unlisted', 'Unknownaceae', 'genus', 4),
+    ('Genus_unlisted', 'Otheraceae', 'genus', 4),
+    ('Synonymus_unlisted', None, 'genus', 4),
+    ('Unknown_species', 'Oldaceae', 'family', 2),
+    ('Animalgenus_other', 'Family', 'family', 2),
+    ('Animalgenus_other', 'Animalaceae', 'unresolved', None),
+    ('Unknown_species', 'Unknownaceae', 'unresolved', None),
+])
+def test_reference_names_use_species_genus_family_priority(reference_taxonomy, species, family, method, taxid):
+    tax, _ = reference_taxonomy
+    assignment = tax.resolve_reference(species, family)
+    assert (assignment['method'], assignment['taxid']) == (method, taxid)
+    assigned = assignment['ranks']
+    if method in {'family', 'unresolved'}:
+        assert assigned[qc.RANKS.index('genus')] is None
+    if method == 'unresolved':
+        assert all(value is None for value in assigned)
+
+
+@pytest.mark.parametrize('species,family,method,taxid,assigned_rank,candidates', [
+    ('Ambiguous_species', 'Otheraceae', 'ambiguous_species', 4, 'genus', (8, 9)),
+    ('Crossgenus_species', 'Unknownaceae', 'ambiguous_species', 2, 'family', (8, 12)),
+    ('Crossfamily_species', 'Family', 'ambiguous_species', 7, 'order', (8, 16)),
+    ('Sharedgenus_unlisted', 'Otheraceae', 'ambiguous_genus', 2, 'family', (4, 10)),
+    ('Unknown_species', 'Sharedaceae', 'ambiguous_family', 7, 'order', (2, 3)),
+])
+def test_ambiguous_reference_names_stop_at_the_common_ancestor(reference_taxonomy, species, family,
+                                                             method, taxid, assigned_rank, candidates):
+    tax, _ = reference_taxonomy
+    assignment = tax.resolve_reference(species, family)
+    assert (assignment['method'], assignment['taxid'], assignment['assigned_rank']) == (method, taxid, assigned_rank)
+    assert assignment['candidates'] == candidates
+    if assigned_rank in {'family', 'order'}:
+        assert assignment['ranks'][qc.RANKS.index('genus')] is None
+    if assigned_rank == 'order':
+        assert assignment['ranks'][qc.RANKS.index('family')] is None
+
+
+def test_above_family_reference_assignments_can_supply_order_votes(tmp_path, reference_taxonomy, monkeypatch):
+    _, taxonomy = reference_taxonomy
+    path = tmp_path / 'locus.fna'
+    path.write_text('>1 Species:Crossfamily_species Repository:INSDC Sequence_ID:ERR2\n' + 'A' * 200 + '\n'
+                    '>1 Species:Outside_species Repository:INSDC Sequence_ID:ERR3\n' + 'C' * 200 + '\n')
+    tree = tmp_path / 'kew.nwk'
+    tree.write_text('(Order_Family_Crossfamily_species_ERR2,Outsideorder_Outsidefamily_Outside_species_ERR3);')
+    output = tmp_path / 'assignments.json'
+    reference.prepare_reference_taxonomy({'1': path}, taxonomy, tree, output)
+    assignments = qc.json.loads(output.read_text())
+    rows = list(reference.reference_rows(path, '1', assignments))
+    assert len(rows) == 2
+    assert rows[0][3][qc.RANKS.index('family')] is None
+    assert rows[0][3][qc.RANKS.index('order')] == 7
+
+    @contextmanager
+    def search(*args):
+        refs = [(species, repository, accession, ranks, reference.accessions(accession), sequence)
+                for species, repository, accession, ranks, sequence in rows]
+        hits = tmp_path / 'hits.tsv'
+        hits.write_text('0\t0\t400\t1\t200\t1\t200\t200M\n0\t1\t300\t1\t200\t1\t200\t200M\n')
+        yield refs, hits
+
+    monkeypatch.setattr(qc, 'search_locus', search)
+    sample = dict(run='ERR1', taxid='8', source_runs={'ERR1'}, exclude_accessions=set())
+    evidence = SimpleNamespace(rows=[])
+    evidence.writerows = evidence.rows.extend
+    [summary] = qc.score_batch([sample], [{'genus': 4, 'family': 2, 'order': 7}], {'1': {0: 'A' * 200}},
+                               {'1': path}, assignments, tmp_path, tmp_path, 1, 2, False, 1, Decimal('.10'), evidence)
+    assert (summary['rank'], summary['status'], summary['registered']) == ('order', 'no_discordance', 7)
+
+
+@pytest.mark.parametrize('lineage', [{'genus': 4, 'family': 2}, {}])
+def test_locus_without_eligible_references_is_unassessed(tmp_path, monkeypatch, lineage):
+    path = tmp_path / 'locus.fna'
+    path.write_text('>1 Species:Unknown_species Repository:INSDC Sequence_ID:ERR2\n' + 'A' * 200 + '\n')
+    assignments = {'Unknown_species|INSDC|ERR2': dict(ranks=[None] * len(qc.RANKS))}
+
+    def search(*args, **kwargs):
+        pytest.fail('MMseqs2 must not run without eligible reference sequences')
+
+    monkeypatch.setattr(qc.subprocess, 'run', search)
+    sample = dict(run='ERR1', taxid='8', source_runs={'ERR1'}, exclude_accessions=set())
+    evidence = SimpleNamespace(rows=[])
+    evidence.writerows = evidence.rows.extend
+    rank_summaries = []
+    [summary] = qc.score_batch([sample], [lineage], {'1': {0: 'A' * 200}}, {'1': path},
+                               assignments, tmp_path, tmp_path, 1, 2, False, 50, Decimal('.10'), evidence,
+                               rank_summaries=rank_summaries)
+    assert (summary['rank'], summary['status'], summary['comparable_loci']) == (None, 'no_reference', 0)
+    assert evidence.rows == []
+    assert len(rank_summaries) == max(1, len(lineage))
+    assert all(row['status'] == 'no_reference' and not row['selected'] for row in rank_summaries)
 
 
 def test_common_identity_breaks_mmseqs_ties_and_splits_equal_alternatives():
@@ -159,11 +258,11 @@ def test_same_strict_registered_threshold_at_all_ranks(rank):
                         cutoff)['status'] == 'insufficient_comparison'
 
 
-def test_closest_reference_respects_masking_and_can_reach_order():
+def test_closest_reference_respects_explicit_exclusion_and_can_reach_order():
     def ref(source, **lineage):
         return ('Species_x', 'INSDC', source, tuple(lineage.get(r) for r in qc.RANKS), {source}, 'A')
 
-    sample = dict(run='ERR1', taxid='10', source_runs={'ERR1'}, exclude_accessions=set())
+    sample = dict(run='ERR1', taxid='10', source_runs={'ERR1'}, exclude_accessions={'ERR1'})
     lineage = {'genus': 10, 'tribe': 20, 'family': 30, 'order': 40}
     masked = ref('ERR1', genus=10, tribe=20, family=30, order=40)
     order = ref('ERR2', genus=11, tribe=21, family=31, order=40)
@@ -171,16 +270,19 @@ def test_closest_reference_respects_masking_and_can_reach_order():
     assert qc.closest_reference_rank(lineage, [masked, order], sample, False) == 'order'
     assert qc.closest_reference_rank(lineage, [masked, order, tribe], sample, False) == 'tribe'
     assert qc.closest_reference_rank(lineage, [masked], sample, False) is None
+    sample['exclude_accessions'].clear()
+    assert qc.closest_reference_rank(lineage, [masked, order], sample, False) == 'genus'
 
 
-def test_later_genus_reference_prevents_fallback_on_insufficient_overlap(tmp_path, monkeypatch):
+@pytest.mark.parametrize('genus_locus', ['1', '50'])
+def test_sparse_genus_reference_falls_back_to_family(tmp_path, monkeypatch, genus_locus):
     sample = dict(run='ERR1', taxid='10', source_runs=set(), exclude_accessions=set())
     lineage = {'genus': 10, 'family': 20}
     marker_path = tmp_path / 'markers.fna'
-    marker_path.write_text('>sample__1\n' + 'A' * 200 + '\n>sample__2\n' + 'A' * 200 + '\n')
+    marker_path.write_text(''.join(f'>sample__{locus}\n' + 'A' * 200 + '\n' for locus in range(1, 51)))
     @contextmanager
     def search(locus, *args):
-        genus = 10 if locus == '2' else 11
+        genus = 10 if locus == genus_locus else 11
         ranks = tuple({'family': 20, 'genus': genus}.get(r) for r in qc.RANKS)
         yield [('Species_x', 'INSDC', 'ERR2', ranks, set(), 'A')], marker_path
 
@@ -195,11 +297,62 @@ def test_later_genus_reference_prevents_fallback_on_insufficient_overlap(tmp_pat
     markers = qc.markers(marker_path)
     summaries = qc.score_batch([sample], [lineage], {locus: {0: sequence} for locus, sequence in markers.items()},
                                dict.fromkeys(markers, marker_path), None, tmp_path, tmp_path,
-                               1, 2, False, 1, Decimal('.20'), evidence)
+                               1, 2, False, 50, Decimal('.20'), evidence)
     assert len(summaries) == 1
-    assert summaries[0]['rank'] == 'genus'
-    assert summaries[0]['status'] == 'insufficient_comparison'
-    assert {r['rank'] for r in evidence.rows} == {'genus'}
+    assert summaries[0]['rank'] == 'family'
+    assert summaries[0]['status'] == 'no_discordance'
+    assert summaries[0]['comparable_loci'] == 50
+    assert len(evidence.rows) == 50
+    assert {r['rank'] for r in evidence.rows} == {'family'}
+
+
+@pytest.mark.parametrize('genus_loci,tribe_loci,family_loci,genus_vote,expected_rank,expected_status', [
+    (49, 49, 50, 'registered', 'family', 'no_discordance'),
+    (49, 50, 50, 'registered', 'tribe', 'no_discordance'),
+    (50, 50, 50, 'registered', 'genus', 'no_discordance'),
+    (49, 49, 49, 'registered', 'genus', 'insufficient_comparison'),
+    (50, 50, 50, 'alternative', 'genus', 'discordant'),
+    (50, 50, 50, 'tie', 'genus', 'no_discordance'),
+])
+def test_rank_fallback_requires_enough_comparable_loci(tmp_path, monkeypatch, genus_loci, tribe_loci,
+                                                     family_loci, genus_vote, expected_rank, expected_status):
+    sample = dict(run='ERR1', taxid='10', source_runs=set(), exclude_accessions=set())
+    lineage = {'genus': 10, 'tribe': 15, 'family': 20}
+    query = 'A' * 200
+    refs = [('Registered_species', 'INSDC', 'ERR2',
+             tuple(lineage.get(rank) for rank in qc.RANKS), set(), query),
+            ('Alternative_species', 'INSDC', 'ERR3',
+             tuple(lineage.get(rank, 0) + 1 if rank in lineage else None for rank in qc.RANKS), set(), query)]
+
+    @contextmanager
+    def search(locus, *args):
+        yield refs, tmp_path / locus
+
+    def hits(path, *args, **kwargs):
+        groups = {}
+        for rank, count in [('genus', genus_loci), ('tribe', tribe_loci), ('family', family_loci)]:
+            if int(path.name) <= count:
+                choice = genus_vote if rank == 'genus' else 'registered'
+                original = qc.Hit(0, 400, 1, 200, query, 'C' + query[1:] if choice == 'alternative' else query)
+                alternative = qc.Hit(1, 400, 1, 200, query, 'C' + query[1:] if choice == 'registered' else query)
+                groups[rank] = {lineage[rank]: original, lineage[rank] + 1: alternative}
+        return {0: groups}
+
+    monkeypatch.setattr(qc, 'search_locus', search)
+    monkeypatch.setattr(qc, 'read_hits', hits)
+    evidence = SimpleNamespace(rows=[])
+    evidence.writerows = evidence.rows.extend
+    paths = {str(locus): tmp_path / str(locus) for locus in range(1, 51)}
+    rank_summaries = []
+    [summary] = qc.score_batch([sample], [lineage], {locus: {0: query} for locus in paths}, paths, None,
+                               tmp_path, tmp_path, 1, 2, False, 50, Decimal('.10'), evidence,
+                               rank_summaries=rank_summaries)
+    assert (summary['rank'], summary['status']) == (expected_rank, expected_status)
+    assert summary['comparable_loci'] == (49 if expected_status == 'insufficient_comparison' else 50)
+    assert {row['rank'] for row in evidence.rows} == {expected_rank}
+    assert [row['rank'] for row in rank_summaries] == list(lineage)
+    assert [row['comparable_loci'] for row in rank_summaries] == [genus_loci, tribe_loci, family_loci]
+    assert [row['rank'] for row in rank_summaries if row['selected']] == [expected_rank]
 
 
 def test_cigar_reconstructs_gaps_and_reverse_strands():
@@ -209,14 +362,23 @@ def test_cigar_reconstructs_gaps_and_reverse_strands():
         qc.alignment_from_cigar('AACG','AACG',1,4,1,4,'3M')
 
 
-def test_mask_same_source_before_picking_best_hit(tmp_path):
+@pytest.mark.parametrize('accession,source_runs', [('ERR2', {'ERR2'}), ('ERR1_ERR2', {'ERR1', 'ERR2'})])
+def test_same_run_reference_can_be_best_hit(tmp_path, accession, source_runs):
     seq = 'A' * 160
-    refs = [('One_species', 'INSDC', 'ERR1_ERR2', tuple({'family': 1, 'genus': 10}.get(r) for r in qc.RANKS), {'ERR1', 'ERR2'}, seq),
+    refs = [('One_species', 'INSDC', accession, tuple({'family': 1, 'genus': 10}.get(r) for r in qc.RANKS), source_runs, seq),
             ('One_other', 'INSDC', 'ERR3', tuple({'family': 1, 'genus': 10}.get(r) for r in qc.RANKS), {'ERR3'}, seq)]
     hits = tmp_path / 'hits.tsv'
     hits.write_text('0\t0\t320\t1\t160\t1\t160\t160M\n0\t1\t315\t1\t160\t1\t160\t160M\n')
     sample = dict(source_runs={'ERR2'}, exclude_accessions=set(), species_name='one species')
-    assert [hit.target for hit in qc.read_hits(hits, {0: seq}, refs, [sample], omit_same_species=False)[0]['family'].values()] == [1]
+
+    def best_target(omit_same_species=False):
+        return [hit.target for hit in qc.read_hits(hits, {0: seq}, refs, [sample],
+                                                 omit_same_species=omit_same_species)[0]['family'].values()]
+
+    assert best_target() == [0]
+    assert best_target(omit_same_species=True) == [1]
+    sample['exclude_accessions'].add(accession)
+    assert best_target() == [1]
 
 
 def test_screen_config_skips_work_and_replots_exact_cutoff(sample_project):
@@ -264,6 +426,121 @@ def test_screen_config_skips_work_and_replots_exact_cutoff(sample_project):
         positions = [plot.index(title + ' · ') for title in titles]
         assert positions == sorted(positions)
     assert read_tsv(src / 'summary.tsv')[0]['status'] == 'discordant'
+    assert (root / 'report/taxonomy_summary.tsv').is_file()
+    assert not (root / 'report/taxonomy_by_rank.tsv').exists()
+
+
+def test_taxonomy_table_reports_votes_and_preserves_missing_values():
+    sample = dict(run='ERR1', taxid='8')
+    tied = dict(vote='tie', alternative_winners=[10, 11])
+    summary = qc.summarize(sample, 'genus', 4, [tied] * 30, 30, 50, Decimal('.10'))
+    summary.update(resolved_taxid=8, resolved_species_name='Genus species', registered_name='Genus',
+                   alternative_name='Othergenus')
+    missing = qc.summarize(dict(run='ERR2', taxid='9'), None, None, [], 0, 50, Decimal('.10'))
+    summary['selected'] = False
+    [shown, unassessed] = list(qc.taxonomy_table_rows([summary, missing]))
+    assert list(shown) == qc.TAXONOMY_TABLE_FIELDS
+    assert shown['NCBI species name'] == 'Genus species'
+    assert shown['Comparable loci'] == shown['Tied loci'] == 30
+    assert shown['Reported taxon vote share (%)'] == '33.33'
+    assert shown['Leading alternative vote share (%)'] == '33.33'
+    assert shown['Rank assessment'] == 'Insufficient comparable loci'
+    assert shown['Used for overall assessment'] == 'No'
+    assert unassessed['Recovered loci'] == unassessed['Comparable loci'] == 0
+    assert unassessed['Reported taxon vote share (%)'] == 'NA'
+    assert unassessed['Leading alternative vote share (%)'] == 'NA'
+    assert unassessed['Rank assessment'] == 'No eligible reference'
+    assert unassessed['Used for overall assessment'] == 'No'
+
+
+def test_rank_replot_uses_exact_fractional_votes(tmp_path):
+    source = tmp_path / 'source'
+    source.mkdir()
+    tied = dict(run='ERR1', rank='genus', locus='1', vote='tie', alternative_winners=[20, 30])
+    detail = qc.summarize(dict(run='ERR1', taxid='8'), 'genus', 4, [tied], 1, 1, Decimal('.10'), exact_votes=True)
+    detail['selected'] = True
+    write_tsv(source / 'rank_summary.tsv', qc.RANK_SUMMARY_FIELDS, [detail])
+    write_tsv(source / 'summary.tsv', qc.SUMMARY_FIELDS,
+              [{key: value for key, value in detail.items() if key in qc.SUMMARY_FIELDS}])
+    write_tsv(source / 'loci.tsv', qc.LOCUS_FIELDS, [tied])
+    write_json(source / 'screen.json', dict(kind='angiosperms353_qc', schema_version=3,
+               settings=dict(min_loci=1, max_registered_support='.10'),
+               summary=record(source / 'summary.tsv'), rank_summary=record(source / 'rank_summary.tsv'),
+               loci=record(source / 'loci.tsv')))
+    for index, (cutoff, expected) in enumerate([
+            ('.3333333333333333333333333333', 'no_discordance'),
+            ('.3333333333333333333333333334', 'discordant')]):
+        output = tmp_path / f'report{index}'
+        qc.report(source / 'screen.json', output, registered_support=cutoff)
+        [rank] = read_tsv(output / 'rank_summary.tsv')
+        [selected] = read_tsv(output / 'summary.tsv')
+        assert rank['registered_vote_fraction'] == '1/3'
+        assert rank['status'] == selected['status'] == expected
+
+
+def test_thirty_recovered_loci_are_searched_and_exported(tmp_path, reference_taxonomy, monkeypatch):
+    _, taxonomy = reference_taxonomy
+    query = 'A' * 200
+    cds = tmp_path / 'markers.fna'
+    cds.write_text(''.join(f'>sample__{locus}\n{query}\n' for locus in range(1, 31)))
+    tree = tmp_path / 'kew.nwk'
+    tree.write_text('(Order_Family_Genus_species_ERR2,Outsideorder_Outsidefamily_Outside_species_ERR3);')
+    paths = {}
+    for locus in map(str, range(1, 31)):
+        path = paths[locus] = tmp_path / f'{locus}.fna'
+        path.write_text(f'>{locus} Species:Genus_species Repository:INSDC Sequence_ID:ERR2\n{query}\n'
+                        f'>{locus} Species:Outside_species Repository:INSDC Sequence_ID:ERR3\nC{query[1:]}\n')
+    monkeypatch.setattr(jobs, 'tool_versions', lambda: {'captus': 'test', 'mmseqs': 'test'})
+    monkeypatch.setattr(jobs.KewReference, 'manifests', lambda self: [tree])
+    monkeypatch.setattr(jobs.KewReference, 'loci', lambda self, selected: paths)
+    monkeypatch.setattr(qc, 'extract', lambda *args, **kwargs: [cds])
+    searches = []
+
+    def search(argv, **kwargs):
+        assert argv[:2] == ['mmseqs', 'easy-search']
+        searches.append(argv[2])
+        [(query_id, sequence)] = list(reference.fasta(argv[2]))
+        with open(argv[4], 'w') as handle:
+            for target, bases in reference.fasta(argv[3]):
+                score = 2 * sum(a == b for a, b in zip(sequence, bases, strict=True))
+                handle.write(f'{query_id}\t{target}\t{score}\t1\t200\t1\t200\t200M\n')
+
+    monkeypatch.setattr(qc.subprocess, 'run', search)
+    output = tmp_path / 'screen'
+    result = qc.screen([dict(run='ERR1', taxid='8', cds=record(cds))], cache=tmp_path / 'cache',
+                       taxonomy=taxonomy, output=output, blat=sys.executable,
+                       config={'storage': {'temporary_directory': 'workspace'}})
+    assert len(searches) == 30
+    assert result['statuses'] == {'insufficient_comparison': 1}
+    [summary] = read_tsv(output / 'summary.tsv')
+    assert summary['extracted_loci'] == summary['comparable_loci'] == '30'
+    assert summary['registered_support'] == '1'
+    rank_rows = read_tsv(output / 'taxonomy_by_rank.tsv')
+    assert [row['Taxonomic rank'] for row in rank_rows] == ['genus', 'tribe', 'subfamily', 'family', 'order']
+    [shown] = [row for row in rank_rows if row['Used for overall assessment'] == 'Yes']
+    assert shown['Run accession'] == 'ERR1'
+    assert shown['NCBI species name'] == 'Genus species'
+    assert shown['Recovered loci'] == shown['Comparable loci'] == '30'
+    assert shown['Reported taxon vote share (%)'] == '100.00'
+    assert shown['Rank assessment'] == 'Insufficient comparable loci'
+    for row in rank_rows:
+        if row['Taxonomic rank'] in {'tribe', 'subfamily'}:
+            assert row['Comparable loci'] == '0'
+            assert row['Reported taxon vote share (%)'] == 'NA'
+        else:
+            assert row['Comparable loci'] == '30'
+            assert row['Reported taxon vote share (%)'] == '100.00'
+    assert read_tsv(output / 'exclusion_candidates.tsv') == []
+    assert 'at least 50 comparable loci' in (output / 'taxonomy_table_notes.txt').read_text()
+    receipt = qc.json.loads((output / 'screen.json').read_text())
+    assert qc.verify(receipt['taxonomy_by_rank']).name == 'taxonomy_by_rank.tsv'
+    assert qc.verify(receipt['table_notes']).name == 'taxonomy_table_notes.txt'
+    assert qc.verify(receipt['rank_summary']).name == 'rank_summary.tsv'
+    assert not (output / 'supplementary_table.tsv').exists()
+    replot = tmp_path / 'replot'
+    qc.report(output / 'screen.json', replot, registered_support='.20')
+    assert len(searches) == 30
+    assert read_tsv(replot / 'taxonomy_by_rank.tsv') == rank_rows
 
 
 def test_screen_portable_database_and_reuse_retained_products(sample_project, monkeypatch):
@@ -398,13 +675,15 @@ def test_screen_batches_of_50_reuse_markers_after_failed_search(tmp_path, monkey
         return [cds] * len(samples)
 
     def score(batch, ancestry, queries, paths, assignments, scratch, work, threads, ram, omit, minimum, cutoff,
-              evidence):
+              evidence, *, rank_summaries):
         scores.append(len(batch))
         assert len(queries['1']) == len(batch)
         if len(scores) == 1:
             raise ValueError('simulated search failure')
         evidence.writerows(dict(run=row['run'], locus='1') for row in batch)
-        return [qc.summarize(row, None, None, [], 1, minimum, cutoff) for row in batch]
+        result = [qc.summarize(row, None, None, [], 1, minimum, cutoff) for row in batch]
+        rank_summaries.extend(dict(row, selected=False, registered_vote_fraction='0') for row in result)
+        return result
 
     monkeypatch.setattr(qc, 'extract', extract)
     monkeypatch.setattr(qc, 'score_batch', score)
@@ -420,6 +699,11 @@ def test_screen_batches_of_50_reuse_markers_after_failed_search(tmp_path, monkey
         jobs.finalize(output, qc.json.loads((output / 'plan.json').read_text()))
     result = qc.screen(samples, **kwargs)
     assert result['batches'] == 3
+    settings = qc.json.loads((output / 'screen.json').read_text())['settings']
+    assert settings['rank_selection'] == 'closest_rank_with_enough_votes'
+    assert settings['reference_taxonomy'] == 'ncbi_species_genus_family_lca'
+    assert settings['reference_scope_taxid'] == 3193
+    assert settings['exclude_same_run'] is False
     assert extractions == [50, 50, 1]
     assert scores == [50, 50, 50, 1]
     receipt = qc.json.loads((output / 'batches/0001/completed.json').read_text())

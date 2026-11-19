@@ -17,6 +17,7 @@ BASE_URL = f'https://sftp.kew.org/pub/paftol/releases/{RELEASE}'
 TREE = f'tree/species/treeoflife.{RELEASE}.tree'
 LOCUS = re.compile(r'[0-9]+')
 RUN = re.compile(r'(?:[DES]RR)[0-9]+', re.I)
+LAND_PLANTS_TAXID = 3193
 LEGACY_RANKS = ('family', 'genus')
 INTERMEDIATE_RANKS = ('family', 'subfamily', 'supertribe', 'tribe', 'subtribe', 'genus')
 RANKS = (*INTERMEDIATE_RANKS, 'superfamily', 'parvorder', 'infraorder', 'suborder',
@@ -122,74 +123,52 @@ def kew_families(tree_path):
 
 
 class ReferenceTaxonomy(Taxonomy):
+    def __init__(self, path):
+        from ete4 import NCBITaxa
+
+        path = Path(path).resolve()
+        if not path.is_file():
+            raise ValueError(f'taxonomy database missing: {path}')
+        self.ncbi = NCBITaxa(dbfile=str(path), update=False)
+        self.db = self.ncbi.db
+        self.db.execute('PRAGMA query_only=ON')
+
+    @lru_cache(maxsize=None)
+    def ancestor_ids(self, taxid):
+        node = self.node(taxid)
+        return tuple(self.ncbi.get_lineage(node[0])) if node is not None else ()
+
     @lru_cache(maxsize=None)
     def name_ids(self, name, rank):
-        return {row[0] for row in self.db.execute('''
-            SELECT taxid FROM species WHERE spname=? AND rank=?
-            UNION
-            SELECT s.taxid FROM synonym n JOIN species s ON s.taxid=n.taxid
-            WHERE n.spname=? COLLATE NOCASE AND s.rank=?
-        ''', (name, rank, name, rank))}
-
-    @lru_cache(maxsize=None)
-    def reconcile(self, genus, family):
-        genera = self.name_ids(genus, 'genus')
-        families = self.name_ids(family, 'family') if family else set()
-        if family and not families:
-            return (None, None)
-        if families:
-            matching = {g for g in genera if self.lineage(g).get('family', (None,))[0] in families}
-            if genera and not matching:
-                return (None, None)
-            genera = matching
-        if len(genera) == 1:
-            gid = next(iter(genera))
-            return (self.lineage(gid).get('family', (None,))[0], gid)
-        return (next(iter(families)) if len(families) == 1 else None, None)
-
-    @lru_cache(maxsize=None)
-    def reference_ranks(self, genus, family):
-        family_id, genus_id = self.reconcile(genus, family)
-        anchor = genus_id if genus_id is not None else family_id
-        lineage = self.lineage(anchor) if anchor is not None else {}
-        return tuple(family_id if rank == 'family' else lineage.get(rank, (None,))[0]
-                     for rank in RANKS)
-
-
-    @lru_cache(maxsize=None)
-    def species_ids(self, name):
+        name = ' '.join((name or '').replace('_', ' ').split())
+        if not name:
+            return ()
         candidates = set()
-        for table in ('species', 'synonym'):
-            for (taxid,) in self.db.execute(f'SELECT taxid FROM {table} WHERE spname=? COLLATE NOCASE', (name,)):
-                node = self.node(taxid)
-                if node is not None and node[2] == 'species':
-                    candidates.add(node[0])
+        for (taxid,) in self.db.execute('''
+            SELECT taxid FROM species WHERE spname=? COLLATE NOCASE
+            UNION
+            SELECT taxid FROM synonym WHERE spname=? COLLATE NOCASE
+        ''', (name, name)):
+            node = self.node(taxid)
+            if node is not None and node[2] == rank and LAND_PLANTS_TAXID in self.ancestor_ids(node[0]):
+                candidates.add(node[0])
         return tuple(sorted(candidates))
 
     def resolve_reference(self, species, family):
         name = ' '.join(species.replace('_', ' ').split())
-        candidates = self.species_ids(name)
-        if candidates:
-            family_ids = self.name_ids(family, 'family') if family else set()
-            lineages = {taxid: self.lineage(taxid) for taxid in candidates}
-            if len(candidates) > 1 and family:
-                lineages = {taxid: lineage for taxid, lineage in lineages.items()
-                            if lineage.get('family', (None,))[0] in family_ids}
-            first = next(iter(lineages.values()), {})
-            # Shared TaxIDs retain the most specific supported assignment and its ancestors.
-            ranks = [first[rank][0] if rank in first and all(
-                lineage.get(rank) == first[rank] for lineage in lineages.values()) else None
-                for rank in RANKS]
-            result = dict(ranks=ranks)
-            if len(candidates) > 1:
-                result['candidates'] = candidates
-            if len(lineages) == 1:
-                return dict(result, method='species', taxid=next(iter(lineages)),
-                            family_conflict=bool(family_ids and ranks[0] not in family_ids))
-            return dict(result, method='ambiguous_species')
-        ranks = self.reference_ranks(species.split('_', 1)[0], family)
-        method = 'genus' if ranks[RANKS.index('genus')] is not None else 'family' if ranks[0] else 'unresolved'
-        return dict(method=method, ranks=ranks)
+        genus = name.split()[0] if name else ''
+        for rank, query in [('species', name), ('genus', genus), ('family', family)]:
+            candidates = self.name_ids(query, rank)
+            if not candidates:
+                continue
+            paths = [self.ancestor_ids(taxid) for taxid in candidates]
+            anchor = next(taxid for taxid in reversed(paths[0]) if all(taxid in path for path in paths[1:]))
+            lineage = self.lineage(anchor)
+            return dict(method=rank if len(candidates) == 1 else f'ambiguous_{rank}',
+                        matched_rank=rank, taxid=anchor, assigned_rank=self.node(anchor)[2],
+                        candidates=candidates, ranks=[lineage.get(level, (None,))[0] for level in RANKS])
+        return dict(method='unresolved', matched_rank=None, taxid=None, assigned_rank=None,
+                    candidates=(), ranks=[None] * len(RANKS))
 
 
 def reference_label(header, locus):
@@ -230,5 +209,5 @@ def reference_rows(path, locus, assignments):
     for header, sequence in fasta(path):
         species, repository, accession = reference_label(header, locus)
         ranks = assignments[reference_key(species, repository, accession)]['ranks']
-        if ranks[0] is not None and sequence:
+        if any(taxid is not None for taxid in ranks) and sequence:
             yield species, repository, accession, ranks, sequence
