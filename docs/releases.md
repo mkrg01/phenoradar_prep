@@ -18,6 +18,11 @@ Tags use `v<VERSION>` and images use `ghcr.io/mkrg01/phenoradar_prep:v<VERSION>`
 The release's `image.json` records the exact image digest and source commit.
 `VERSION` is the only version number to edit.
 
+Ordinary pushes run the test workflow. A push to `main` starts a release only
+when `VERSION` changes; a manual **Release** dispatch can also publish an unused
+version. Documentation-only updates can keep `VERSION` unchanged and do not
+publish a new container.
+
 ## Repository setup
 
 Allow `GITHUB_TOKEN` to create tags/releases (`contents: write`) and publish

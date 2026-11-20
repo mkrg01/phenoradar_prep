@@ -66,7 +66,7 @@ Unrecorded methods and versions are `unknown`. Local GeneGalleon sources append
 `+local.<content ID>` to the version. Detailed revisions, container identities,
 settings, and reuse history are kept in machine-readable provenance.
 
-For older databases, [export this table](datasets.md#supplementary-sample-table)
+For older databases, [export this table](datasets.md#sample-processing-table)
 to a separate directory.
 
 ## Result files
@@ -95,7 +95,9 @@ Start with these checks:
 | --- | --- |
 | `metadata/selection.json` | Which samples were included and why |
 | `metadata/samples.tsv` | Sample IDs, biological species, and runs |
-| `metadata/species_metadata.tsv` | Ready-to-use traits, taxonomy, and available pair assignments; source checksums in the adjacent JSON |
+| `metadata/species_metadata.tsv` | Traits, taxonomy, and available pair/block IDs; source checksums in the adjacent JSON |
+| `phylogeny/<tree>/contrast/species_metadata.tsv` | Branch-specific trait-clade, pair/block, and display-sample assignments |
+| `phylogeny/<tree>/contrast/phylogenetic_blocks.tsv` | One row per block with its anchoring pair and sample/species counts |
 | `metadata/busco_completeness.svg` | Per-sample BUSCO completeness |
 | `orthogroups/expression/mapping_qc.tsv` | Mapped/retained TPM fractions and ambiguous targets |
 

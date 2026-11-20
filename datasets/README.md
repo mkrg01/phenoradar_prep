@@ -115,7 +115,9 @@ taxonomy_screen:
   batch_size: 24
 ```
 
-Run the screen explicitly after assembly. The default method,
+`enabled: true` makes the screening commands available; database builds and
+analysis submissions do not schedule the screen automatically. Run it explicitly
+after sample processing. The default method,
 `angiosperms353`, uses Kew v4.0 and the build's frozen NCBI taxonomy when
 available. Install its [environment](angiosperms353.environment.yaml).
 
@@ -223,6 +225,8 @@ References are used only at the assigned node and above; unmatched references
 are excluded. Assignments above family remain available through order; references
 assigned only above order are omitted. The screen records reference assignments
 once and shares them across all batches.
+References from the same sequencing run or reported species remain eligible by
+default. Use explicit masks for validation comparisons when needed.
 To refresh NCBI Taxonomy, prepare a snapshot at a new path and pass it with
 `--taxonomy`. The original sample TaxID and accession remain in the source
 database.

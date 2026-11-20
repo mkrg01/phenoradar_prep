@@ -3,8 +3,8 @@
 Build cross-species RNA-seq datasets for [PhenoRadar](https://github.com/mkrg01/phenoradar).
 The workflow assembles transcriptomes, quantifies gene expression, and stores
 orthogroup expression in a reusable database. It can then use that database
-to generate protein alignments, KEGG annotations, species trees, and trait
-contrast pairs.
+to generate protein alignments, KEGG annotations, species trees, divergence-time
+estimates, contrasting sister-clade pairs, and phylogenetic blocks.
 
 ## Quick start
 
@@ -14,6 +14,8 @@ up the environment and container. Run the commands below from the repository roo
 
 1. Prepare [sample metadata](docs/inputs.md) and edit [config/build.yaml](config/build.yaml).
    Set `reuse_from: null` for a first build.
+   For public angiosperm leaf data, use the [curated dataset guide](datasets/angiosperm_leaf/README.md)
+   to retrieve metadata and select candidate runs.
 2. Preview and submit the build. Review `reports/plan/plan.tsv` after `plan`.
 
    ```bash
@@ -34,6 +36,17 @@ The reusable database is in `results/BUILD/database/`. The
 [PhenoRadar inputs](docs/phenoradar_inputs.md) are in
 `results/BUILD/downstream/ANALYSIS/`. See [status and retries](docs/datasets.md#failure-and-recovery-behavior)
 for saved runs.
+
+## Taxonomic quality checks
+
+| Check | When to use it | Effect on sample selection |
+| --- | --- | --- |
+| [Kew or OrthoDB screening](datasets/README.md#sample-taxonomy-screening) | After assembly, before choosing a final database | Reports discordant runs; apply an exclusion plan or export a filtered database to remove them |
+| [Taxonomic monophyly](docs/taxonomy_check.md) | After species-tree inference | Reports disagreement with NCBI taxonomy for review |
+
+The sequence-based screen is run explicitly with `run_metadata.sh`; enabling
+`taxonomy_screen` alone does not schedule it during a build. Monophyly assessment
+runs with the analysis `all` target when enabled and does not exclude samples.
 
 [Documentation](docs/index.md) · [Curated datasets](datasets/README.md) ·
 [Angiosperm leaf dataset](datasets/angiosperm_leaf/README.md)

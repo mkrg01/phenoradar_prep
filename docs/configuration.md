@@ -33,6 +33,7 @@ settings. Use [resource overrides](running.md#resource-budgets) for job resource
 | `busco.cache_dir` | Shared reference directory; default `resources/busco`; `null` disables sharing |
 | `taxonomy.cache_dir` | Shared ETE/NCBI database; default `resources/taxonomy`; existing snapshots are reused |
 | `taxonomy.database` | Explicit SQLite snapshot for classification; use the snapshot recorded by metadata selection |
+| `taxonomy.missing_taxid` | `exclude` (default) omits unresolved TaxIDs before sample jobs; `error` stops, `null` keeps the legacy selection policy |
 | `translation.table` | NCBI genetic code; default `1` |
 | `execution` | [Job resources and total limits](running.md#resource-budgets) |
 
@@ -147,7 +148,8 @@ a new run. Each usage receipt records the effective limits. See
 ## Optional analyses and exports
 
 Choose branches before the first submission. The supplied analysis config uses
-the `all` tree and enables dating and contrast pairs.
+the `all` tree and enables OG alignments, KEGG, dating, contrast pairs, and
+taxonomic monophyly assessment.
 
 | Setting | Guide |
 | --- | --- |
@@ -169,7 +171,9 @@ these for independent inference. Use `[]` to disable inference and disable any
 postprocessing flags as well. Dating and taxonomy checks support `all` and
 `phenotyped`. For `representatives`, set both `phylogeny.dating.enabled` and
 `phylogeny.taxonomy_check.enabled` to `false`. For trees containing
-non-angiosperms, disable dating. Contrast pairs support all three tree sets.
+non-angiosperms, use `phylogeny.dating.calibration_source: timetree` or disable
+dating; AngioCal uses angiosperm fossils and a 154 Ma sampled-root maximum.
+Contrast pairs support all three tree sets.
 
 See [species sets](phylogeny.md#species-sets) for selection criteria. Representative
 selection, pairs, and tree inference use a fixed internal seed (`12345`).

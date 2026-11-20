@@ -9,8 +9,20 @@ BUSCO. The dating environment contains the [AngioCal fossil workbook](dating.md)
 
 ## Taxonomy reference
 
-`resources/taxonomy/taxa.sqlite` is created from NCBI taxonomy when absent.
-To refresh, archive `resources/taxonomy/` and prepare a new build or analysis.
+Builds use `taxonomy.database` when supplied. Otherwise the default shared
+database is `resources/taxonomy/ete/dataset/taxa.sqlite`; an existing
+`resources/taxonomy/taxa.sqlite` is also accepted for build selection. The
+selected database is linked as `<build>/taxonomy.sqlite` and recorded in
+`taxonomy_selection.json`.
+
+The default analysis database is `resources/taxonomy/taxa.sqlite`, prepared from
+NCBI taxonomy when absent. Check each run's provenance for its actual snapshot.
+Existing databases are reused without automatic updates.
+
+To refresh metadata selection and a new build together, prepare a snapshot at a
+new path and set both `metadata_selection.taxonomy_database` and
+`taxonomy.database` to it; see the [selection policy](../datasets/README.md#selection-policy).
+Keep earlier snapshots at their recorded paths for existing builds and analyses.
 
 ## OrthoDB reference
 

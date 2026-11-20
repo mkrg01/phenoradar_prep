@@ -45,6 +45,28 @@ decisions, or report taxonomy eligibility as pending without downloading a refer
 The completed database is `results/{build_name}/database/`. Builds record BUSCO
 scores for every sample; filtering belongs to the analysis.
 
+### Sample processing
+
+Each run is assembled and quantified separately. With the supplied GeneGalleon
+source and settings:
+
+- AMALGKIT retrieves reads and normally applies fastp with a minimum retained
+  read length of 25 nt. A fallback can recover original public FASTQs directly
+  without fastp. The worker log identifies this route; while getfastq outputs
+  are retained, `getfastq_completion.json` records `read_source: public-original`.
+- rnaSPAdes assembles the reads. Inputs above 30 Gbp are subsampled to about
+  30 Gbp with seed `11`.
+- cdskit searches all six frames, preferring complete ORFs to partial candidates.
+  Identical CDSs are collapsed, incomplete codons are padded, and one longest
+  CDS is kept per rnaSPAdes gene group.
+- BUSCO assesses the representative CDS set in transcriptome mode using
+  `busco.lineage`. The analysis threshold defaults to 50% complete BUSCOs,
+  counting single-copy and duplicated hits.
+
+The [Kew/OrthoDB screen](../datasets/README.md#sample-taxonomy-screening) is a
+separate step after sample processing. Reused samples keep their recorded
+generating conditions; see the [sample processing table](#sample-processing-table).
+
 ## Plans and progress
 
 Build `plan` shows sample and mapping reuse and saves `reports/plan/plan.tsv`.
@@ -236,7 +258,7 @@ Resume this build with `submit --build results/orthodb_refresh`; completed chunk
 remain reusable. Run downstream analyses against the new database to use its
 updated OGs. See [reference storage and checks](references.md#preparing-and-verifying-the-reference).
 
-### Supplementary sample table
+### Sample processing table
 
 New builds include `database/sample_processing.tsv`: one row per sample with
 generating versions, methods, references, and BUSCO completeness.
@@ -244,7 +266,7 @@ To export it from an older database without rerunning analyses:
 
 ```bash
 ./run_build.sh export-processing --build results/{build_name} \
-  --outdir reports/supplementary
+  --outdir reports/sample_processing
 ```
 
 Reused samples keep their generating versions; missing historical records are
@@ -276,3 +298,10 @@ in advance:
 runtime by OCI SHA256 digest. Image labels and file checksums are recorded in
 receipts. Downloads are cached under `resources/software/genegalleon/`;
 `repository` and `image` select local copies.
+
+The workflow source and runtime image are pinned separately. Upstream updates
+take effect only after these pins are deliberately changed for a new build.
+Report tool versions from the image used for the sample; assembly tools and
+downstream analysis tools can use different versions. The image's GeneGalleon
+label identifies its build, while `version` identifies the mounted workflow
+source. Reused samples retain their original versions and settings.

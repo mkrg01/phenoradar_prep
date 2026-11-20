@@ -54,6 +54,8 @@ affect display representatives, not pair IDs or pair/block membership.
 
 ## Representative selection
 
+### Before tree inference
+
 Representative inference requires exactly two observed states and at least four
 representatives. It also works with pair selection disabled.
 
@@ -67,6 +69,8 @@ representatives. It also works with pair selection disabled.
 Both trait states are reduced. A manual outgroup must belong to the selected
 representatives. Review `phylogeny/representatives/selection/`.
 
+### For summary figures
+
 After assigning pairs and blocks, summary figures retain one sample per trait
 clade, selected by BUSCO completeness with seeded tie breaking. These display
 samples do not change the assignments. The `representatives` inference route
@@ -79,14 +83,14 @@ Under `results/<build>/downstream/<analysis>/phylogeny/<tree>/contrast/`:
 | Output | Contents |
 | --- | --- |
 | `contrast_pairs.tsv` | Pair states, representatives, and counts |
-| `species_metadata.tsv` | Traits, groups, representatives, and nullable pair IDs |
-| `phylogenetic_blocks.tsv` | Anchoring pairs, expanded-clade membership counts, and both trait-state counts |
-| `summary_tree.nwk`, `.all.tsv`, `.sampled.tsv` | Grouped molecular tree and membership |
-| `contrastive.nwk`, `.all.tsv`, `.sampled.tsv` | Raw selection, including unresolved candidates |
-| `summary_tree.pdf`, `.svg` | Publication view: scientific names, group species counts, and red pair clades |
-| `summary_tree_id.pdf`, `.svg` | Same tree with run, group, and pair IDs in tip labels |
-| `phylogenetic_block_tree.pdf`, `.svg` | Same tree with expanded-clade shading and blue expanded branches; original pair branches remain red |
-| `phylogenetic_block_tree_id.pdf`, `.svg` | Expanded view with run, group, original pair, and expanded-clade IDs |
+| `species_metadata.tsv` | Traits, trait-clade membership, display representatives, and nullable pair/block IDs |
+| `phylogenetic_blocks.tsv` | Anchoring pairs, block membership counts, and both trait-state counts |
+| `summary_tree.nwk`, `.all.tsv`, `.sampled.tsv` | One display tip per trait clade, plus full and sampled membership tables |
+| `contrastive.nwk`, `.all.tsv`, `.sampled.tsv` | Representative views of pair candidates, including unresolved candidates |
+| `summary_tree.pdf`, `.svg` | Publication view: scientific names, trait-clade species counts, and red pair clades |
+| `summary_tree_id.pdf`, `.svg` | Same tree with run, trait-clade, and pair IDs in tip labels |
+| `phylogenetic_block_tree.pdf`, `.svg` | Same tree with block shading and blue block branches; pair branches remain red |
+| `phylogenetic_block_tree_id.pdf`, `.svg` | Block view with run, trait-clade, pair, and block IDs |
 | `summary.json` | Counts, settings, and provenance |
 
 For PhenoRadar input, use `metadata/species_metadata.tsv` at the analysis root.
@@ -94,9 +98,9 @@ The `all` target joins these pair assignments to the cohort's traits and taxonom
 When several tree branches are selected, each has a separate pair-ID column in
 that table. See [input metadata](phenoradar_inputs.md#input-files).
 
-Figures show the trait states (`0` and `1`) and biological species counts per group.
-Use the ID views to trace representatives, groups, and pairs back to sample
-records. Red branches mark original pairs; the expanded views also mark the
+Figures show the configured trait states and biological species counts per
+trait clade. Use the ID views to trace display samples, clades, pairs, and blocks
+back to sample records. Red branches mark pairs; the block views also mark the
 larger clades.
 
 Pair IDs describe sampled contrasts. Inferring the number of evolutionary
@@ -122,7 +126,7 @@ clade; the pair-only `contrastive.nwk` omits unpaired tips.
 
 Blocks are disjoint and use the anchoring pair IDs. An added sample
 can have a block ID and a blank original pair ID. Missing-trait
-samples and branches outside the expanded clades have blank IDs. With a single
+samples and branches outside the blocks have blank IDs. With a single
 pair, its block can include the entire observed tree.
 
 For leave-one-group-out validation, review the number of blocks and their
@@ -138,14 +142,15 @@ without inference or pair reselection:
 python workflow/scripts/expanded_pair_clades.py --analysis results/leaf/downstream/carnivory
 ```
 
-Run with the workflow test environment or the pinned `timetree` environment.
+Run with the workflow test environment or the dating environment defined in
+[`workflow/envs/dating.yaml`](../workflow/envs/dating.yaml).
 Every configured contrast branch must already have its summary tree, metadata,
 pair table, and summary. Outputs go under `<analysis>/phylogenetic_blocks/`:
 
 - `metadata/species_metadata.tsv`: the full cohort, taxonomy, original pairs,
-  and expanded-clade columns; its JSON records the joins.
+  and phylogenetic-block columns; its JSON records the joins.
 - `phylogeny/<tree>/contrast/`: the unchanged saved tree and pair table,
-  augmented branch metadata, expanded-clade counts, and both expanded figures.
+  augmented branch metadata, block counts, and both block figures.
 - `provenance.json`: source/output checksums, code version, and branch counts.
 
 Expression inputs remain at their original analysis paths. Publication is

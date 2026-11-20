@@ -11,7 +11,7 @@ Paths are relative to the analysis directory.
 
 | Input | Path |
 | --- | --- |
-| Traits, taxonomy, and available contrast groups | `metadata/species_metadata.tsv` |
+| Traits, taxonomy, and available pair/block IDs | `metadata/species_metadata.tsv` |
 | Sample IDs, biological species, and runs | `metadata/samples.tsv` |
 | Trait states, missing count, and source checksums | `metadata/species_trait.json` |
 | OG expression | `orthogroups/expression/tpm.tsv` or `orthogroups/expression/tpm_sum.tsv` |
@@ -72,12 +72,16 @@ expression.
 
 ## Validation groups
 
-With one contrast branch, use `contrast_pair_id` for original pairs or
-`phylogenetic_block_id` for [expanded clades](contrast_pairs.md#phylogenetic-blocks).
+With one contrast branch, use `contrast_pair_id` for contrasting sister-clade
+pairs or `phylogenetic_block_id` for [phylogenetic blocks](contrast_pairs.md#phylogenetic-blocks).
 With several branches, use a suffixed column such as `contrast_pair_id_all` or
 `phylogenetic_block_id_phenotyped`. Unassigned samples have blank IDs.
 
-For leave-one-group-out validation on expanded clades:
+`trait_clade_id` is recorded in each branch's `contrast/species_metadata.tsv`.
+The combined PhenoRadar metadata contains pair/block IDs from the selected
+branches, rather than the branch-specific trait-clade and display-sample fields.
+
+For leave-one-group-out validation on phylogenetic blocks:
 
 ```yaml
 data:
@@ -88,9 +92,12 @@ split:
 ```
 
 Using the same column in both settings sends labeled samples with blank groups to
-`external_test` and makes any pair-aware ranking use the expanded groups. For
+`external_test` and makes contrast-aware ranking use the blocks. These settings
+use PhenoRadar's current `dev` configuration. Releases that use the older
+`data.contrast_pair_col` key need that key in place of `data.contrast_group_col`;
+the metadata column name remains `phylogenetic_block_id`. For
 taxonomic holdouts, set `split.group_col` to `family` or `order` and review
-missing group labels before running. See [PhenoRadar's split rules](https://github.com/mkrg01/phenoradar/blob/main/docs/data-format.md#metadata-tsv).
+missing group labels before running. See [PhenoRadar's split rules](https://github.com/mkrg01/phenoradar/blob/dev/docs/data-format.md#metadata-tsv).
 
 ## Verify completed outputs
 

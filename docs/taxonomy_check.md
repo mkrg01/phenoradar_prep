@@ -1,10 +1,11 @@
-# Taxonomy check
+# Taxonomic monophyly
 
 [Documentation](index.md) · [Species exclusion](species_filter.md)
 
-MonoPhy compares rooted BUSCO trees with NCBI taxonomy and links conflicting
-placements to RNA-seq runs. Reports support review; they never exclude samples
-automatically.
+MonoPhy 1.3.2 compares rooted BUSCO trees with NCBI taxonomy and links conflicting
+placements to RNA-seq runs. This is a tree-based review, separate from the
+[Kew/OrthoDB sequence screen](../datasets/README.md#sample-taxonomy-screening).
+Its reports never exclude samples automatically.
 
 ## Configuration and execution
 
@@ -19,8 +20,14 @@ genus. To run the check on its own:
 The target includes missing tree inference. Supported tree sets are `all` and
 `phenotyped`. Review jobs default to 1 CPU and 8 GB.
 
-`outlierlevel` is the required focal-group fraction inside a candidate core
-clade, in `(0, 1]`; it is not confidence. `collapse_monophyletic` affects figures only.
+Each rank is assessed separately after omitting tips without that rank's
+annotation. Single-tip taxa are recorded as monotypic and can still be intruders
+to other taxa.
+
+`outlierlevel` defaults to `0.5`. When the focal taxon accounts for less than this
+fraction of the tips below its MRCA, MonoPhy searches for a core clade to identify
+outliers. The setting accepts `(0, 1]`; it controls outlier detection, rather than
+the monophyly decision or its confidence. `collapse_monophyletic` affects figures only.
 
 ## Read the reports
 

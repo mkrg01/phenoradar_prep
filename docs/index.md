@@ -16,7 +16,7 @@
 | Infer a species tree from BUSCO markers | [Phylogeny](phylogeny.md) |
 | Estimate divergence ages | [Dating](dating.md) |
 | Review tree placements against NCBI taxonomy | [Taxonomy check](taxonomy_check.md) |
-| Select trait contrasts and define groups | [Contrast pairs](contrast_pairs.md) |
+| Identify contrasting sister-clade pairs and phylogenetic blocks | [Contrast pairs and blocks](contrast_pairs.md) |
 
 ## Manage data and runs
 
