@@ -181,11 +181,13 @@ def test_above_family_reference_assignments_can_supply_order_votes(tmp_path, ref
     assert (summary['rank'], summary['status'], summary['registered']) == ('order', 'no_discordance', 7)
 
 
-@pytest.mark.parametrize('lineage', [{'genus': 4, 'family': 2}, {}])
-def test_locus_without_eligible_references_is_unassessed(tmp_path, monkeypatch, lineage):
+@pytest.mark.parametrize('lineage', [{'genus': 4, 'family': 2, 'order': 7}, {}])
+@pytest.mark.parametrize('reference_rank', [None, 'class'])
+def test_locus_without_eligible_references_is_unassessed(tmp_path, monkeypatch, lineage, reference_rank):
     path = tmp_path / 'locus.fna'
     path.write_text('>1 Species:Unknown_species Repository:INSDC Sequence_ID:ERR2\n' + 'A' * 200 + '\n')
-    assignments = {'Unknown_species|INSDC|ERR2': dict(ranks=[None] * len(qc.RANKS))}
+    assignments = {'Unknown_species|INSDC|ERR2': dict(ranks=[99 if rank == reference_rank else None
+                                                          for rank in qc.RANKS])}
 
     def search(*args, **kwargs):
         pytest.fail('MMseqs2 must not run without eligible reference sequences')
@@ -194,14 +196,13 @@ def test_locus_without_eligible_references_is_unassessed(tmp_path, monkeypatch, 
     sample = dict(run='ERR1', taxid='8', source_runs={'ERR1'}, exclude_accessions=set())
     evidence = SimpleNamespace(rows=[])
     evidence.writerows = evidence.rows.extend
-    rank_summaries = []
     [summary] = qc.score_batch([sample], [lineage], {'1': {0: 'A' * 200}}, {'1': path},
-                               assignments, tmp_path, tmp_path, 1, 2, False, 50, Decimal('.10'), evidence,
-                               rank_summaries=rank_summaries)
-    assert (summary['rank'], summary['status'], summary['comparable_loci']) == (None, 'no_reference', 0)
-    assert evidence.rows == []
-    assert len(rank_summaries) == max(1, len(lineage))
-    assert all(row['status'] == 'no_reference' and not row['selected'] for row in rank_summaries)
+                               assignments, tmp_path, tmp_path, 1, 2, False, 50, Decimal('.10'), evidence)
+    assert (summary['rank'], summary['status'], summary['comparable_loci']) == (
+        'order' if lineage else None, 'no_reference', 0)
+    assert summary['registered_support'] is None
+    assert len(evidence.rows) == 1
+    assert not list(tmp_path.glob('rank-hits-*'))
 
 
 def test_common_identity_breaks_mmseqs_ties_and_splits_equal_alternatives():
@@ -291,6 +292,7 @@ def test_sparse_genus_reference_falls_back_to_family(tmp_path, monkeypatch, genu
                                21: qc.Hit(0, 300, 1, 200, 'A' * 200, 'C' * 200)}}}
 
     monkeypatch.setattr(qc, 'search_locus', search)
+    monkeypatch.setattr(qc, 'locus_references', lambda *a, **k: [('Species_x', 'INSDC', 'ERR2')])
     monkeypatch.setattr(qc, 'read_hits', hits)
     evidence = SimpleNamespace(rows=[])
     evidence.writerows = evidence.rows.extend
@@ -310,7 +312,7 @@ def test_sparse_genus_reference_falls_back_to_family(tmp_path, monkeypatch, genu
     (49, 49, 50, 'registered', 'family', 'no_discordance'),
     (49, 50, 50, 'registered', 'tribe', 'no_discordance'),
     (50, 50, 50, 'registered', 'genus', 'no_discordance'),
-    (49, 49, 49, 'registered', 'genus', 'insufficient_comparison'),
+    (49, 49, 49, 'registered', 'family', 'insufficient_comparison'),
     (50, 50, 50, 'alternative', 'genus', 'discordant'),
     (50, 50, 50, 'tie', 'genus', 'no_discordance'),
 ])
@@ -326,12 +328,14 @@ def test_rank_fallback_requires_enough_comparable_loci(tmp_path, monkeypatch, ge
 
     @contextmanager
     def search(locus, *args):
-        yield refs, tmp_path / locus
+        hit_path = tmp_path / locus
+        hit_path.touch()
+        yield refs, hit_path
 
     def hits(path, *args, **kwargs):
         groups = {}
         for rank, count in [('genus', genus_loci), ('tribe', tribe_loci), ('family', family_loci)]:
-            if int(path.name) <= count:
+            if int(path.name.split('.')[0]) <= count:
                 choice = genus_vote if rank == 'genus' else 'registered'
                 original = qc.Hit(0, 400, 1, 200, query, 'C' + query[1:] if choice == 'alternative' else query)
                 alternative = qc.Hit(1, 400, 1, 200, query, 'C' + query[1:] if choice == 'registered' else query)
@@ -339,20 +343,23 @@ def test_rank_fallback_requires_enough_comparable_loci(tmp_path, monkeypatch, ge
         return {0: groups}
 
     monkeypatch.setattr(qc, 'search_locus', search)
+    monkeypatch.setattr(qc, 'locus_references', lambda *a, **k: refs)
     monkeypatch.setattr(qc, 'read_hits', hits)
     evidence = SimpleNamespace(rows=[])
     evidence.writerows = evidence.rows.extend
     paths = {str(locus): tmp_path / str(locus) for locus in range(1, 51)}
-    rank_summaries = []
+    votes = []
+    original_vote = qc.vote
+    def vote(*args, **kwargs):
+        votes.append(args[1])
+        return original_vote(*args, **kwargs)
+    monkeypatch.setattr(qc, 'vote', vote)
     [summary] = qc.score_batch([sample], [lineage], {locus: {0: query} for locus in paths}, paths, None,
-                               tmp_path, tmp_path, 1, 2, False, 50, Decimal('.10'), evidence,
-                               rank_summaries=rank_summaries)
+                               tmp_path, tmp_path, 1, 2, False, 50, Decimal('.10'), evidence)
     assert (summary['rank'], summary['status']) == (expected_rank, expected_status)
     assert summary['comparable_loci'] == (49 if expected_status == 'insufficient_comparison' else 50)
     assert {row['rank'] for row in evidence.rows} == {expected_rank}
-    assert [row['rank'] for row in rank_summaries] == list(lineage)
-    assert [row['comparable_loci'] for row in rank_summaries] == [genus_loci, tribe_loci, family_loci]
-    assert [row['rank'] for row in rank_summaries if row['selected']] == [expected_rank]
+    assert set(votes) == set(list(lineage)[:list(lineage).index(expected_rank) + 1])
 
 
 def test_cigar_reconstructs_gaps_and_reverse_strands():
@@ -360,6 +367,85 @@ def test_cigar_reconstructs_gaps_and_reverse_strands():
     assert qc.alignment_from_cigar('AACG','AACG',4,1,4,1,'0M4M') == ('CGTT','CGTT')
     with pytest.raises(ValueError, match='disagrees'):
         qc.alignment_from_cigar('AACG','AACG',1,4,1,4,'3M')
+
+
+def test_rank_assessment_stops_per_sample_and_counts_all_loci(tmp_path, monkeypatch):
+    lineage = {'genus': 10, 'family': 20, 'order': 30, 'class': 40}
+    refs = [('Registered', 'INSDC', 'ERR9', tuple(lineage.get(r) for r in qc.RANKS), set(), 'A')]
+    searched, voted = [], []
+
+    @contextmanager
+    def search(locus, *args):
+        searched.append(locus)
+        path = tmp_path / locus
+        path.touch()
+        yield refs, path
+
+    def vote(run, rank, locus, *args, **kwargs):
+        voted.append((run, rank, locus))
+        choice = 'registered'
+        if run == 'ERR1' and int(locus) <= 50:
+            choice = 'alternative'
+        if run == 'ERR2' and rank == 'genus' and int(locus) > 49:
+            choice = 'no_registered_hit'
+        return dict(run=run, rank=rank, locus=locus, vote=choice, alternative_winners=[11])
+
+    monkeypatch.setattr(qc, 'search_locus', search)
+    monkeypatch.setattr(qc, 'locus_references', lambda *a, **k: refs)
+    monkeypatch.setattr(qc, 'read_hits', lambda *a, **k: {})
+    monkeypatch.setattr(qc, 'vote', vote)
+    samples = [dict(run=f'ERR{i}', taxid='10', exclude_accessions=set()) for i in (1, 2)]
+    paths = {str(i): tmp_path / str(i) for i in range(1, 101)}
+    evidence = SimpleNamespace(writerows=lambda rows: None)
+    first, second = qc.score_batch(samples, [lineage] * 2, {locus: {0: 'A', 1: 'A'} for locus in paths},
+                                    paths, None, tmp_path, tmp_path, 1, 2, False, 50, Decimal('.1'), evidence)
+    assert first['rank'] == 'genus' and first['comparable_loci'] == 100
+    assert first['status'] == 'no_discordance' and first['registered_support'] == '0.5'
+    assert second['rank'] == 'family' and second['comparable_loci'] == 100
+    assert {rank for run, rank, _ in voted if run == 'ERR1'} == {'genus'}
+    assert {rank for run, rank, _ in voted if run == 'ERR2'} == {'genus', 'family'}
+    assert len(searched) == len(set(searched)) == 100
+    assert not list(tmp_path.glob('rank-hits-*'))
+
+
+@pytest.mark.parametrize('count', [0, 49, 50])
+def test_order_is_terminal_even_when_class_would_have_enough_votes(tmp_path, monkeypatch, count):
+    lineage = {'genus': 10, 'family': 20, 'order': 30, 'class': 40}
+    refs = [('Registered', 'INSDC', 'ERR9', tuple(lineage.get(r) for r in qc.RANKS), set(), 'A')]
+
+    @contextmanager
+    def search(locus, *args):
+        path = tmp_path / locus
+        path.touch()
+        yield refs, path
+
+    def vote(run, rank, locus, *args):
+        assert rank != 'class'
+        choice = 'registered' if rank == 'order' and int(locus) <= count else 'no_alternative_hit'
+        return dict(run=run, rank=rank, locus=locus, vote=choice)
+
+    monkeypatch.setattr(qc, 'search_locus', search)
+    monkeypatch.setattr(qc, 'locus_references', lambda *a, **k: refs)
+    monkeypatch.setattr(qc, 'read_hits', lambda *a, **k: {})
+    monkeypatch.setattr(qc, 'vote', vote)
+    paths = {str(i): tmp_path / str(i) for i in range(1, 61)}
+    evidence = SimpleNamespace(rows=[])
+    evidence.writerows = evidence.rows.extend
+    [summary] = qc.score_batch([dict(run='ERR1', taxid='10', exclude_accessions=set())], [lineage],
+                               {locus: {0: 'A'} for locus in paths}, paths, None, tmp_path, tmp_path,
+                               1, 2, False, 50, Decimal('.1'), evidence)
+    assert summary['rank'] == 'order' and summary['comparable_loci'] == count
+    assert summary['status'] == ('no_discordance' if count == 50 else 'insufficient_comparison')
+    assert summary['registered_support'] == ('1' if count else None)
+    assert {row['rank'] for row in evidence.rows} == {'order'}
+
+
+def test_empty_recovery_still_records_terminal_rank(tmp_path):
+    [summary] = qc.score_batch([dict(run='ERR1', taxid='10')], [{'genus': 10, 'order': 20}], {}, {}, {},
+                               tmp_path, tmp_path, 1, 2, False, 50, Decimal('.1'),
+                               SimpleNamespace(writerows=lambda rows: None))
+    assert (summary['rank'], summary['status'], summary['comparable_loci']) == ('order', 'insufficient_comparison', 0)
+    assert summary['registered_support'] is None
 
 
 @pytest.mark.parametrize('accession,source_runs', [('ERR2', {'ERR2'}), ('ERR1_ERR2', {'ERR1', 'ERR2'})])
@@ -437,20 +523,17 @@ def test_taxonomy_table_reports_votes_and_preserves_missing_values():
     summary.update(resolved_taxid=8, resolved_species_name='Genus species', registered_name='Genus',
                    alternative_name='Othergenus')
     missing = qc.summarize(dict(run='ERR2', taxid='9'), None, None, [], 0, 50, Decimal('.10'))
-    summary['selected'] = False
     [shown, unassessed] = list(qc.taxonomy_table_rows([summary, missing]))
     assert list(shown) == qc.TAXONOMY_TABLE_FIELDS
     assert shown['NCBI species name'] == 'Genus species'
     assert shown['Comparable loci'] == shown['Tied loci'] == 30
     assert shown['Reported taxon vote share (%)'] == '33.33'
     assert shown['Leading alternative vote share (%)'] == '33.33'
-    assert shown['Rank assessment'] == 'Insufficient comparable loci'
-    assert shown['Used for overall assessment'] == 'No'
+    assert shown['Assessment'] == 'Insufficient comparable loci'
     assert unassessed['Recovered loci'] == unassessed['Comparable loci'] == 0
     assert unassessed['Reported taxon vote share (%)'] == 'NA'
     assert unassessed['Leading alternative vote share (%)'] == 'NA'
-    assert unassessed['Rank assessment'] == 'No eligible reference'
-    assert unassessed['Used for overall assessment'] == 'No'
+    assert unassessed['Assessment'] == 'No eligible reference'
 
 
 def test_rank_replot_uses_exact_fractional_votes(tmp_path):
@@ -472,10 +555,35 @@ def test_rank_replot_uses_exact_fractional_votes(tmp_path):
             ('.3333333333333333333333333334', 'discordant')]):
         output = tmp_path / f'report{index}'
         qc.report(source / 'screen.json', output, registered_support=cutoff)
-        [rank] = read_tsv(output / 'rank_summary.tsv')
+        assert not (output / 'rank_summary.tsv').exists()
+        assert not (output / 'taxonomy_by_rank.tsv').exists()
         [selected] = read_tsv(output / 'summary.tsv')
-        assert rank['registered_vote_fraction'] == '1/3'
-        assert rank['status'] == selected['status'] == expected
+        assert selected['status'] == expected
+        receipt = qc.json.loads((output / 'screen.json').read_text())
+        assert 'rank_summary' not in receipt and 'taxonomy_by_rank' not in receipt
+
+
+def test_replot_preserves_terminal_no_reference_and_zero_comparison(tmp_path):
+    source = tmp_path / 'source'
+    source.mkdir()
+    summaries = [qc.summarize(dict(run=run, taxid='8'), 'order', 7, [], 0, 50, Decimal('.10'))
+                 for run in ('ERR1', 'ERR2')]
+    summaries[0]['status'] = 'no_reference'
+    write_tsv(source / 'summary.tsv', qc.SUMMARY_FIELDS, summaries)
+    write_tsv(source / 'loci.tsv', qc.LOCUS_FIELDS, [])
+    write_json(source / 'screen.json', dict(kind='angiosperms353_qc', schema_version=3,
+               settings=dict(min_loci=50, max_registered_support='.10'),
+               summary=record(source / 'summary.tsv'), loci=record(source / 'loci.tsv')))
+    output = tmp_path / 'report'
+    result = qc.report(source / 'screen.json', output, registered_support='.2')
+    assert result['statuses'] == {'no_reference': 1, 'insufficient_comparison': 1}
+    rows = read_tsv(output / 'taxonomy_summary.tsv')
+    assert len(rows) == 2
+    assert all(row['Assessment rank'] == 'order' and row['Reported taxon vote share (%)'] == 'NA'
+               and row['Comparable loci'] == '0' for row in rows)
+    for name in qc.PLOT_NAMES:
+        plot = (output / name).read_text()
+        assert '0 assessed, 0 flagged, 2 unassessed' in plot
 
 
 def test_thirty_recovered_loci_are_searched_and_exported(tmp_path, reference_taxonomy, monkeypatch):
@@ -515,32 +623,26 @@ def test_thirty_recovered_loci_are_searched_and_exported(tmp_path, reference_tax
     [summary] = read_tsv(output / 'summary.tsv')
     assert summary['extracted_loci'] == summary['comparable_loci'] == '30'
     assert summary['registered_support'] == '1'
-    rank_rows = read_tsv(output / 'taxonomy_by_rank.tsv')
-    assert [row['Taxonomic rank'] for row in rank_rows] == ['genus', 'tribe', 'subfamily', 'family', 'order']
-    [shown] = [row for row in rank_rows if row['Used for overall assessment'] == 'Yes']
+    [shown] = read_tsv(output / 'taxonomy_summary.tsv')
+    assert shown['Assessment rank'] == 'order'
     assert shown['Run accession'] == 'ERR1'
     assert shown['NCBI species name'] == 'Genus species'
     assert shown['Recovered loci'] == shown['Comparable loci'] == '30'
     assert shown['Reported taxon vote share (%)'] == '100.00'
-    assert shown['Rank assessment'] == 'Insufficient comparable loci'
-    for row in rank_rows:
-        if row['Taxonomic rank'] in {'tribe', 'subfamily'}:
-            assert row['Comparable loci'] == '0'
-            assert row['Reported taxon vote share (%)'] == 'NA'
-        else:
-            assert row['Comparable loci'] == '30'
-            assert row['Reported taxon vote share (%)'] == '100.00'
+    assert shown['Assessment'] == 'Insufficient comparable loci'
+    assert not (output / 'rank_summary.tsv').exists()
+    assert not (output / 'taxonomy_by_rank.tsv').exists()
     assert read_tsv(output / 'exclusion_candidates.tsv') == []
     assert 'at least 50 comparable loci' in (output / 'taxonomy_table_notes.txt').read_text()
     receipt = qc.json.loads((output / 'screen.json').read_text())
-    assert qc.verify(receipt['taxonomy_by_rank']).name == 'taxonomy_by_rank.tsv'
+    assert qc.verify(receipt['taxonomy_summary']).name == 'taxonomy_summary.tsv'
     assert qc.verify(receipt['table_notes']).name == 'taxonomy_table_notes.txt'
-    assert qc.verify(receipt['rank_summary']).name == 'rank_summary.tsv'
+    assert 'rank_summary' not in receipt and 'taxonomy_by_rank' not in receipt
     assert not (output / 'supplementary_table.tsv').exists()
     replot = tmp_path / 'replot'
     qc.report(output / 'screen.json', replot, registered_support='.20')
     assert len(searches) == 30
-    assert read_tsv(replot / 'taxonomy_by_rank.tsv') == rank_rows
+    assert read_tsv(replot / 'taxonomy_summary.tsv') == [shown]
 
 
 def test_screen_portable_database_and_reuse_retained_products(sample_project, monkeypatch):
@@ -675,14 +777,13 @@ def test_screen_batches_of_50_reuse_markers_after_failed_search(tmp_path, monkey
         return [cds] * len(samples)
 
     def score(batch, ancestry, queries, paths, assignments, scratch, work, threads, ram, omit, minimum, cutoff,
-              evidence, *, rank_summaries):
+              evidence):
         scores.append(len(batch))
         assert len(queries['1']) == len(batch)
         if len(scores) == 1:
             raise ValueError('simulated search failure')
         evidence.writerows(dict(run=row['run'], locus='1') for row in batch)
         result = [qc.summarize(row, None, None, [], 1, minimum, cutoff) for row in batch]
-        rank_summaries.extend(dict(row, selected=False, registered_vote_fraction='0') for row in result)
         return result
 
     monkeypatch.setattr(qc, 'extract', extract)
@@ -700,7 +801,9 @@ def test_screen_batches_of_50_reuse_markers_after_failed_search(tmp_path, monkey
     result = qc.screen(samples, **kwargs)
     assert result['batches'] == 3
     settings = qc.json.loads((output / 'screen.json').read_text())['settings']
-    assert settings['rank_selection'] == 'closest_rank_with_enough_votes'
+    assert settings['rank_selection'] == 'first_comparable_rank_then_stop'
+    assert settings['max_rank'] == 'order'
+    assert settings['inconclusive_rank'] == 'highest_available'
     assert settings['reference_taxonomy'] == 'ncbi_species_genus_family_lca'
     assert settings['reference_scope_taxid'] == 3193
     assert settings['exclude_same_run'] is False

@@ -168,30 +168,27 @@ screen has `summary.tsv`, per-marker `loci.tsv`, and `screen.json` with inputs,
 versions and settings. All screened runs remain in `summary.tsv`, including runs
 with fewer than 50 recovered loci: their sequences are still searched and their
 available vote shares are retained, but they cannot receive a discordance call.
-`rank_summary.tsv` retains results at every evaluated rank with exact vote totals.
-`taxonomy_by_rank.tsv` presents those results as one row per run and rank, with
-readable names, locus counts, reported/leading-alternative vote percentages,
-and the assessment. `Used for overall assessment` identifies the selected rank;
-only that rank governs exclusion candidates. Ranks follow the sample's NCBI
-lineage from genus upward; OrthoDB evaluates genus, family, and order.
-`taxonomy_table_notes.txt` defines the columns and thresholds. These files
-include inconclusive runs; missing values are `NA` and percentages have two
-decimal places. `loci.tsv` contains marker evidence at the selected rank,
-not every evaluated rank. `registered_support.svg` pools all assessed samples.
-`registered_support_by_rank.svg` separates them by the rank used for each
-decision. Both show the cutoff and counts of assessed, flagged and unassessed
-samples. `exclusion_candidates.tsv` lists the flagged accessions for review.
+`taxonomy_summary.tsv` is a readable table with one row per run at its assessment
+rank, including recovered/comparable locus counts, reported/leading-alternative
+vote percentages, and the assessment. `taxonomy_table_notes.txt` defines the
+columns and thresholds. Missing values are `NA`; percentages have two decimal
+places. `summary.tsv` retains machine-readable values, and `loci.tsv` contains
+marker evidence at the assessment rank. New screens do not generate all-rank
+tables. `registered_support.svg` pools all assessed samples;
+`registered_support_by_rank.svg` separates them by assessment rank, from genus
+at the top to order at the bottom. Both show the cutoff and counts of assessed,
+flagged and unassessed samples. Inconclusive runs are counted as unassessed,
+not as zero-support samples. `exclusion_candidates.tsv` lists flagged accessions.
 `record` includes the evidence when passed the screen.
 `--exclude-taxonomy` proposes accession exclusions at the evaluated rank in
 the existing editable plan. Applying the plan persists those decisions for the next
 build. Check the plan before applying, including the existing read/scratch cleanup.
 
-After changing the threshold in `build.yaml`, regenerate the calls and both
-plots from saved votes without searching the sequences again. All-rank screens
-also regenerate `rank_summary.tsv`, `taxonomy_by_rank.tsv`, and their notes.
-Older screens saved only the selected rank: they export `taxonomy_summary.tsv`
-instead. Recovering unsaved rank results requires a new screen; they cannot be
-reconstructed from the old summary or selected-rank marker evidence.
+After changing the threshold in `build.yaml`, regenerate calls, the one-row
+summary table and both plots from saved votes without searching sequences again.
+Reports of older screens retain their original assessment ranks; replotting does
+not apply the new order limit or replace an older inconclusive rank. To apply
+the current rank-selection procedure, run a new screen in a new output directory.
 
 ```bash
 ./run_metadata.sh report-taxonomy --screen work/<build>-taxonomy/screen.json \
@@ -223,9 +220,9 @@ annotations only when the preceding rank has no eligible matches. A single
 candidate supplies its NCBI lineage. Multiple candidates are assigned to their
 lowest common ancestor, without further name matching or Kew family filtering.
 References are used only at the assigned node and above; unmatched references
-are excluded. Assignments above family remain available for higher-rank comparisons.
-The screen
-records the reference assignments once and shares them across all batches.
+are excluded. Assignments above family remain available through order; references
+assigned only above order are omitted. The screen records reference assignments
+once and shares them across all batches.
 To refresh NCBI Taxonomy, prepare a snapshot at a new path and pass it with
 `--taxonomy`. The original sample TaxID and accession remain in the source
 database.
@@ -239,14 +236,23 @@ taxon at the same A/C/G/T positions, requiring at least
 taxa share the highest identity, they split one vote equally, including the
 registered taxon when it ties for first.
 
-Both methods follow the sample’s NCBI lineage from genus toward the root and
-select the first supported rank with at least 50 voting loci. The Kew method
-counts comparable loci, including split votes for ties; the OrthoDB method
-counts only untied loci and considers genus, family, and order. Each method
-emits one result per run. If no rank has enough voting loci, the closest rank
-with an eligible reference is reported as inconclusive. When no rank has a
-reference, the result is unassessed. At the selected rank, a registered
-vote share strictly below `taxonomy_screen.max_registered_support` (default 10%) flags the run for review.
+Both methods assess ranks along the sample's NCBI lineage from genus through
+order, stopping at the first rank with at least 50 voting loci. All available
+loci are counted at that rank; assessment does not stop after the first 50 loci.
+The Kew method includes named intermediate ranks and split votes for ties;
+OrthoDB counts only untied loci and considers genus, family, and order. Sequence
+searches run once per locus. Only unresolved samples advance to a higher rank,
+reusing compressed search hits in task scratch, which is removed after the batch.
+
+Each method emits one result per run. If no rank has enough voting loci, the
+last available rank through order is reported, usually order. A lack of any
+eligible registered-taxon reference among recovered loci gives `no_reference`;
+otherwise the result is `insufficient_comparison`. A run with no recovered loci
+is also inconclusive. Zero comparable loci gives an unavailable vote share
+(`NA`), not zero support. Inconclusive and unassessed runs remain eligible for
+the filtered database. At an adequately sampled assessment rank, a registered
+vote share strictly below `taxonomy_screen.max_registered_support` (default 10%)
+flags the run for review. Assessment then stops regardless of the outcome.
 `--max-registered-support` overrides the config for a single run. `registered_support`
 and `discordance_support` are the registered and combined alternative vote
 shares and add up to 100% of the votes cast. Loci without a valid comparison

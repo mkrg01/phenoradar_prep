@@ -23,6 +23,7 @@ INTERMEDIATE_RANKS = ('family', 'subfamily', 'supertribe', 'tribe', 'subtribe', 
 RANKS = (*INTERMEDIATE_RANKS, 'superfamily', 'parvorder', 'infraorder', 'suborder',
          'order', 'superorder', 'infraclass', 'subclass', 'class', 'superclass',
          'subphylum', 'phylum', 'superphylum', 'subkingdom', 'kingdom', 'superkingdom', 'domain')
+ASSESSMENT_RANKS = frozenset(RANKS[:RANKS.index('order') + 1])
 
 
 def fasta(path):

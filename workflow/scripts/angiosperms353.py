@@ -9,11 +9,13 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 
-from angiosperms353_reference import INTERMEDIATE_RANKS, LEGACY_RANKS, LOCUS, RANKS, accessions, fasta, reference_rows
-from common import atomic_writer, now, numerical_environment, read_tsv, write_json, write_tsv
+from angiosperms353_reference import (ASSESSMENT_RANKS, INTERMEDIATE_RANKS, LEGACY_RANKS, LOCUS, RANKS,
+                                     accessions, fasta, reference_rows)
+from common import atomic_writer, now, numerical_environment, read_tsv, text_open, write_json, write_tsv
 from dataset_assets import record, verify
 from phase_config import DEFAULT_REGISTERED_SUPPORT
 
@@ -33,10 +35,10 @@ LOCUS_FIELDS = ['run', 'rank', 'locus', 'vote', 'winner', 'registered_reference'
 PLOT_NAMES = ('registered_support.svg', 'registered_support_by_rank.svg')
 SCREEN_KINDS = {'angiosperms353_qc', 'orthodb_qc'}
 RANK_SUMMARY_FIELDS = [*SUMMARY_FIELDS, 'selected', 'registered_vote_fraction']
-TAXONOMY_TABLE_FIELDS = ['Run accession', 'NCBI species name', 'NCBI TaxID', 'Taxonomic rank',
+TAXONOMY_TABLE_FIELDS = ['Run accession', 'NCBI species name', 'NCBI TaxID', 'Assessment rank',
                          'Reported taxon', 'Recovered loci', 'Comparable loci', 'Tied loci',
                          'Reported taxon vote share (%)', 'Leading alternative taxon',
-                         'Leading alternative vote share (%)', 'Rank assessment', 'Used for overall assessment']
+                         'Leading alternative vote share (%)', 'Assessment']
 ASSESSMENT_LABELS = {'no_discordance': 'No discordance detected', 'discordant': 'Discordant',
                      'insufficient_comparison': 'Insufficient comparable loci',
                      'no_reference': 'No eligible reference'}
@@ -256,17 +258,13 @@ def search_locus(locus, queries, reference_path, assignments, work, threads, ram
     """Search the complete same-locus database without a fixed top-k cap."""
     with tempfile.TemporaryDirectory(prefix=f'{locus}-', dir=work) as temp:
         path = Path(temp)
-        refs = []
+        refs = locus_references(reference_path, locus, assignments, protein=protein)
         extension = 'faa' if protein else 'fna'
         query_path, target_path = (path / f'query.{extension}', path / f'target.{extension}')
         hits_path = path / 'hits.tsv'
-        source = reference_rows
-        if protein:
-            from orthodb_taxonomy import reference_rows as source
         with target_path.open('w') as handle:
-            for species, repository, accession, ranks, sequence, *taxids in source(reference_path, locus, assignments):
-                handle.write(f'>{len(refs)}\n{sequence}\n')
-                refs.append((species, repository, accession, ranks, accessions(accession), sequence, *taxids))
+            for index, ref in enumerate(refs):
+                handle.write(f'>{index}\n{ref[5]}\n')
         if not refs:
             hits_path.touch()
             yield refs, hits_path
@@ -286,6 +284,15 @@ def search_locus(locus, queries, reference_path, assignments, work, threads, ram
                             '--shuffle', '0', '--split-memory-limit', f'{ram}G', '-v', '2'],
                            stdout=log, stderr=subprocess.STDOUT, check=True, env=dict(os.environ, TMPDIR=str(path)))
         yield refs, hits_path
+
+
+def locus_references(path, locus, assignments, *, protein=False):
+    source = reference_rows
+    if protein:
+        from orthodb_taxonomy import reference_rows as source
+    return [(species, repository, accession, ranks, accessions(accession), sequence, *taxids)
+            for species, repository, accession, ranks, sequence, *taxids in source(path, locus, assignments)
+            if any(ranks[RANKS.index(rank)] is not None for rank in ASSESSMENT_RANKS)]
 
 
 def alignment_from_cigar(query, target, qstart, qend, tstart, tend, cigar, *, protein=False):
@@ -354,7 +361,7 @@ def read_hits(path, queries, refs, samples, *, omit_same_species, ranks_by_query
     # Keep only the best alignment per taxon for each query. This bounds memory
     # independently of the number of specimens in well-sampled taxa.
     kept = defaultdict(lambda: {rank: {} for rank in RANKS})
-    with path.open() as handle:
+    with text_open(path) as handle:
         for line in handle:
             if not line.strip():
                 continue
@@ -363,11 +370,13 @@ def read_hits(path, queries, refs, samples, *, omit_same_species, ranks_by_query
             ref = refs[target_id]
             if index not in queries:
                 raise ValueError(f'unexpected MMseqs2 query index: {index}')
+            considered = RANKS if ranks_by_query is None else ranks_by_query[index]
+            if not considered:
+                continue
             if not reference_allowed(samples[index], ref, omit_same_species):
                 continue
             score, start, end = int(score), int(start), int(end)
             hit = None
-            considered = RANKS if ranks_by_query is None else ranks_by_query[index]
             for rank in considered:
                 group = ref[3][RANKS.index(rank)]
                 if group is None:
@@ -498,7 +507,7 @@ def taxonomy_table_rows(summaries):
         yield {'Run accession': row['run'],
                'NCBI species name': available(row.get('resolved_species_name')),
                'NCBI TaxID': available(row.get('resolved_taxid') or row.get('taxid')),
-               'Taxonomic rank': available(row.get('rank')),
+               'Assessment rank': available(row.get('rank')),
                'Reported taxon': taxon(row, 'registered'),
                'Recovered loci': available(row.get('extracted_loci')),
                'Comparable loci': available(row.get('comparable_loci')),
@@ -506,23 +515,22 @@ def taxonomy_table_rows(summaries):
                'Reported taxon vote share (%)': percentage(row.get('registered_support')),
                'Leading alternative taxon': taxon(row, 'alternative'),
                'Leading alternative vote share (%)': percentage(row.get('support') if row.get('alternative') else None),
-               'Rank assessment': ASSESSMENT_LABELS.get(row['status'], row['status']),
-               'Used for overall assessment': 'Yes' if str(row.get('selected', bool(row.get('rank')))).lower() in {'true', '1'} else 'No'}
+               'Assessment': ASSESSMENT_LABELS.get(row['status'], row['status'])}
 
 
-def write_taxonomy_table_notes(path, cutoff, min_loci, method, all_ranks):
+def write_taxonomy_table_notes(path, cutoff, min_loci, method):
     ties = ('Tied loci split one vote equally among the highest-identity taxa and count as comparable loci.'
             if method == 'angiosperms353' else
             'Tied loci cast no vote and do not count as comparable loci.')
     with atomic_writer(path) as handle:
         handle.write(
             'Taxonomic consistency screening: table definitions\n\n'
-            + ('One row per screened run and evaluated rank, including inconclusive and unassessed results.\n'
-               if all_ranks else 'One row per screened run at its selected rank; other ranks were not saved in the source screen.\n') +
+            'One row per screened run at its assessment rank, including inconclusive and unassessed results.\n'
             'NCBI species name and NCBI TaxID use the taxonomy database used for screening.\n'
-            'Ranks follow each sample\'s NCBI lineage from genus upward; the protein method evaluates genus, family, and order.\n'
-            'Used for overall assessment identifies the selected rank governing the overall call and exclusion candidates.\n'
-            'Other rows describe evidence at their own rank and do not independently exclude a sample.\n'
+            'New screens evaluate ranks from genus through order and stop at the first rank with enough comparable loci; '
+            'the protein method considers genus, family, and order.\n'
+            'Inconclusive new screens report the last available rank within that range, usually order. '
+            'Reports of older screens preserve their original assessment rank.\n'
             'Reported taxon is the sample\'s NCBI taxon at the row\'s rank.\n'
             'Recovered loci are those retained after marker recovery and sequence filtering.\n'
             'Comparable loci are those contributing votes at the row\'s rank.\n'
@@ -538,25 +546,21 @@ def write_taxonomy_table_notes(path, cutoff, min_loci, method, all_ranks):
             'but are not classified as discordant or free of detected discordance.\n'
             'No discordance detected refers only to the row\'s rank and does not establish species identity.\n'
             'Discordant identifies an exclusion candidate only at the selected rank; it is not an applied exclusion.\n'
-            'A rank without an eligible reference for the reported taxon is marked No eligible reference.\n'
-            'At higher ranks, zero comparable loci may also reflect the absence of alternative-taxon references.\n'
+            'No eligible reference means no eligible registered-taxon reference was found at any examined rank.\n'
+            'Zero comparable loci may also reflect the absence of alternative-taxon references; '
+            'this is insufficient comparison, not evidence for the reported taxon.\n'
             'NA means unavailable or not applicable; zero is retained for measured zero values.\n'
             'Percentages are rounded to two decimal places; decisions use unrounded values.\n')
 
 
-def write_report(output, summaries, cutoff, method='angiosperms353', *, min_loci=50, rank_summaries=None):
+def write_report(output, summaries, cutoff, method='angiosperms353', *, min_loci=50):
     plot_support(output, summaries, cutoff)
     write_tsv(output / 'summary.tsv', SUMMARY_FIELDS, summaries)
-    table_name = 'taxonomy_by_rank' if rank_summaries is not None else 'taxonomy_summary'
-    write_tsv(output / f'{table_name}.tsv', TAXONOMY_TABLE_FIELDS,
-              taxonomy_table_rows(rank_summaries if rank_summaries is not None else summaries))
-    write_taxonomy_table_notes(output / 'taxonomy_table_notes.txt', cutoff, min_loci, method,
-                               rank_summaries is not None)
+    table_name = 'taxonomy_summary'
+    write_tsv(output / f'{table_name}.tsv', TAXONOMY_TABLE_FIELDS, taxonomy_table_rows(summaries))
+    write_taxonomy_table_notes(output / 'taxonomy_table_notes.txt', cutoff, min_loci, method)
     tables = {table_name: record(output / f'{table_name}.tsv'),
               'table_notes': record(output / 'taxonomy_table_notes.txt')}
-    if rank_summaries is not None:
-        write_tsv(output / 'rank_summary.tsv', RANK_SUMMARY_FIELDS, rank_summaries)
-        tables['rank_summary'] = record(output / 'rank_summary.tsv')
     write_tsv(output / 'exclusion_candidates.tsv', ['accession', 'taxid', 'reason'],
               [dict(accession=row['run'], taxid=row['taxid'], reason=exclusion_reason(row, method))
                for row in summaries if row['status'] == 'discordant'])
@@ -584,22 +588,16 @@ def report(screen_path, output, *, registered_support, selection_config=None):
             elif row['vote'] == 'tie':
                 votes[row['run']] += Fraction(1, 1 + len(json.loads(row['alternative_winners'])))
     for row in summaries:
-        row['status'] = decision_status(row['rank'], votes[row['run']], int(row['comparable_loci']), min_loci, cutoff)
-    rank_summaries = None
-    if data.get('rank_summary'):
-        rank_summaries = read_tsv(verify(data['rank_summary']))
-        for row in rank_summaries:
-            if row['status'] != 'no_reference':
-                row['status'] = decision_status(row['rank'], Fraction(row['registered_vote_fraction']),
-                                                int(row['comparable_loci']), min_loci, cutoff)
+        if row['status'] != 'no_reference':
+            row['status'] = decision_status(row['rank'], votes[row['run']], int(row['comparable_loci']), min_loci, cutoff)
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
-    files = write_report(output, summaries, cutoff, data['kind'].removesuffix('_qc'), min_loci=min_loci,
-                         rank_summaries=rank_summaries)
+    files = write_report(output, summaries, cutoff, data['kind'].removesuffix('_qc'), min_loci=min_loci)
     verify(source)
     if selection_config:
         verify(selection_config)
-    previous = {key: value for key, value in data.items() if key not in {'supplementary_table', 'supplementary_notes'}}
+    previous = {key: value for key, value in data.items()
+                if key not in {'supplementary_table', 'supplementary_notes', 'rank_summary', 'taxonomy_by_rank'}}
     updated = dict(previous, **files, created_at=now(), source_screen=source, selection_config=selection_config,
                    settings=dict(data['settings'], max_registered_support=str(cutoff)))
     write_json(output / 'screen.json', updated)
@@ -607,48 +605,65 @@ def report(screen_path, output, *, registered_support, selection_config=None):
 
 
 def score_batch(batch, ancestry, by_locus, paths, assignments, work, log_dir, threads, ram,
-                omit_same_species, min_loci, support, evidence, *, protein=False, rank_summaries=None):
-    rows, extracted, closest = defaultdict(list), Counter(), {}
-    ranks = [tuple(lineage) for lineage in ancestry]
-    for locus, path in paths.items():
-        queries = by_locus[locus]
-        options = {'protein': True} if protein else {}
-        with search_locus(locus, queries, path, assignments, work, threads, ram, log_dir, **options) as (refs, hits_path):
-            ranks_by_query = {}
-            for index in queries:
-                current = ranks[index]
-                if current and closest.get(index) != current[0]:
-                    rank = closest_reference_rank(ancestry[index], refs, batch[index], omit_same_species)
-                    if rank in current and (index not in closest or current.index(rank) < current.index(closest[index])):
-                        closest[index] = rank
-                ranks_by_query[index] = current
-            hits = read_hits(hits_path, queries, refs, batch, omit_same_species=omit_same_species,
-                             ranks_by_query=ranks_by_query, **options)
-            for index, sequence in queries.items():
-                extracted[index] += 1
-                for rank in ranks_by_query[index]:
-                    result = vote(batch[index]['run'], rank, locus, len(sequence), ancestry[index][rank],
-                                  hits.get(index, {}).get(rank, {}), refs, **options)
-                    rows[index, rank].append(result)
-    summaries = []
-    comparable = {'registered', 'alternative'} if protein else {'registered', 'alternative', 'tie'}
-    for index, sample in enumerate(batch):
-        rank = next((rank for rank in ranks[index] if sum(row['vote'] in comparable
-                    for row in rows[index, rank]) >= min_loci), closest.get(index))
-        results = rows[index, rank]
-        evidence.writerows(results)
-        summary = summarize(sample, rank, ancestry[index].get(rank), results, extracted[index], min_loci, support)
-        summaries.append(summary)
-        if rank_summaries is not None:
-            closest_rank = closest.get(index)
-            available = set(ranks[index][ranks[index].index(closest_rank):]) if closest_rank else set()
-            for level in ranks[index] or (None,):
-                detail = summarize(sample, level, ancestry[index].get(level), rows[index, level],
-                                   extracted[index], min_loci, support, exact_votes=True)
-                if level not in available:
-                    detail['status'] = 'no_reference'
-                rank_summaries.append(dict(detail, selected=level == rank and level is not None))
-    return summaries
+                omit_same_species, min_loci, support, evidence, *, protein=False):
+    """Search each locus once, then assess one rank at a time through order.
+
+    Only unresolved samples advance. Compressed search hits live in task scratch
+    until rank assessment finishes; reference sequences are read one locus at a
+    time, so retaining hits does not retain all locus databases in memory.
+    """
+    ancestry = [{rank: taxid for rank, taxid in lineage.items() if rank in ASSESSMENT_RANKS}
+                for lineage in ancestry]
+    ranks = [tuple(lineage) or (None,) for lineage in ancestry]
+    extracted = Counter(index for queries in by_locus.values() for index in queries)
+    has_reference = set()
+    active = set(range(len(batch)))
+    summaries = {}
+    options = {'protein': True} if protein else {}
+    with tempfile.TemporaryDirectory(prefix='rank-hits-', dir=work) as directory:
+        cached = {locus: Path(directory) / f'{locus}.tsv.gz' for locus in paths}
+        for step in range(max(map(len, ranks), default=0)):
+            rows = defaultdict(list)
+            for locus, path in paths.items():
+                queries = by_locus[locus]
+                pending = active.intersection(queries)
+                if not pending:
+                    continue
+                current = {index: (ranks[index][step],) if index in pending and ranks[index][step] else ()
+                           for index in queries}
+                if step == 0:
+                    with search_locus(locus, queries, path, assignments, work, threads, ram,
+                                      log_dir, **options) as (refs, hits_path):
+                        for index in pending - has_reference:
+                            if closest_reference_rank(ancestry[index], refs, batch[index], omit_same_species):
+                                has_reference.add(index)
+                        hits = read_hits(hits_path, queries, refs, batch, omit_same_species=omit_same_species,
+                                         ranks_by_query=current, **options)
+                        if any(len(ranks[index]) > 1 for index in pending):
+                            with text_open(hits_path) as source, atomic_writer(cached[locus]) as destination:
+                                shutil.copyfileobj(source, destination)
+                else:
+                    refs = locus_references(path, locus, assignments, **options)
+                    hits = read_hits(cached[locus], queries, refs, batch, omit_same_species=omit_same_species,
+                                     ranks_by_query=current, **options)
+                for index in sorted(pending):
+                    rank = ranks[index][step]
+                    rows[index].append(vote(batch[index]['run'], rank, locus, len(queries[index]),
+                                            ancestry[index].get(rank), hits.get(index, {}).get(rank, {}),
+                                            refs, **options))
+            for index in sorted(active):
+                rank = ranks[index][step]
+                summary = summarize(batch[index], rank, ancestry[index].get(rank), rows[index],
+                                    extracted[index], min_loci, support)
+                if summary['comparable_loci'] >= min_loci or step == len(ranks[index]) - 1:
+                    if not rank or (extracted[index] and index not in has_reference):
+                        summary['status'] = 'no_reference'
+                    evidence.writerows(rows[index])
+                    summaries[index] = summary
+            active.difference_update(summaries)
+            if not active:
+                break
+    return [summaries[index] for index in range(len(batch))]
 
 
 def screen(samples, **kwargs):
