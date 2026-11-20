@@ -17,14 +17,12 @@ from expanded_pair_clades import COLUMN, TABLE_FIELDS, annotate
 from contrast_metadata import CLADE_COLUMN
 
 
-def skim(tree, rows, prefix, seed, contrastive=False, topology_only=False):
-    """Use nwkit's grouping and selection functions, including for zero pairs."""
+def group_traits(tree, rows):
+    """Assign maximal uniform trait clades without selecting representatives."""
     nwkit_backend()
     import pandas as pd
-    from nwkit.skim import (mark_traits_to_nodes, add_group_ids,
-                            add_contrastive_clade_ids, sample_from_groups)
-    args = SimpleNamespace(group_by="trait", filter_by="busco_percent", filter_mode="descending",
-                           retain_per_clade=1, prioritize_non_missing=True, seed=seed)
+    from nwkit.skim import mark_traits_to_nodes, add_group_ids
+    args = SimpleNamespace(group_by="trait")
     names = set(tree.leaf_names())
     frame = pd.DataFrame(sorted(rows, key=lambda r: r["leaf_name"]))
     if set(frame["leaf_name"]) != names or frame["leaf_name"].duplicated().any():
@@ -33,7 +31,14 @@ def skim(tree, rows, prefix, seed, contrastive=False, topology_only=False):
     if frame["trait"].eq("").any():
         raise ValueError("skim requires observed traits")
     tree = mark_traits_to_nodes(tree, frame, args)
-    frame = add_group_ids(frame, tree)
+    return add_group_ids(frame, tree)
+
+
+def save_skim(tree, frame, prefix, seed, contrastive=False, topology_only=False):
+    """Write representative views after their clade memberships are known."""
+    from nwkit.skim import add_contrastive_clade_ids, sample_from_groups
+    args = SimpleNamespace(group_by="trait", filter_by="busco_percent", filter_mode="descending",
+                           retain_per_clade=1, prioritize_non_missing=True, seed=seed)
     if contrastive:
         frame = add_contrastive_clade_ids(frame, tree)
     sampled = sample_from_groups(frame, args)
@@ -51,6 +56,32 @@ def skim(tree, rows, prefix, seed, contrastive=False, topology_only=False):
         # There is no Newick representation of zero tips. An empty file means
         # no contrastive clades; summary.json and the TSV headers disambiguate it.
     return frame.to_dict("records"), sampled.to_dict("records")
+
+
+def skim(tree, rows, prefix, seed, contrastive=False, topology_only=False):
+    """Select NCBI inference representatives or write molecular-tree views."""
+    return save_skim(tree, group_traits(tree, rows), prefix, seed, contrastive, topology_only)
+
+
+def trait_clade_pairs(tree, rows):
+    """Find opposite-state sister clades directly on the input molecular tree."""
+    frame = group_traits(tree, rows)
+    from nwkit.skim import add_contrastive_clade_ids
+
+    candidates = add_contrastive_clade_ids(frame.copy(), tree)
+    pairs, unresolved = [], []
+    # Order by all input tips, independently of BUSCO scores or display samples.
+    clades = [part for _, part in candidates.dropna(subset=["contrastive_clade"]).groupby("contrastive_clade")]
+    for candidate in sorted(clades, key=lambda part: sorted(part["leaf_name"])):
+        groups = candidate.drop_duplicates("group").sort_values("trait")
+        if len(groups) != 2 or groups["trait"].nunique() != 2:
+            unresolved.append(sorted(candidate["leaf_name"]))
+            continue
+        left, right = groups.to_dict("records")
+        pairs.append({"contrast_pair_id": len(pairs) + 1,
+                      "state_a": left["trait"], "state_b": right["trait"],
+                      "group_a": left["group"], "group_b": right["group"]})
+    return frame, pairs, unresolved
 
 
 def prepare(samples, metadata, traits, tree, outdir, trait="C4", seed=RANDOM_SEED):
@@ -128,19 +159,54 @@ def summarize(tree, selection_dir, outgroup_file, outdir, seed=RANDOM_SEED):
 
 
 def summarize_tree(inferred, rows, all_traits, tip_for_species, outdir, trait, seed, outgroup, provenance):
-    """Shared molecular skim, pair assignment and export for both input routes."""
+    """Assign molecular clades and blocks before selecting display samples."""
     from ete4 import Tree
     outgroup = outgroup_ids(outgroup)
     out = Path(outdir)
     out.mkdir(parents=True, exist_ok=True)
     if rows:
-        second_all, second_reps = skim(inferred, rows, out / "summary_tree", seed)
-        summary_tree = Tree((out / "summary_tree.nwk").read_text(), parser=0)
-        _, contrast_reps = skim(summary_tree, [
-            {k: r[k] for k in ["leaf_name", "trait", "busco_percent"]} for r in second_reps
-        ], out / "contrastive", seed, contrastive=True)
+        frame, pairs, unresolved = trait_clade_pairs(inferred, rows)
+        second_all = frame.to_dict("records")
     else:
-        second_all, second_reps, contrast_reps = [], [], []
+        second_all, pairs, unresolved = [], [], []
+    # Map original species through their input-tree tips to molecular groups.
+    second_group = {r["leaf_name"]: r["group"] for r in second_all}
+    members = {name: second_group[tip] for name, tip in tip_for_species.items()}
+    sample_counts = Counter(members.values())
+    taxa = {r["species"]: r.get("species_id", r["species"]) for r in all_traits}
+    counts = {g: len({taxa[n] for n, group in members.items() if group == g}) for g in sample_counts}
+    paired_groups = {}
+    for pair in pairs:
+        for group in [pair["group_a"], pair["group_b"]]:
+            if group in paired_groups:
+                raise ValueError("one clade assigned to more than one contrast pair")
+            paired_groups[group] = pair["contrast_pair_id"]
+        for side in ["a", "b"]:
+            group = pair[f"group_{side}"]
+            pair[f"n_species_{side}"] = counts[group]
+            pair[f"n_samples_{side}"] = sample_counts[group]
+    metadata = []
+    for row in all_traits:
+        name = row["species"]
+        group = members.get(name, "")
+        metadata.append({"species": name, "species_id": taxa[name], trait: row["trait"],
+                         "role": "outgroup" if name in outgroup else row["role"],
+                         CLADE_COLUMN: group,
+                         "n_species_in_trait_clade": counts.get(group, ""),
+                         "n_samples_in_trait_clade": sample_counts.get(group, ""),
+                         "contrast_pair_id": paired_groups.get(group, "")})
+    metadata, expanded_clades, expanded_report = annotate(
+        inferred if rows else None, metadata, trait, tip_for_species=tip_for_species)
+
+    # Representatives affect only the exported views and their tip labels.
+    # Pair IDs and block membership have already been fixed on the input tree.
+    if rows:
+        _, second_reps = save_skim(inferred.copy(), frame, out / "summary_tree", seed)
+        summary_tree = Tree((out / "summary_tree.nwk").read_text(), parser=0)
+        skim(summary_tree, [{k: r[k] for k in ["leaf_name", "trait", "busco_percent"]}
+                            for r in second_reps], out / "contrastive", seed, contrastive=True)
+    else:
+        second_reps = []
         for prefix in ["summary_tree", "contrastive"]:
             fields = ["leaf_name", "trait", "busco_percent", "group"]
             if prefix == "contrastive":
@@ -149,49 +215,13 @@ def summarize_tree(inferred, rows, all_traits, tip_for_species, outdir, trait, s
                 write_tsv(out / f"{prefix}.{suffix}.tsv", fields, [])
             with atomic_writer(out / f"{prefix}.nwk") as handle:
                 handle.write("")
-    # Map original species through their input-tree tips to molecular groups.
-    second_group = {r["leaf_name"]: r["group"] for r in second_all}
     final_reps = {r["group"]: r["leaf_name"] for r in second_reps}
-    members = {name: second_group[tip] for name, tip in tip_for_species.items()}
-    sample_counts = Counter(members.values())
-    taxa = {r["species"]: r.get("species_id", r["species"]) for r in all_traits}
-    counts = {g: len({taxa[n] for n, group in members.items() if group == g}) for g in sample_counts}
-    candidates = {}
-    for row in contrast_reps:
-        candidates.setdefault(int(row["contrastive_clade"]), []).append(row)
-    pairs, paired_groups, unresolved = [], {}, []
-    # Canonical ordering makes public pair IDs independent of Newick child order.
-    for candidate in sorted(candidates.values(), key=lambda rs: sorted(r["leaf_name"] for r in rs)):
-        if len(candidate) != 2 or len({r["trait"] for r in candidate}) != 2:
-            unresolved.append(sorted(r["leaf_name"] for r in candidate))
-            continue
-        left, right = sorted(candidate, key=lambda r: str(r["trait"]))
-        pair_id = len(pairs) + 1
-        groups = [second_group[r["leaf_name"]] for r in [left, right]]
-        for group in groups:
-            if group in paired_groups:
-                raise ValueError("one clade assigned to more than one contrast pair")
-            paired_groups[group] = pair_id
-        pairs.append({"contrast_pair_id": pair_id, "state_a": left["trait"], "state_b": right["trait"],
-                      "representative_a": left["leaf_name"], "representative_b": right["leaf_name"],
-                      "group_a": groups[0], "group_b": groups[1],
-                      "n_species_a": counts[groups[0]], "n_species_b": counts[groups[1]],
-                      "n_samples_a": sample_counts[groups[0]], "n_samples_b": sample_counts[groups[1]]})
-    metadata = []
-    for row in all_traits:
-        name = row["species"]
-        group = members.get(name, "")
-        metadata.append({"species": name, "species_id": taxa[name], trait: row["trait"],
-                         "role": "outgroup" if name in outgroup else row["role"],
-                         CLADE_COLUMN: group, "representative": final_reps.get(group, ""),
-                         "is_representative": int(final_reps.get(group) == name),
-                         "n_species_in_trait_clade": counts.get(group, ""),
-                         "n_samples_in_trait_clade": sample_counts.get(group, ""),
-                         "contrast_pair_id": paired_groups.get(group, "")})
-    # The contrastive skim prunes its in-memory tree to paired tips. Expansion
-    # must retain every unpaired summary tip from the saved molecular tree.
-    expansion_tree = Tree((out / "summary_tree.nwk").read_text(), parser=0) if rows else None
-    metadata, expanded_clades, expanded_report = annotate(expansion_tree, metadata, trait)
+    for row in metadata:
+        row["representative"] = final_reps.get(row[CLADE_COLUMN], "")
+        row["is_representative"] = int(row["representative"] == row["species"])
+    for pair in pairs:
+        for side in ["a", "b"]:
+            pair[f"representative_{side}"] = final_reps[pair[f"group_{side}"]]
     fields = ["contrast_pair_id", "state_a", "state_b", "representative_a", "representative_b",
               "group_a", "group_b", "n_species_a", "n_species_b", "n_samples_a", "n_samples_b"]
     write_tsv(out / "contrast_pairs.tsv", fields, pairs)
@@ -203,6 +233,9 @@ def summarize_tree(inferred, rows, all_traits, tip_for_species, outdir, trait, s
                "nwkit": nwkit_backend().__version__, "outgroup": outgroup,
                "summary_species": len({taxa[r["leaf_name"]] for r in second_reps}),
                "summary_samples": len(second_reps), "contrast_pairs": len(pairs), "seed": seed,
+               "pair_selection": "opposite-state sister clades on the input molecular tree",
+               "block_selection": "maximal clades on the input molecular tree",
+               "summary_representatives": "display only",
                "unresolved_contrastive_clades": unresolved, **provenance, **expanded_report}
     write_json(out / "summary.json", report)
     return report

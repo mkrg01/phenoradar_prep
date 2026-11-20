@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from common import read_tsv, sha256, write_json, write_tsv
-from contrast_pairs import from_tree
+from contrast_pairs import from_tree, trait_clade_pairs
 from filter_species import discover, export
 from plot_contrast_tree import plot
 
@@ -90,6 +90,58 @@ def test_direct_membership_uses_molecular_tree_and_inherits_root(molecular_snaps
         for b in KNOWN:
             assert old.get_distance(a, b) == pytest.approx(new.get_distance(a, b))
     assert state(source) == before
+
+
+def test_pair_ids_and_blocks_do_not_depend_on_display_representatives(tmp_path):
+    """Changing the displayed tips must not renumber pairs or reassign blocks."""
+    from expanded_pair_clades import validate_result
+
+    source = tmp_path / "input"
+    names = ["O", "A", "Z", "B", "Y", "C", "X", "D", "W", "E", "U"]
+    rows = [dict(species=n, busco_percent=95 if n in "ABCD" else 70) for n in names]
+    write_tsv(source / "samples.tsv", ["species"], [{"species": n} for n in names])
+    write_tsv(source / "metadata.tsv", list(rows[0]), rows)
+    write_tsv(source / "traits.tsv", ["species", "C4"],
+              [{"species": n, "C4": "" if n in {"O", "U"} else int(n in "BYDW")} for n in names])
+    newick = "(O:1,(((((A:1,Z:1):1,(B:1,Y:1):1):1,E:1):1,((C:1,X:1):1,(D:1,W:1):1):1):1,U:1):1);"
+    (source / "tree.nwk").write_text(newick)
+    write_json(source / "tree.json", {"species": len(names), "outgroup": "O"})
+    args = dict(tree=source / "tree.nwk", tree_qc=source / "tree.json",
+                samples=source / "samples.tsv", metadata=source / "metadata.tsv", traits=source / "traits.tsv")
+    first, second = tmp_path / "first", tmp_path / "second"
+    from_tree(**args, outdir=first)
+    for row in rows:
+        row["busco_percent"] = 100 if row["species"] in "ZYXW" else 70
+    write_tsv(source / "metadata.tsv", list(rows[0]), rows)
+    from_tree(**args, outdir=second, seed=7)
+
+    before = {r["species"]: r for r in read_tsv(first / "species_metadata.tsv")}
+    after = {r["species"]: r for r in read_tsv(second / "species_metadata.tsv")}
+    assert before["A"]["representative"] == "A" and after["A"]["representative"] == "Z"
+    assert before["B"]["representative"] == "B" and after["B"]["representative"] == "Y"
+    assert {n: (r["contrast_pair_id"], r["phylogenetic_block_id"]) for n, r in before.items()} == {
+        n: (r["contrast_pair_id"], r["phylogenetic_block_id"]) for n, r in after.items()}
+    assert {n for n, r in after.items() if r["contrast_pair_id"] == "1"} == set("AZBY")
+    assert {n for n, r in after.items() if r["contrast_pair_id"] == "2"} == set("CXDW")
+    assert after["E"]["contrast_pair_id"] == "" and after["E"]["phylogenetic_block_id"] == "1"
+    assert all(after[n]["phylogenetic_block_id"] == "" for n in ["O", "U"])
+    assert read_tsv(first / "phylogenetic_blocks.tsv") == read_tsv(second / "phylogenetic_blocks.tsv")
+    for out in [first, second]:
+        validate_result(out, "C4")
+        plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out, expanded=True)
+
+
+@pytest.mark.parametrize("newick", ["((((A,F),B),E),(C,D));", "((D,C),(E,(B,(F,A))));"])
+def test_direct_pair_selection_needs_only_topology_and_trait_states(newick):
+    from ete4 import Tree
+
+    rows = [{"leaf_name": n, "trait": "1" if n in "BC" else "0"} for n in "ABCDEF"]
+    tree = Tree(newick, parser=9)
+    grouped, pairs, unresolved = trait_clade_pairs(tree, rows)
+    names = {group: set(part["leaf_name"]) for group, part in grouped.groupby("group")}
+    assert [{frozenset(names[pair["group_a"]]), frozenset(names[pair["group_b"]])} for pair in pairs] == [
+        {frozenset("AF"), frozenset("B")}, {frozenset("D"), frozenset("C")}]
+    assert not unresolved
 
 
 def test_exclusion_reforms_pairs_and_does_not_just_remove_rows(molecular_snapshot, tmp_path):

@@ -8,7 +8,7 @@ import shutil
 import tempfile
 
 from common import file_record, now, read_tsv, sha256, write_json, write_tsv
-from contrast_metadata import BLOCK_COLUMN, canonical_rows, read_blocks
+from contrast_metadata import BLOCK_COLUMN, CLADE_COLUMN, canonical_rows, read_blocks
 
 COLUMN = BLOCK_COLUMN
 POLICY = "maximal rooted clade containing one selected contrast pair and no other selected pair"
@@ -32,26 +32,44 @@ def clade_roots(tree, rows):
                            else ({str(rows[node.name]["contrast_pair_id"])} if rows[node.name].get("contrast_pair_id") else set()))
     roots = {}
     for pair, members in sorted(pairs.items()):
-        if len(members) != 2:
-            raise ValueError(f"contrast pair {pair} must have exactly two representative tips")
+        if len({rows[tip.name][CLADE_COLUMN] for tip in members}) != 2:
+            raise ValueError(f"contrast pair {pair} must have exactly two trait clades")
         node = tree.common_ancestor(members)
         if set(node.leaf_names()) != {tip.name for tip in members}:
-            raise ValueError(f"contrast pair {pair} is not a summary-tree clade")
+            raise ValueError(f"contrast pair {pair} is not a tree clade")
         while node.up is not None and pair_sets[node.up] == {pair}:
             node = node.up
         roots[pair] = node
     return roots
 
 
-def annotate(tree, metadata, trait):
-    """Compose summary-tip clades with the existing full sample membership."""
+def annotate(tree, metadata, trait, *, tip_for_species=None):
+    """Assign blocks on input-tree tips, or validate legacy summary-tree results."""
     metadata = canonical_rows(metadata, trait_clades=True)
-    representatives = {r["species"]: r for r in metadata if str(r["is_representative"]) == "1"}
     if len({r["species"] for r in metadata}) != len(metadata):
         raise ValueError("duplicate species in contrast metadata")
-    roots = clade_roots(tree, representatives) if tree is not None else {}
-    if tree is None and representatives:
-        raise ValueError("empty summary tree has nonempty representatives")
+    if tip_for_species is None:
+        tree_rows = {r["species"]: r for r in metadata if str(r["is_representative"]) == "1"}
+        tip_for_species = {}
+        for row in metadata:
+            representative = row.get("representative", "")
+            if representative:
+                if representative not in tree_rows:
+                    raise ValueError(f"unknown contrast representative: {representative}")
+                tip_for_species[row["species"]] = representative
+    else:
+        if set(tip_for_species) != {r["species"] for r in metadata if r[trait] != ""}:
+            raise ValueError("input-tree mapping differs from observed sample membership")
+        tree_rows = {}
+        for row in metadata:
+            tip = tip_for_species.get(row["species"])
+            if tip is not None:
+                previous = tree_rows.setdefault(tip, row)
+                if any(previous[key] != row[key] for key in [trait, CLADE_COLUMN, "contrast_pair_id"]):
+                    raise ValueError(f"conflicting input-tree memberships for {tip}")
+    roots = clade_roots(tree, tree_rows) if tree is not None else {}
+    if tree is None and tree_rows:
+        raise ValueError("empty tree has nonempty sample membership")
     membership = {}
     for pair, root in roots.items():
         for tip in root.leaves():
@@ -60,10 +78,7 @@ def annotate(tree, metadata, trait):
             membership[tip.name] = pair
     result = []
     for row in metadata:
-        representative = row.get("representative", "")
-        if representative and representative not in representatives:
-            raise ValueError(f"unknown contrast representative: {representative}")
-        expanded = membership.get(representative, "")
+        expanded = membership.get(tip_for_species.get(row["species"], ""), "")
         if row.get("contrast_pair_id") and expanded != str(row["contrast_pair_id"]):
             raise ValueError("expanded clade must retain the original contrast pair")
         if expanded and not row[trait]:
@@ -72,14 +87,14 @@ def annotate(tree, metadata, trait):
     clades = []
     for pair, root in roots.items():
         members = [r for r in result if r[COLUMN] == pair]
-        states = sorted({r[trait] for r in representatives.values() if str(r.get("contrast_pair_id") or "") == pair})
+        states = sorted({r[trait] for r in members if str(r.get("contrast_pair_id") or "") == pair})
         if len(states) != 2:
             raise ValueError(f"contrast pair {pair} requires two opposite trait states")
         def species(rows):
             return len({r.get("species_id") or r["species"] for r in rows})
         a, b = ([r for r in members if r[trait] == state] for state in states)
         clades.append({COLUMN: pair, "contrast_pair_id": pair, "state_a": states[0], "state_b": states[1],
-                       "n_representatives": len(list(root.leaves())), "n_species": species(members),
+                       "n_representatives": len({r[CLADE_COLUMN] for r in members}), "n_species": species(members),
                        "n_samples": len(members), "n_species_a": species(a), "n_species_b": species(b),
                        "n_samples_a": len(a), "n_samples_b": len(b)})
     assigned = [r for r in result if r[COLUMN]]

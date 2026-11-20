@@ -8,7 +8,7 @@ nwkit. Traits come from the column named by `trait` in `inputs.species_trait`.
 - A **trait clade** is a maximal clade with one observed trait state among its
   sampled members; it can contain one or several species.
 - A **contrast pair** consists of two sister trait clades with opposite states.
-  One sample represents each clade, and all its members retain pair membership.
+  All members of both clades retain pair membership.
 - A **phylogenetic block** is the largest rooted clade containing one selected
   contrast pair and no other selected pair. It may include unpaired samples.
 
@@ -46,6 +46,12 @@ Pairs are also included in `all`.
 All/phenotyped trees with zero or one observed state produce zero pairs.
 More than two states is unsupported. Missing-trait samples keep empty pair IDs.
 
+For `all` and `phenotyped`, pairs are identified directly on the molecular tree
+after removing missing-trait tips. Both sister clades must be uniform for the
+trait and have opposite states. Blocks are also assigned on that tree, before
+selecting any display representatives. BUSCO completeness and the random seed
+affect display representatives, not pair IDs or pair/block membership.
+
 ## Representative selection
 
 Representative inference requires exactly two observed states and at least four
@@ -54,12 +60,17 @@ representatives. It also works with pair selection disabled.
 1. Group homogeneous trait clades on the NCBI guide and choose representatives
    by BUSCO completeness, breaking ties with seed `12345`.
 2. Resolve the outgroup and infer a BUSCO tree for those representatives.
-3. Group the molecular tree and pair minimal mixed clades with opposite-state
-   representatives; unresolved multiway cases remain unpaired.
+3. Identify opposite-state sister trait clades and their blocks directly on the
+   inferred molecular tree; unresolved multiway cases remain unpaired.
 4. Map original samples through the groups to their representatives and pairs.
 
 Both trait states are reduced. A manual outgroup must belong to the selected
 representatives. Review `phylogeny/representatives/selection/`.
+
+After assigning pairs and blocks, summary figures retain one sample per trait
+clade, selected by BUSCO completeness with seeded tie breaking. These display
+samples do not change the assignments. The `representatives` inference route
+still requires its separate NCBI-based selection before tree estimation.
 
 ## Outputs and interpretation
 
@@ -96,14 +107,18 @@ distinguish biological species (`n_species_*`) from sample tips (`n_samples_*`).
 
 [Filtering a completed tree](species_filter.md) can recompute pairs for
 all/phenotyped results. Pair IDs are specific to each tree and cohort.
+From v0.8.13, IDs are ordered by clade membership rather than display sample
+names. Recomputing an earlier result can therefore change its ID numbers;
+reading or exporting saved results preserves their existing IDs.
 
 ## Phylogenetic blocks
 
 `phylogenetic_block_id` assigns the largest rooted clade containing one selected
 contrast pair and no other selected pair. Start at each pair's common ancestor
-on the molecular `summary_tree.nwk`, then ascend until the parent contains
-another pair. Unpaired tips remain available during expansion; do not use the
-pair-only `contrastive.nwk` for this step.
+on the input molecular tree, then ascend until the parent contains another
+pair. Unpaired tips remain available during expansion. The exported
+`summary_tree.nwk` shows the same assignments using one display tip per trait
+clade; the pair-only `contrastive.nwk` omits unpaired tips.
 
 Blocks are disjoint and use the anchoring pair IDs. An added sample
 can have a block ID and a blank original pair ID. Missing-trait

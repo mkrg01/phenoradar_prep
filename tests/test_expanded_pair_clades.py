@@ -43,6 +43,18 @@ def test_maximal_disjoint_membership_preserves_pairs_traits_and_biological_count
     assert clades[0]["n_representatives"] == 3
 
 
+def test_blocks_on_full_tree_match_saved_summary_membership_without_representatives():
+    source = metadata()
+    expected, clades, report = annotate(Tree(NEWICK, parser=0), source, "C4")
+    full = NEWICK.replace("A:1", "(A:0.5,A_run2:0.5):0.5").replace("B:1", "(B:0.5,B2:0.5):0.5")
+    rows = [{k: v for k, v in row.items() if k not in {"representative", "is_representative"}}
+            for row in source]
+    mapping = {r["species"]: r["species"] for r in rows if r["C4"]}
+    actual, actual_clades, actual_report = annotate(Tree(full, parser=0), rows, "C4", tip_for_species=mapping)
+    assert {r["species"]: r[COLUMN] for r in actual} == {r["species"]: r[COLUMN] for r in expected}
+    assert actual_clades == clades and actual_report == report
+
+
 @pytest.mark.parametrize("pair_count", [0, 1])
 def test_zero_pairs_stay_empty_and_one_pair_can_expand_to_the_root(pair_count):
     source = metadata()
