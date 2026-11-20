@@ -8,8 +8,9 @@ import shutil
 import tempfile
 
 from common import file_record, now, read_tsv, sha256, write_json, write_tsv
+from contrast_metadata import BLOCK_COLUMN, canonical_rows, read_blocks
 
-COLUMN = "expanded_pair_clade_id"
+COLUMN = BLOCK_COLUMN
 POLICY = "maximal rooted clade containing one selected contrast pair and no other selected pair"
 TABLE_FIELDS = [COLUMN, "contrast_pair_id", "state_a", "state_b", "n_representatives",
                 "n_species", "n_samples", "n_species_a", "n_species_b", "n_samples_a", "n_samples_b"]
@@ -44,6 +45,7 @@ def clade_roots(tree, rows):
 
 def annotate(tree, metadata, trait):
     """Compose summary-tip clades with the existing full sample membership."""
+    metadata = canonical_rows(metadata, trait_clades=True)
     representatives = {r["species"]: r for r in metadata if str(r["is_representative"]) == "1"}
     if len({r["species"] for r in metadata}) != len(metadata):
         raise ValueError("duplicate species in contrast metadata")
@@ -92,11 +94,13 @@ def validate_result(folder, trait):
     from ete4 import Tree
     folder = Path(folder)
     text = (folder / "summary_tree.nwk").read_text()
-    saved = read_tsv(folder / "species_metadata.tsv")
+    saved = canonical_rows(read_tsv(folder / "species_metadata.tsv"), trait_clades=True)
     rows, clades, report = annotate(Tree(text, parser=0) if text.strip() else None, saved, trait)
     expected = [{key: str(value) for key, value in row.items()} for row in clades]
     summary = json.loads((folder / "summary.json").read_text())
-    if rows != saved or expected != read_tsv(folder / "expanded_pair_clades.tsv") or any(summary.get(k) != v for k, v in report.items()):
+    if (rows != saved
+            or expected != read_blocks(folder)
+            or any(summary.get(k) != v for k, v in report.items())):
         raise ValueError("expanded-pair outputs differ from the saved summary tree")
     pairs = read_tsv(folder / "contrast_pairs.tsv")
     by_name = {r["species"]: r for r in saved}
@@ -115,7 +119,7 @@ def export_analysis(analysis, outdir=None):
     from consumer_metadata import BRANCHES, create, validate
     from plot_contrast_tree import plot
     source = Path(analysis).resolve()
-    requested = Path(outdir) if outdir else source / "expanded_pair_clades"
+    requested = Path(outdir) if outdir else source / "phylogenetic_blocks"
     if requested.is_symlink():
         raise ValueError("expanded-pair output must not be a symlink")
     out = requested.resolve()
@@ -158,7 +162,7 @@ def export_analysis(analysis, outdir=None):
             for name in ["summary_tree.nwk", "contrast_pairs.tsv"]:
                 shutil.copyfile(consume(original / name), target / name)
             write_tsv(target / "species_metadata.tsv", list(rows[0]) if rows else ["species", trait, COLUMN], rows)
-            write_tsv(target / "expanded_pair_clades.tsv", TABLE_FIELDS, clades)
+            write_tsv(target / "phylogenetic_blocks.tsv", TABLE_FIELDS, clades)
             write_json(target / "summary.json", {**summary, **report})
             validate_result(target, trait)
             plot(target / "summary_tree.nwk", target / "species_metadata.tsv", target / "summary.json",
@@ -179,7 +183,7 @@ def export_analysis(analysis, outdir=None):
             "reestimated": False, "pairs_reselected": False, "branches": reports,
             "sources": list(inputs.values()), "outputs": outputs,
             "implementation": [file_record(code / name) for name in [
-                "expanded_pair_clades.py", "plot_contrast_tree.py", "consumer_metadata.py", "phenoradar_metadata.py", "common.py"]],
+                "expanded_pair_clades.py", "contrast_metadata.py", "plot_contrast_tree.py", "consumer_metadata.py", "phenoradar_metadata.py", "common.py"]],
         })
         os.rename(stage, out)
         return {"output": str(out), "branches": reports}
@@ -191,6 +195,6 @@ def export_analysis(analysis, outdir=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--analysis", required=True, help="Analysis with completed, saved contrast outputs")
-    parser.add_argument("--outdir", help="New derivative directory; default: ANALYSIS/expanded_pair_clades")
+    parser.add_argument("--outdir", help="New derivative directory; default: ANALYSIS/phylogenetic_blocks")
     args = parser.parse_args()
     print(json.dumps(export_analysis(**vars(args)), indent=2))

@@ -137,9 +137,11 @@ def required_outputs(pipeline, implementation=()):
             if phy.get(option, {}).get('enabled'):
                 required.append(f'{prefix}/{marker}')
                 if option == 'contrast_pairs' and any(Path(e['path']).name == 'expanded_pair_clades.py' for e in implementation):
-                    required += [f'{prefix}/contrast/{name}' for name in [
-                        'expanded_pair_clades.tsv', 'expanded_pair_tree.pdf', 'expanded_pair_tree.svg',
-                        'expanded_pair_tree_id.pdf', 'expanded_pair_tree_id.svg']]
+                    current_names = any(Path(e['path']).name == 'contrast_metadata.py' for e in implementation)
+                    table = 'phylogenetic_blocks.tsv' if current_names else 'expanded_pair_clades.tsv'
+                    stem = 'phylogenetic_block_tree' if current_names else 'expanded_pair_tree'
+                    required += [f'{prefix}/contrast/{name}' for name in [table,
+                        f'{stem}.pdf', f'{stem}.svg', f'{stem}_id.pdf', f'{stem}_id.svg']]
     return required
 
 

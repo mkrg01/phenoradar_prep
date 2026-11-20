@@ -123,14 +123,14 @@ def test_two_skims_compose_all_species_membership_and_plot(tmp_path):
     pairs = read_tsv(out / "contrast_pairs.tsv")
     assert len(pairs) == 2
     meta = {r["species"]: r for r in read_tsv(out / "species_metadata.tsv")}
-    assert {meta[n]["group"] for n in ["A", "A2", "C"]} == {meta["A"]["group"]}
-    assert meta["A"]["n_species_in_group"] == "3"
+    assert {meta[n]["trait_clade_id"] for n in ["A", "A2", "C"]} == {meta["A"]["trait_clade_id"]}
+    assert meta["A"]["n_species_in_trait_clade"] == "3"
     assert meta["A"]["contrast_pair_id"] == meta["B"]["contrast_pair_id"]
     assert meta["D"]["contrast_pair_id"] == meta["E"]["contrast_pair_id"]
     assert meta["A"]["contrast_pair_id"] != meta["D"]["contrast_pair_id"]
     assert meta["U"]["C4"] == meta["U"]["contrast_pair_id"] == ""
     assert meta["O"]["role"] == "outgroup" and meta["O"]["contrast_pair_id"] == ""
-    assert meta["O"]["C4"] == "0" and meta["O"]["group"] != ""
+    assert meta["O"]["C4"] == "0" and meta["O"]["trait_clade_id"] != ""
     assert meta["O"]["is_representative"] == "1"
     plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out)
     assert (out / "summary_tree.pdf").read_bytes().startswith(b"%PDF")

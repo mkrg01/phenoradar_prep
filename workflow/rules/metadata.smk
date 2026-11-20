@@ -80,7 +80,7 @@ rule prepare_phenoradar_metadata:
         traits=rules.normalize_traits.output.traits,
         report=rules.normalize_traits.output.report,
         code=f"{SCRIPTS}/phenoradar_metadata.py",
-        helpers=[f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
+        helpers=[f"{SCRIPTS}/species_traits.py", f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py", f"{SCRIPTS}/contrast_metadata.py"]
     output: f"{OUT}/{BASE_METADATA}"
     params: trait=config["trait"]
     log: f"{LOG}/phenoradar_metadata.log"
@@ -104,7 +104,7 @@ rule prepare_consumer_metadata:
         taxonomy=f"{META}/metadata_high_busco.tsv",
         pairs=lambda wc: list(consumer_pair_tables().values()),
         code=f"{SCRIPTS}/consumer_metadata.py",
-        helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "phenoradar_metadata", "sample_identity", "species_traits"]]
+        helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "phenoradar_metadata", "sample_identity", "species_traits", "contrast_metadata"]]
     output:
         table=f"{OUT}/{CONSUMER_METADATA}",
         provenance=f"{OUT}/{Path(CONSUMER_METADATA).with_suffix('.json')}"

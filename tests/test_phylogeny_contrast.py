@@ -78,10 +78,10 @@ def test_direct_membership_uses_molecular_tree_and_inherits_root(molecular_snaps
     assert pair_members(out) == {frozenset(["A", "B"]), frozenset(["D", "E"])}
     meta = {r["species"]: r for r in read_tsv(out / "species_metadata.tsv")}
     assert set(meta) == set(SPECIES)
-    assert meta["A2"]["representative"] == "A" and meta["A"]["n_species_in_group"] == "2"
+    assert meta["A2"]["representative"] == "A" and meta["A"]["n_species_in_trait_clade"] == "2"
     assert meta["A2"]["contrast_pair_id"] == meta["B"]["contrast_pair_id"]
     assert meta["C"]["contrast_pair_id"] == ""
-    assert all(meta[n]["contrast_pair_id"] == meta[n]["group"] == "" for n in ["O", "U"])
+    assert all(meta[n]["contrast_pair_id"] == meta[n]["trait_clade_id"] == "" for n in ["O", "U"])
     assert report["outgroup"] == ["O"] and report["outgroup_in_observed_tree"] is False
     assert report["rooting"] == "source_root_inherited" and report["reestimated"] is False
     old, new = Tree(TREE, parser=0), Tree((out / "observed_tree.nwk").read_text(), parser=0)
@@ -125,7 +125,7 @@ def test_phenotyped_scope_and_different_pair_trait(molecular_snapshot, tmp_path)
     report = from_tree(**inputs(source, traits, "phylogeny/phenotyped"), outdir=out, trait="other", exclude_species=["A", "O"])
     meta = {r["species"]: r for r in read_tsv(out / "species_metadata.tsv")}
     assert set(meta) == set(KNOWN) - {"A"}
-    assert meta["B"]["group"] == meta["B"]["contrast_pair_id"] == ""
+    assert meta["B"]["trait_clade_id"] == meta["B"]["contrast_pair_id"] == ""
     assert report["excluded_species"] == ["A"] and report["outgroup_in_observed_tree"] is False
 
 
@@ -310,7 +310,7 @@ def test_missing_id_figure_runs_only_plot_rule_on_frozen_inputs(molecular_snapsh
 
     run()
     out = target / "phylogeny/all/contrast"
-    for stem in ["summary_tree", "summary_tree_id", "expanded_pair_tree", "expanded_pair_tree_id"]:
+    for stem in ["summary_tree", "summary_tree_id", "phylogenetic_block_tree", "phylogenetic_block_tree_id"]:
         for ext in ["pdf", "svg"]:
             assert (out / f"{stem}.{ext}").is_file()
     assert "run = R1, replicate_A" in (out / "summary_tree_id.svg").read_text()
@@ -318,7 +318,7 @@ def test_missing_id_figure_runs_only_plot_rule_on_frozen_inputs(molecular_snapsh
     (out / "summary_tree_id.pdf").unlink()
     assert "plot_contrast_tree" in run()
     assert (out / "summary_tree_id.pdf").is_file()
-    (out / "expanded_pair_tree_id.svg").unlink()
+    (out / "phylogenetic_block_tree_id.svg").unlink()
     assert "plot_expanded_pair_tree" in run()
-    assert (out / "expanded_pair_tree_id.svg").is_file()
+    assert (out / "phylogenetic_block_tree_id.svg").is_file()
     assert {path: state(target)[path] for path in before} == before

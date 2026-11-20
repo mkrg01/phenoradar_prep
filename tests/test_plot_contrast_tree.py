@@ -119,9 +119,9 @@ def test_publication_and_id_labels_keep_accessions_upright_and_color_only_pair_c
                 assert [text.get_text() for text in suffixes] == [" (n = 7)", *(" (n = 1)" for _ in range(3))]
                 assert all("SRR" not in text.get_text() for text in texts)
             else:
-                assert suffixes[0].get_text() == " (n = 7; run = SRR_A_01; group = 1; pair = 9)"
-                assert suffixes[2].get_text() == " (n = 1; run = SRR_C_01; group = 3; pair = -)"
-                assert suffixes[3].get_text() == " (n = 1; run = SRR_D_01; group = 4; pair = -)"
+                assert suffixes[0].get_text() == " (n = 7; run = SRR_A_01; clade = 1; pair = 9)"
+                assert suffixes[2].get_text() == " (n = 1; run = SRR_C_01; clade = 3; pair = -)"
+                assert suffixes[3].get_text() == " (n = 1; run = SRR_D_01; clade = 4; pair = -)"
             red = [line for line in ax.lines if to_hex(line.get_color()) == "#c62828"]
             assert len(red) == 3  # Two descendant edges and their joining vertical line.
             assert all(max(line.get_ydata()) < 70 for line in red)

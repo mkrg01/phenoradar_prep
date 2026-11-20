@@ -14,6 +14,7 @@ from phylogeny_root import nwkit_backend, species_rows
 from species_traits import read_species_traits
 from sample_identity import species_id, traits_for_samples
 from expanded_pair_clades import COLUMN, TABLE_FIELDS, annotate
+from contrast_metadata import CLADE_COLUMN
 
 
 def skim(tree, rows, prefix, seed, contrastive=False, topology_only=False):
@@ -182,10 +183,10 @@ def summarize_tree(inferred, rows, all_traits, tip_for_species, outdir, trait, s
         group = members.get(name, "")
         metadata.append({"species": name, "species_id": taxa[name], trait: row["trait"],
                          "role": "outgroup" if name in outgroup else row["role"],
-                         "group": group, "representative": final_reps.get(group, ""),
+                         CLADE_COLUMN: group, "representative": final_reps.get(group, ""),
                          "is_representative": int(final_reps.get(group) == name),
-                         "n_species_in_group": counts.get(group, ""),
-                         "n_samples_in_group": sample_counts.get(group, ""),
+                         "n_species_in_trait_clade": counts.get(group, ""),
+                         "n_samples_in_trait_clade": sample_counts.get(group, ""),
                          "contrast_pair_id": paired_groups.get(group, "")})
     # The contrastive skim prunes its in-memory tree to paired tips. Expansion
     # must retain every unpaired summary tip from the saved molecular tree.
@@ -194,9 +195,9 @@ def summarize_tree(inferred, rows, all_traits, tip_for_species, outdir, trait, s
     fields = ["contrast_pair_id", "state_a", "state_b", "representative_a", "representative_b",
               "group_a", "group_b", "n_species_a", "n_species_b", "n_samples_a", "n_samples_b"]
     write_tsv(out / "contrast_pairs.tsv", fields, pairs)
-    write_tsv(out / "species_metadata.tsv", ["species", "species_id", trait, "role", "group", "representative",
-              "is_representative", "n_species_in_group", "n_samples_in_group", "contrast_pair_id", COLUMN], metadata)
-    write_tsv(out / "expanded_pair_clades.tsv", TABLE_FIELDS, expanded_clades)
+    write_tsv(out / "species_metadata.tsv", ["species", "species_id", trait, "role", CLADE_COLUMN, "representative",
+              "is_representative", "n_species_in_trait_clade", "n_samples_in_trait_clade", "contrast_pair_id", COLUMN], metadata)
+    write_tsv(out / "phylogenetic_blocks.tsv", TABLE_FIELDS, expanded_clades)
     report = {"created_at": now(), "trait": trait,
                "state_order": sorted({r["trait"] for r in all_traits if r["trait"] != ""}),
                "nwkit": nwkit_backend().__version__, "outgroup": outgroup,
@@ -215,8 +216,9 @@ def from_tree(tree, tree_qc, samples, metadata, traits, outdir, trait="C4", seed
     if len(set(exclude_species)) != len(exclude_species):
         raise ValueError("duplicate excluded species IDs")
     if not isinstance(trait, str) or not trait.strip() or trait in {
-            "species", "species_id", "role", "group", "representative", "is_representative",
-            "n_species_in_group", "n_samples_in_group", "contrast_pair_id", COLUMN}:
+            "species", "species_id", "role", "group", CLADE_COLUMN, "representative", "is_representative",
+            "n_species_in_group", "n_samples_in_group", "n_species_in_trait_clade",
+            "n_samples_in_trait_clade", "contrast_pair_id", COLUMN, "expanded_pair_clade_id"}:
         raise ValueError("trait must name a non-reserved phenotype column")
     if type(seed) is not int or seed <= 0:
         raise ValueError("seed must be a positive integer")

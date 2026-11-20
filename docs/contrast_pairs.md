@@ -1,10 +1,22 @@
-# Trait contrast pairs
+# Contrasting sister-clade pairs and phylogenetic blocks
 
 [Documentation](index.md) · [BUSCO phylogeny](phylogeny.md)
 
-Select opposite-trait representatives with nwkit's homogeneous-clade grouping
-and contrastive-clade selection. Traits come from the column named by `trait`
-in `inputs.species_trait`.
+Select pairs of sister clades with different states of the focal trait using
+nwkit. Traits come from the column named by `trait` in `inputs.species_trait`.
+
+- A **trait clade** is a maximal clade with one observed trait state among its
+  sampled members; it can contain one or several species.
+- A **contrast pair** consists of two sister trait clades with opposite states.
+  One sample represents each clade, and all its members retain pair membership.
+- A **phylogenetic block** is the largest rooted clade containing one selected
+  contrast pair and no other selected pair. It may include unpaired samples.
+
+Public metadata uses `trait_clade_id`, `contrast_pair_id`, and
+`phylogenetic_block_id`. The raw nwkit skim tables retain nwkit's `group` column.
+Readers accept the former `group` and `expanded_pair_clade_id` metadata columns
+and the former `expanded_pair_clades.tsv` filename. Conflicting old and new
+values are errors. New outputs use the canonical names.
 
 ## Configuration and execution
 
@@ -57,13 +69,13 @@ Under `results/<build>/downstream/<analysis>/phylogeny/<tree>/contrast/`:
 | --- | --- |
 | `contrast_pairs.tsv` | Pair states, representatives, and counts |
 | `species_metadata.tsv` | Traits, groups, representatives, and nullable pair IDs |
-| `expanded_pair_clades.tsv` | Anchoring pairs, expanded-clade membership counts, and both trait-state counts |
+| `phylogenetic_blocks.tsv` | Anchoring pairs, expanded-clade membership counts, and both trait-state counts |
 | `summary_tree.nwk`, `.all.tsv`, `.sampled.tsv` | Grouped molecular tree and membership |
 | `contrastive.nwk`, `.all.tsv`, `.sampled.tsv` | Raw selection, including unresolved candidates |
 | `summary_tree.pdf`, `.svg` | Publication view: scientific names, group species counts, and red pair clades |
 | `summary_tree_id.pdf`, `.svg` | Same tree with run, group, and pair IDs in tip labels |
-| `expanded_pair_tree.pdf`, `.svg` | Same tree with expanded-clade shading and blue expanded branches; original pair branches remain red |
-| `expanded_pair_tree_id.pdf`, `.svg` | Expanded view with run, group, original pair, and expanded-clade IDs |
+| `phylogenetic_block_tree.pdf`, `.svg` | Same tree with expanded-clade shading and blue expanded branches; original pair branches remain red |
+| `phylogenetic_block_tree_id.pdf`, `.svg` | Expanded view with run, group, original pair, and expanded-clade IDs |
 | `summary.json` | Counts, settings, and provenance |
 
 For PhenoRadar input, use `metadata/species_metadata.tsv` at the analysis root.
@@ -85,21 +97,21 @@ distinguish biological species (`n_species_*`) from sample tips (`n_samples_*`).
 [Filtering a completed tree](species_filter.md) can recompute pairs for
 all/phenotyped results. Pair IDs are specific to each tree and cohort.
 
-## Expanded pair clades
+## Phylogenetic blocks
 
-`expanded_pair_clade_id` assigns the largest rooted clade containing one selected
+`phylogenetic_block_id` assigns the largest rooted clade containing one selected
 contrast pair and no other selected pair. Start at each pair's common ancestor
 on the molecular `summary_tree.nwk`, then ascend until the parent contains
 another pair. Unpaired tips remain available during expansion; do not use the
 pair-only `contrastive.nwk` for this step.
 
-Expanded clades are disjoint and use the anchoring pair IDs. An added sample
-can have an expanded-clade ID and a blank original pair ID. Missing-trait
+Blocks are disjoint and use the anchoring pair IDs. An added sample
+can have a block ID and a blank original pair ID. Missing-trait
 samples and branches outside the expanded clades have blank IDs. With a single
-pair, its expanded clade can include the entire observed tree.
+pair, its block can include the entire observed tree.
 
-For leave-one-group-out validation, review the number of clades and their
-sample counts and label balance. An expanded clade can be much larger than
+For leave-one-group-out validation, review the number of blocks and their
+sample counts and label balance. A block can be much larger than
 its anchor pair. See [PhenoRadar validation groups](phenoradar_inputs.md#validation-groups).
 
 ### Apply to saved results
@@ -113,7 +125,7 @@ python workflow/scripts/expanded_pair_clades.py --analysis results/leaf/downstre
 
 Run with the workflow test environment or the pinned `timetree` environment.
 Every configured contrast branch must already have its summary tree, metadata,
-pair table, and summary. Outputs go under `<analysis>/expanded_pair_clades/`:
+pair table, and summary. Outputs go under `<analysis>/phylogenetic_blocks/`:
 
 - `metadata/species_metadata.tsv`: the full cohort, taxonomy, original pairs,
   and expanded-clade columns; its JSON records the joins.

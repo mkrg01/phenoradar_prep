@@ -73,17 +73,17 @@ expression.
 ## Validation groups
 
 With one contrast branch, use `contrast_pair_id` for original pairs or
-`expanded_pair_clade_id` for [expanded clades](contrast_pairs.md#expanded-pair-clades).
+`phylogenetic_block_id` for [expanded clades](contrast_pairs.md#phylogenetic-blocks).
 With several branches, use a suffixed column such as `contrast_pair_id_all` or
-`expanded_pair_clade_id_phenotyped`. Unassigned samples have blank IDs.
+`phylogenetic_block_id_phenotyped`. Unassigned samples have blank IDs.
 
 For leave-one-group-out validation on expanded clades:
 
 ```yaml
 data:
-  contrast_pair_col: expanded_pair_clade_id
+  contrast_group_col: phylogenetic_block_id
 split:
-  group_col: expanded_pair_clade_id
+  group_col: phylogenetic_block_id
   outer_cv_strategy: logo
 ```
 

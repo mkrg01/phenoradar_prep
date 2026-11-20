@@ -86,8 +86,11 @@ def validate_keys(config):
         trait = config["trait"]
         if not isinstance(trait, str) or not trait.strip():
             raise ValueError("trait must name a column in input/species_trait.tsv")
-        if trait in {"species", "role", "group", "representative", "is_representative",
-                     "n_species_in_group", "n_samples_in_group", "species_id", "contrast_pair_id"}:
+        if (trait in {"species", "role", "group", "trait_clade_id", "representative", "is_representative",
+                      "n_species_in_group", "n_samples_in_group", "n_species_in_trait_clade",
+                      "n_samples_in_trait_clade", "species_id", "contrast_pair_id",
+                      "phylogenetic_block_id", "expanded_pair_clade_id"}
+                or trait.startswith(("contrast_pair_id_", "phylogenetic_block_id_", "expanded_pair_clade_id_"))):
             raise ValueError("trait conflicts with a reserved output column")
     phylogeny = config.get("phylogeny", {})
     if "min_taxa" in phylogeny:

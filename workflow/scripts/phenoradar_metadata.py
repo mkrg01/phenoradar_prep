@@ -5,6 +5,7 @@ import csv
 import re
 
 from common import write_tsv
+from contrast_metadata import BLOCK_COLUMN, canonical_column, canonical_row
 from species_traits import read_species_traits
 from sample_identity import traits_for_samples
 
@@ -16,7 +17,8 @@ def fields(trait="C4"):
             or any(c in trait for c in "\t\r\n")
             or trait in {"species", "contrast_pair_id", *TAXONOMY_RANKS}
             or trait.startswith("contrast_pair_id_")
-            or trait == "expanded_pair_clade_id" or trait.startswith("expanded_pair_clade_id_")):
+            or canonical_column(trait) == BLOCK_COLUMN
+            or canonical_column(trait).startswith(BLOCK_COLUMN + "_")):
         raise ValueError("trait must name a non-reserved output column")
     return ["species", trait, "contrast_pair_id", *TAXONOMY_RANKS]
 
@@ -25,12 +27,13 @@ def _table(path, required):
     with open(path, newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         columns = reader.fieldnames or []
-        if len(columns) != len(set(columns)) or not set(required) <= set(columns):
+        if (len(columns) != len(set(columns))
+                or not set(required) <= {canonical_column(name) for name in columns}):
             raise ValueError(f"missing or duplicate TSV columns: {path}; required {required}")
         for row in reader:
             if None in row or any(value is None for value in row.values()):
                 raise ValueError(f"malformed TSV row: {path}:{reader.line_num}")
-            yield row
+            yield canonical_row(row)
 
 
 def _species(value):
@@ -52,6 +55,7 @@ def _base_rows(rows, trait):
     required = ["species", trait, "contrast_pair_id", "family"]
     result, seen = [], set()
     for row in rows:
+        row = canonical_row(row)
         if not set(required) <= set(row) or any(row[key] is None for key in required):
             raise ValueError(f"base metadata requires {required}")
         name = _species(row["species"])
@@ -97,8 +101,8 @@ def with_pairs(rows, pairs, trait="C4"):
     by_species = {row["species"]: row for row in result}
     for row in result:
         row["contrast_pair_id"] = ""
-        if "expanded_pair_clade_id" in row:
-            row["expanded_pair_clade_id"] = ""
+        if "phylogenetic_block_id" in row:
+            row["phylogenetic_block_id"] = ""
     seen = set()
     for pair in _table(pairs, ["species", trait, "contrast_pair_id"]):
         name = _species(pair["species"])
@@ -111,13 +115,13 @@ def with_pairs(rows, pairs, trait="C4"):
         if _trait(pair[trait], name) != row[trait]:
             raise ValueError("contrast trait differs from base metadata: " + name)
         row["contrast_pair_id"] = pair["contrast_pair_id"].strip()
-        if "expanded_pair_clade_id" in pair:
-            expanded = pair["expanded_pair_clade_id"].strip()
+        if "phylogenetic_block_id" in pair:
+            expanded = pair["phylogenetic_block_id"].strip()
             if row["contrast_pair_id"] and expanded != row["contrast_pair_id"]:
                 raise ValueError("expanded clade differs from its anchoring pair: " + name)
             if expanded and not row[trait]:
                 raise ValueError("missing-trait species has an expanded pair clade: " + name)
-            row["expanded_pair_clade_id"] = expanded
+            row["phylogenetic_block_id"] = expanded
     return result
 
 

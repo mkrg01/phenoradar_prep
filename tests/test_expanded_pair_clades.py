@@ -16,13 +16,13 @@ def metadata():
     rows = []
     for name in "ABXCDYOZ":
         rows.append(dict(species=name, species_id=name, C4="1" if name in "BDY" else "0",
-                         role="observed", group=name, representative=name, is_representative="1",
-                         n_species_in_group="2" if name == "B" else "1", n_samples_in_group="2" if name in "AB" else "1",
+                         role="observed", trait_clade_id=name, representative=name, is_representative="1",
+                         n_species_in_trait_clade="2" if name == "B" else "1", n_samples_in_trait_clade="2" if name in "AB" else "1",
                          contrast_pair_id="1" if name in "AB" else "2" if name in "CD" else ""))
     rows += [{**rows[0], "species": "A_run2", "is_representative": "0"},
              {**rows[1], "species": "B2", "species_id": "B2", "is_representative": "0"},
-             dict(species="U", species_id="U", C4="", role="missing_trait", group="", representative="",
-                  is_representative="0", n_species_in_group="", n_samples_in_group="", contrast_pair_id="")]
+             dict(species="U", species_id="U", C4="", role="missing_trait", trait_clade_id="", representative="",
+                  is_representative="0", n_species_in_trait_clade="", n_samples_in_trait_clade="", contrast_pair_id="")]
     return rows
 
 
@@ -55,6 +55,32 @@ def test_zero_pairs_stay_empty_and_one_pair_can_expand_to_the_root(pair_count):
     assert rows[-1][COLUMN] == ""
     empty, clades, report = annotate(None, [source[-1]], "C4")
     assert empty[0][COLUMN] == "" and not clades and report["expanded_pair_species"] == 0
+
+
+def test_legacy_saved_block_table_and_metadata_remain_verifiable(tmp_path):
+    from contrast_metadata import read_blocks
+
+    rows, clades, report = annotate(Tree(NEWICK, parser=0), metadata(), "C4")
+    legacy = {"phylogenetic_block_id": "expanded_pair_clade_id", "trait_clade_id": "group",
+              "n_species_in_trait_clade": "n_species_in_group", "n_samples_in_trait_clade": "n_samples_in_group"}
+    def earlier(records):
+        return [{legacy.get(key, key): value for key, value in row.items()} for row in records]
+    (tmp_path / "summary_tree.nwk").write_text(NEWICK)
+    old_rows, old_clades = earlier(rows), earlier(clades)
+    write_tsv(tmp_path / "species_metadata.tsv", list(old_rows[0]), old_rows)
+    write_tsv(tmp_path / "expanded_pair_clades.tsv", list(old_clades[0]), old_clades)
+    write_tsv(tmp_path / "contrast_pairs.tsv", ["contrast_pair_id", "representative_a", "representative_b"],
+              [dict(contrast_pair_id="1", representative_a="A", representative_b="B"),
+               dict(contrast_pair_id="2", representative_a="C", representative_b="D")])
+    write_json(tmp_path / "summary.json", {"trait": "C4", **report})
+    before = {p: p.read_bytes() for p in tmp_path.iterdir()}
+    assert validate_result(tmp_path, "C4") == report
+    assert {p: p.read_bytes() for p in before} == before
+    changed = read_blocks(tmp_path)
+    changed[0]["n_samples"] = "999"
+    write_tsv(tmp_path / "phylogenetic_blocks.tsv", list(changed[0]), changed)
+    with pytest.raises(ValueError, match="conflicting phylogenetic block tables"):
+        validate_result(tmp_path, "C4")
 
 
 @pytest.mark.parametrize("problem", ["non_clade", "one_tip", "unknown_representative", "missing_trait", "duplicate"])
@@ -102,9 +128,9 @@ def test_saved_analysis_export_is_atomic_preserves_sources_and_validates_provena
     assert all(r["family"] == "Plant family" for r in ready)
     contrast = output / "phylogeny/representatives/contrast"
     assert validate_result(contrast, "C4") == result["branches"]["representatives"]
-    for stem in ["expanded_pair_tree", "expanded_pair_tree_id"]:
+    for stem in ["phylogenetic_block_tree", "phylogenetic_block_tree_id"]:
         assert (contrast / f"{stem}.pdf").read_bytes().startswith(b"%PDF")
-        assert "Expanded pair clade" in (contrast / f"{stem}.svg").read_text()
+        assert "Phylogenetic block" in (contrast / f"{stem}.svg").read_text()
     info = json.loads((output / "provenance.json").read_text())
     assert info["reestimated"] is info["pairs_reselected"] is False
     assert all(file_record(r["path"]) == r for r in info["sources"])
@@ -118,5 +144,5 @@ def test_failed_saved_export_publishes_nothing(saved_analysis):
     path.write_text(path.read_text().replace("\tA\tB", "\tA\tX"))
     with pytest.raises(ValueError, match="representative differs"):
         export_analysis(saved_analysis)
-    assert not (saved_analysis / "expanded_pair_clades").exists()
+    assert not (saved_analysis / "phylogenetic_blocks").exists()
     assert not list(saved_analysis.glob(".expanded-pairs-*"))

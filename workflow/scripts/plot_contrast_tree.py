@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 
 from common import read_tsv
+from contrast_metadata import canonical_rows
 from expanded_pair_clades import COLUMN, clade_roots
 
 
@@ -52,8 +53,8 @@ def plot(tree, metadata, summary, outdir, samples=None, expanded=False):
     from matplotlib.textpath import TextToPath
     from ete4 import Tree
     info = json.loads(Path(summary).read_text())
-    stems = ["expanded_pair_tree", "expanded_pair_tree_id"] if expanded else ["summary_tree", "summary_tree_id"]
-    metadata_rows = read_tsv(metadata)
+    stems = ["phylogenetic_block_tree", "phylogenetic_block_tree_id"] if expanded else ["summary_tree", "summary_tree_id"]
+    metadata_rows = canonical_rows(read_tsv(metadata), trait_clades=True)
     rows = {r["species"]: r for r in metadata_rows if r["is_representative"] == "1"}
     if not Path(tree).read_text().strip():
         if rows or info["summary_species"]:
@@ -113,13 +114,13 @@ def plot(tree, metadata, summary, outdir, samples=None, expanded=False):
         return text_path.get_text_width_height_descent(str(value), font, ismath=False)[0]
     def suffix(node, detailed):
         row = rows[node.name]
-        fields = [f"n = {row['n_species_in_group']}"]
+        fields = [f"n = {row['n_species_in_trait_clade']}"]
         if detailed:
             run = identities[node][2]
             fields += [f"run = {run}" if run else f"sample = {node.name}",
-                       f"group = {row.get('group') or '-'}", f"pair = {row.get('contrast_pair_id') or '-'}"]
+                       f"clade = {row.get('trait_clade_id') or '-'}", f"pair = {row.get('contrast_pair_id') or '-'}"]
             if expanded:
-                fields.append(f"expanded = {row.get(COLUMN) or '-'}")
+                fields.append(f"block = {row.get(COLUMN) or '-'}")
         return " (" + "; ".join(fields) + ")"
     def label_width(node, detailed):
         name, scientific, _ = identities[node]
@@ -133,7 +134,7 @@ def plot(tree, metadata, summary, outdir, samples=None, expanded=False):
     legend_width = max(text_width(info["trait"], upright),
                        sum(text_width(labels[state], upright) + 20 for state in states) + gap,
                        text_width("Contrast pair clade", upright) + 24 if clades else 0,
-                       text_width("Expanded pair clade", upright) + 24 if expanded_roots else 0)
+                       text_width("Phylogenetic block", upright) + 24 if expanded_roots else 0)
     height = (len(tips) - 1) * row_height + 44 + margin + legend_height
     maximum = max(distance.values())
     x = {node: margin + value / (maximum or 1) * tree_width for node, value in distance.items()}
@@ -185,7 +186,7 @@ def plot(tree, metadata, summary, outdir, samples=None, expanded=False):
                 names = ["Contrast pair clade"]
                 if expanded_roots:
                     handles.append(Line2D([], [], color="#0072B2", linewidth=0.7))
-                    names.append("Expanded pair clade")
+                    names.append("Phylogenetic block")
                 ax.add_artist(Legend(ax, handles, names, loc="upper left",
                                      bbox_to_anchor=(margin, height - margin - 32),
                                      bbox_transform=ax.transData, frameon=False, borderaxespad=0,

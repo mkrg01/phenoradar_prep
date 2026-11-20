@@ -68,18 +68,18 @@ def test_expanded_assignments_keep_original_pairs_and_separate_tree_branches(coh
     for branch, path in paths.items():
         rows = read_tsv(path)
         for row in rows:
-            row['expanded_pair_clade_id'] = ('2' if branch == 'all' else '7') if row['habit'] else ''
+            row['phylogenetic_block_id'] = ('2' if branch == 'all' else '7') if row['habit'] else ''
         write_tsv(path, list(rows[0]), rows)
     rows = create(**kwargs, pair_tables={b: paths[b] for b in branches})
     assert validate(kwargs['output'], 'habit') == rows
     if branches == ['all']:
         assert [r['contrast_pair_id'] for r in rows] == ['2', '', '2', '']
-        assert [r['expanded_pair_clade_id'] for r in rows] == ['2', '2', '2', '']
+        assert [r['phylogenetic_block_id'] for r in rows] == ['2', '2', '2', '']
     else:
-        assert all(r['expanded_pair_clade_id'] == '' for r in rows)
+        assert all(r['phylogenetic_block_id'] == '' for r in rows)
     if len(branches) > 1:
-        assert [r['expanded_pair_clade_id_all'] for r in rows] == ['2', '2', '2', '']
-        assert [r['expanded_pair_clade_id_representatives'] for r in rows] == ['7', '7', '7', '']
+        assert [r['phylogenetic_block_id_all'] for r in rows] == ['2', '2', '2', '']
+        assert [r['phylogenetic_block_id_representatives'] for r in rows] == ['7', '7', '7', '']
 
 
 def test_schema_one_metadata_remains_verifiable_without_expanded_column(cohort):
@@ -93,7 +93,7 @@ def test_schema_one_metadata_remains_verifiable_without_expanded_column(cohort):
     info.update(schema_version=1, output=dict(file_record(output), path='metadata/species_metadata.tsv'))
     write_json(output.with_suffix('.json'), info)
     assert validate(output, 'habit') == rows
-    assert 'expanded_pair_clade_id' not in rows[0]
+    assert 'phylogenetic_block_id' not in rows[0]
 
 
 @pytest.mark.parametrize('problem', ['unknown_branch', 'unknown_sample', 'trait_mismatch', 'duplicate',

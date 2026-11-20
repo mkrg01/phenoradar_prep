@@ -22,15 +22,15 @@ def assemble(base, taxonomy, pair_tables, trait="C4", include_expanded=True):
                 raise ValueError(f"base metadata {rank} differs from selected taxonomy: {row['species']}")
         row.update(ranks[row["species"]])
         row["contrast_pair_id"] = ""
-        row["expanded_pair_clade_id"] = ""
+        row["phylogenetic_block_id"] = ""
     columns = fields(trait)
     if include_expanded:
-        columns.append("expanded_pair_clade_id")
+        columns.append("phylogenetic_block_id")
     # Start from canonical columns, so a former pair source never leaks through.
     rows = [{key: row[key] for key in columns} for row in rows]
     for branch, path in sorted(pair_tables.items()):
         joined = with_pairs(rows, path, trait)
-        for annotation in ["contrast_pair_id", *(["expanded_pair_clade_id"] if include_expanded else [])]:
+        for annotation in ["contrast_pair_id", *(["phylogenetic_block_id"] if include_expanded else [])]:
             key = annotation if len(pair_tables) == 1 else annotation + "_" + branch
             if key not in columns:
                 columns.append(key)
@@ -60,7 +60,7 @@ def create(base, taxonomy, output, pair_tables=None, trait="C4"):
                "contrasts": {key: relative(path) for key, path in sorted(pair_tables.items())}}
     write_tsv(output, columns, rows)
     write_json(output.with_suffix(".json"), {
-        "schema_version": 2, "created_at": now(), "trait": trait, "samples": len(rows),
+        "schema_version": 3, "created_at": now(), "trait": trait, "samples": len(rows),
         "pair_policy": "single_source" if len(pair_tables) == 1 else "separate_columns" if pair_tables else "no_contrasts",
         "sources": sources, "output": dict(file_record(output), path=str(output.relative_to(root))),
     })
@@ -72,7 +72,7 @@ def validate(output, trait="C4"):
     output = Path(output).resolve()
     root = output.parent.parent
     info = json.loads(output.with_suffix(".json").read_text())
-    if info.get("schema_version") not in {1, 2} or info.get("trait") != trait:
+    if info.get("schema_version") not in {1, 2, 3} or info.get("trait") != trait:
         raise ValueError("consumer metadata provenance differs from the requested trait")
     def source(record):
         path = Path(record["path"])

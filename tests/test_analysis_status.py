@@ -124,6 +124,16 @@ def test_consumer_metadata_is_required_for_new_frozen_analyses():
     assert 'filtered/metadata/species_metadata.tsv' in required_outputs({'exclude_species': ['Plant_A']}, implementation)
 
 
+def test_block_artifact_names_follow_the_saved_implementation():
+    pipeline = {'phylogeny': {'trees': ['all'], 'contrast_pairs': {'enabled': True}}}
+    earlier = [{'path': '/repo/workflow/scripts/expanded_pair_clades.py'}]
+    current = [*earlier, {'path': '/repo/workflow/scripts/contrast_metadata.py'}]
+    assert 'phylogeny/all/contrast/expanded_pair_clades.tsv' in required_outputs(pipeline, earlier)
+    assert 'phylogeny/all/contrast/expanded_pair_tree.svg' in required_outputs(pipeline, earlier)
+    assert 'phylogeny/all/contrast/phylogenetic_blocks.tsv' in required_outputs(pipeline, current)
+    assert 'phylogeny/all/contrast/phylogenetic_block_tree.svg' in required_outputs(pipeline, current)
+
+
 @pytest.mark.parametrize('phase', ['validating', 'exporting'])
 def test_runtime_phase_100_percent_does_not_mean_whole_completion(saved, monkeypatch, phase):
     receipt(saved)

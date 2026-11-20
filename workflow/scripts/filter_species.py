@@ -22,7 +22,7 @@ from layout import (ORTHOGROUP_MAPPING, ORTHOGROUP_EXPRESSION, ORTHOGROUP_ALIGNM
 # Share workflow dependencies and the completed export's code provenance.
 EXPORT_CODE = (
     "filter_species.py", "filter_species_phylogeny.py", "contrast_pairs.py", "expanded_pair_clades.py",
-    "plot_contrast_tree.py", "species_traits.py", "sample_identity.py",
+    "plot_contrast_tree.py", "contrast_metadata.py", "species_traits.py", "sample_identity.py",
     "phylogeny_root.py", "nwkit_runtime.py", "phylogeny_outgroup.py", "phenoradar_metadata.py",
     "consumer_metadata.py", "analysis_validation.py",
     "alignment_selection.py", "mapping_tables.py", "og_kegg.py",
