@@ -56,11 +56,25 @@ table. Reused products retain their generating versions.
 | `run_accession` | Input run accession or private run identifier |
 | `genegalleon_version` | Version that produced the sample's assembly, BUSCO, and quantification |
 | `assembly_method` | Recorded assembler method |
+| `read_acquisition_method` | `amalgkit`, `genegalleon_fallback`, `mixed`, or `unknown` |
+| `fastp_applied` | `yes`, `no`, `mixed`, or `unknown`, based on recorded processing evidence |
 | `busco_lineage` | BUSCO lineage dataset |
 | `busco_complete_percent` | Complete BUSCOs (single-copy + duplicated) as a percentage of total |
 | `phenoradar_prep_version` | Version that produced the saved OG expression |
 | `orthodb_release` | OrthoDB release used for mapping |
 | `orthodb_clade` | Mapping clade; uncommon groups use an NCBI Taxonomy ID |
+
+Read acquisition and fastp status cover the reads used for assembly and
+quantification. `mixed` means these stages used different methods or fastp
+statuses; if either stage is unrecorded, the corresponding value is `unknown`.
+`amalgkit` includes AMALGKIT's internal alternative downloads and local FASTQ
+processing; it does not identify a download provider. `genegalleon_fallback`
+identifies GeneGalleon's additional public-FASTQ recovery path.
+
+Newly processed samples retain stage-specific read records in the database
+manifest, including through reuse and copying `database/` to another project.
+FASTQ cleanup and diagnostic compression do not remove these records. Older
+samples without recorded read-processing information remain `unknown`.
 
 Unrecorded methods and versions are `unknown`. Local GeneGalleon sources append
 `+local.<content ID>` to the version. Detailed revisions, container identities,

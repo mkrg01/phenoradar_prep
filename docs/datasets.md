@@ -52,8 +52,11 @@ source and settings:
 
 - AMALGKIT retrieves reads and normally applies fastp with a minimum retained
   read length of 25 nt. A fallback can recover original public FASTQs directly
-  without fastp. The worker log identifies this route; while getfastq outputs
-  are retained, `getfastq_completion.json` records `read_source: public-original`.
+  without fastp. Newly processed samples record their acquisition method and
+  fastp status in `database/sample_processing.tsv`, with stage-specific records
+  retained in the database manifest. The worker log also identifies this route,
+  and `getfastq_completion.json` records `read_source: public-original` in the
+  retained or archived native diagnostics.
 - rnaSPAdes assembles the reads. Inputs above 30 Gbp are subsampled to about
   30 Gbp with seed `11`.
 - cdskit searches all six frames, preferring complete ORFs to partial candidates.
@@ -261,7 +264,8 @@ updated OGs. See [reference storage and checks](references.md#preparing-and-veri
 ### Sample processing table
 
 New builds include `database/sample_processing.tsv`: one row per sample with
-generating versions, methods, references, and BUSCO completeness.
+generating versions, methods, read acquisition and fastp status, references,
+and BUSCO completeness.
 To export it from an older database without rerunning analyses:
 
 ```bash

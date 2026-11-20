@@ -6,7 +6,7 @@ from common import write_tsv
 
 
 FIELDS = ['sample_id', 'scientific_name', 'run_accession', 'genegalleon_version',
-          'assembly_method', 'busco_lineage', 'busco_complete_percent',
+          'assembly_method', 'read_acquisition_method', 'fastp_applied', 'busco_lineage', 'busco_complete_percent',
           'phenoradar_prep_version', 'orthodb_release', 'orthodb_clade']
 PRODUCT_KEYS = ('reference', 'busco', 'quant')
 
@@ -53,9 +53,21 @@ def native_processing(products, manifest=None):
     present = [products[key] for key in PRODUCT_KEYS if products.get(key)]
     recorded = [p.get('provenance', {}).get('processing') for p in present]
     if recorded and all(recorded):
-        if any(value != recorded[0] for value in recorded[1:]):
+        producers = [{k: v for k, v in value.items() if k != 'read_processing'} for value in recorded]
+        if any(value != producers[0] for value in producers[1:]):
             raise ValueError('sample contains different GeneGalleon generating conditions; rebuild the sample')
-        return copy.deepcopy(recorded[0])
+        result = copy.deepcopy(producers[0])
+        # Imported complete samples carry both stages on every receipt. Select
+        # only the stage actually produced by each product, including on retries.
+        reads = {}
+        for key, stage in (('reference', 'assembly'), ('quant', 'quant')):
+            processing = (products.get(key) or {}).get('provenance', {}).get('processing') or {}
+            value = processing.get('read_processing', {}).get(stage)
+            if value is not None:
+                reads[stage] = copy.deepcopy(value)
+        if reads:
+            result['read_processing'] = reads
+        return result
     # Historical native receipts prove their producer only when every stage
     # agrees with the source build's actual software receipts and conditions.
     if manifest is not None and present and not any(recorded):
@@ -80,6 +92,7 @@ def completed_processing(product, source_config=None):
 
 
 def write_summary(path, data):
+    from read_processing import summary as read_summary
     rows = []
     for name, product in sorted(data['products'].items()):
         processing = product.get('processing') or {}
@@ -91,6 +104,7 @@ def write_summary(path, data):
                      'run_accession': product['row']['run'],
                      'genegalleon_version': processing.get('genegalleon_version', 'unknown'),
                      'assembly_method': processing.get('assembly_method', 'unknown'),
+                     **read_summary(processing),
                      'busco_lineage': data['lineage'],
                      'busco_complete_percent': f'{100 * complete / total:.2f}' if total else 'unknown',
                      'phenoradar_prep_version': product.get('phenoradar_prep_version', 'unknown'),

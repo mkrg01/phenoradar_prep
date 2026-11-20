@@ -225,6 +225,8 @@ def test_legacy_export_is_standalone_and_never_invents_a_version(dataset_project
     assert list(rows[0]) == FIELDS
     assert {row['genegalleon_version'] for row in rows} == {'unknown'}
     assert {row['assembly_method'] for row in rows} == {'unknown'}
+    assert {row['read_acquisition_method'] for row in rows} == {'unknown'}
+    assert {row['fastp_applied'] for row in rows} == {'unknown'}
     assert rows[0]['busco_complete_percent'] == '80.00'
     assert rows[0]['orthodb_clade'] == 'Embryophyta'
     assert (source / 'manifest.json').read_bytes() == before
@@ -243,3 +245,65 @@ def test_scientific_changes_still_prevent_cross_version_reuse(upgrade_project):
     cfg['genegalleon']['settings']['assembly_method'] = 'Trinity'
     config.write_text(yaml.safe_dump(cfg))
     assert dataset.plan(root, config, name='different')[-1][0]['assembly'] == 'conflict'
+
+
+@pytest.mark.parametrize('source,counts,method,fastp', [
+    ('amalgkit', {'num_fastp_in': 100, 'num_written': 100}, 'amalgkit', 'yes'),
+    ('public-original', {'num_written': 100, 'bp_fastp_in': 10000, 'bp_fastp_out': 10000},
+     'genegalleon_fallback', 'no'),
+])
+def test_read_processing_survives_cleanup_and_portable_reuse(dataset_project, source, counts, method, fastp):
+    from test_datasets import new_dataset
+    from test_read_processing import read_evidence
+    root = dataset_project
+    build = new_dataset(root)
+    dataset.submit(build, until='quant', dry_run=True)
+    manifest = dataset.load(build)
+    item = manifest['items'][0]
+    work = dataset.workspace(build, manifest, item)
+    read_evidence(work / 'output/transcriptome_assembly', item['row']['species_id'],
+                  item['row']['run'], source, counts)
+    dataset.worker(build, 1)
+    products = dataset.item_products(dataset.load(build), item)
+    recorded = native_processing(products)
+    assert recorded['read_processing']['assembly'] == recorded['read_processing']['quant'] == {
+        'read_acquisition_method': method, 'fastp_applied': fastp}
+    assert not (work / 'output/transcriptome_assembly/longest_cds').exists()
+    source_db = database_from_stages(root, manifest['config']['store'], [item], 'read_source')
+    portable = root / 'copied_database'
+    shutil.copytree(source_db, portable)
+    shutil.rmtree(work)
+    assert load_complete(portable)['products'][item['species']]['processing'] == recorded
+    rows = read_tsv(portable / 'sample_processing.tsv')
+    assert rows[0]['read_acquisition_method'] == method
+    assert rows[0]['fastp_applied'] == fastp
+    config = root / 'config/build.yaml'
+    cfg = yaml.safe_load(config.read_text())
+    cfg['reuse_from'] = str(portable)
+    config.write_text(yaml.safe_dump(cfg))
+    reused = dataset.prepare(root, 'reuse_reads', config, 'input/new.tsv')
+    reused_manifest = dataset.load(reused)
+    reused_item = next(row for row in reused_manifest['items'] if row['species'] == item['species'])
+    reused_products = dataset.item_products(reused_manifest, reused_item)
+    assert native_processing(reused_products) == recorded
+
+
+def test_quant_retry_records_its_own_read_processing(dataset_project, monkeypatch):
+    from test_datasets import new_dataset
+    from test_read_processing import read_evidence
+    from read_processing import summary
+    build = new_dataset(dataset_project)
+    dataset.submit(build, until='quant', dry_run=True)
+    manifest = dataset.load(build)
+    item = manifest['items'][0]
+    output = dataset.workspace(build, manifest, item) / 'output/transcriptome_assembly'
+    native, run = item['row']['species_id'], item['row']['run']
+    read_evidence(output, native, run, 'amalgkit', {'num_fastp_in': 100, 'num_written': 100})
+    monkeypatch.setenv('FAKE_GG_FAIL_QUANT', '1')
+    with pytest.raises(subprocess.CalledProcessError):
+        dataset.worker(build, 1)
+    monkeypatch.delenv('FAKE_GG_FAIL_QUANT')
+    read_evidence(output, native, run, 'public-original', {'num_written': 100, 'bp_fastp_in': 10000})
+    dataset.worker(build, 1)
+    processing = native_processing(dataset.item_products(dataset.load(build), item))
+    assert summary(processing) == {'read_acquisition_method': 'mixed', 'fastp_applied': 'mixed'}

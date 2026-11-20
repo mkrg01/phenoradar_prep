@@ -811,6 +811,9 @@ def register_native(path, manifest, item, products, eligible, env):
             provenance['taxonomy_reference'] = manifest['taxonomy_reference']
         from sample_processing import generating_conditions
         provenance['processing'] = generating_conditions(manifest)
+        if stage in {'assembly', 'quant'}:
+            from read_processing import collect as collect_read_processing
+            provenance['processing']['read_processing'] = {stage: collect_read_processing(out, native, run)}
         published = work / 'products'
         name = {'assembly': f'{species}_longestCDS.fa.gz',
                 'busco': f'{species}.busco.full.tsv', 'quant': f'{run}_abundance.tsv.gz'}[stage]
