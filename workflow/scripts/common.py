@@ -58,8 +58,11 @@ def text_open(path, mode="rt", **kwargs):
 
 
 def existing_product(path, default_gzip=False):
-    """Resolve a compressed product, accepting historical plain products."""
+    """Resolve either a plain or gzip product, preferring gzip when available."""
     path = Path(path)
+    if path.suffix == '.gz':
+        plain = path.with_suffix('')
+        return plain if not path.is_file() and plain.is_file() else path
     compressed = Path(str(path) + ".gz")
     return compressed if compressed.is_file() or (default_gzip and not path.is_file()) else path
 

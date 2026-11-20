@@ -92,10 +92,10 @@ rule merge_tpm:
         code=f"{SCRIPTS}/merge_tpm.py",
         common=[f"{SCRIPTS}/common.py", f"{SCRIPTS}/sample_identity.py"]
     output:
-        normalized=f"{TPM}/tpm.tsv",
-        normalized_wide=f"{TPM}/tpm_wide.tsv",
-        summed=f"{TPM}/tpm_sum.tsv",
-        summed_wide=f"{TPM}/tpm_sum_wide.tsv",
+        normalized=f"{TPM}/tpm.tsv.gz",
+        normalized_wide=f"{TPM}/tpm_wide.tsv.gz",
+        summed=f"{TPM}/tpm_sum.tsv.gz",
+        summed_wide=f"{TPM}/tpm_sum_wide.tsv.gz",
         qc=f"{TPM}/mapping_qc.tsv"
     params: runs=f"{TPM}/runs", out=TPM
     log: f"{LOG}/{ORTHOGROUP_EXPRESSION}/merge.log"
@@ -103,4 +103,4 @@ rule merge_tpm:
     resources: mem_mb=32000
     shell:
         "{PYTHON:q} {input.code:q} --samples {input.samples:q} --run-dir {params.runs:q} "
-        "--outdir {params.out:q} > {log:q} 2>&1"
+        "--outdir {params.out:q} --gzip > {log:q} 2>&1"

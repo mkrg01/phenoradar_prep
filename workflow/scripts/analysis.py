@@ -172,9 +172,10 @@ def status(path, verify_outputs=False):
 def validate_outputs(path, manifest):
     from analysis_status import required_outputs
     from analysis_validation import validate
+    from common import existing_product
     pipeline = manifest['pipeline']
     missing = [name for name in required_outputs(pipeline, manifest.get('implementation', []))
-               if not (path / name).is_file()]
+               if not existing_product(path / name).is_file()]
     if missing:
         raise ValueError('required analysis outputs are missing: ' + ', '.join(missing))
     return validate(path, exclusions=pipeline.get('exclude_species', []), trait=pipeline.get('trait', 'C4'))

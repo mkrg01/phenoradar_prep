@@ -25,7 +25,8 @@ settings. Use [resource overrides](running.md#resource-budgets) for job resource
 | `name_mode` | `timestamp` (supplied config) creates dated builds; `fixed` resumes the named build |
 | `metadata`, `excluded_accessions` | Sample metadata and optional run exclusions |
 | `metadata_provenance` | Optional metadata history JSON, matched by checksum and copied into the database |
-| `metadata_selection`, `taxonomy_screen` | [Metadata and QC settings](../datasets/README.md#sample-taxonomy-screening) used by `run_metadata.sh`. The screen is enabled by default with `method: angiosperms353`. |
+| `metadata_selection` | [Representative selection and QC records](../datasets/README.md#selection-policy) used by `run_metadata.sh` |
+| `taxonomy_screen` | [Sequence-based taxonomy screening](taxonomy_screening.md); enabled by default with `method: angiosperms353` and run explicitly with `run_metadata.sh` |
 | `reuse_from` | Previous build/database path, list of paths, `auto`, or `null`; see [reuse](datasets.md#reusing-completed-databases) |
 | `rebuild_samples` | Sample IDs or run accessions to restart from assembly in a new build; default `[]` |
 | `genegalleon` | [Pinned software](datasets.md#pinned-genegalleon-source-and-sif) and assembly/quantification settings |
@@ -33,7 +34,7 @@ settings. Use [resource overrides](running.md#resource-budgets) for job resource
 | `busco.cache_dir` | Shared reference directory; default `resources/busco`; `null` disables sharing |
 | `taxonomy.cache_dir` | Shared ETE/NCBI database; default `resources/taxonomy`; existing snapshots are reused |
 | `taxonomy.database` | Explicit SQLite snapshot for classification; use the snapshot recorded by metadata selection |
-| `taxonomy.missing_taxid` | `exclude` (default) omits unresolved TaxIDs before sample jobs; `error` stops, `null` keeps the legacy selection policy |
+| `taxonomy.missing_taxid` | `exclude` (default) omits unresolved TaxIDs before sample jobs; `error` stops, `null` disables this check |
 | `translation.table` | NCBI genetic code; default `1` |
 | `execution` | [Job resources and total limits](running.md#resource-budgets) |
 
@@ -55,7 +56,7 @@ See [OrthoDB update examples](datasets.md#update-orthodb-for-all-samples).
 
 ### Shared BUSCO references
 
-New builds download each lineage once to `resources/busco/<lineage>/` and
+Builds download each lineage once to `resources/busco/<lineage>/` and
 share it read-only across samples. Sharing requires Apptainer; for Docker or
 SingularityCE, set both `busco.cache_dir` and `taxonomy.cache_dir` to `null`.
 
@@ -66,7 +67,7 @@ to recompute completed samples.
 
 ### Shared taxonomy database
 
-New builds prepare one ETE/NCBI database under `resources/taxonomy/ete/` and
+Builds prepare one ETE/NCBI database under `resources/taxonomy/ete/` and
 share it read-only across samples. This requires Apptainer; set
 `taxonomy.cache_dir: null` to use per-sample downloads. The snapshot is verified
 and reused without automatic updates. Keep it available while processing or
@@ -123,8 +124,7 @@ project's `work/scratch/`. Set `workspace` to use that project directory,
 
 Temporary files are normally deleted after each attempt. To keep them under
 `work/scratch/` for debugging, enable `storage.keep_intermediates`. Restart
-products are saved with the build. The older key `storage.scratch_root` is
-still accepted.
+products are saved with the build.
 
 Image pulls also use the supplied task scratch or temporary directory for unpacking
 and disposable OCI layers. Only the completed SIF is published to the image cache.

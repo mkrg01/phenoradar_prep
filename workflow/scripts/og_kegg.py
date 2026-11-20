@@ -141,7 +141,7 @@ def load_og_annotations(directory):
     return groups, dict(kos), file_record(provenance)
 
 
-def aggregate(samples, annotation_dir, og_run_dir, outdir, ambiguity="duplicate"):
+def aggregate(samples, annotation_dir, og_run_dir, outdir, ambiguity="duplicate", compressed=False):
     if ambiguity not in AMBIGUITY_POLICIES:
         raise ValueError("unsupported KO ambiguity policy")
     manifest = selected_samples(samples)
@@ -152,9 +152,11 @@ def aggregate(samples, annotation_dir, og_run_dir, outdir, ambiguity="duplicate"
     all_kos = sorted({ko for kos in eligible.values() for ko in kos})
     out = Path(outdir)
     reports, sources = [], []
+    outputs = {name: out / (name + '.gz' if compressed and name != 'mapping_qc.tsv' else name)
+               for name in EXPRESSION_FILES}
     with ExitStack() as stack:
         def writer(name, fields):
-            handle = stack.enter_context(atomic_writer(out / name))
+            handle = stack.enter_context(atomic_writer(outputs[name]))
             result = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", lineterminator="\n")
             result.writeheader()
             return result
@@ -215,6 +217,9 @@ def aggregate(samples, annotation_dir, og_run_dir, outdir, ambiguity="duplicate"
             ])))
             sources.append({"run": run, "expression": file_record(path), "qc": file_record(qc_path)})
     write_tsv(out / "mapping_qc.tsv", QC_FIELDS, reports)
+    for name in EXPRESSION_FILES:
+        if name != 'mapping_qc.tsv':
+            (out / (name if compressed else name + '.gz')).unlink(missing_ok=True)
     write_json(out / "provenance.json", {
         "schema_version": 2, "annotation_scope": "orthogroup", "created_at": now(),
         "method": "median_length_one_representative", "ambiguity": ambiguity,
@@ -224,7 +229,7 @@ def aggregate(samples, annotation_dir, og_run_dir, outdir, ambiguity="duplicate"
                           "target_sum": 1000000, "ko_renormalized": False},
         "qc_original_tpm_fields": ["total_tpm", "odb_mapped_tpm", "retained_tpm"],
         "unmapped_proteins": "not_annotated", "additional_representatives": False,
-        "results": [file_record(out / name) for name in EXPRESSION_FILES],
+        "results": [file_record(outputs[name]) for name in EXPRESSION_FILES],
     })
 
 
@@ -238,6 +243,7 @@ if __name__ == "__main__":
     for key in ["samples", "annotation-dir", "og-run-dir", "outdir"]:
         aggregate_parser.add_argument(f"--{key}", required=True)
     aggregate_parser.add_argument("--ambiguity", choices=AMBIGUITY_POLICIES, default="duplicate")
+    aggregate_parser.add_argument('--gzip', dest='compressed', action='store_true')
     args = vars(parser.parse_args())
     action = args.pop("action")
     (assign if action == "assign" else aggregate)(**args)

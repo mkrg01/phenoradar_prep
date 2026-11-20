@@ -89,7 +89,7 @@ rule align_orthogroup_batch:
     shell:
         '{PYTHON:q} {input.code:q} batch --batch {input.batch:q} --inputs {params.inputs:q} '
         '--outdir {params.outdir:q} --reports {params.reports:q} --receipt {output.receipt:q} '
-        '--cpus {threads} --cache {params.cache:q} --trimal-mode {params.trimal:q} > {log:q} 2>&1'
+        '--cpus {threads} --cache {params.cache:q} --trimal-mode {params.trimal:q} --gzip > {log:q} 2>&1'
 
 
 use rule align_orthogroup_batch as align_large_orthogroup with:

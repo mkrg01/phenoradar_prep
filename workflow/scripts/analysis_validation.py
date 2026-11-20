@@ -53,7 +53,7 @@ def discover(source, exclusions=()):
     sections, artifacts, hashes, trees, contrasts = {}, {}, {}, {}, []
 
     def include(relative):
-        path = source / relative
+        path = existing_product(source / relative)
         if path.is_file():
             files.add(path)
             artifacts[relative] = path
@@ -65,10 +65,10 @@ def discover(source, exclusions=()):
                 include(str(path.relative_to(source)))
 
     def branch(name, required):
-        present = [p for p in required if (source / p).is_file()]
+        present = [p for p in required if existing_product(source / p).is_file()]
         status = "ready" if len(present) == len(required) else "incomplete" if present else "absent"
         sections[name] = status
-        files.update(source / p for p in present)
+        files.update(existing_product(source / p) for p in present)
         return status == "ready"
 
     folder("metadata")
@@ -77,6 +77,8 @@ def discover(source, exclusions=()):
         include(SEQUENCE_EXPRESSION)
     if branch("orthogroups", [f"{ORTHOGROUP_EXPRESSION}/tpm.tsv", f"{ORTHOGROUP_EXPRESSION}/mapping_qc.tsv"]):
         folder(ORTHOGROUP_EXPRESSION)
+        for name in ('tpm', 'tpm_sum', 'tpm_wide', 'tpm_sum_wide', 'mapping_qc'):
+            include(f'{ORTHOGROUP_EXPRESSION}/{name}.tsv')
     if branch("mapping", [f"{ORTHOGROUP_MAPPING}/{name}" for name in
                           ["snapshot.json"]]):
         folder(ORTHOGROUP_MAPPING, recursive=True)
@@ -119,16 +121,16 @@ def discover(source, exclusions=()):
             if filtered and record["after"] == 0:
                 continue
             relative = f"{ORTHOGROUP_ALIGNMENTS}/{og}.faa"
-            path = source / relative
+            path = existing_product(source / relative)
             if not path.is_file():
                 raise ValueError("completed alignment is missing: " + str(path))
             include(relative)
             if not filtered:
                 hashes[str(path)] = record["alignment"]["sha256"]
         for path in (source / ORTHOGROUP_ALIGNMENTS).glob("*"):
-            if path.suffix != ".faa":
+            if not path.name.endswith(('.faa', '.faa.gz')):
                 include(str(path.relative_to(source)))
-    elif any((source / ORTHOGROUP_ALIGNMENTS).glob("*.faa")):
+    elif any(p.name.endswith(('.faa', '.faa.gz')) for p in (source / ORTHOGROUP_ALIGNMENTS).glob('*.faa*')):
         sections["alignments"] = "incomplete"
 
     # Species/run identity comes from the selected manifest, never stale files.
@@ -416,7 +418,7 @@ def validate(source, exclusions=(), trait="C4"):
             if feature == "orthogroup":
                 orthogroups = features
     for dest, path in artifacts.items():
-        if dest.startswith(f"{ORTHOGROUP_ALIGNMENTS}/") and path.suffix == ".faa":
+        if dest.startswith(f"{ORTHOGROUP_ALIGNMENTS}/") and path.name.endswith(('.faa', '.faa.gz')):
             validate_alignment(path, species)
         elif dest in {"kegg/ko_modules.tsv", "kegg/ko_pathways.tsv"}:
             validate_groups(path, "module" if "modules" in dest else "pathway")

@@ -4,7 +4,7 @@
 
 MonoPhy 1.3.2 compares rooted BUSCO trees with NCBI taxonomy and links conflicting
 placements to RNA-seq runs. This is a tree-based review, separate from the
-[Kew/OrthoDB sequence screen](../datasets/README.md#sample-taxonomy-screening).
+[Kew/OrthoDB sequence screen](taxonomy_screening.md).
 Its reports never exclude samples automatically.
 
 ## Configuration and execution

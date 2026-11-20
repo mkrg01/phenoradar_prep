@@ -100,7 +100,7 @@ def test_mixed_mapping_and_cross_run_reuse(tiny_inputs, fake_odb, frozen_referen
     write_tsv(metadata, list(all_rows[0]), [r for r in all_rows if r["scientific_name"] == "Beta sp-X"])
     config["run_name"] = "removed_alpha"
     removed = execute()
-    assert {r["species"] for r in read_tsv(removed / "orthogroups/expression/tpm.tsv")} == {"Beta_sp-X"}
+    assert {r["species"] for r in read_tsv(removed / "orthogroups/expression/tpm.tsv.gz")} == {"Beta_sp-X"}
     assert not (removed / "proteins/Alpha_plant_protein.fa").exists()
     assert len(events.read_text().splitlines()) == 1
     write_tsv(metadata, list(all_rows[0]), all_rows)

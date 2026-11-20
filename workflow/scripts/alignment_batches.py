@@ -12,7 +12,7 @@ import shutil
 import tempfile
 
 from align_orthogroups import align, trim_existing, SAFE_OG
-from common import atomic_writer, file_record, write_json
+from common import atomic_writer, existing_product, file_record, text_open, write_json
 from dataset_assets import digest, record, stat_identity
 
 DEFAULT_BATCH_SIZE = 100
@@ -91,7 +91,7 @@ def batch_targets(plan_dir, outdir, reports):
                     raise ValueError('batch membership changed')
                 for og, files in receipt['members'].items():
                     expected = [Path(index['collection']['path']).parent / f'{og}.faa',
-                                Path(outdir) / f'{og}.faa', Path(reports) / f'{og}.json']
+                                existing_product(Path(outdir) / f'{og}.faa'), Path(reports) / f'{og}.json']
                     if len(files) != len(expected) or any(
                             Path(entry['path']).resolve() != filename.resolve() or
                             entry['stat'] != stat_identity(filename)
@@ -133,6 +133,11 @@ def move_alignment(source, destination):
     """Move without duplicating storage; publish cross-filesystem copies atomically."""
     source, destination = Path(source), Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if (source.suffix == '.gz') != (destination.suffix == '.gz'):
+        with text_open(source) as original, atomic_writer(destination) as target:
+            shutil.copyfileobj(original, target)
+        source.unlink()
+        return
     try:
         source.replace(destination)
     except OSError as error:
@@ -167,7 +172,7 @@ def validate_groups(groups):
 
 
 def run_batch(batch, inputs, outdir, reports, receipt, cpus=DEFAULT_BATCH_CPUS, threads_per_og=4,
-              command='famsa', cache=None, trimal_mode=None, trimal_command='trimal'):
+              command='famsa', cache=None, trimal_mode=None, trimal_command='trimal', compressed=False):
     if any(type(value) is not int or value < 1 for value in (cpus, threads_per_og)):
         raise ValueError('CPU counts must be positive')
     payload = json.loads(Path(batch).read_text())
@@ -191,26 +196,39 @@ def run_batch(batch, inputs, outdir, reports, receipt, cpus=DEFAULT_BATCH_CPUS, 
         raise FileNotFoundError(f'trimAl executable unavailable: {trimal_command}')
 
     def process(og):
-        fasta, output, provenance = inputs / f'{og}.faa', outdir / f'{og}.faa', reports / f'{og}.json'
+        suffix = '.faa.gz' if compressed else '.faa'
+        fasta, output, provenance = inputs / f'{og}.faa', outdir / f'{og}{suffix}', reports / f'{og}.json'
+        alternate = outdir / (f'{og}.faa' if compressed else f'{og}.faa.gz')
+        cached = existing_product(cache / f'{og}.faa') if cache is not None else None
+
+        def restore(source, report_path):
+            move_alignment(source, output)
+            report = json.loads(report_path.read_text())
+            report['alignment'] = file_record(output)
+            write_json(provenance, report)
+
         reused = reusable(fasta, output, provenance, threads, executable, trimal_mode, trimal_executable)
+        if not reused and reusable(fasta, alternate, provenance, threads, executable, trimal_mode, trimal_executable):
+            restore(alternate, provenance)
+            reused = True
         if not reused and cache is not None and reusable(
-                fasta, cache / f'{og}.faa', cache / f'{og}.json', threads, executable, trimal_mode, trimal_executable):
-            copy_report(cache / f'{og}.json', provenance)
-            move_alignment(cache / f'{og}.faa', output)
+                fasta, cached, cache / f'{og}.json', threads, executable, trimal_mode, trimal_executable):
+            restore(cached, cache / f'{og}.json')
             reused = True
         if not reused:
             if trimal_mode is not None and cache is not None and reusable(
-                    fasta, cache / f'{og}.faa', cache / f'{og}.json', threads, executable):
-                copy_report(cache / f'{og}.json', provenance)
-                move_alignment(cache / f'{og}.faa', output)
+                    fasta, cached, cache / f'{og}.json', threads, executable):
+                restore(cached, cache / f'{og}.json')
             if trimal_mode is not None and reusable(fasta, output, provenance, threads, executable):
                 trim_existing(output, provenance, trimal_mode, trimal_command)
             else:
                 align(fasta, output, provenance, threads=threads, command=command,
                       trimal_mode=trimal_mode, trimal_command=trimal_command)
+        alternate.unlink(missing_ok=True)
         if cache is not None:
             # A selected OG lives in the final directory, not in both locations.
             (cache / f'{og}.faa').unlink(missing_ok=True)
+            (cache / f'{og}.faa.gz').unlink(missing_ok=True)
             (cache / f'{og}.json').unlink(missing_ok=True)
         return og, [record(p) for p in (fasta, output, provenance)], reused
 
@@ -247,6 +265,7 @@ if __name__ == '__main__':
     p.add_argument('--cache')
     p.add_argument('--trimal-mode', choices=['gappyout', 'automated1'], default='gappyout')
     p.add_argument('--trimal-command', default='trimal')
+    p.add_argument('--gzip', dest='compressed', action='store_true')
     args = vars(parser.parse_args())
     action = args.pop('action')
     (plan if action == 'plan' else run_batch)(**args)

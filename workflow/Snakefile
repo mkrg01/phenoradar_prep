@@ -100,8 +100,8 @@ KEGG_ANNOTATIONS = f"{KEGG}/annotation"
 KEGG_REFERENCE = "resources/kegg/snapshot_v1"
 KEGG_FINAL = [f"{KEGG}/{name}" for name in [
     "og_kos.tsv", "orthogroups.tsv", "annotation_provenance.json", "provenance.json",
-    "ko_tpm_sum.tsv", "ko_tpm_sum_wide.tsv",
-    "ko_support.tsv", "mapping_qc.tsv", "ko_modules.tsv", "ko_pathways.tsv",
+    "ko_tpm_sum.tsv.gz", "ko_tpm_sum_wide.tsv.gz",
+    "ko_support.tsv.gz", "mapping_qc.tsv", "ko_modules.tsv", "ko_pathways.tsv",
     "reference_qc.json",
 ]]
 PHYLO_BRANCHES = PHYLOGENY_BRANCHES
@@ -282,10 +282,10 @@ rule all:
         f"{OUT}/run.json",
         f"{OUT}/{BASE_METADATA}",
         CONSUMER_METADATA_FINAL,
-        f"{TPM}/tpm.tsv",
-        f"{TPM}/tpm_wide.tsv",
-        f"{TPM}/tpm_sum.tsv",
-        f"{TPM}/tpm_sum_wide.tsv",
+        f"{TPM}/tpm.tsv.gz",
+        f"{TPM}/tpm_wide.tsv.gz",
+        f"{TPM}/tpm_sum.tsv.gz",
+        f"{TPM}/tpm_sum_wide.tsv.gz",
         f"{TPM}/mapping_qc.tsv",
         f"{OUT}/{SEQUENCE_EXPRESSION}",
         lambda wc: alignment_targets(wc) if config["alignment"]["enabled"] else [],

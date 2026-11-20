@@ -148,7 +148,7 @@ def test_complete_build_multiple_analyses_and_species_updates(dataset_project,fa
         assert 'tpm' not in analysis.load(run)['pipeline']
         assert load_complete(build)['tpm'] == {'multimap': 'error'}
         assert (output/'orthogroups/expression/runs/A1.tsv.gz').samefile(build/'database/expression/runs/A1.tsv.gz')
-        assert {r['species'] for r in read_tsv(output/'orthogroups/expression/tpm.tsv')} == expected
+        assert {r['species'] for r in read_tsv(output/'orthogroups/expression/tpm.tsv.gz')} == expected
         sequence_rows = read_tsv(output/'expression/sequence_tpm.tsv.gz')
         assert list(sequence_rows[0]) == ['species', 'sequence_id', 'tpm']
         assert {r['species'] for r in sequence_rows} == expected
@@ -194,7 +194,7 @@ def test_complete_build_multiple_analyses_and_species_updates(dataset_project,fa
         if name == 'removed':
             subset = analysis.prepare(root,'without_excluded',config,updated)
             execute(subset,'all'); analysis.validate_outputs(subset, analysis.load(subset))
-            assert {r['species'] for r in read_tsv(subset/'orthogroups/expression/tpm.tsv')} == {'Alpha_plant_A1'}
+            assert {r['species'] for r in read_tsv(subset/'orthogroups/expression/tpm.tsv.gz')} == {'Alpha_plant_A1'}
             assert not events.exists()
         assert (updated/'database/expression/runs/A1.tsv.gz').samefile(build/'database/expression/runs/A1.tsv.gz')
         assert analysis.prepare(root,'loose',config,updated) == updated/'downstream/loose'

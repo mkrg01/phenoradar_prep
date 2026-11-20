@@ -144,10 +144,10 @@ def discover(source, traits=None):
     for name, names in BUNDLES.items():
         if name == "kegg" and any((source / p).exists() for p in KEGG_OG_BUNDLE[:3]):
             names = KEGG_OG_BUNDLE
-        missing = [n for n in names if not (source / n).is_file()]
+        missing = [n for n in names if not existing_product(source / n).is_file()]
         sections[name] = {"status": "ready" if not missing else "absent" if len(missing) == len(names) else "incomplete",
                           "missing": missing}
-        files.update(source / n for n in names if (source / n).is_file())
+        files.update(existing_product(source / n) for n in names if existing_product(source / n).is_file())
     if sections['odb']['status'] == 'ready':
         snapshot = source / ORTHOGROUP_MAPPING / 'snapshot.json'
         data = load_tables(snapshot, verify_files=False)
@@ -158,7 +158,8 @@ def discover(source, traits=None):
                 sections['odb']['missing'].append(str(path))
             else: files.add(path)
     if sections["alignments"]["status"] == "absent":
-        unfinished = list((source / ORTHOGROUP_ALIGNMENTS).glob("*.faa"))
+        unfinished = [p for p in (source / ORTHOGROUP_ALIGNMENTS).glob('*.faa*')
+                      if p.name.endswith(('.faa', '.faa.gz'))]
         if unfinished:
             sections["alignments"]["status"] = "incomplete"
             files.update(unfinished)
@@ -176,7 +177,7 @@ def discover(source, traits=None):
     if sections["alignments"]["status"] == "ready":
         report = json.loads((source / f"{ORTHOGROUP_ALIGNMENTS}/provenance.json").read_text())
         for record in report["alignments"]:
-            files.add(source / ORTHOGROUP_ALIGNMENTS / f"{safe_name(record['orthogroup'])}.faa")
+            files.add(existing_product(source / ORTHOGROUP_ALIGNMENTS / f"{safe_name(record['orthogroup'])}.faa"))
     if sections["phylogeny"]["status"] == "ready":
         report = json.loads((source / f"{ALL_PHYLOGENY}/gene_trees.json").read_text())
         for record in report["retained"]:
@@ -215,7 +216,7 @@ def discover(source, traits=None):
 
 def fasta_records(path):
     """Preserve full headers and residue case; wrap differences are cosmetic."""
-    with Path(path).open() as handle:
+    with text_open(path) as handle:
         header, parts = None, []
         for raw in handle:
             line = raw.strip()
@@ -259,7 +260,7 @@ class Export:
                         "raw logs, chunk results, and per-run computation caches"]
 
     def input(self, path, expected_hash=None):
-        path = Path(path).resolve()
+        path = existing_product(path).resolve()
         key = str(path)
         if key not in self.allowed_inputs:
             raise ValueError(f"input not in frozen export inventory: {path}")
@@ -293,7 +294,7 @@ class Export:
         fields = next(reader)
         before = after = 0
         seen = set()
-        dest = self.stage / relative
+        dest = self.stage / path.relative_to(self.source)
         dest.parent.mkdir(parents=True, exist_ok=True)
         with atomic_writer(dest) as handle:
             writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", lineterminator="\n")
@@ -419,8 +420,8 @@ class Export:
                 og = record["orthogroup"]
                 path = self.input(self.source / ORTHOGROUP_ALIGNMENTS / f"{og}.faa", record["alignment"]["sha256"])
                 seen, width, after, batch = set(), None, 0, []
-                output = destination / f"{og}.faa"
-                with output.open("w") as fasta:
+                output = destination / path.name
+                with atomic_writer(output) as fasta:
                     for header, sequence in fasta_records(path):
                         gene = header.split()[0]
                         species = species_from_gene_id(gene)

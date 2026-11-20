@@ -17,9 +17,14 @@ from common import file_record, read_tsv, species_from_gene_id, write_tsv
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def alignment_og(path):
+    return Path(path).name.removesuffix(".gz").removesuffix(".faa")
+
+
 def alignment_members(folder):
-    return [dict(orthogroup=path.stem, gene_id=gene, species=species_from_gene_id(gene))
-            for path in sorted(folder.glob("*.faa")) for gene, _ in fasta_records(path)]
+    return [dict(orthogroup=alignment_og(path), gene_id=gene, species=species_from_gene_id(gene))
+            for path in sorted(folder.glob("*.faa*"))
+            if path.name.endswith((".faa", ".faa.gz")) for gene, _ in fasta_records(path)]
 
 
 @pytest.mark.parametrize("gene,species", [
@@ -295,13 +300,13 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
 
     execute()
     out = tmp_path / "results/test/orthogroups/alignments"
-    assert {p.name for p in out.glob("*.faa")} == {"OG1.faa", "OG2.faa", "OG3.faa"}
-    assert len(list(fasta_records(out / "OG1.faa"))) == 4
-    assert len(list(fasta_records(out / "OG2.faa"))) == 2
-    assert len(list(fasta_records(out / "OG3.faa"))) == 1
+    assert {p.name for p in out.glob("*.faa.gz")} == {"OG1.faa.gz", "OG2.faa.gz", "OG3.faa.gz"}
+    assert len(list(fasta_records(out / "OG1.faa.gz"))) == 4
+    assert len(list(fasta_records(out / "OG2.faa.gz"))) == 2
+    assert len(list(fasta_records(out / "OG3.faa.gz"))) == 1
     assert len(alignment_members(out)) == 7
-    for fasta in out.glob('*.faa'):
-        report = json.loads((tmp_path / 'logs/test/orthogroups/alignments' / f'{fasta.stem}.json').read_text())
+    for fasta in out.glob('*.faa.gz'):
+        report = json.loads((tmp_path / 'logs/test/orthogroups/alignments' / f'{alignment_og(fasta)}.json').read_text())
         assert report['trimming']['mode'] == 'gappyout'
         assert report['sites'] == report['trimming']['sites']
         assert report['trimming']['raw_sites'] >= report['sites'] > 0
@@ -313,7 +318,7 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     assert {r['sequence_id'] for r in read_tsv(sequence_tpm)} == {
         f'{sample}_g{gene}' for sample in ['Alpha_plant', 'Beta_sp-X'] for gene in [1, 2, 3]}
     assert not (out.parents[1] / "phylogeny").exists()
-    times = {p.name: p.stat().st_mtime_ns for p in out.glob("*.faa")}
+    times = {p.name: p.stat().st_mtime_ns for p in out.glob("*.faa.gz")}
     assert "Nothing to be done" in execute()
 
     # Tightening occupancy only changes selection; shared completed OGs and the
@@ -327,9 +332,9 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
         execute()
         inventory = json.loads((out / 'provenance.json').read_text())
         assert {r['orthogroup'] for r in inventory['alignments']} == expected
-        assert {p.stem for p in out.glob('*.faa')} == expected
+        assert {alignment_og(p) for p in out.glob('*.faa.gz')} == expected
         cache = tmp_path / 'work/test/orthogroups/alignments/cache'
-        assert all(((out if Path(name).stem in expected else cache) / name).stat().st_mtime_ns == t
+        assert all(((out if alignment_og(name) in expected else cache) / name).stat().st_mtime_ns == t
                    for name, t in times.items())
         assert [p.stat().st_mtime_ns for p in (raw_collection, measured)] == source_times
     (out / 'occupancy.tsv').unlink()
@@ -338,17 +343,17 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     assert all((out / name).stat().st_mtime_ns == t for name, t in times.items())
 
     # Missing output + interrupted rerun: only the affected OG is recomputed.
-    (out / "OG2.faa").unlink()
+    (out / "OG2.faa.gz").unlink()
     fail_once.touch()
     execute(fail=True)
-    assert (out / "OG1.faa").stat().st_mtime_ns == times["OG1.faa"]
+    assert (out / "OG1.faa.gz").stat().st_mtime_ns == times["OG1.faa.gz"]
     execute(options=("--rerun-incomplete",))
     assert events.read_text().splitlines().count("OG1") == 1
     assert events.read_text().splitlines().count("OG2") == 3
 
     # Quantification changes do not affect alignments.
     # Compare with the repaired outputs, including the deliberately recomputed OG2.
-    times = {p.name: p.stat().st_mtime_ns for p in out.glob('*.faa')}
+    times = {p.name: p.stat().st_mtime_ns for p in out.glob('*.faa.gz')}
     abundance = Path(tiny_inputs["quant_dir"]) / "Alpha_plant/A1/A1_abundance.tsv"
     values = read_tsv(abundance)
     values[0]["tpm"] = 40
@@ -359,13 +364,13 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     assert next(r['tpm'] for r in read_tsv(sequence_tpm) if r['sequence_id'] == 'Alpha_plant_g1') == '40'
     config["alignment"]["enabled"] = True
     configfile.write_text(yaml.safe_dump(config))
-    times = {p.name: p.stat().st_mtime_ns for p in out.glob("*.faa")}
-    (out / "OG2.faa").unlink()
+    times = {p.name: p.stat().st_mtime_ns for p in out.glob("*.faa.gz")}
+    (out / "OG2.faa.gz").unlink()
     execute(targets=(), fail=True)  # Multi-OG genes stop TPM aggregation.
-    assert not (out.parent / "expression/tpm.tsv").exists()
+    assert not (out.parent / "expression/tpm.tsv.gz").exists()
     execute()
-    assert (out / "OG2.faa").exists()
-    assert all((out / name).stat().st_mtime_ns == t for name, t in times.items() if name != "OG2.faa")
+    assert (out / "OG2.faa.gz").exists()
+    assert all((out / name).stat().st_mtime_ns == t for name, t in times.items() if name != "OG2.faa.gz")
     assert len(alignment_members(out)) == 7  # multi-OG copies still present
     assert "Nothing to be done" in execute()
 
@@ -375,10 +380,10 @@ def test_real_alignment_workflow_resume_updates_and_opt_in(
     config["selection"] = {"species_list": True}
     configfile.write_text(yaml.safe_dump(config))
     execute()
-    assert {p.name for p in out.glob("*.faa")} == {"OG1.faa", "OG2.faa"}
+    assert {p.name for p in out.glob("*.faa.gz")} == {"OG1.faa.gz", "OG2.faa.gz"}
     assert {r["species"] for r in alignment_members(out)} == {"Alpha_plant"}
-    assert len(list(fasta_records(out / "OG1.faa"))) == 2
-    assert len(list(fasta_records(out / "OG2.faa"))) == 1
+    assert len(list(fasta_records(out / "OG1.faa.gz"))) == 2
+    assert len(list(fasta_records(out / "OG2.faa.gz"))) == 1
     assert "Nothing to be done" in execute()
 
 

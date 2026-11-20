@@ -10,8 +10,7 @@ BUSCO. The dating environment contains the [AngioCal fossil workbook](dating.md)
 ## Taxonomy reference
 
 Builds use `taxonomy.database` when supplied. Otherwise the default shared
-database is `resources/taxonomy/ete/dataset/taxa.sqlite`; an existing
-`resources/taxonomy/taxa.sqlite` is also accepted for build selection. The
+database is `resources/taxonomy/ete/dataset/taxa.sqlite`. The
 selected database is linked as `<build>/taxonomy.sqlite` and recorded in
 `taxonomy_selection.json`.
 
@@ -22,7 +21,7 @@ Existing databases are reused without automatic updates.
 To refresh metadata selection and a new build together, prepare a snapshot at a
 new path and set both `metadata_selection.taxonomy_database` and
 `taxonomy.database` to it; see the [selection policy](../datasets/README.md#selection-policy).
-Keep earlier snapshots at their recorded paths for existing builds and analyses.
+Keep reference snapshots at their recorded paths for builds and analyses.
 
 ## OrthoDB reference
 
@@ -59,8 +58,7 @@ python workflow/scripts/verify_odb_reference.py \
 Mapping requires network access and an ODB-mapper supporting the selected
 release; fallback to another release is rejected.
 
-New mapping jobs and retries share a pinned reference checksum. Reference
-checksums are recorded internally; missing historical records remain unknown.
+Mapping jobs and retries share a pinned reference checksum recorded in provenance.
 Preparation validates an existing snapshot before pinning it, and writes only
 a per-run `reference-ready.json` receipt under the mapping work directory.
 Code updates and forced preparation leave the shared reference files unchanged.

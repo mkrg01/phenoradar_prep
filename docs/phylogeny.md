@@ -94,13 +94,11 @@ cdskit pads, masks, and translates CDS using the build's genetic code. Stops and
 unresolved codons become X. Review `species/*.json`: padding may affect reading
 frames, and QC cannot verify ORFs or exclude paralogy.
 
-FAMSA aligns proteins and trimAl selects columns with X treated as gaps. The
-columns selected by trimAl are preserved when short sequences are removed;
-columns left entirely as gaps or X are not removed afterward. The
-same species coverage threshold applies at marker selection, before alignment,
-and after trimming and sequence filtering. Each check uses all species selected
-for that tree as the denominator. No separate four-species or variable-site
-filter is applied to markers. Variable and parsimony-informative site counts
+FAMSA aligns proteins and trimAl selects columns with X treated as gaps.
+Short sequences are removed after trimming. Species coverage is checked at
+marker selection, before alignment, and after trimming and sequence filtering,
+using all species selected for that tree as the denominator.
+Variable and parsimony-informative site counts
 are recorded for diagnosis. Gene trees require at least two tips for CASTLES-II
 branch-length estimation; the complete analysis still requires at least four
 species. The marker list is fixed at selection.
@@ -117,9 +115,7 @@ include all mapped copies from the analysis cohort.
 VeryFastTree uses double precision and `-lg -gamma` (LG+CAT search with Gamma20
 length rescaling), reporting SH-like local support. ASTRAL-IV reports local
 posterior probabilities and CASTLES-II substitution lengths. Both use seed
-`12345`; no bootstrap or support filter is applied.
-VeryFastTree defaults to one thread: repeated four-thread runs of the pinned
-4.0.5 binary produced different topologies despite the same input and seed.
+`12345`. VeryFastTree defaults to one thread for reproducible topology searches.
 
 Under `results/<build>/downstream/<analysis>/phylogeny/<set>/`:
 

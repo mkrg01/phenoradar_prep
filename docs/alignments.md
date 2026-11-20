@@ -40,7 +40,7 @@ aggregation rejects such assignments.
 
 Results are in `results/<build>/downstream/<analysis>/orthogroups/alignments/`:
 
-- `{og}.faa`: trimAl-filtered alignment with original gene IDs and all copies retained.
+- `{og}.faa.gz`: trimAl-filtered alignment with original gene IDs and all copies retained.
 - `occupancy.tsv`: counts, fractions and selection decisions for all candidate OGs.
 - `provenance.json`: completed alignment inventory and provenance.
 

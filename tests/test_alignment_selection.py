@@ -68,7 +68,8 @@ def test_zero_and_one_fractions_and_empty_selection(occupancy_inputs):
     assert saved['alignments'] == [] and saved['selection']['min_sample_fraction'] == 1
 
 
-def test_threshold_changes_publish_only_selected_and_move_cached_results_without_copies(occupancy_inputs, tmp_path):
+@pytest.mark.parametrize('compressed', [False, True])
+def test_threshold_changes_publish_only_selected_and_move_cached_results_without_copies(occupancy_inputs, tmp_path, compressed):
     raw, occupancy, selected = occupancy_inputs
     out, reports, plans = tmp_path / 'out', tmp_path / 'reports', tmp_path / 'plans'
     cache = tmp_path / 'work/cache'
@@ -76,9 +77,10 @@ def test_threshold_changes_publish_only_selected_and_move_cached_results_without
     famsa.write_text(f'#!{sys.executable}\nfrom pathlib import Path\nimport sys\n'
                      'Path(sys.argv[-1]).write_bytes(Path(sys.argv[-2]).read_bytes())\n')
     famsa.chmod(0o755)
+    suffix = '.faa.gz' if compressed else '.faa'
     # A completed result excluded by the new default must survive untouched.
-    align(raw / 'OGlow.faa', out / 'OGlow.faa', reports / 'OGlow.json', threads=4, command=str(famsa))
-    old = (out / 'OGlow.faa').stat()
+    align(raw / 'OGlow.faa', out / ('OGlow' + suffix), reports / 'OGlow.json', threads=4, command=str(famsa))
+    old = (out / ('OGlow' + suffix)).stat()
     original = {}
     for fraction, expected, reused in [(0.5, {'OGhalf', 'OGthree'}, 0),
                                        (0.75, {'OGthree'}, 1),
@@ -89,20 +91,20 @@ def test_threshold_changes_publish_only_selected_and_move_cached_results_without
         if expected:
             receipt = out / 'batches/batch_000000.json'
             run_batch(plans / 'batch_000000.json', selected, out, reports, receipt,
-                      cpus=4, command=str(famsa), cache=cache)
+                      cpus=4, command=str(famsa), cache=cache, compressed=compressed)
             assert json.loads(receipt.read_text())['reused'] == reused
         finish(selected, out, reports, cache=cache)
         saved = json.loads((out / 'provenance.json').read_text())
         assert {r['orthogroup'] for r in saved['alignments']} == expected
         assert saved['selection']['min_sample_fraction'] == fraction
-        assert {p.stem for p in out.glob('*.faa')} == expected
-        assert {p.stem for p in cache.glob('*.faa')} == {'OGlow', 'OGhalf', 'OGthree'} - expected
-        files = [*out.glob('*.faa'), *cache.glob('*.faa')]
+        assert {p.name.removesuffix(suffix) for p in out.glob('*' + suffix)} == expected
+        assert {p.name.removesuffix(suffix) for p in cache.glob('*' + suffix)} == {'OGlow', 'OGhalf', 'OGthree'} - expected
+        files = [*out.glob('*' + suffix), *cache.glob('*' + suffix)]
         assert len(files) == 3  # No duplicated alignment storage.
         if not original:
             original = {p.name: (p.read_bytes(), p.stat().st_mtime_ns, p.stat().st_ino) for p in files}
         assert {p.name: (p.read_bytes(), p.stat().st_mtime_ns, p.stat().st_ino) for p in files} == original
-        low = (out if 'OGlow' in expected else cache) / 'OGlow.faa'
+        low = (out if 'OGlow' in expected else cache) / ('OGlow' + suffix)
         assert low.stat().st_mtime_ns == old.st_mtime_ns
         assert low.stat().st_ino == old.st_ino
 

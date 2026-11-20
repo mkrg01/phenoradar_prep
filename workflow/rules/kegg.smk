@@ -132,9 +132,9 @@ rule merge_kegg:
         helpers=[f"{SCRIPTS}/{name}.py" for name in [
             "select_kegg_representatives", "aggregate_ko_tpm", "common"]]
     output:
-        summed=f"{KEGG}/ko_tpm_sum.tsv",
-        wide=f"{KEGG}/ko_tpm_sum_wide.tsv",
-        support=f"{KEGG}/ko_support.tsv",
+        summed=f"{KEGG}/ko_tpm_sum.tsv.gz",
+        wide=f"{KEGG}/ko_tpm_sum_wide.tsv.gz",
+        support=f"{KEGG}/ko_support.tsv.gz",
         qc=f"{KEGG}/mapping_qc.tsv",
         provenance=f"{KEGG}/provenance.json"
     params:
@@ -147,4 +147,4 @@ rule merge_kegg:
     shell:
         "{PYTHON:q} {input.code:q} aggregate --samples {input.samples:q} "
         "--annotation-dir {params.annotation:q} --og-run-dir {params.runs:q} "
-        "--outdir {params.outdir:q} --ambiguity {params.ambiguity:q} > {log:q} 2>&1"
+        "--outdir {params.outdir:q} --ambiguity {params.ambiguity:q} --gzip > {log:q} 2>&1"

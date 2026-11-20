@@ -320,8 +320,15 @@ def test_filtered_outputs_are_selected_without_copying(snapshot):
     assert state(snapshot) == before
 
 
-def test_completion_requires_native_outputs_even_with_legacy_exports(snapshot):
+@pytest.mark.parametrize('compressed', [False, True])
+def test_completion_requires_native_outputs_even_with_legacy_exports(snapshot, compressed):
     import analysis
+    expression = snapshot / 'orthogroups/expression/tpm.tsv'
+    if compressed:
+        target = expression.with_name(expression.name + '.gz')
+        target.write_bytes(gzip.compress(expression.read_bytes(), mtime=0))
+        expression.unlink()
+        expression = target
     write_json(snapshot / 'run.json', {})
     write_json(snapshot / 'metadata/selection.json', {})
     pipeline = {'alignment': {'enabled': True}}
@@ -329,7 +336,7 @@ def test_completion_requires_native_outputs_even_with_legacy_exports(snapshot):
     legacy = snapshot / 'phenoradar_inputs/tpm.tsv'
     legacy.parent.mkdir()
     legacy.write_text('Previously collected TPM\n')
-    (snapshot / 'orthogroups/expression/tpm.tsv').unlink()
+    expression.unlink()
     before = state(snapshot)
     with pytest.raises(ValueError, match='required analysis outputs.*orthogroups/expression/tpm.tsv'):
         analysis.validate_outputs(snapshot, {'pipeline': pipeline})

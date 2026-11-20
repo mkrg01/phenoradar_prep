@@ -12,11 +12,8 @@ nwkit. Traits come from the column named by `trait` in `inputs.species_trait`.
 - A **phylogenetic block** is the largest rooted clade containing one selected
   contrast pair and no other selected pair. It may include unpaired samples.
 
-Public metadata uses `trait_clade_id`, `contrast_pair_id`, and
-`phylogenetic_block_id`. The raw nwkit skim tables retain nwkit's `group` column.
-Readers accept the former `group` and `expanded_pair_clade_id` metadata columns
-and the former `expanded_pair_clades.tsv` filename. Conflicting old and new
-values are errors. New outputs use the canonical names.
+Metadata records trait clades, contrast pairs, and phylogenetic blocks in
+`trait_clade_id`, `contrast_pair_id`, and `phylogenetic_block_id`.
 
 ## Configuration and execution
 
@@ -74,7 +71,7 @@ representatives. Review `phylogeny/representatives/selection/`.
 After assigning pairs and blocks, summary figures retain one sample per trait
 clade, selected by BUSCO completeness with seeded tie breaking. These display
 samples do not change the assignments. The `representatives` inference route
-still requires its separate NCBI-based selection before tree estimation.
+uses NCBI-based selection before tree estimation.
 
 ## Outputs and interpretation
 
@@ -111,9 +108,7 @@ distinguish biological species (`n_species_*`) from sample tips (`n_samples_*`).
 
 [Filtering a completed tree](species_filter.md) can recompute pairs for
 all/phenotyped results. Pair IDs are specific to each tree and cohort.
-From v0.8.13, IDs are ordered by clade membership rather than display sample
-names. Recomputing an earlier result can therefore change its ID numbers;
-reading or exporting saved results preserves their existing IDs.
+IDs are ordered by clade membership, independently of display sample names.
 
 ## Phylogenetic blocks
 

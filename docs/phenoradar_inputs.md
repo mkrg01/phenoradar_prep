@@ -2,7 +2,7 @@
 
 [Documentation](index.md) · [Output formats](outputs.md)
 
-Point PhenoRadar at the files in `results/BUILD/downstream/ANALYSIS/`.
+Point [PhenoRadar](https://github.com/mkrg01/phenoradar) at the files in `results/BUILD/downstream/ANALYSIS/`.
 Use files from the same analysis or from the same [exported subset](species_filter.md).
 
 ## Input files
@@ -12,36 +12,36 @@ Paths are relative to the analysis directory.
 | Input | Path |
 | --- | --- |
 | Traits, taxonomy, and available pair/block IDs | `metadata/species_metadata.tsv` |
-| Sample IDs, biological species, and runs | `metadata/samples.tsv` |
-| Trait states, missing count, and source checksums | `metadata/species_trait.json` |
-| OG expression | `orthogroups/expression/tpm.tsv` or `orthogroups/expression/tpm_sum.tsv` |
-| KO expression | `kegg/ko_tpm_sum.tsv` |
-| Trimmed OG alignments | `orthogroups/alignments/*.faa` |
+| OG expression | `orthogroups/expression/tpm.tsv.gz` or `orthogroups/expression/tpm_sum.tsv.gz` |
+| KO expression | `kegg/ko_tpm_sum.tsv.gz` |
+| Trimmed OG alignments | `orthogroups/alignments/*.faa.gz` |
 | Original per-sequence TPM | `expression/sequence_tpm.tsv.gz` |
 | Species tree | `phylogeny/<tree>/species_tree.nwk` |
 | Dated tree, when enabled | `phylogeny/<tree>/dating/species_tree.dated.nwk` |
 
 The `all` target creates the PhenoRadar metadata after the enabled contrast
 branches finish. `species` identifies a sample in PhenoRadar inputs and in tree
-tips. Use `metadata/samples.tsv` to recover biological species and run IDs.
-Keep repeated samples of a species in the same validation group.
+tips. Keep repeated samples of a species in the same validation group.
+
+PhenoRadar accepts plain and gzip-compressed expression tables, sequence TPM,
+and alignment FASTA files. The workflow writes these large outputs as gzip files.
 
 ## Expression settings
 
 ```yaml
 data:
   metadata_path: results/leaf/downstream/c4/metadata/species_metadata.tsv
-  tpm_path: results/leaf/downstream/c4/orthogroups/expression/tpm.tsv
+  tpm_path: results/leaf/downstream/c4/orthogroups/expression/tpm.tsv.gz
   species_col: species
   feature_col: orthogroup
   value_col: tpm
 ```
 
 OG `tpm` is rescaled over genes assigned to OGs. To use the original gene TPM
-sums, choose `tpm_sum.tsv` and set `value_col: tpm_sum`. For KO expression,
-use `kegg/ko_tpm_sum.tsv`, `feature_col: ko`, and `value_col: tpm_sum`.
-From v0.8.11, these KO values sum renormalized OG `tpm`, using all OG-assigned
-sequences as the normalization basis. They are not renormalized again by KO.
+sums, choose `tpm_sum.tsv.gz` and set `value_col: tpm_sum`. For KO expression,
+use `kegg/ko_tpm_sum.tsv.gz`, `feature_col: ko`, and `value_col: tpm_sum`.
+KO values sum renormalized OG `tpm`, using all OG-assigned sequences as the
+normalization basis.
 Use matching [orthogroup annotations](https://github.com/mkrg01/phenoradar/blob/main/docs/data-format.md#orthogroup-annotations)
 with OG features, or leave `data.orthogroup_annotation_path` unset.
 
@@ -92,12 +92,9 @@ split:
 ```
 
 Using the same column in both settings sends labeled samples with blank groups to
-`external_test` and makes contrast-aware ranking use the blocks. These settings
-use PhenoRadar's current `dev` configuration. Releases that use the older
-`data.contrast_pair_col` key need that key in place of `data.contrast_group_col`;
-the metadata column name remains `phylogenetic_block_id`. For
-taxonomic holdouts, set `split.group_col` to `family` or `order` and review
-missing group labels before running. See [PhenoRadar's split rules](https://github.com/mkrg01/phenoradar/blob/dev/docs/data-format.md#metadata-tsv).
+`external_test` and makes contrast-aware ranking use the blocks. For taxonomic
+holdouts, set `split.group_col` to `family` or `order` and review
+missing group labels before running. See [PhenoRadar's split rules](https://github.com/mkrg01/phenoradar/blob/main/docs/data-format.md#metadata-tsv).
 
 ## Verify completed outputs
 

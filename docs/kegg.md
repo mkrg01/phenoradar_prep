@@ -47,19 +47,14 @@ is applied after summing by KO. With `duplicate`, an OG with normalized TPM 10
 assigned to two KOs contributes 10 to each, so total KO TPM can exceed one million.
 Repeated hits to the same KO count once.
 
-From v0.8.11, the existing `tpm_sum` output columns contain sums of renormalized
-OG TPM. Earlier versions summed original OG TPM. Prepare a new analysis from
-the completed build to obtain the updated values; translation, OG mapping, and
-kallisto quantification do not need to be repeated.
-
 ## Outputs
 
 Under `results/<build>/downstream/<analysis>/kegg/`:
 
 | Output | Contents |
 | --- | --- |
-| `ko_tpm_sum.tsv`, `ko_tpm_sum_wide.tsv` | Long/wide expression; long columns: `species`, `ko`, `tpm_sum` |
-| `ko_support.tsv` | Observed contributing OG counts and TPM per KO/run |
+| `ko_tpm_sum.tsv.gz`, `ko_tpm_sum_wide.tsv.gz` | Long/wide expression; long columns: `species`, `ko`, `tpm_sum` |
+| `ko_support.tsv.gz` | Observed contributing OG counts and TPM per KO/run |
 | `mapping_qc.tsv` | Per-run counts, original TPM coverage, and normalized KO contributions |
 | `orthogroups.tsv` | OG annotation status and representative metadata |
 | `og_kos.tsv` | OG/KO hits and donor IDs; use `accepted=1` rows |

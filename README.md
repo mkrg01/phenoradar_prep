@@ -37,16 +37,5 @@ The reusable database is in `results/BUILD/database/`. The
 `results/BUILD/downstream/ANALYSIS/`. See [status and retries](docs/datasets.md#failure-and-recovery-behavior)
 for saved runs.
 
-## Taxonomic quality checks
-
-| Check | When to use it | Effect on sample selection |
-| --- | --- | --- |
-| [Kew or OrthoDB screening](datasets/README.md#sample-taxonomy-screening) | After assembly, before choosing a final database | Reports discordant runs; apply an exclusion plan or export a filtered database to remove them |
-| [Taxonomic monophyly](docs/taxonomy_check.md) | After species-tree inference | Reports disagreement with NCBI taxonomy for review |
-
-The sequence-based screen is run explicitly with `run_metadata.sh`; enabling
-`taxonomy_screen` alone does not schedule it during a build. Monophyly assessment
-runs with the analysis `all` target when enabled and does not exclude samples.
-
 [Documentation](docs/index.md) · [Curated datasets](datasets/README.md) ·
 [Angiosperm leaf dataset](datasets/angiosperm_leaf/README.md)

@@ -9,7 +9,7 @@ import shutil
 import tempfile
 
 from alignment_batches import cache_directory, copy_report, move_alignment, validate_groups
-from common import atomic_writer, file_record, now, read_tsv, write_json, write_tsv
+from common import atomic_writer, existing_product, file_record, now, read_tsv, write_json, write_tsv
 from mapping_tables import load_tables, read_species
 
 
@@ -136,7 +136,7 @@ def finish(inputs, outdir, reports, cache=None, trimal_mode=None):
         report = json.loads(report_path.read_text())
         if trimal_mode is not None and report.get('trimming', {}).get('mode') != trimal_mode:
             raise ValueError(f'OG alignment has not completed the requested trimAl mode: {og}')
-        expected = outdir / f'{og}.faa'
+        expected = existing_product(outdir / f'{og}.faa')
         if Path(report['alignment']['path']).name != expected.name:
             raise ValueError(f'misplaced OG alignment: {og}')
         check_record(inputs / f'{og}.faa', report['input'])
@@ -149,24 +149,28 @@ def finish(inputs, outdir, reports, cache=None, trimal_mode=None):
         raise ValueError('selected alignment inventory differs from occupancy')
     # Verify every selected alignment before moving any former output. Keep its
     # report with the cached file so later reuse checks input, output and aligner.
-    expected_names = {f'{og}.faa' for og in groups}
-    candidates = {r['orthogroup'] + '.faa' for r in rows}
+    expected_names = {Path(record['alignment']['path']).name for record in alignments}
+    candidates = {r['orthogroup'] for r in rows}
     outdir.mkdir(parents=True, exist_ok=True)
-    for path in outdir.glob('*.faa'):
-        if path.name not in candidates:
+    for path in outdir.glob('*.faa*'):
+        if not path.name.endswith(('.faa', '.faa.gz')):
+            continue
+        og = path.name.removesuffix('.gz').removesuffix('.faa')
+        if og not in candidates or (og in groups and path.name not in expected_names):
             path.unlink()  # Preserve the existing policy for obsolete OGs.
         elif path.name not in expected_names:
-            report = reports / f'{path.stem}.json'
+            report = reports / f'{og}.json'
             cached_report = cache / report.name
             if report.is_file():
                 copy_report(report, cached_report)
             else:
                 cached_report.unlink(missing_ok=True)
             move_alignment(path, cache / path.name)
-    for path in cache.glob('*.faa'):
-        if path.name not in candidates:
+    for path in cache.glob('*.faa*'):
+        if path.name.endswith(('.faa', '.faa.gz')) and path.name.removesuffix('.gz').removesuffix('.faa') not in candidates:
             path.unlink()
-            path.with_suffix('.json').unlink(missing_ok=True)
+            og = path.name.removesuffix('.gz').removesuffix('.faa')
+            (cache / f'{og}.json').unlink(missing_ok=True)
     with occupancy.open() as source, atomic_writer(outdir / 'occupancy.tsv') as target:
         shutil.copyfileobj(source, target)
     write_json(outdir / 'provenance.json', {

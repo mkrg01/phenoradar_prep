@@ -85,7 +85,7 @@ def test_bundle_relocation_and_analysis(completed_project):
         assert run == second/'results/copied/downstream/copied'
         execute(second,run,'all',env)
         analysis.validate_outputs(run, analysis.load(run))
-        assert {r['species'] for r in read_tsv(run/'orthogroups/expression/tpm.tsv')} == {'Alpha_plant_A1','Beta_sp-X_B1'}
+        assert {r['species'] for r in read_tsv(run/'orthogroups/expression/tpm.tsv.gz')} == {'Alpha_plant_A1','Beta_sp-X_B1'}
         assert not (run/'orthogroups/expression/runs/A1.qc.json').samefile(moved/'expression/runs/A1.qc.json')
         assert not events.exists()
     finally:

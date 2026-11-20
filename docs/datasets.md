@@ -28,11 +28,11 @@ Use the build directory name printed by `submit` for `{build_name}` below.
 submits the required jobs through Slurm or AGE. Add `--prepare-locally` to
 import already verified inputs on the submit host.
 
-New builds first check every candidate TaxID against one frozen taxonomy snapshot,
+Builds first check every candidate TaxID against one frozen taxonomy snapshot,
 including builds that reuse all sample products. `taxonomy.missing_taxid: exclude`
 omits unresolved IDs before import or sample dispatch; merged IDs remain included
-with their original identity. Use `error` to stop instead, or `null` for legacy
-selection. `taxonomy.database` can select an existing SQLite snapshot.
+with their original identity. Use `error` to stop instead, or `null` to disable
+this check. `taxonomy.database` can select an existing SQLite snapshot.
 
 Review `taxonomy_selection.tsv` and `taxonomy_excluded_runs.tsv` in the build.
 `taxonomy_selection.json` pins the decisions and reference checksum for resumes;
@@ -52,7 +52,7 @@ source and settings:
 
 - AMALGKIT retrieves reads and normally applies fastp with a minimum retained
   read length of 25 nt. A fallback can recover original public FASTQs directly
-  without fastp. Newly processed samples record their acquisition method and
+  without fastp. Samples record their acquisition method and
   fastp status in `database/sample_processing.tsv`, with stage-specific records
   retained in the database manifest. The worker log also identifies this route,
   and `getfastq_completion.json` records `read_source: public-original` in the
@@ -66,7 +66,7 @@ source and settings:
   `busco.lineage`. The analysis threshold defaults to 50% complete BUSCOs,
   counting single-copy and duplicated hits.
 
-The [Kew/OrthoDB screen](../datasets/README.md#sample-taxonomy-screening) is a
+The [Kew/OrthoDB screen](taxonomy_screening.md) is a
 separate step after sample processing. Reused samples keep their recorded
 generating conditions; see the [sample processing table](#sample-processing-table).
 
@@ -253,8 +253,8 @@ odb:
 ./run_build.sh submit --name orthodb_refresh
 ```
 
-If earlier builds used different releases, only samples with a different release
-or clade are remapped. The finished database uses the configured release for all
+Samples mapped with the configured release and clade are reused; other samples
+are remapped. The finished database uses the configured release for all
 samples. BUSCO lineage is independent; the mapper must support the selected release.
 
 Resume this build with `submit --build results/orthodb_refresh`; completed chunks
@@ -263,17 +263,17 @@ updated OGs. See [reference storage and checks](references.md#preparing-and-veri
 
 ### Sample processing table
 
-New builds include `database/sample_processing.tsv`: one row per sample with
+The database includes `database/sample_processing.tsv`: one row per sample with
 generating versions, methods, read acquisition and fastp status, references,
 and BUSCO completeness.
-To export it from an older database without rerunning analyses:
+To export it to a separate directory without rerunning analyses:
 
 ```bash
 ./run_build.sh export-processing --build results/{build_name} \
   --outdir reports/sample_processing
 ```
 
-Reused samples keep their generating versions; missing historical records are
+Reused samples keep their generating versions; unrecorded values are
 `unknown`. See the [column definitions](outputs.md#sample-processing-table).
 
 ## Copying a completed build to another project

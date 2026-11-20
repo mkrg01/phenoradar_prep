@@ -40,9 +40,9 @@ follow the [sample identifier conventions](inputs.md#identifiers).
 | `odb/snapshot.json`, `odb/species/*.tsv.gz` | Mapping provenance and gene/OG tables |
 | `expression/runs/{run}.tsv.gz`, `{run}.qc.json` | Saved OG expression and QC |
 
-New databases and build caches gzip protein FASTA and expression tables,
-preserving all values and source columns. Combined OG/KO analysis tables remain
-plain TSV; the larger per-sequence table is gzip-compressed.
+Databases and build caches gzip protein FASTA and expression tables,
+preserving all values and source columns. Analysis outputs also gzip the combined
+OG/KO expression tables, sequence TPM table, and OG alignment FASTA files.
 
 ## Sample processing table
 
@@ -71,16 +71,14 @@ statuses; if either stage is unrecorded, the corresponding value is `unknown`.
 processing; it does not identify a download provider. `genegalleon_fallback`
 identifies GeneGalleon's additional public-FASTQ recovery path.
 
-Newly processed samples retain stage-specific read records in the database
-manifest, including through reuse and copying `database/` to another project.
-FASTQ cleanup and diagnostic compression do not remove these records. Older
-samples without recorded read-processing information remain `unknown`.
+Stage-specific read records are stored in the database manifest and preserved
+when reusing products, copying `database/`, or cleaning up FASTQs and diagnostics.
 
 Unrecorded methods and versions are `unknown`. Local GeneGalleon sources append
 `+local.<content ID>` to the version. Detailed revisions, container identities,
 settings, and reuse history are kept in machine-readable provenance.
 
-For older databases, [export this table](datasets.md#sample-processing-table)
+You can also [export this table](datasets.md#sample-processing-table)
 to a separate directory.
 
 ## Result files
@@ -93,10 +91,10 @@ results/<build>/downstream/<analysis>/
   orthogroups/
     mapping/                 # gene_id / orthogroup tables and provenance
     expression/
-      tpm_sum.tsv            # Original TPM summed by OG
-      tpm.tsv                # Rescaled OG TPM
-      tpm_sum_wide.tsv
-      tpm_wide.tsv
+      tpm_sum.tsv.gz         # Original TPM summed by OG
+      tpm.tsv.gz             # Rescaled OG TPM
+      tpm_sum_wide.tsv.gz
+      tpm_wide.tsv.gz
       mapping_qc.tsv
     alignments/              # Optional all-copy alignments
   kegg/                      # Optional KO annotation and expression
@@ -121,9 +119,8 @@ Keep `run.json`, branch provenance, reference snapshots, and the release's
 
 ## Storage cleanup
 
-New OrthoDB chunks store annotations and hits as lossless `.gz` files. Plain
-historical chunks and annotation caches remain readable; stored-byte and decoded
-content checksums verify compressed results before reuse.
+OrthoDB chunks store annotations and hits as lossless `.gz` files. Stored-byte
+and decoded-content checksums verify compressed results before reuse.
 
 After a database completes, preview `./run_build.sh compact --build results/NAME`.
 Add `--apply` to archive successful native diagnostics and remove empty diagnostic
@@ -138,7 +135,7 @@ the entire build. A completed database also retires its private ODB partition,
 table-construction, and checksum caches after all published files verify.
 Published snapshots, compressed source annotations, and lock identities remain;
 collection can regenerate these derivations without RNA-seq processing or ODB
-remapping. Legacy receipts without a native wrapper exit remain retained.
+remapping.
 Measurement peaks remain in the JSON receipt even when the bounded trace rotates.
 
 With the default `storage.keep_intermediates: false`, ODB and KofamScan remove

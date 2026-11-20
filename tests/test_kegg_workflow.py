@@ -136,7 +136,7 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     benchmarks = list((workflow_project / "logs/test/kegg/benchmarks").glob("batch_*.tsv"))
     assert len(benchmarks) == 1
     assert all(float(read_tsv(path)[0]["s"]) >= 0 for path in benchmarks)
-    rows = read_tsv(out / "ko_tpm_sum.tsv")
+    rows = read_tsv(out / "ko_tpm_sum.tsv.gz")
     assert {(r["species"], r["ko"]): float(r["tpm_sum"]) for r in rows} == {
         (run, ko): value for run, unique, multi in [("Alpha_plant", 400000, 600000), ("Beta_sp-X", 400000, 600000)]
         for ko, value in [("K00001", unique), ("K00002", multi), ("K00003", multi)]}
@@ -151,7 +151,7 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     assert float(qc["A1"]["retained_tpm"]) == 50
     assert float(qc["A1"]["retained_normalized_tpm"]) == 1000000
     assert float(qc["A1"]["ko_tpm_sum"]) == 1600000
-    assert len(read_tsv(out / "ko_support.tsv")) == 6
+    assert len(read_tsv(out / "ko_support.tsv.gz")) == 6
     assert read_tsv(out / "ko_modules.tsv")[0] == {"ko": "K00001", "module": "M00001"}
     assert "Nothing to be done" in execute(["--dry-run"])
 
@@ -164,7 +164,7 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     assert "rule annotate_kofam:" not in dry
     execute()
     assert len(events.read_text().splitlines()) == 1
-    assert float(next(r for r in read_tsv(out / "ko_tpm_sum.tsv")
+    assert float(next(r for r in read_tsv(out / "ko_tpm_sum.tsv.gz")
                       if r["species"] == "Alpha_plant" and r["ko"] == "K00001")["tpm_sum"]) == pytest.approx(40 / 70 * 1e6)
 
     # Aggregation policy changes reuse the representative annotations.
@@ -176,7 +176,7 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
         assert "rule merge_kegg:" in dry
         assert "rule annotate_kofam:" not in dry
         execute()
-        assert {r["ko"] for r in read_tsv(out / "ko_tpm_sum.tsv")} == expected_kos
+        assert {r["ko"] for r in read_tsv(out / "ko_tpm_sum.tsv.gz")} == expected_kos
         assert len(events.read_text().splitlines()) == 1
         assert all(p.stat().st_mtime_ns == timestamp for p, timestamp in annotation_times.items())
 
@@ -185,14 +185,14 @@ def test_kegg_standalone_incremental_and_opt_in_full(tiny_inputs, fake_odb, froz
     config["selection"] = {"species_list": True}
     configfile.write_text(yaml.safe_dump(config))
     execute()
-    assert [r["species"] for r in read_tsv(out / "ko_tpm_sum.tsv")] == ["Beta_sp-X"] * 3
+    assert [r["species"] for r in read_tsv(out / "ko_tpm_sum.tsv.gz")] == ["Beta_sp-X"] * 3
     assert {r["representative_species"] for r in read_tsv(out / "orthogroups.tsv")} == {"Beta_sp-X"}
     assert len(events.read_text().splitlines()) == 1
 
     config["kegg"]["enabled"] = True
     configfile.write_text(yaml.safe_dump(config))
     execute(targets=())
-    assert [r["species"] for r in read_tsv(out.parent / "orthogroups/expression/tpm.tsv")] == ["Beta_sp-X", "Beta_sp-X"]
+    assert [r["species"] for r in read_tsv(out.parent / "orthogroups/expression/tpm.tsv.gz")] == ["Beta_sp-X", "Beta_sp-X"]
     assert len(odb_events.read_text().splitlines()) == 2  # Legacy mapping reran for the smaller sample set.
     assert "Nothing to be done" in execute(["--dry-run"], targets=())
 
@@ -301,7 +301,7 @@ def test_kegg_reuses_completed_database_without_mapping_or_translation(
     assert (run / "orthogroups/expression/runs/A1.tsv.gz").samefile(
         build / "database/expression/runs/A1.tsv.gz")
     values = {(r["species"], r["ko"]): float(r["tpm_sum"])
-              for r in read_tsv(run / "kegg/ko_tpm_sum.tsv")}
+              for r in read_tsv(run / "kegg/ko_tpm_sum.tsv.gz")}
     assert values["Alpha_plant_A1", "K00001"] == 400000
     assert values["Beta_sp-X_B1", "K00002"] == values["Beta_sp-X_B1", "K00003"] == 600000
     from analysis_validation import validate

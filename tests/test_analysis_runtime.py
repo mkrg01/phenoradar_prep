@@ -41,12 +41,10 @@ def test_real_workflow_completion_and_validation_failure(completed_project, monk
             rows[0]['tpm'] = 'NaN'
             write_tsv(table, list(rows[0]), rows)
         elif invalid_output:
-            table = path / 'orthogroups/expression/tpm.tsv'
-            lines = table.read_text().splitlines()
-            values = lines[1].split('\t')
-            values[lines[0].split('\t').index('tpm')] = 'NaN'
-            lines[1] = '\t'.join(values)
-            table.write_text('\n'.join(lines) + '\n')
+            table = path / 'orthogroups/expression/tpm.tsv.gz'
+            rows = read_tsv(table)
+            rows[0]['tpm'] = 'NaN'
+            write_tsv(table, list(rows[0]), rows)
         return result
 
     monkeypatch.setattr(subprocess, 'run', without_container)
@@ -61,7 +59,7 @@ def test_real_workflow_completion_and_validation_failure(completed_project, monk
         done = json.loads((path / 'completed.json').read_text())
         assert state['phase'] == 'complete'
         assert done['run_token'] == state['run_token']
-        assert (path / 'orthogroups/expression/tpm.tsv').is_file()
+        assert (path / 'orthogroups/expression/tpm.tsv.gz').is_file()
         assert not (path / 'phenoradar_inputs').exists()
         assert done['output_layout'] == 'native'
         assert done['files']

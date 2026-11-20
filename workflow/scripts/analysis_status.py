@@ -180,7 +180,8 @@ def status(path, manifest=None, run=None):
     finished = timestamp(created_at)
     current = completion.is_file() and finished is not None and (not latest or started is not None and finished >= started)
     required = required_outputs(manifest.get('pipeline', {}), manifest.get('implementation', []))
-    missing = [name for name in required if not (path / name).is_file()] if current else []
+    from common import existing_product
+    missing = [name for name in required if not existing_product(path / name).is_file()] if current else []
     complete = current and not missing and saved.get('target', 'all') == 'all'
     queue_state = controller['state']
     if saved.get('state') in {'submitting', 'unknown'}:

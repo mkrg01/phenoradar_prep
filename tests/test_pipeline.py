@@ -465,7 +465,7 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     assert len(read_tsv(out / "metadata/species_metadata.tsv")) == 2
     manifest_dir = "incremental_plan" if reuse else "manifests"
     assert (out / "orthogroups/mapping" / manifest_dir / "chunks.json").is_file()
-    assert len(read_tsv(out / "orthogroups/expression/tpm_wide.tsv")) == 2
+    assert len(read_tsv(out / "orthogroups/expression/tpm_wide.tsv.gz")) == 2
     events = tmp_path / "events.txt"
     assert (len(events.read_text().splitlines()) if events.exists() else 0) == (0 if reuse else 1)
     assert json.loads((out / "orthogroups/mapping/snapshot.json").read_text())["qc"]["duplicate_pairs_removed"] == 4
@@ -494,7 +494,7 @@ def test_snakemake_end_to_end_and_incremental_rerun(tiny_inputs, fake_odb, froze
     config["selection"] = {"species_list": True}
     configfile.write_text(yaml.safe_dump(config))
     execute()
-    assert [r["species"] for r in read_tsv(out / "orthogroups/expression/tpm_wide.tsv")] == ["Beta_sp-X"]
+    assert [r["species"] for r in read_tsv(out / "orthogroups/expression/tpm_wide.tsv.gz")] == ["Beta_sp-X"]
     assert json.loads((out / "metadata/selection.json").read_text())["requested_species"] == ["Beta_sp-X", "Gamma_plant"]
     assert (len(events.read_text().splitlines()) if events.exists() else 0) == (0 if reuse else 2)
     if reuse:

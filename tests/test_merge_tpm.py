@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import merge_tpm
-from common import read_tsv, write_json, write_tsv
+from common import read_tsv, text_open, write_json, write_tsv
 
 
 TABLE_FIELDS = ["species", "run", "orthogroup", "tpm", "tpm_sum"]
@@ -29,7 +29,8 @@ def save_run(directory, species, run, entries, compressed=False):
     return rows, report, path
 
 
-def test_exact_tables_single_input_pass_and_independent_runs(tmp_path, monkeypatch):
+@pytest.mark.parametrize('compressed', [False, True])
+def test_exact_tables_single_input_pass_and_independent_runs(tmp_path, monkeypatch, compressed):
     samples = tmp_path / "samples.tsv"
     manifest = [{"species": "Beta", "run": "B1"}, {"species": "Alpha_A2", "run": "A2"},
                 {"species": "Alpha_A1", "run": "A1"}]
@@ -42,8 +43,8 @@ def test_exact_tables_single_input_pass_and_independent_runs(tmp_path, monkeypat
         ("Beta", "B1", [("OG1", "-0", "9.999999999999999"), (odd_group, "2.0", "3e+10")], False),
     ]
     all_rows, reports, paths = [], [], []
-    for species, run, entries, compressed in data:
-        rows, report, path = save_run(runs, species, run, entries, compressed)
+    for species, run, entries, input_compressed in data:
+        rows, report, path = save_run(runs, species, run, entries, input_compressed)
         all_rows.extend(rows)
         reports.append(report)
         paths.append(path)
@@ -58,7 +59,7 @@ def test_exact_tables_single_input_pass_and_independent_runs(tmp_path, monkeypat
 
     monkeypatch.setattr(merge_tpm, "read_tsv", tracked_read)
     actual = tmp_path / "actual"
-    merge_tpm.merge(samples, runs, actual)
+    merge_tpm.merge(samples, runs, actual, compressed=compressed)
     assert reads == [samples, *paths]
 
     expected = tmp_path / "expected"
@@ -78,7 +79,18 @@ def test_exact_tables_single_input_pass_and_independent_runs(tmp_path, monkeypat
         write_tsv(expected / f"{value}_wide.tsv", ["species", *groups], wide)
     write_tsv(expected / "mapping_qc.tsv", QC_FIELDS, reports)
     for name in OUTPUTS:
-        assert (actual / name).read_bytes() == (expected / name).read_bytes(), name
+        produced = actual / (name + '.gz' if compressed and name != 'mapping_qc.tsv' else name)
+        with text_open(produced) as handle:
+            assert handle.read() == (expected / name).read_text(), name
+        if compressed and name != 'mapping_qc.tsv':
+            assert not (actual / name).exists()
+    for use_gzip in (not compressed, compressed):
+        merge_tpm.merge(samples, runs, actual, compressed=use_gzip)
+        for name in OUTPUTS:
+            produced = actual / (name + '.gz' if use_gzip and name != 'mapping_qc.tsv' else name)
+            with text_open(produced) as handle:
+                assert handle.read() == (expected / name).read_text(), name
+        assert len(list(actual.iterdir())) == len(OUTPUTS)
 
 
 @pytest.mark.parametrize("problem", ["empty", "species", "run", "duplicate", "qc"])

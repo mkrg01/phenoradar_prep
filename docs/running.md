@@ -118,9 +118,8 @@ run and measure requested allocations, not actual usage. Cluster limits still
 apply.
 
 The build configs, including angiosperm, default to `total_limits.jobs: null`.
-New analyses keep
-finite CPU/memory budgets (64 CPUs/256 GB by default), so worker concurrency
-follows each job's allocation rather than a fixed worker count. Prepared analyses
+Analyses use finite CPU/memory budgets (64 CPUs/256 GB by default), so worker
+concurrency follows each job's allocation. Prepared analyses
 keep their saved settings; use resource overrides to change a later submission.
 
 ```yaml
@@ -184,8 +183,6 @@ To change resources for an existing run:
 ```
 
 Only the supplied `execution` settings change; scientific settings stay frozen.
-Existing configs and saved builds using `slurm` remain supported; do not specify
-both `execution` and `slurm` in one file.
 Partial resource files may contain just the changed limits or job entries.
 
 GeneGalleon derives its tool limits from the actual allocation. Worker logs

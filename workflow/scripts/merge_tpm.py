@@ -11,7 +11,7 @@ from common import atomic_writer, existing_product, read_tsv
 from sample_identity import sample_run_map
 
 
-def merge(samples, run_dir, outdir):
+def merge(samples, run_dir, outdir, compressed=False):
     manifest = sorted(read_tsv(samples), key=lambda row: (row["species"], row["run"]))
     sample_run_map(manifest)
     fields = ["species", "run", "targets", "protein_genes", "quantified_proteins", "mapped_targets",
@@ -19,9 +19,11 @@ def merge(samples, run_dir, outdir):
               "mapped_tpm_fraction", "retained_tpm", "retained_tpm_fraction", "multimap"]
     values = ("tpm", "tpm_sum")
     names = ("tpm", "tpm_wide", "tpm_sum", "tpm_sum_wide", "mapping_qc")
+    outputs = {name: Path(outdir) / (f"{name}.tsv.gz" if compressed and name != 'mapping_qc'
+                                    else f"{name}.tsv") for name in names}
     with ExitStack() as stack:
         writers = {
-            name: csv.writer(stack.enter_context(atomic_writer(Path(outdir) / f"{name}.tsv")),
+            name: csv.writer(stack.enter_context(atomic_writer(outputs[name])),
                              delimiter="\t", lineterminator="\n")
             for name in names
         }
@@ -67,10 +69,14 @@ def merge(samples, run_dir, outdir):
                     [sample["species"],
                      *(by_group.get(group, (0, 0))[column] for group in groups)])
             del by_group
+    for name in names[:-1]:
+        alternate = Path(outdir) / (f"{name}.tsv" if compressed else f"{name}.tsv.gz")
+        alternate.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ["samples", "run-dir", "outdir"]:
         parser.add_argument(f"--{flag}", required=True)
+    parser.add_argument('--gzip', dest='compressed', action='store_true')
     merge(**vars(parser.parse_args()))

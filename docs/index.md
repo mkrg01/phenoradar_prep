@@ -11,11 +11,12 @@
 
 | Task | Guide |
 | --- | --- |
+| Screen assembled sequences against Kew or OrthoDB | [Sample taxonomy screening](taxonomy_screening.md) |
 | Align mapped proteins by orthogroup | [OG alignments](alignments.md) |
 | Annotate orthogroups and summarize KO expression | [KEGG](kegg.md) |
 | Infer a species tree from BUSCO markers | [Phylogeny](phylogeny.md) |
 | Estimate divergence ages | [Dating](dating.md) |
-| Review tree placements against NCBI taxonomy | [Taxonomy check](taxonomy_check.md) |
+| Review tree placements against NCBI taxonomy | [Taxonomic monophyly](taxonomy_check.md) |
 | Identify contrasting sister-clade pairs and phylogenetic blocks | [Contrast pairs and blocks](contrast_pairs.md) |
 
 ## Manage data and runs
