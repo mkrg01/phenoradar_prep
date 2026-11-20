@@ -48,26 +48,38 @@ def generating_conditions(manifest):
             'assembly_method': gg.get('settings', {}).get('assembly_method', 'unknown')}
 
 
+def producer(processing):
+    """Read observations do not change the identity of the generating software."""
+    return ({k: v for k, v in processing.items() if k != 'read_processing'}
+            if processing is not None else None)
+
+
+def with_read_processing(processing, products):
+    result = copy.deepcopy(producer(processing))
+    if result is None:
+        return None
+    # Imported complete samples carry both stages on every receipt. Select
+    # only the stage actually produced by each product, including on retries.
+    reads = {}
+    for key, stage in (('reference', 'assembly'), ('quant', 'quant')):
+        recorded = (products.get(key) or {}).get('provenance', {}).get('processing') or {}
+        value = recorded.get('read_processing', {}).get(stage)
+        if value is not None:
+            reads[stage] = copy.deepcopy(value)
+    if reads:
+        result['read_processing'] = reads
+    return result
+
+
 def native_processing(products, manifest=None):
     """Never infer a generating release from the configuration of a reuse build."""
     present = [products[key] for key in PRODUCT_KEYS if products.get(key)]
     recorded = [p.get('provenance', {}).get('processing') for p in present]
     if recorded and all(recorded):
-        producers = [{k: v for k, v in value.items() if k != 'read_processing'} for value in recorded]
+        producers = [producer(value) for value in recorded]
         if any(value != producers[0] for value in producers[1:]):
             raise ValueError('sample contains different GeneGalleon generating conditions; rebuild the sample')
-        result = copy.deepcopy(producers[0])
-        # Imported complete samples carry both stages on every receipt. Select
-        # only the stage actually produced by each product, including on retries.
-        reads = {}
-        for key, stage in (('reference', 'assembly'), ('quant', 'quant')):
-            processing = (products.get(key) or {}).get('provenance', {}).get('processing') or {}
-            value = processing.get('read_processing', {}).get(stage)
-            if value is not None:
-                reads[stage] = copy.deepcopy(value)
-        if reads:
-            result['read_processing'] = reads
-        return result
+        return with_read_processing(recorded[0], products)
     # Historical native receipts prove their producer only when every stage
     # agrees with the source build's actual software receipts and conditions.
     if manifest is not None and present and not any(recorded):

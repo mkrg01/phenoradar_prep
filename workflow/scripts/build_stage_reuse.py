@@ -25,6 +25,7 @@ def fingerprints(entry):
 
 
 def merge(selected, name, entry):
+    from sample_processing import producer, with_read_processing
     previous = selected.get(name)
     if previous is None:
         selected[name] = entry
@@ -35,7 +36,7 @@ def merge(selected, name, entry):
                       else previous['product'].get('processing'))
     new_processing = (entry.get('processing') if entry.get('kind') == 'stages'
                       else entry['product'].get('processing'))
-    same_producer = old_processing is not None and old_processing == new_processing
+    same_producer = old_processing is not None and producer(old_processing) == producer(new_processing)
     if old_complete != new_complete and not same_producer:
         if new_complete:
             selected[name] = entry
@@ -54,6 +55,7 @@ def merge(selected, name, entry):
             for key in ('busco', 'quant'):
                 if previous['products'][key] is None:
                     previous['products'][key] = entry['products'][key]
+            previous['processing'] = with_read_processing(old_processing, previous['products'])
 
 
 def select(paths, items, cfg, selected, errors, sources, verify_files=True, rebuilds=None):

@@ -82,3 +82,26 @@ def test_stage_reports_can_differ_without_mixing_generating_releases():
     assert original['read_processing']['quant'] == assembly
     assert summary({'read_processing': {'assembly': assembly}}) == {
         'read_acquisition_method': 'unknown', 'fastp_applied': 'unknown'}
+
+
+def test_partial_reuse_merge_keeps_stage_providers_and_read_records():
+    from build_stage_reuse import merge
+    common = {'genegalleon_version': '1.0.0'}
+    assembly = {'read_acquisition_method': 'amalgkit', 'fastp_applied': 'yes'}
+    quant = {'read_acquisition_method': 'genegalleon_fallback', 'fastp_applied': 'no'}
+    reference = {'cds': {'sha256': 'cds'}, 'provenance': {
+        'processing': {**common, 'read_processing': {'assembly': assembly}}}}
+    busco = {'full': {'sha256': 'busco'}, 'provenance': {'processing': common}}
+    quantified = {'abundance': {'sha256': 'quant'}, 'provenance': {
+        'processing': {**common, 'read_processing': {'quant': quant}}}}
+    partial = {'kind': 'stages', 'products': {'reference': reference, 'busco': busco, 'quant': None}}
+    complete = {'kind': 'stages', 'products': {'reference': reference, 'busco': dict(busco), 'quant': quantified}}
+    for entry in (partial, complete):
+        entry['processing'] = native_processing(entry['products'])
+    selected = {'sample': partial}
+    merge(selected, 'sample', complete)
+    assert selected['sample']['products']['busco'] is busco
+    assert selected['sample']['products']['quant'] is quantified
+    assert selected['sample']['processing']['read_processing'] == {'assembly': assembly, 'quant': quant}
+    assert summary(selected['sample']['processing']) == {
+        'read_acquisition_method': 'mixed', 'fastp_applied': 'mixed'}
