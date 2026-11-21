@@ -449,7 +449,7 @@ def test_sample_workers_reuse_and_native_array_filename_order(dataset_project, m
         monkeypatch.setenv('GG_TRANSCRIPTOME_' + key, 'yes')
     path = new_dataset(root, ('New plant', 'New plant alba'))
     commands = submit(path, until='quant', dry_run=True)
-    assert len(commands) == 1 and '--array=1,2' in commands[0]
+    assert len(commands) == 1 and '--array=1-2' in commands[0]
     assert '--stage' not in Path(commands[0][-1]).read_text()
     for index in (1, 2): worker(path, index)
     events = native_events(path)
@@ -515,7 +515,7 @@ def test_partial_pilot_never_exports_incomplete_dataset(dataset_project):
     subset.write_text("Other_plant\n")
     commands = submit(path, until="mapping", species=subset, dry_run=True)
     assert len(commands) == 1
-    assert all("--array=2" in cmd for cmd in commands)
+    assert all("--array=1" in cmd for cmd in commands)
     assert not any("mapping" in cmd[-1] for cmd in commands)
     worker(path, 2)
     with pytest.raises(ValueError, match="dataset incomplete: New_plant"):
@@ -687,7 +687,7 @@ def test_split_slurm_arrays_preserve_species_identity_and_bound_concurrency(data
     monkeypatch.setattr('phase_config.resolve_array_size', lambda: 2)
     commands = submit(path, until='quant', dry_run=True)
     assert len(commands) == 2
-    assert "--array=1,2" in commands[0]
+    assert "--array=1-2" in commands[0]
     assert "--array=1" in commands[1]
     assert "--dependency=afterany:JOB_ID_sample" in commands[1]
     # Execute the generated high-index batch locally with the GeneGalleon double.
@@ -723,7 +723,7 @@ def test_auto_array_size_preserves_stage_dependencies_and_sparse_retry(dataset_p
     monkeypatch.setattr('phase_config.resolve_array_size', detect)
     commands = submit(path, dry_run=True)
     assert len(commands) == 2  # One sample array, followed by the mapping controller.
-    assert '--array=1,2,3' + suffix in commands[0]
+    assert '--array=1-3' + suffix in commands[0]
     assert not any(arg.startswith('--dependency=') for arg in commands[0])
     assert '--dependency=afterok:JOB_ID_sample' in commands[1]
     assert '--kill-on-invalid-dep=yes' in commands[1]
@@ -743,17 +743,19 @@ def test_auto_array_size_preserves_stage_dependencies_and_sparse_retry(dataset_p
         return str(1000 + len(calls)) + '\n'
     monkeypatch.setattr(subprocess, 'check_output', scheduler)
     retry = submit(path)
-    assert '--array=2' + suffix in retry[0]
+    assert '--array=1' + suffix in retry[0]
     assert len(retry) == 2
     batch = json.loads((path / 'jobs/submission_0002.json').read_text())
     assert [job['array_offset'] for job in batch['jobs']] == [0, 0]
     assert [job['indices'] for job in batch['jobs']] == [[2], None]
+    assert batch['jobs'][0]['array_index_mode'] == 'dense'
+    assert json.loads((path / 'jobs/0002_sample.indices.json').read_text()) == [2]
     resources = json.loads((path / 'jobs/submission_0002.resources.json').read_text())
     assert 'array_size' not in resources['slurm']
     assert resources['resolved_array_size'] == 3
     assert (path / 'build.json').read_bytes() == frozen
     subprocess.run(['bash', retry[0][-1]], cwd=dataset_project,
-                   env=dict(os.environ, SLURM_ARRAY_TASK_ID='2'), check=True)
+                   env=dict(os.environ, SLURM_ARRAY_TASK_ID='1'), check=True)
     assert all(row['assembly'] == 'reuse' for row in status(path))
     assert submit(path, until='quant', dry_run=True) == []
     assert len(queries) == 2  # Once per submission; no query when no array is needed.
@@ -774,7 +776,7 @@ def test_legacy_array_sizes_in_saved_build_and_override_are_ignored(dataset_proj
     monkeypatch.setattr('phase_config.resolve_array_size', lambda: 3)
     commands = submit(path, until='quant', dry_run=True, resources=resources)
     assert len(commands) == 1
-    assert '--array=1,2,3' in commands[0]
+    assert '--array=1-3' in commands[0]
     saved = json.loads((path / 'jobs/submission_0001.resources.json').read_text())
     assert 'array_size' not in saved['slurm']
     assert saved['resolved_array_size'] == 3
@@ -795,7 +797,7 @@ def test_auto_array_size_preserves_sample_ids_when_cluster_limit_changes(dataset
     monkeypatch.setattr(subprocess, 'check_output', query)
     commands = submit(path, until='quant', dry_run=True)
     assert len(commands) == 1
-    assert '--array=1,2,3' in commands[0]
+    assert '--array=1-3' in commands[0]
     for task_id in (1, 2):
         subprocess.run(['bash', commands[0][-1]], cwd=dataset_project,
                        env=dict(os.environ, SLURM_ARRAY_TASK_ID=str(task_id)), check=True)
@@ -811,6 +813,58 @@ def test_auto_array_size_preserves_sample_ids_when_cluster_limit_changes(dataset
     assert all(row['assembly'] == 'reuse' for row in status(path))
     assert submit(path, until='quant', dry_run=True) == []
     assert len(calls) == 2
+
+
+def test_large_sparse_selection_uses_short_array_and_frozen_sample_map(dataset_project, monkeypatch):
+    import dataset
+
+    path = new_dataset(dataset_project)
+    manifest = load(path)
+    template = manifest['items'][0]
+    manifest['items'] = [dict(template, species=f'sample_{index}') for index in range(1, 6416)]
+    selected = [3 + 5 * index for index in range(1267)]
+    assert len(','.join(map(str, selected))) > 6000
+    pending = set(selected)
+    reports = [{stage: 'pending' if index in pending else 'reuse'
+                for stage in ('assembly', 'busco', 'quant')} for index in range(1, 6416)]
+    staged = []
+    monkeypatch.setattr(dataset, 'load', lambda *args, **kwargs: manifest)
+    monkeypatch.setattr(dataset, 'status_report', lambda *args: reports)
+    monkeypatch.setattr(dataset, 'stage_workspace', lambda build, data, indices: staged.extend(indices))
+    monkeypatch.setattr(dataset, 'workspace', lambda build, data, item: build / 'native' / item['species'])
+    monkeypatch.setattr('taxonomy_selection.require', lambda *args: None)
+    monkeypatch.setattr('phase_config.resolve_array_size', lambda: 150000)
+    commands = submit(path, dry_run=True)
+    assert len(commands) == 2
+    assert '--array=1-1267' in commands[0]
+    assert '--dependency=afterok:JOB_ID_sample' in commands[1]
+    assert staged == selected
+    task_map = path / 'jobs/0001_sample.indices.json'
+    assert json.loads(task_map.read_text()) == selected
+    script = Path(commands[0][-1]).read_text()
+    assert f'--indices {task_map}' in script
+    assert f'--indices-sha256 {file_record(task_map)["sha256"]}' in script
+    workspaces = json.loads((path / 'jobs/0001_sample.workspaces.json').read_text())
+    assert len(workspaces) == 1267
+    for task, index in enumerate(selected, 1):
+        assert workspaces[str(task)] == str(path / 'native' / f'sample_{index}')
+
+
+def test_slurm_worker_rejects_changed_sample_map_before_processing(dataset_project):
+    path = new_dataset(dataset_project, ('Alpha new', 'Beta new', 'Gamma new'))
+    selected = path / 'selected.txt'
+    selected.write_text(load(path)['items'][2]['species'] + '\n')
+    command = submit(path, until='quant', species=selected, dry_run=True)[0]
+    assert '--array=1' in command
+    task_map = path / 'jobs/0001_sample.indices.json'
+    assert json.loads(task_map.read_text()) == [3]
+    task_map.write_text('[1]\n')
+    result = subprocess.run(['bash', command[-1]], cwd=dataset_project,
+                            env=dict(os.environ, SLURM_ARRAY_TASK_ID='1'),
+                            capture_output=True, text=True)
+    assert result.returncode != 0
+    assert not native_events(path)
+    assert all(row['assembly'] == 'pending' for row in status(path))
 
 
 def test_auto_array_query_failure_prevents_submission(dataset_project, monkeypatch):

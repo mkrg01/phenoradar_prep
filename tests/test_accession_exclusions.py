@@ -102,7 +102,7 @@ def test_excluded_species_never_receive_array_indices(dataset_project):
     (root/'config/excluded_accessions.tsv').write_text('accession\treason\nA1\tdownload_failed\n')
     build = prepare(root,'two_species',root/'config/build.yaml')
     commands = submit(build,until='quant',dry_run=True)
-    assert len(commands) == 1 and '--array=1,2' in commands[0]
+    assert len(commands) == 1 and '--array=1-2' in commands[0]
     for index in (1,2): worker(build, index)
     events = [e['species'] for e in native_events(build)]
     assert events == ['Beta_sp-X','Gamma_plant']

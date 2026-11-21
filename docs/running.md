@@ -145,8 +145,9 @@ remains reserved throughout processing.
 Samples run as array tasks, split into sequential batches to fit the scheduler's
 array limits and the workflow budget. Preparation reads these limits through
 `scontrol show config` (Slurm) or `qconf -sconf` (AGE) before
-submitting arrays. Failed samples do not block other samples; database publication
-waits for all of them to succeed.
+submitting arrays. Task numbers are local to each batch; use `status` to identify
+the corresponding samples, including retries. Failed samples do not block other
+samples; database publication waits for all of them to succeed.
 
 `per_job_resources.controller` sizes preparation and the controllers
 that manage mapping and analysis jobs. The default build controller requests

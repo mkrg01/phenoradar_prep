@@ -1068,7 +1068,7 @@ def submit(path, until="database", species=None, dry_run=False, resources=None, 
         array_size = None
         if any(pending.values()):
             array_size = scheduler_array_size(slurm)
-            print(f"Using {backend} array limit: {array_size} sample index slots per batch", flush=True)
+            print(f"Using {backend} array limit: {array_size} sample tasks per batch", flush=True)
             stage_workspace(path, manifest, pending['sample'])
         batch_number = 1 + max([int(p.name.split("_")[1].split(".")[0]) for p in jobs.glob("submission_*.resources.json")] + [0])
         execution = jobs / f"submission_{batch_number:04d}.resources.json"
@@ -1081,8 +1081,9 @@ def submit(path, until="database", species=None, dry_run=False, resources=None, 
         commands = []
         scheduled = []
         for stage, indices in pending.items():
-            for offset in sorted({((i - 1) // array_size) * array_size for i in indices}):
-                scheduled.append((stage, [i for i in indices if offset < i <= offset + array_size], offset))
+            if indices:
+                for offset in range(0, len(indices), array_size):
+                    scheduled.append((stage, indices[offset:offset + array_size], offset))
         if until in {"mapping", "database"} and wanted is None:
             scheduled.append(("mapping", None, 0))
         for stage, indices, offset in scheduled:
@@ -1095,17 +1096,16 @@ def submit(path, until="database", species=None, dry_run=False, resources=None, 
             if stage == "mapping":
                 worker_command += ["--execution", str(execution)]
                 invocation = shlex.join(worker_command)
-            elif backend == 'slurm':
-                invocation = shlex.join(worker_command) + f' --task-id "$((SLURM_ARRAY_TASK_ID + {offset}))"'
             else:
                 task_map = jobs / f'{batch_number:04d}_{label}.indices.json'
                 write_json(task_map, indices)
-                invocation = shlex.join([*worker_command, '--indices', str(task_map), '--indices-sha256', record(task_map)['sha256']]) + ' --task-id "$SGE_TASK_ID"'
+                task_variable = 'SLURM_ARRAY_TASK_ID' if backend == 'slurm' else 'SGE_TASK_ID'
+                invocation = shlex.join([*worker_command, '--indices', str(task_map), '--indices-sha256', record(task_map)['sha256']]) + f' --task-id "${task_variable}"'
             prefix = storage_prefix(path / 'pipeline.yaml', manifest['root'], path / 'jobs/storage', stage)
             if indices:
                 task_variable = 'SLURM_ARRAY_TASK_ID' if backend == 'slurm' else 'SGE_TASK_ID'
                 sample_map = jobs / f'{batch_number:04d}_{label}.workspaces.json'
-                write_json(sample_map, {str(i - offset if backend == 'slurm' else position):
+                write_json(sample_map, {str(position):
                                        str(workspace(path, manifest, manifest['items'][i - 1]))
                                        for position, i in enumerate(indices, 1)})
                 prefix[-1:-1] = ['--sample-map', str(sample_map), '--task-variable', task_variable]
@@ -1125,11 +1125,13 @@ def submit(path, until="database", species=None, dry_run=False, resources=None, 
             cmd = batch_command(slurm, job_resources, manifest['root'], manifest['name'] + '_' + label,
                                 f'{jobs}/logs/{batch_number:04d}_{label}_%A_%a.out',
                                 f'{jobs}/logs/{batch_number:04d}_{label}_%A_%a.err', script=script,
-                                indices=[i - offset for i in indices] if indices else None,
+                                indices=range(1, len(indices) + 1) if indices else None,
                                 concurrency=caps.get(stage), afterok=afterok, afterany=afterany)
             commands.append(cmd)
             job = {"stage": stage, "indices": indices, "array_offset": offset, "command": cmd, "job_id": None,
                    "state": "submitting", 'scheduler': backend}
+            if indices:
+                job['array_index_mode'] = 'dense'
             batch["jobs"].append(job)
             if not dry_run:
                 # Record submission intent before invoking sbatch. Preserve already submitted IDs on later failure.

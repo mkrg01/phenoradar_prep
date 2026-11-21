@@ -114,6 +114,23 @@ def parse_id(output, backend):
     raise ValueError(f'Unrecognized {backend} submission response: {text!r}; reconcile the receipt before retrying')
 
 
+def slurm_array(indices):
+    """Keep contiguous task indices compact, including large one-based arrays."""
+    values = sorted(set(indices))
+    if not values:
+        return ''
+    ranges = []
+    first = last = values[0]
+    for value in values[1:]:
+        if value == last + 1:
+            last = value
+        else:
+            ranges.append(str(first) if first == last else f'{first}-{last}')
+            first = last = value
+    ranges.append(str(first) if first == last else f'{first}-{last}')
+    return ','.join(ranges)
+
+
 def batch_command(settings, job, root, name, stdout, stderr, *, script=None,
                   indices=None, concurrency=None, afterok=(), afterany=()):
     """Keep resource units and dependencies consistent across both schedulers."""
@@ -126,7 +143,7 @@ def batch_command(settings, job, root, name, stdout, stderr, *, script=None,
         if settings.get('partition'):
             cmd.append('--partition=' + settings['partition'])
         if indices:
-            value = ','.join(map(str, indices))
+            value = slurm_array(indices)
             if concurrency is not None:
                 value += '%' + str(concurrency)
             cmd.append('--array=' + value)

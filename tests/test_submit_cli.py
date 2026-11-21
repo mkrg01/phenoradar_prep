@@ -219,13 +219,13 @@ def test_pilot_submission_prepares_only_selected_workspaces(dataset_project, sch
     pilot.write_text(items[1]['species'] + '\n')
     commands = dataset.submit(build, species=pilot)
     assert len(commands) == 1
-    assert '--array=2' in commands[0]
+    assert '--array=1' in commands[0]
     workspaces = build / 'work/genegalleon'
     assert {p.name for p in workspaces.iterdir()} == {items[1]['species']}
-    # Adding the other samples later preserves the original task indices.
+    # Adding the other samples later preserves the original sample identities.
     scheduler['running'] = False
     commands = dataset.submit(build, until='quant')
-    assert '--array=1,2,3' in commands[0]
+    assert '--array=1-3' in commands[0]
     assert {p.name for p in workspaces.iterdir()} == {item['species'] for item in items}
 
 

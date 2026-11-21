@@ -95,10 +95,11 @@ def jobs(path, build, runs=None):
             if job.get('job_id'):
                 base = str(job['job_id'])
                 offset = job.get('array_offset', 0)
-                for index in indices:
+                dense = job.get('array_index_mode') == 'dense' or job.get('scheduler') == 'age'
+                for position, index in enumerate(indices, 1):
                     name = items[index - 1]['species']
                     if name in result:
-                        task = indices.index(index) + 1 if job.get('scheduler') == 'age' else index - offset
+                        task = position if dense else index - offset
                         identifier = f'{base}_{task}'
                         identifiers.setdefault(identifier, set()).add(name)
                         result[name]['submitted_id'] = identifier

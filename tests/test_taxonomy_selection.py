@@ -80,7 +80,7 @@ def test_array_indices_and_worker_use_the_same_filtered_order(dataset_project):
     from build_dispatch import verify_and_stage
     verify_and_stage(build, load(build))
     commands = submit(build, until='quant', dry_run=True)
-    assert '--array=1,2' in commands[0]
+    assert '--array=1-2' in commands[0]
     assert [i['row']['run'] for i in load(build)['items']] == ['B1', 'G1']
     from dataset import worker
     worker(build, 1)

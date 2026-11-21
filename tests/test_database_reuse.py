@@ -255,7 +255,8 @@ def test_two_sources_and_one_missing_sample_only_compute_missing_work(completed_
     config = configure(root, [str(first), str(second)])
     build = dataset.prepare(root, 'mixed', config)
     commands = dataset.submit(build, until='quant', dry_run=True)
-    assert len(commands) == 1 and '--array=3' in commands[0]
+    assert len(commands) == 1 and '--array=1' in commands[0]
+    assert json.loads((build / 'jobs/0001_sample.indices.json').read_text()) == [3]
     dataset.worker(build, 3)
     assert len(native_events(build)) == 1
     assert {event['species'] for event in native_events(build)} == {'Gamma_plant'}

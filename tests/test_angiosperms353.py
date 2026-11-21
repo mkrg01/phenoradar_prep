@@ -841,7 +841,7 @@ def test_screen_scheduler_serializes_array_chunks_with_global_limits(tmp_path, m
     assert result['concurrency'] == 2
     first, second, finalize = commands
     if backend == 'slurm':
-        assert '--array=1,2%2' in first
+        assert '--array=1-2%2' in first
         assert '--dependency=afterany:101' in second
         assert '--dependency=afterany:102' in finalize
     else:

@@ -1,5 +1,6 @@
 """Software upgrades keep completed samples and never mix native generating releases."""
 from pathlib import Path
+import json
 import shutil
 import subprocess
 import sys
@@ -62,7 +63,8 @@ def test_upgrade_reuses_complete_sample_and_restarts_incomplete_sample(upgrade_p
     assert not (build / 'work/genegalleon' / first['species']).exists()
     assert not (build / 'work/genegalleon' / second['species']).exists()
     commands = dataset.submit(build, until='quant', dry_run=True)
-    assert '--array=2,3' in commands[0]
+    assert '--array=1-2' in commands[0]
+    assert json.loads((build / 'jobs/0001_sample.indices.json').read_text()) == [2, 3]
     dataset.worker(build, 1)
     dataset.worker(build, 2)
     assert len(native_events(build)) == 1

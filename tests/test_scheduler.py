@@ -86,6 +86,27 @@ def test_shared_command_builder_preserves_units_and_dependency_semantics(tmp_pat
     assert '--dependency=afterany:11,afterok:10' in slurm
 
 
+@pytest.mark.parametrize('indices,expected', [
+    ([], ''), ([7], '7'), ([0, 1, 2, 4, 6, 7], '0-2,4,6-7'),
+    ([5, 2, 1, 2, 4], '1-2,4-5'), (range(1, 150001), '1-150000'),
+])
+def test_slurm_array_compacts_ranges_without_changing_tasks(indices, expected):
+    actual = scheduler.slurm_array(indices)
+    assert actual == expected
+    expanded = []
+    for term in actual.split(',') if actual else []:
+        bounds = [int(value) for value in term.split('-')]
+        expanded.extend(range(bounds[0], bounds[-1] + 1))
+    assert expanded == sorted(set(indices))
+
+
+def test_large_array_keeps_short_specification_and_concurrency(tmp_path):
+    job = {'cpus': 4, 'mem_gb': 128, 'time': '16-00:00:00'}
+    command = scheduler.batch_command({'scheduler': 'slurm'}, job, tmp_path, 'samples',
+                                      'out', 'err', indices=range(1, 1268), concurrency=8)
+    assert '--array=1-1267%8' in command
+
+
 def test_accounting_distinguishes_live_failed_and_unknown_tasks():
     commands = []
     def query(command, **kwargs):

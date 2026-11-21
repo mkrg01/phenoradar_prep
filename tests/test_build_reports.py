@@ -148,7 +148,7 @@ def test_cached_submit_with_new_samples_schedules_workers_directly(reuse_project
     commands = scheduler['commands']
     assert len(commands) == 2
     assert '_sample' in next(arg for arg in commands[0] if arg.startswith('--job-name='))
-    assert next(arg for arg in commands[0] if arg.startswith('--array=')).split('%')[0] == '--array=3'
+    assert next(arg for arg in commands[0] if arg.startswith('--array=')).split('%')[0] == '--array=1'
     assert '--dependency=afterok:1001' in commands[1]
     assert not (root / 'results/new_sample/jobs/0001_verify.sh').exists()
     assert {p.name for p in (root / 'results/new_sample/work/genegalleon').iterdir()} == {'Delta_new_NEW1'}
@@ -215,7 +215,7 @@ def test_cached_submit_defers_file_preparation_and_dispatch_keeps_cache_hits(reu
     monkeypatch.setenv('SLURM_JOB_ID', '1001')
     commands = dispatch(build)
     assert len(commands) == 2
-    assert '--array=3' in commands[0]
+    assert '--array=1' in commands[0]
     assert '--dependency=afterok:1001' in commands[0]
     assert '--dependency=afterok:1002' in commands[1]
     assert {p.name for p in (build / 'work/genegalleon').iterdir()} == {'Delta_new_NEW1'}
@@ -359,7 +359,7 @@ def test_status_reports_each_samples_latest_array_log_files(dataset_project, sch
     dataset.submit(build, until='quant', species=pilot)
     # Only Beta was retried. Gamma retains task 1 of the second array batch.
     expected = [('0001_sample_1001_1', '1001_1'),
-                ('0002_sample_1003_2', '1003_2'),
+                ('0002_sample_1003_1', '1003_1'),
                 ('0001_sample_3_4_1002_1', '1002_1')]
     for item, (_, identifier), stage in zip(items, expected, ('assembly', 'busco', 'quant')):
         write_json(build / 'jobs/status' / f'{item["species"]}.sample.json',

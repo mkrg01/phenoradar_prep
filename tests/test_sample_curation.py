@@ -155,7 +155,8 @@ def test_exclusion_replaces_same_taxid_and_new_build_automatically_reuses_partia
     assert (old / 'build.json').read_bytes() == frozen
     old.rename(old.with_name('source_offline'))
     commands = dataset.submit(second, until='quant', dry_run=True)
-    assert len(commands) == 1 and '--array=2,3' in commands[0]
+    assert len(commands) == 1 and '--array=1-2' in commands[0]
+    assert json.loads((second / 'jobs/0001_sample.indices.json').read_text()) == [2, 3]
     finish(second, 2)
     finish(second, 3)
     assert len(native_events(second)) == 2
@@ -224,7 +225,7 @@ def test_memory_retry_changes_internal_tool_budget_and_preserves_successful_samp
     resources.write_text('slurm:\n  per_job_resources:\n    sample:\n      cpus: 8\n      mem_gb: 256\n')
     commands = dataset.submit(build, until='quant', dry_run=True, resources=resources)
     assert '--cpus-per-task=8' in commands[0] and '--mem=256000M' in commands[0]
-    assert '--array=2,3' in commands[0]
+    assert '--array=1-2' in commands[0]
     monkeypatch.setenv('SLURM_CPUS_PER_TASK', '8')
     monkeypatch.setenv('SLURM_MEM_PER_NODE', '256000')
     monkeypatch.setenv('GG_MEM_TOTAL_GB', '12')

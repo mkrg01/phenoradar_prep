@@ -212,6 +212,32 @@ def test_pending_retry_is_held_even_when_previous_attempt_failed(sample_project,
     assert result['excluded_runs'] == []
 
 
+@pytest.mark.parametrize('mode,offset,indices,tasks', [
+    (None, 0, [2, 3], [2, 3]),
+    (None, 2, [3], [1]),
+    ('dense', 0, [2, 3], [1, 2]),
+    ('dense', 2, [3], [1]),
+])
+def test_sample_accounting_supports_dense_and_legacy_slurm_arrays(
+        sample_project, monkeypatch, mode, offset, indices, tasks):
+    from sample_review import jobs
+
+    root, cfg, build = sample_project
+    manifest = dataset.load(build)
+    job = dict(stage='sample', indices=indices, array_offset=offset,
+               job_id='800', state='submitted', scheduler='slurm')
+    if mode is not None:
+        job['array_index_mode'] = mode
+    write_json(build / 'jobs/submission_0001.json', {'jobs': [job]})
+    identifiers = [f'800_{task}' for task in tasks]
+    scheduler(monkeypatch, '\n'.join(identifiers) + '\n')
+    states = jobs(build, manifest)
+    for index, identifier in zip(indices, identifiers):
+        state = states[manifest['items'][index - 1]['species']]
+        assert state['submitted_id'] == identifier
+        assert state['activity'] == 'queued_or_running'
+
+
 def test_accounting_proves_oom_after_wrapper_was_killed(sample_project, monkeypatch):
     root, cfg, build = sample_project
     item = dataset.load(build)['items'][0]
