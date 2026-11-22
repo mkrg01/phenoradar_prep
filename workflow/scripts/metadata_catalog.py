@@ -564,17 +564,28 @@ def select_with_taxonomy(root, cfg, source, output, taxonomy):
     selected = {tid: row for tid, (_, row) in best.items() if tid not in active_accepted}
     selected.update(kept)
     selected.update(forced)
+    # Apply the name policy after resolving taxonomy and choosing representatives,
+    # including reviewed runs, overrides, and accepted runs absent from the source.
+    unidentified = {}
+    for tid, row in {**active_accepted, **selected}.items():
+        current = selection_identity(row, taxonomy) if taxonomy else row
+        current = current or row
+        if re.search(r'\s+sp\.?\s*$', current['scientific_name'], re.IGNORECASE):
+            unidentified[tid] = current
+    selected = {tid: row for tid, row in selected.items() if tid not in unidentified}
     unresolved = sorted(row['run'] for tid, row in active_accepted.items()
-                        if tid not in kept and tid not in forced)
+                        if tid not in kept and tid not in forced and tid not in unidentified)
     reports = []
-    for tid in sorted(set(previous) | set(active_accepted) | observed_taxids | set(selected), key=int):
+    for tid in sorted(set(previous) | set(active_accepted) | observed_taxids | set(selected) | set(unidentified), key=int):
         update = identity_updates.get(tid)
         old = active_accepted.get(tid) or (update['old'] if update else previous.get(tid))
         new = selected.get(tid)
         cached = previous_by_run.get(old['run'], {}) if old else {}
         incoming = observed.get(tid, {})
         review, reason = False, ''
-        if tid in overrides:
+        if tid in unidentified:
+            decision, reason = 'excluded', 'species_name_ends_with_sp'
+        elif tid in overrides:
             decision, reason = 'override', overrides[tid]['reason']
         elif tid in active_accepted:
             decision = 'retained' if tid in kept else 'unresolved'
@@ -590,7 +601,7 @@ def select_with_taxonomy(root, cfg, source, output, taxonomy):
             reason = 'largest_total_bases'
         else:
             decision, reason = 'no_candidate', 'no_eligible_run'
-        reports.append({'taxid': tid, 'scientific_name': (new or old or {}).get('scientific_name', ''),
+        reports.append({'taxid': tid, 'scientific_name': (new or unidentified.get(tid) or old or {}).get('scientific_name', ''),
                         'previous_run': old['run'] if old else '', 'selected_run': new['run'] if new else '',
                         'bioproject': new['bioproject'] if new else '', 'decision': decision,
                         'previous_bioproject': old.get('bioproject', '') if old else '',

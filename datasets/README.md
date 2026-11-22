@@ -22,6 +22,12 @@ name and TaxID match `accepted_samples.tsv`. For each remaining TaxID, choose th
 eligible run with the largest positive `total_bases`, breaking ties by accession.
 New candidates must pass AMALGKIT curation for the configured `sample_group`.
 
+Species names ending in a bare `sp.` or `sp` are excluded, including QC-approved
+representatives and overrides. Names with a following identifier, such as
+`Actinidia sp. A1A`, remain eligible. When a taxonomy snapshot is configured, the
+rule uses its resolved species name. Exclusions are recorded as
+`species_name_ends_with_sp` in `selection.tsv`.
+
 To select by species in a fixed NCBI taxonomy snapshot, set
 `metadata_selection.taxonomy_database` and the build's `taxonomy.database` to
 the same SQLite file. See [taxonomy references](../docs/references.md#taxonomy-reference).

@@ -539,6 +539,88 @@ def test_historical_name_cleanup_retains_original_name():
     assert normalized['analysis_sample_id'] == 'Elymus_breviaristatus_A1'
 
 
+@pytest.mark.parametrize('name', ['Plant sp.', 'Plant sp', 'Plant SP.', 'Plant sp.  '])
+def test_selection_excludes_bare_sp_names_and_retains_identifiers(fresh_project, name):
+    root, dataset, cfg = fresh_project
+    inputs = [dict(row(1, 'BARE'), scientific_name=name),
+              dict(row(2, 'CODED'), scientific_name='Plant sp. A1A'), row(3, 'NAMED')]
+    exclusions = (dataset / 'excluded_accessions.tsv').read_bytes()
+    summary, output = select(fresh_project, inputs)
+    assert {r['run'] for r in read_tsv(output / 'metadata.tsv')} == {'CODED', 'NAMED'}
+    report = {r['taxid']: r for r in read_tsv(output / 'selection.tsv')}
+    assert report['1']['decision'] == 'excluded'
+    assert report['1']['reason'] == 'species_name_ends_with_sp'
+    assert report['1']['selected_run'] == '' and report['1']['review'] == 'no'
+    assert summary['decisions']['excluded'] == 1
+    assert (dataset / 'excluded_accessions.tsv').read_bytes() == exclusions
+
+
+@pytest.mark.parametrize('present,local', [(True, True), (False, True), (False, False)])
+def test_bare_sp_policy_withdraws_accepted_runs_even_without_source_or_fallback(
+        curated_project, present, local):
+    root, dataset, cfg = curated_project
+    previous = read_tsv(dataset / 'metadata.tsv')
+    fields = list(previous[0])
+    for entry in previous:
+        if entry['taxid'] == '1':
+            entry.update(scientific_name='Plant sp', species_id='Plant_sp',
+                         analysis_sample_id='Plant_sp_OLD1')
+    if not local:
+        previous = [entry for entry in previous if entry['taxid'] != '1']
+    write_tsv(dataset / 'metadata.tsv', fields, previous)
+    accepted = read_tsv(dataset / 'accepted_samples.tsv')
+    accepted[0]['scientific_name'] = 'Plant sp'
+    write_tsv(dataset / 'accepted_samples.tsv', catalog.ACCEPTED_FIELDS, accepted)
+    incoming = [row(2, 'GOOD2')]
+    if present:
+        incoming.append(dict(row(1, 'OLD1'), scientific_name='Plant sp.'))
+    summary, output = select(curated_project, incoming)
+    assert summary['unresolved_accepted_runs'] == []
+    assert {r['run'] for r in read_tsv(output / 'metadata.tsv')} == {'GOOD2'}
+    report = next(r for r in read_tsv(output / 'selection.tsv') if r['taxid'] == '1')
+    assert (report['decision'], report['reason'], report['review']) == (
+        'excluded', 'species_name_ends_with_sp', 'no')
+    assert catalog.accept_candidate(root, cfg, output)['retained_success_evidence'] == 0
+    assert read_tsv(dataset / 'accepted_samples.tsv') == []
+
+
+def test_override_cannot_bypass_bare_sp_policy(fresh_project):
+    root, dataset, cfg = fresh_project
+    write_tsv(dataset / 'overrides.tsv', ['taxid', 'run', 'reason'],
+              [dict(taxid='1', run='BARE', reason='previous representative')])
+    _, output = select(fresh_project, [dict(row(1, 'BARE'), scientific_name='Plant sp.'), row(2, 'GOOD')])
+    assert {r['run'] for r in read_tsv(output / 'metadata.tsv')} == {'GOOD'}
+    report = next(r for r in read_tsv(output / 'selection.tsv') if r['taxid'] == '1')
+    assert (report['decision'], report['reason']) == ('excluded', 'species_name_ends_with_sp')
+
+
+def test_bare_sp_policy_uses_resolved_species_name(fresh_project, tiny_inputs):
+    import sqlite3
+
+    root, dataset, cfg = fresh_project
+    taxonomy = root / 'taxa.sqlite'
+    shutil.copyfile(tiny_inputs['taxonomy_db'], taxonomy)
+    with sqlite3.connect(taxonomy) as db:
+        named, = db.execute("SELECT taxid FROM species WHERE spname='Alpha plant'").fetchone()
+        db.executemany('INSERT INTO species VALUES (?,?,?,?,?,?)', [
+            (9990, 1, 'Bare sp.', '', 'species', ''),
+            (9991, 9990, 'Bare sp. A1A', '', 'strain', ''),
+            (9992, 1, 'Coded sp. A1A', '', 'species', ''),
+        ])
+    cfg['taxonomy_database'] = str(taxonomy)
+    _, output = select(fresh_project, [
+        dict(row(named, 'RESOLVED'), scientific_name='Alpha sp.'),
+        dict(row(9991, 'BARE_PARENT'), scientific_name='Bare sp. A1A'),
+        dict(row(9992, 'CODED'), scientific_name='Coded sp. A1A'),
+    ])
+    selected = {r['run']: r for r in read_tsv(output / 'metadata.tsv')}
+    assert set(selected) == {'RESOLVED', 'CODED'}
+    assert selected['RESOLVED']['scientific_name'] == 'Alpha plant'
+    assert selected['CODED']['scientific_name'] == 'Coded sp-A1A'
+    report = next(r for r in read_tsv(output / 'selection.tsv') if r['taxid'] == '9990')
+    assert (report['scientific_name'], report['reason']) == ('Bare sp', 'species_name_ends_with_sp')
+
+
 def test_historical_seed_carries_exclusions_without_retaining_old_success(curated_project):
     root, dataset, cfg = curated_project
     source = root / 'historical.tsv'
