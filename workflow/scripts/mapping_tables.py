@@ -167,6 +167,15 @@ def partition(annotation, members, cache_dir):
     return target
 
 
+def write_gene_mapping(raw, genes, pairs):
+    """Write a deterministic table with a blank row for each unmapped gene."""
+    with gzip.GzipFile(fileobj=raw, mode='wb', filename='', mtime=0, compresslevel=1) as handle:
+        handle.write(b'gene_id\torthogroup\n')
+        for gene in sorted(genes):
+            for og in sorted(pairs.get(gene, ())) or ['']:
+                handle.write(f'{gene}\t{og}\n'.encode())
+
+
 def species_table(name, odb_name, protein, annotation, parts, cache_dir, version, node, shard=None):
     identity = digest([name, content_sha256(protein), content_sha256(annotation), version, node])
     target = Path(cache_dir) / '.tables' / identity
@@ -194,12 +203,8 @@ def species_table(name, odb_name, protein, annotation, parts, cache_dir, version
         unique = sum(map(len, pairs.values()))
         with tempfile.TemporaryDirectory(prefix='.table-', dir=target.parent) as tmp:
             staging = Path(tmp); output = staging / 'table.tsv.gz'
-            # Deterministic bytes allow safe reuse and transport between projects.
-            with output.open('wb') as raw_out, gzip.GzipFile(fileobj=raw_out, mode='wb', filename='', mtime=0, compresslevel=1) as handle:
-                handle.write(b'gene_id\torthogroup\n')
-                for gene in sorted(genes):
-                    for og in sorted(pairs.get(gene, ())) or ['']:
-                        handle.write(f'{gene}\t{og}\n'.encode())
+            with output.open('wb') as handle:
+                write_gene_mapping(handle, genes, pairs)
             verify(protein)
             entry = {'odb_species':odb_name, 'protein_sha256':content_sha256(protein),
                      'table':dict(record(output), path='table.tsv.gz'),

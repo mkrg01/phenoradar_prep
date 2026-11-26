@@ -72,6 +72,28 @@ To change releases, edit `odb.version` and
 [create a new build](datasets.md#update-orthodb-for-all-samples). Matching results
 are reused; other samples are remapped automatically.
 
+### Mapping a reference proteome
+
+For data such as an annotated expression atlas, supply the matching reference
+protein FASTA (plain or gzip) with one sequence per gene. Each FASTA header's
+first token must match the gene identifier used in the expression data. To join
+with an existing analysis, use its OrthoDB release and mapping clade.
+
+Run from the repository with ODB-mapper available on `PATH` or supply its
+environment with `--prefix`:
+
+```bash
+python workflow/scripts/map_reference_proteins.py \
+  --proteins reference_proteins.fa.gz \
+  --reference resources/orthodb/v12_3193/reference.json \
+  --output-dir results/reference_mapping --jobs 8
+```
+
+`gene_to_orthogroup.tsv.gz` contains `gene_id` and `orthogroup`, with one row per
+distinct assignment and an empty `orthogroup` for each unmapped gene.
+`mapping_provenance.json` records checksums, the reference and mapping counts.
+Use a dedicated output directory for each FASTA and reference combination.
+
 ## KOfam and KEGG reference
 
 The KEGG branch downloads KOfam profiles, `ko_list`, and KO-to-MODULE/PATHWAY maps
