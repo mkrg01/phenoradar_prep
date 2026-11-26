@@ -23,7 +23,7 @@ def configure_group_wait_files(workflow):
     from snakemake_interface_executor_plugins.settings import DeploymentMethod, ExecMode
     methods = getattr(getattr(workflow, 'deployment_settings', None), 'deployment_method', set())
     if (snakemake.__version__ != '9.8.0' or workflow.exec_mode != ExecMode.DEFAULT or
-            workflow.executor_plugin.name != 'slurm' or
+            workflow.executor_plugin.name not in {'slurm', 'cluster-generic'} or
             not {DeploymentMethod.CONDA, DeploymentMethod.APPTAINER} <= set(methods)):
         return False
     from snakemake.jobs import GroupJob, Job
@@ -40,17 +40,17 @@ def configure_group_wait_files(workflow):
         GroupJob.get_wait_for_files = group_wait_files
     workflow._phenoradar_container_wait = True
     from snakemake.logging import logger
-    logger.info('Containerized Slurm groups wait for external inputs and host Conda '
+    logger.info(f'Containerized {workflow.executor_plugin.name} groups wait for external inputs and host Conda '
                 'environments only (Snakemake 9.8.0 compatibility).')
     return True
 
 
 def configure_scheduler(workflow):
-    """Use the sbatch gate as the only submission limiter in its controller."""
+    """Set up grouped cluster jobs and use the sbatch gate for Slurm throttling."""
     from snakemake_interface_executor_plugins.settings import ExecMode
+    configure_group_wait_files(workflow)
     if workflow.exec_mode != ExecMode.DEFAULT or workflow.executor_plugin.name != 'slurm':
         return
-    configure_group_wait_files(workflow)
     shim = Path(__file__).resolve().parents[1] / 'slurm/sbatch'
     actual = shutil.which('sbatch')
     real = os.environ.get('PHENORADAR_REAL_SBATCH')

@@ -12,19 +12,28 @@ import tempfile
 from unittest.mock import patch
 
 
-def inspect_workflow(manifest, slurm, target):
+DEFAULT_INSPECTION_TIMEOUT = 300
+
+
+def inspect_workflow(manifest, slurm, target, *, timeout=DEFAULT_INSPECTION_TIMEOUT):
     """Run the adapter in a child so Snakemake logging/cwd never affect the CLI."""
+    if type(timeout) is not int or timeout < 1:
+        raise ValueError('inspection timeout must be a positive integer in seconds')
     root = Path(manifest['root'])
     environment = {**os.environ, 'PHENORADAR_READ_ONLY': '1', 'PYTHONDONTWRITEBYTECODE': '1'}
     environment.pop('PHENORADAR_FROZEN_IMAGE', None)
     if manifest.get('compatible_container_image'):
         environment['PHENORADAR_FROZEN_IMAGE'] = manifest['compatible_container_image']
-    result = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--inspect'],
-        input=json.dumps({'root': str(root), 'analysis': manifest['pipeline']['output_root'],
-                          'slurm': slurm, 'target': target,
-                          'compatible_launcher': bool(manifest.get('compatible_launcher'))}),
-        capture_output=True, text=True, timeout=300,
-        env=environment)
+    payload = {'root': str(root), 'analysis': manifest['pipeline']['output_root'],
+               'slurm': slurm, 'target': target,
+               'compatible_launcher': bool(manifest.get('compatible_launcher'))}
+    try:
+        result = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--inspect'],
+                                input=json.dumps(payload), capture_output=True, text=True,
+                                timeout=timeout, env=environment)
+    except subprocess.TimeoutExpired as error:
+        raise ValueError(f'Pending-work inspection timed out after {timeout} seconds. '
+                         'No controller was submitted. Retry with a larger --inspection-timeout.') from error
     if result.returncode:
         raise ValueError('Cannot inspect pending work: ' + (result.stderr or result.stdout)[-3000:])
     return json.loads(result.stdout)

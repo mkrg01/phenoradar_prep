@@ -84,6 +84,10 @@ To run a branch in an existing analysis:
 Targets include missing prerequisites within the analysis. They use the saved
 settings and never rebuild upstream sample products.
 
+`submit` inspects pending work before queuing the controller. If the inspection
+exceeds the default 300 seconds, allow more time with `--inspection-timeout 900`.
+The option also works with `--dry-run`.
+
 | Target | Work requested |
 | --- | --- |
 | `all` (default) | Merge OG/per-sequence expression, run enabled branches, validate native outputs, and record completion |

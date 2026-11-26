@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from slurm_submit import configure_group_wait_files
+from slurm_submit import configure_group_wait_files, configure_scheduler
 
 
 @pytest.fixture
@@ -35,13 +35,17 @@ def grouped_inputs(tmp_path, monkeypatch):
     return workflow, group, env, GroupJob, Job
 
 
-def test_containerized_group_waits_succeed_and_internal_products_stay_excluded(grouped_inputs):
+@pytest.mark.parametrize('executor', ['slurm', 'cluster-generic'])
+def test_containerized_group_waits_succeed_and_internal_products_stay_excluded(
+        grouped_inputs, monkeypatch, executor):
     from snakemake.io import wait_for_files
     workflow, group, env, GroupJob, Job = grouped_inputs
+    workflow.executor_plugin.name = executor
+    monkeypatch.delenv('PHENORADAR_REAL_SBATCH', raising=False)
     upstream = GroupJob.get_wait_for_files(group)
     assert env.address in upstream
     assert all(env.address not in Job.get_wait_for_files(job) for job in group.jobs)
-    assert configure_group_wait_files(workflow)
+    configure_scheduler(workflow)
     wait = GroupJob.get_wait_for_files(group)
     assert env.address not in wait and not set(wait) & group.all_products
     asyncio.run(wait_for_files(wait, latency_wait=0))
@@ -78,7 +82,7 @@ def test_other_workflows_are_unchanged_and_installation_is_idempotent(grouped_in
 
 
 @pytest.mark.parametrize('change', ['version', 'remote', 'local', 'no_container', 'no_conda'])
-def test_compatibility_is_limited_to_pinned_containerized_slurm_controller(grouped_inputs, monkeypatch, change):
+def test_compatibility_is_limited_to_pinned_containerized_cluster_controller(grouped_inputs, monkeypatch, change):
     import snakemake
     from snakemake_interface_executor_plugins.settings import DeploymentMethod, ExecMode
     workflow, _, _, GroupJob, _ = grouped_inputs

@@ -17,6 +17,7 @@ if __name__ == '__main__' and READ_ONLY_COMMAND:
     sys.dont_write_bytecode = True
 
 import yaml
+from analysis_inspection import DEFAULT_INSPECTION_TIMEOUT
 from build_products import load_complete
 from portable_build import completion_path, input_entries
 from sample_identity import select_samples
@@ -267,7 +268,7 @@ def submission_guard(path, manifest):
         check_analysis_submissions(worker_records, path, {j.strip() for j in queued})
 
 
-def preflight(path, target, resources):
+def preflight(path, target, resources, *, inspection_timeout=DEFAULT_INSPECTION_TIMEOUT):
     manifest = load(path, check_code=True)
     validate_analysis(manifest['pipeline'], [target])
     from analysis_validation import check_dependencies
@@ -278,7 +279,7 @@ def preflight(path, target, resources):
     worker_budgets(slurm)
     submission_guard(path, manifest)
     from analysis_inspection import inspect_workflow
-    pending = inspect_workflow(manifest, slurm, target)
+    pending = inspect_workflow(manifest, slurm, target, timeout=inspection_timeout)
     return manifest, slurm, pending
 
 
@@ -299,7 +300,7 @@ def print_pending(pending, target):
         print('After workflow steps: validate native outputs and record whole-analysis completion.')
 
 
-def submit(path, target='all', dry_run=False, resources=None):
+def submit(path, target='all', dry_run=False, resources=None, *, inspection_timeout=DEFAULT_INSPECTION_TIMEOUT):
     from contextlib import nullcontext
     from scheduler import batch_command, parse_id, storage_prefix
     path = Path(path).resolve()
@@ -307,7 +308,7 @@ def submit(path, target='all', dry_run=False, resources=None):
     # The real submission holds the lock across the same checks and sbatch.
     jobs = path/'jobs'
     with nullcontext() if dry_run else locked(jobs/'.submit.lock'):
-        manifest, slurm, pending = preflight(path, target, resources)
+        manifest, slurm, pending = preflight(path, target, resources, inspection_timeout=inspection_timeout)
         print_pending(pending, target)
         number = 1 + max([int(p.name.split('_')[1].split('.')[0]) for p in jobs.glob('submission_*.resources.json')] + [0])
         execution = jobs/f'submission_{number:04d}.resources.json'
@@ -341,7 +342,8 @@ def submit(path, target='all', dry_run=False, resources=None):
         return cmd
 
 
-def submit_named(root, name, config=None, build=None, target='all', dry_run=False, resources=None):
+def submit_named(root, name, config=None, build=None, target='all', dry_run=False, resources=None, *,
+                 inspection_timeout=DEFAULT_INSPECTION_TIMEOUT):
     """Save conditions once, then submit the same frozen downstream run on retries."""
     root = Path(root).resolve()
     if not isinstance(name, str) or not SAFE.fullmatch(name):
@@ -375,7 +377,8 @@ def submit_named(root, name, config=None, build=None, target='all', dry_run=Fals
                 return []
             path = prepare(root, name, config, source)
             print(f'Prepared downstream conditions: {path}', flush=True)
-    return submit(path, target, dry_run, absolute(root, resources) if resources else None)
+    return submit(path, target, dry_run, absolute(root, resources) if resources else None,
+                  inspection_timeout=inspection_timeout)
 
 
 def main():
@@ -397,6 +400,8 @@ def main():
         if name=='submit':
             p.add_argument('--root',default='.'); p.add_argument('--config'); p.add_argument('--build')
             p.add_argument('--name',help='Downstream condition name'); p.add_argument('--dry-run',action='store_true'); p.add_argument('--resources')
+            p.add_argument('--inspection-timeout', type=int, default=DEFAULT_INSPECTION_TIMEOUT, metavar='SECONDS',
+                           help='Maximum seconds for pending-work inspection (default: %(default)s)')
         if name=='run':
             p.add_argument('--execution'); p.add_argument('--local',action='store_true'); p.add_argument('--cores',type=int,default=1); p.add_argument('--mem-mb',type=int,default=8000)
     args=parser.parse_args()
@@ -422,13 +427,17 @@ def main():
         print(json.dumps(report,indent=2))
         if report['state'] == 'pending': sys.exit(1)
     elif args.command=='submit':
+        if args.inspection_timeout < 1:
+            parser.error('--inspection-timeout must be a positive integer in seconds')
         if args.analysis:
             if any(value is not None for value in (args.name,args.config,args.build)):
                 parser.error('--analysis cannot be combined with --name, --config, or --build; use --resources for retry resources')
             submit(absolute(args.root,args.analysis),args.target,args.dry_run,
-                   absolute(args.root,args.resources) if args.resources else None)
+                   absolute(args.root,args.resources) if args.resources else None,
+                   inspection_timeout=args.inspection_timeout)
         else:
-            submit_named(args.root,args.name,args.config,args.build,args.target,args.dry_run,args.resources)
+            submit_named(args.root,args.name,args.config,args.build,args.target,args.dry_run,args.resources,
+                         inspection_timeout=args.inspection_timeout)
     else: run(args.analysis,args.target,args.execution,args.local,args.cores,args.mem_mb)
 
 

@@ -3,6 +3,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -137,6 +138,46 @@ def test_analysis_repeated_dry_run_preserves_all_files_and_first_submission_numb
     assert not scheduler['commands']
     analysis.submit(run)
     assert (run / 'jobs/submission_0001.json').is_file()
+
+
+def test_analysis_can_retry_slow_inspection_through_standard_submit(
+        tmp_path, scheduler, monkeypatch, capsys):
+    import analysis_inspection
+
+    repo = Path(analysis.__file__).resolve().parents[2]
+    run = tmp_path / 'slow'
+    run.mkdir()
+    pipeline = {'output_root': run.name, 'phylogeny': {'trees': [], **{
+        name: {'enabled': False} for name in ('contrast_pairs', 'dating', 'taxonomy_check')}}}
+    execution = yaml.safe_load((repo / 'config/analysis.yaml').read_text())['execution']
+    manifest = {'root': str(tmp_path), 'name': run.name, 'pipeline': pipeline,
+                'config': {'slurm': execution}}
+    monkeypatch.setattr(analysis, 'load', lambda *args, **kwargs: manifest)
+    timeouts = []
+
+    def inspect(command, **kwargs):
+        timeout = kwargs['timeout']
+        timeouts.append(timeout)
+        if timeout < 600:
+            raise subprocess.TimeoutExpired(command, timeout)
+        output = {'workflow_steps': 2, 'worker_jobs': 2, 'partial': False,
+                  'pending': {'import_build_expression': 2}, 'reused': {},
+                  'reasons': {'missing_output': 2}, 'examples': []}
+        return subprocess.CompletedProcess(command, 0, json.dumps(output), '')
+
+    monkeypatch.setattr(analysis_inspection, 'subprocess',
+                        SimpleNamespace(run=inspect, TimeoutExpired=subprocess.TimeoutExpired))
+    with pytest.raises(ValueError, match=r'300 seconds.*--inspection-timeout'):
+        invoke(monkeypatch, analysis, 'submit', '--analysis', run)
+    assert not scheduler['commands']
+    assert not list((run / 'jobs').glob('submission_*'))
+
+    invoke(monkeypatch, analysis, 'submit', '--analysis', run, '--inspection-timeout', '900', '--dry-run')
+    assert not scheduler['commands']
+    invoke(monkeypatch, analysis, 'submit', '--analysis', run, '--inspection-timeout', '900')
+    assert timeouts == [300, 900, 900]
+    assert len(scheduler['commands']) == 1
+    assert '2 worker jobs' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize('module,args', [
