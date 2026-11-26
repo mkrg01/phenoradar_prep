@@ -94,6 +94,7 @@ def test_direct_membership_uses_molecular_tree_and_inherits_root(molecular_snaps
 
 def test_pair_ids_and_blocks_do_not_depend_on_display_representatives(tmp_path):
     """Changing the displayed tips must not renumber pairs or reassign blocks."""
+    from ete4 import Tree
     from expanded_pair_clades import validate_result
 
     source = tmp_path / "input"
@@ -103,7 +104,10 @@ def test_pair_ids_and_blocks_do_not_depend_on_display_representatives(tmp_path):
     write_tsv(source / "metadata.tsv", list(rows[0]), rows)
     write_tsv(source / "traits.tsv", ["species", "C4"],
               [{"species": n, "C4": "" if n in {"O", "U"} else int(n in "BYDW")} for n in names])
-    newick = "(O:1,(((((A:1,Z:1):1,(B:1,Y:1):1):1,E:1):1,((C:1,X:1):1,(D:1,W:1):1):1):1,U:1):1);"
+    # Removing U contracts the parent of the first block.
+    block_a = "(((A:1,Z:1):1,(B:1,Y:1):1):1,E:1):1"
+    block_b = "((C:1,X:1):1,(D:1,W:1):1):1"
+    newick = f"(O:1,(({block_a},U:1):1,{block_b}):1);"
     (source / "tree.nwk").write_text(newick)
     write_json(source / "tree.json", {"species": len(names), "outgroup": "O"})
     args = dict(tree=source / "tree.nwk", tree_qc=source / "tree.json",
@@ -121,26 +125,35 @@ def test_pair_ids_and_blocks_do_not_depend_on_display_representatives(tmp_path):
     assert before["B"]["representative"] == "B" and after["B"]["representative"] == "Y"
     assert {n: (r["contrast_pair_id"], r["phylogenetic_block_id"]) for n, r in before.items()} == {
         n: (r["contrast_pair_id"], r["phylogenetic_block_id"]) for n, r in after.items()}
-    assert {n for n, r in after.items() if r["contrast_pair_id"] == "1"} == set("AZBY")
-    assert {n for n, r in after.items() if r["contrast_pair_id"] == "2"} == set("CXDW")
-    assert after["E"]["contrast_pair_id"] == "" and after["E"]["phylogenetic_block_id"] == "1"
+    assert {n for n, r in after.items() if r["contrast_pair_id"] == "1"} == set("CXDW")
+    assert {n for n, r in after.items() if r["contrast_pair_id"] == "2"} == set("AZBY")
+    assert after["E"]["contrast_pair_id"] == "" and after["E"]["phylogenetic_block_id"] == "2"
     assert all(after[n]["phylogenetic_block_id"] == "" for n in ["O", "U"])
     assert read_tsv(first / "phylogenetic_blocks.tsv") == read_tsv(second / "phylogenetic_blocks.tsv")
     for out in [first, second]:
+        source_order = list(Tree(newick, parser=0).leaf_names())
+        for filename in ["observed_tree.nwk", "summary_tree.nwk"]:
+            tips = list(Tree((out / filename).read_text(), parser=0).leaf_names())
+            assert tips == [tip for tip in source_order if tip in tips]
         validate_result(out, "C4")
         plot(out / "summary_tree.nwk", out / "species_metadata.tsv", out / "summary.json", out, expanded=True)
 
 
-@pytest.mark.parametrize("newick", ["((((A,F),B),E),(C,D));", "((D,C),(E,(B,(F,A))));"])
-def test_direct_pair_selection_needs_only_topology_and_trait_states(newick):
+@pytest.mark.parametrize("newick,first_pair", [
+    ("((((A,F),B),E),(C,D));", "CD"), ("((D,C),(E,(B,(F,A))));", "ABF"),
+])
+def test_pair_membership_depends_on_topology_and_ids_follow_tip_order(newick, first_pair):
     from ete4 import Tree
 
     rows = [{"leaf_name": n, "trait": "1" if n in "BC" else "0"} for n in "ABCDEF"]
     tree = Tree(newick, parser=9)
     grouped, pairs, unresolved = trait_clade_pairs(tree, rows)
     names = {group: set(part["leaf_name"]) for group, part in grouped.groupby("group")}
-    assert [{frozenset(names[pair["group_a"]]), frozenset(names[pair["group_b"]])} for pair in pairs] == [
-        {frozenset("AF"), frozenset("B")}, {frozenset("D"), frozenset("C")}]
+    membership = [(names[pair["group_a"]], names[pair["group_b"]]) for pair in pairs]
+    assert {(frozenset(a), frozenset(b)) for a, b in membership} == {
+        (frozenset("AF"), frozenset("B")), (frozenset("D"), frozenset("C"))}
+    assert membership[0][0] | membership[0][1] == set(first_pair)
+    assert [pair["contrast_pair_id"] for pair in pairs] == [1, 2]
     assert not unresolved
 
 

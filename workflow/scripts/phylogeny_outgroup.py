@@ -33,6 +33,19 @@ def validate_root(tree, outgroup):
         raise ValueError("species-tree root does not match the selected outgroup clade")
 
 
+def prune_in_tip_order(tree, names):
+    """Prune while retaining branch lengths and the input order of surviving tips."""
+    positions = {name: index for index, name in enumerate(tree.leaf_names())}
+    tree.prune(names, preserve_branch_length=True)
+    first_tip = {}
+    for node in tree.traverse("postorder"):
+        if node.is_leaf:
+            first_tip[node] = positions[node.name]
+        else:
+            node.children.sort(key=first_tip.__getitem__)
+            first_tip[node] = first_tip[node.children[0]]
+
+
 def root_on_outgroup(tree, outgroup):
     """Orient an existing split without pruning tips or changing unrooted edges.
 

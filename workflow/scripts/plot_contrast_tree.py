@@ -70,11 +70,12 @@ def plot(tree, metadata, summary, outdir, samples=None, expanded=False):
         plt.close(fig)
         return
     phy = Tree(Path(tree).read_text(), parser=0)
-    # Ladderization only orders siblings for drawing; topology and lengths stay intact.
-    counts = {}
-    for node in phy.traverse("postorder"):
-        counts[node] = sum(counts[c] for c in node.children) if node.children else 1
-        node.children.sort(key=lambda c: counts[c], reverse=True)
+    if not info.get("pair_ids_follow_tree"):
+        # Preserve the layout of older results with name-ordered pair IDs.
+        counts = {}
+        for node in phy.traverse("postorder"):
+            counts[node] = sum(counts[c] for c in node.children) if node.children else 1
+            node.children.sort(key=lambda c: counts[c], reverse=True)
     tips = list(phy.leaves())
     if set(phy.leaf_names()) != set(rows):
         raise ValueError("plot labels differ from summary tree")

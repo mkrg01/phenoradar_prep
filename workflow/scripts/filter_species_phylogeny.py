@@ -5,7 +5,7 @@ import math
 
 from common import write_json, write_tsv
 from layout import PHYLOGENY_BRANCHES
-from phylogeny_outgroup import outgroup_ids, validate_root
+from phylogeny_outgroup import outgroup_ids, prune_in_tip_order, validate_root
 
 ALL_PHYLOGENY = PHYLOGENY_BRANCHES["all"]
 
@@ -26,12 +26,15 @@ def read_tree(text, allowed, exact=False):
     return tree
 
 
-def prune(tree, keep):
+def prune(tree, keep, *, preserve_order=False):
     """Keep path lengths; supports cannot be reinterpreted on contracted edges."""
     selected = set(tree.leaf_names()) & keep
     if len(selected) < 2:
         return None
-    tree.prune(sorted(selected), preserve_branch_length=True)
+    if preserve_order:
+        prune_in_tip_order(tree, sorted(selected))
+    else:
+        tree.prune(sorted(selected), preserve_branch_length=True)
     for node in tree.traverse():
         if not node.is_leaf:
             node.name = ""
@@ -100,7 +103,7 @@ def export_phylogeny(job):
             rooting = "original_outgroup_partially_retained"
         else:
             rooting = "original_outgroup_retained"
-    tree_text = prune(tree, job.keep)
+    tree_text = prune(tree, job.keep, preserve_order=True)
     if tree_text:
         (out / "species_tree.pruned.nwk").write_text(tree_text)
     with genes.open() as handle, (out / "gene_trees.pruned.nwk").open("w") as merged:

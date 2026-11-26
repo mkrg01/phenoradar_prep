@@ -6,7 +6,7 @@ import math
 from collections import Counter
 from pathlib import Path
 
-from phylogeny_outgroup import outgroup_ids, read_outgroup, validate_root
+from phylogeny_outgroup import outgroup_ids, prune_in_tip_order, read_outgroup, validate_root
 from types import SimpleNamespace
 
 from common import RANDOM_SEED, atomic_writer, file_record, now, read_tsv, write_json, write_tsv
@@ -51,7 +51,7 @@ def save_skim(tree, frame, prefix, seed, contrastive=False, topology_only=False)
             data.sort_values(["group", "leaf_name"]).to_csv(handle, sep="\t", index=False)
     with atomic_writer(str(prefix) + ".nwk") as handle:
         if not sampled.empty:
-            tree.prune(sampled["leaf_name"].tolist(), preserve_branch_length=True)
+            prune_in_tip_order(tree, sampled["leaf_name"].tolist())
             handle.write(tree.write(parser=9 if topology_only else 0) + "\n")
         # There is no Newick representation of zero tips. An empty file means
         # no contrastive clades; summary.json and the TSV headers disambiguate it.
@@ -70,9 +70,10 @@ def trait_clade_pairs(tree, rows):
 
     candidates = add_contrastive_clade_ids(frame.copy(), tree)
     pairs, unresolved = [], []
-    # Order by all input tips, independently of BUSCO scores or display samples.
+    # In a right-facing plot, the last Newick tip appears at the top.
+    tip_order = {name: index for index, name in enumerate(reversed(list(tree.leaf_names())))}
     clades = [part for _, part in candidates.dropna(subset=["contrastive_clade"]).groupby("contrastive_clade")]
-    for candidate in sorted(clades, key=lambda part: sorted(part["leaf_name"])):
+    for candidate in sorted(clades, key=lambda part: min(tip_order[name] for name in part["leaf_name"])):
         groups = candidate.drop_duplicates("group").sort_values("trait")
         if len(groups) != 2 or groups["trait"].nunique() != 2:
             unresolved.append(sorted(candidate["leaf_name"]))
@@ -228,7 +229,7 @@ def summarize_tree(inferred, rows, all_traits, tip_for_species, outdir, trait, s
     write_tsv(out / "species_metadata.tsv", ["species", "species_id", trait, "role", CLADE_COLUMN, "representative",
               "is_representative", "n_species_in_trait_clade", "n_samples_in_trait_clade", "contrast_pair_id", COLUMN], metadata)
     write_tsv(out / "phylogenetic_blocks.tsv", TABLE_FIELDS, expanded_clades)
-    report = {"created_at": now(), "trait": trait,
+    report = {"created_at": now(), "trait": trait, "pair_ids_follow_tree": True,
                "state_order": sorted({r["trait"] for r in all_traits if r["trait"] != ""}),
                "nwkit": nwkit_backend().__version__, "outgroup": outgroup,
                "summary_species": len({taxa[r["leaf_name"]] for r in second_reps}),
@@ -286,7 +287,7 @@ def from_tree(tree, tree_qc, samples, metadata, traits, outdir, trait="C4", seed
     out.mkdir(parents=True, exist_ok=True)
     with atomic_writer(out / "observed_tree.nwk") as handle:
         if eligible:
-            inferred.prune(sorted(eligible), preserve_branch_length=True)
+            prune_in_tip_order(inferred, sorted(eligible))
             handle.write(inferred.write(parser=0) + "\n")
     rows = [{"leaf_name": n, "trait": annotation[n], "busco_percent": scores[n]} for n in sorted(eligible)]
     taxa = {r["species"]: species_id(r) for r in sample_rows}

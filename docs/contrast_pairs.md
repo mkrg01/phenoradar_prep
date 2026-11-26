@@ -108,7 +108,11 @@ distinguish biological species (`n_species_*`) from sample tips (`n_samples_*`).
 
 [Filtering a completed tree](species_filter.md) can recompute pairs for
 all/phenotyped results. Pair IDs are specific to each tree and cohort.
-IDs are ordered by clade membership, independently of display sample names.
+Pair and block IDs increase from top to bottom in a right-facing plot of the
+input tree (last Newick tip at the top). Pruned species and summary trees retain
+the input order of surviving tips. Display representative choice does not affect
+the IDs. Regenerated contrast metadata can have different numeric IDs from older
+releases.
 
 ## Phylogenetic blocks
 

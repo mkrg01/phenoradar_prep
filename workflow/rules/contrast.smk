@@ -49,7 +49,7 @@ if "representatives" in PHY["trees"]:
             traits=rules.normalize_traits.output.traits,
             tree=f"{ROOTING}/ncbi_tree.nwk",
             code=f"{SCRIPTS}/contrast_pairs.py",
-            helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "nwkit_runtime", "sample_identity", "expanded_pair_clades", "contrast_metadata"]]
+            helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "phylogeny_outgroup", "nwkit_runtime", "sample_identity", "expanded_pair_clades", "contrast_metadata"]]
         output:
             samples=f"{REPRESENTATIVES}/selection/samples.tsv",
             traits=f"{REPRESENTATIVES}/selection/traits.tsv",
@@ -76,7 +76,7 @@ if "representatives" in PHY["trees"]:
                 outgroup=f"{REPRESENTATIVES}/rooting/outgroup.txt",
                 selection=rules.select_contrast_representatives.output,
                 code=f"{SCRIPTS}/contrast_pairs.py",
-                helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "nwkit_runtime", "sample_identity", "expanded_pair_clades", "contrast_metadata"]]
+                helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "phylogeny_outgroup", "nwkit_runtime", "sample_identity", "expanded_pair_clades", "contrast_metadata"]]
             output:
                 tree=f"{CONTRAST}/summary_tree.nwk",
                 all=f"{CONTRAST}/summary_tree.all.tsv",
@@ -149,7 +149,7 @@ rule identify_phylogeny_contrast_pairs:
         metadata=f"{META}/metadata_high_busco.tsv",
         traits=rules.normalize_traits.output.traits,
         code=f"{SCRIPTS}/contrast_pairs.py",
-        helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "nwkit_runtime", "sample_identity", "expanded_pair_clades", "contrast_metadata"]]
+        helpers=[f"{SCRIPTS}/{name}.py" for name in ["common", "species_traits", "phylogeny_root", "phylogeny_outgroup", "nwkit_runtime", "sample_identity", "expanded_pair_clades", "contrast_metadata"]]
     output:
         observed=f"{PHYLO_RUN}/contrast/observed_tree.nwk",
         tree=f"{PHYLO_RUN}/contrast/summary_tree.nwk",

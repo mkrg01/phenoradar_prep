@@ -76,6 +76,8 @@ With one contrast branch, use `contrast_pair_id` for contrasting sister-clade
 pairs or `phylogenetic_block_id` for [phylogenetic blocks](contrast_pairs.md#phylogenetic-blocks).
 With several branches, use a suffixed column such as `contrast_pair_id_all` or
 `phylogenetic_block_id_phenotyped`. Unassigned samples have blank IDs.
+Use the species tree and group IDs from the same branch to keep the IDs in
+ascending order down the PhenoRadar tree heatmap.
 
 `trait_clade_id` is recorded in each branch's `contrast/species_metadata.tsv`.
 The combined PhenoRadar metadata contains pair/block IDs from the selected
